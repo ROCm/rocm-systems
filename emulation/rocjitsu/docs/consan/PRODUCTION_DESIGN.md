@@ -4213,6 +4213,48 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AJ: lower SuperCollider native LDS from normalized inventory
+
+- **Complete access cutover:** The native-LDS lowerer now carries immutable
+  `ConSanAccessInventorySite` pointers through owner validation, liveness and
+  scratch planning, cave and relay selection, gfx1250 two-address expansion,
+  instruction emission, patch publication, and coverage accounting. Together
+  with Slice 5AI, no SuperCollider source reads `ConSanLdsSite`,
+  `ConSanFlatSite`, or the legacy container access vectors.
+- **One owner query:** A shared helper derives the complete, sorted execution
+  owner descriptors from normalized analysis and explicit kernel attribution.
+  FLAT and native-LDS lowering use that query instead of carrying independently
+  merged owner vectors. Alias admission remains owned by shared policy; the
+  lowerers select one deterministic normalized representative per physical
+  file offset.
+- **Normalized resource mechanics:** Scratch overlap, tuple alignment,
+  descriptor-growth headroom, compare-source selection, subword handling, and
+  two-address decoding now consume normalized operands and widths. The old
+  `legacy_scratch_search_start` layer, two one-consumer scratch wrappers, and
+  legacy two-address site overloads are deleted. Sync analysis calls the
+  remaining mnemonic classifier directly.
+- **Shared FLAT/LDS placement protection:** The native-LDS lowerer now builds
+  its selected-container and future-FLAT protection indexes from normalized
+  accesses too. This removes its last indirect dependency on the legacy FLAT
+  and LDS vectors without changing test-only container selection semantics.
+- **Contract coverage:** Focused tests cover complete and missing execution
+  owners, aliased physical sites, cross-target tuple rules, subword and D16
+  operations, wide and two-address forms, gfx1250 high-bank and expanded-offset
+  forms, scratch spills, cave/relay routing, and coverage-ledger outcomes.
+  Existing paired device workloads exercise the same native-LDS mechanisms on
+  all five targets, so no compatibility-shape test was added.
+- **Deletion result:** Production source is seven physical lines smaller
+  despite replacing terse legacy fields throughout the complete lowerer. The
+  copied canonical native-LDS record and container traversals are gone, and
+  this slice introduces no fallback representation.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 73.05
+  seconds. An earlier cold-cache run timed out only the unrelated gfx950 Inline
+  Shadow large-LDS pair; both passed in isolation before the clean full rerun.
+  Slice 5AC completed the periodic physical-gfx950 gate. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -21,6 +21,16 @@ sc_admitted_access_file_offsets(const ConSanResult &result, ConSanAccessOrigin o
   return offsets;
 }
 
+[[nodiscard]] std::vector<uint64_t>
+sc_execution_owner_descriptor_file_offsets(const ConSanAccessInventorySite &access) {
+  std::vector<uint64_t> owners = access.execution_owner_descriptor_file_offsets;
+  if (access.container.kernel_descriptor_file_offset)
+    owners.push_back(*access.container.kernel_descriptor_file_offset);
+  std::ranges::sort(owners);
+  owners.erase(std::ranges::unique(owners).begin(), owners.end());
+  return owners;
+}
+
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
                                                  ConSanResult &result) {
   const ConSanAccessPolicyRequest request{
@@ -318,38 +328,35 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
   return ranges;
 }
 
-[[nodiscard]] ConSanPatchKind lds_check_trap_patch_kind(const ConSanLdsSite &site,
+[[nodiscard]] ConSanPatchKind lds_check_trap_patch_kind(const ConSanAccessInventorySite &access,
                                                         bool use_local_cave) {
-  if (site.kind == ConSanLdsAccessKind::Write)
+  if (access.kind == ConSanLdsAccessKind::Write)
     return use_local_cave ? ConSanPatchKind::LocalCaveLdsStoreCheckTrap
                           : ConSanPatchKind::InlineLdsStoreCheckTrap;
   return use_local_cave ? ConSanPatchKind::LocalCaveLdsLoadCheckTrap
                         : ConSanPatchKind::InlineLdsLoadCheckTrap;
 }
 
-[[nodiscard]] bool is_d16_lds_load(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_u8_d16" || site.mnemonic == "ds_load_u8_d16_hi" ||
-         site.mnemonic == "ds_load_i8_d16" || site.mnemonic == "ds_load_i8_d16_hi" ||
-         site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
-         site.mnemonic == "ds_read_u8_d16" || site.mnemonic == "ds_read_u8_d16_hi" ||
-         site.mnemonic == "ds_read_i8_d16" || site.mnemonic == "ds_read_i8_d16_hi" ||
-         site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi";
+[[nodiscard]] bool is_d16_lds_load(const ConSanAccessInventorySite &access) {
+  return access.mnemonic == "ds_load_u8_d16" || access.mnemonic == "ds_load_u8_d16_hi" ||
+         access.mnemonic == "ds_load_i8_d16" || access.mnemonic == "ds_load_i8_d16_hi" ||
+         access.mnemonic == "ds_load_u16_d16" || access.mnemonic == "ds_load_u16_d16_hi" ||
+         access.mnemonic == "ds_read_u8_d16" || access.mnemonic == "ds_read_u8_d16_hi" ||
+         access.mnemonic == "ds_read_i8_d16" || access.mnemonic == "ds_read_i8_d16_hi" ||
+         access.mnemonic == "ds_read_u16_d16" || access.mnemonic == "ds_read_u16_d16_hi";
 }
 
-[[nodiscard]] uint32_t lds_check_trap_predelay_setup_words(const ConSanLdsSite &site) {
-  return is_d16_lds_load(site) ? 2u : 0u;
+[[nodiscard]] uint32_t
+lds_check_trap_predelay_setup_words(const ConSanAccessInventorySite &access) {
+  return is_d16_lds_load(access) ? 2u : 0u;
 }
 
-[[nodiscard]] bool is_subdword_lds_store(const ConSanLdsSite &site) {
-  return site.kind == ConSanLdsAccessKind::Write && site.width_bits < 32u;
+[[nodiscard]] bool is_subdword_lds_store(const ConSanAccessInventorySite &access) {
+  return access.kind == ConSanLdsAccessKind::Write && access.decoded_width_bits < 32u;
 }
 
-[[nodiscard]] bool is_high_d16_lds_store(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_store_b8_d16_hi" || site.mnemonic == "ds_store_b16_d16_hi";
-}
-
-[[nodiscard]] uint16_t lds_check_trap_base_extra_scratch_vgprs(const ConSanLdsSite &site) {
-  return is_subdword_lds_store(site) || site.dst_accvgpr ? 1u : 0u;
+[[nodiscard]] bool is_high_d16_lds_store(const ConSanAccessInventorySite &access) {
+  return access.mnemonic == "ds_store_b8_d16_hi" || access.mnemonic == "ds_store_b16_d16_hi";
 }
 
 struct Gfx1250TwoAddressExpansionPlan {
@@ -373,15 +380,15 @@ struct Gfx1250TwoAddressExpansionPlan {
 
 [[nodiscard]] std::optional<Gfx1250TwoAddressExpansionPlan>
 gfx1250_two_address_expansion_plan(std::span<const uint8_t> original_bytes,
-                                   const ConSanLdsSite &site, rj_code_arch_t arch) {
+                                   const ConSanAccessInventorySite &access, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
-      (!is_two_address_lds_load(site) && !is_two_address_lds_store(site)))
+      (!is_two_address_lds_load(access.mnemonic) && !is_two_address_lds_store(access.mnemonic)))
     return std::nullopt;
-  const auto width_bits = two_address_lds_element_width_bits(site);
+  const auto width_bits = two_address_lds_element_width_bits(access.mnemonic);
   std::array<uint32_t, 1> words{};
-  if (!width_bits || !read_words_at(original_bytes, site.file_offset, std::span<uint32_t>(words)))
+  if (!width_bits || !read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
     return std::nullopt;
-  const auto offsets = two_address_lds_byte_offsets(site, words.front());
+  const auto offsets = two_address_lds_byte_offsets(access.mnemonic, words.front());
   if (!offsets)
     return std::nullopt;
   return Gfx1250TwoAddressExpansionPlan{
@@ -391,16 +398,17 @@ gfx1250_two_address_expansion_plan(std::span<const uint8_t> original_bytes,
 }
 
 [[nodiscard]] uint16_t
-lds_check_trap_extra_scratch_vgprs(const ConSanLdsSite &site,
+lds_check_trap_extra_scratch_vgprs(const ConSanAccessInventorySite &site,
                                    const std::optional<Gfx1250TwoAddressExpansionPlan> &expansion) {
-  return static_cast<uint16_t>(lds_check_trap_base_extra_scratch_vgprs(site) +
-                               (expansion && expansion->large_offset_count() != 0u ? 1u : 0u));
+  return static_cast<uint16_t>(
+      (is_subdword_lds_store(site) || site.operands.destination_accvgpr ? 1u : 0u) +
+      (expansion && expansion->large_offset_count() != 0u ? 1u : 0u));
 }
 
-[[nodiscard]] uint32_t lds_check_trap_precompare_words(const ConSanLdsSite &site) {
-  if (!is_subdword_lds_store(site))
+[[nodiscard]] uint32_t lds_check_trap_precompare_words(const ConSanAccessInventorySite &access) {
+  if (!is_subdword_lds_store(access))
     return 0u;
-  return is_high_d16_lds_store(site) ? 3u : 2u;
+  return is_high_d16_lds_store(access) ? 3u : 2u;
 }
 
 [[nodiscard]] std::optional<std::array<uint32_t, 2>>
@@ -791,8 +799,8 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
-    std::span<const uint8_t> original_bytes, const ConSanLdsSite &site, rj_code_arch_t arch,
-    const ConSanOptions &options, uint32_t delay_words, uint16_t scratch_vgpr,
+    std::span<const uint8_t> original_bytes, const ConSanAccessInventorySite &site,
+    rj_code_arch_t arch, const ConSanOptions &options, uint32_t delay_words, uint16_t scratch_vgpr,
     uint16_t vcc_save_sgpr, uint16_t gfx1250_vgpr_msb_mode,
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   guest_instruction_word_offset.reset();
@@ -825,16 +833,18 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
   const uint16_t saved_address_vgpr = std::max(core_scratch_end, report_scratch_end);
   if (site.kind == ConSanLdsAccessKind::Read) {
-    if (site.dst_accvgpr && consan_arch_has_descriptor_partitioned_accumulators(arch))
+    if (site.operands.destination_accvgpr &&
+        consan_arch_has_descriptor_partitioned_accumulators(arch))
       duplicate_load[0] &= ~(uint32_t{1} << 25u);
     duplicate_load[1] =
         (duplicate_load[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(scratch_vgpr) << 24u);
     if (preserve_address)
       duplicate_load[1] = (duplicate_load[1] & 0xFFFFFF00u) | saved_address_vgpr;
   } else if (site.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address = is_two_address_lds_store(site);
+    const bool two_address = is_two_address_lds_store(site.mnemonic);
     const uint32_t element_width =
-        two_address ? two_address_lds_element_width_bits(site).value_or(0u) : site.width_bits;
+        two_address ? two_address_lds_element_width_bits(site.mnemonic).value_or(0u)
+                    : site.decoded_width_bits;
     auto word0 =
         build_ds_load_word0_from_vds_word0(original_access[0], element_width, two_address, arch);
     if (!word0) {
@@ -842,7 +852,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       return std::nullopt;
     }
     duplicate_load[0] = *word0;
-    duplicate_load[1] = build_ds_load_word1(*site.addr_vgpr, scratch_vgpr);
+    duplicate_load[1] = build_ds_load_word1(*site.operands.address_vgpr, scratch_vgpr);
   } else {
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported site");
     return std::nullopt;
@@ -855,7 +865,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
 
   auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
   auto first_compare_vgpr =
-      site.dst_accvgpr && consan_arch_has_descriptor_partitioned_accumulators(arch)
+      site.operands.destination_accvgpr && consan_arch_has_descriptor_partitioned_accumulators(arch)
           ? std::optional<uint16_t>(compare_scratch_vgpr)
           : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
   if (!first_compare_vgpr) {
@@ -900,7 +910,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       narrow_source = compare_scratch_vgpr;
     }
     const auto mask = instrumentation::build_v_and_b32_literal(
-        compare_scratch_vgpr, (uint32_t{1} << site.width_bits) - 1u, narrow_source, arch);
+        compare_scratch_vgpr, (uint32_t{1} << site.decoded_width_bits) - 1u, narrow_source, arch);
     if (!mask) {
       errors.emplace_back("ConSan LDS check/trap proof could not mask sub-dword store value");
       return std::nullopt;
@@ -931,12 +941,13 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       (preserve_address ? 1u : 0u) + 2u + lds_check_trap_predelay_setup_words(site) + delay_words +
       2u + 1u + lds_check_trap_precompare_words(site) + 1u +
       (2u + mismatch_action->size()) * *required_vgprs + 1u + compare_mode_switch_words +
-      (site.dst_accvgpr ? 2u * *required_vgprs : 0u) +
+      (site.operands.destination_accvgpr ? 2u * *required_vgprs : 0u) +
       (gfx1250_two_address ? gfx1250_two_address->total_additional_word_count() : 0u));
   std::vector<uint32_t> words;
   words.reserve(total_words);
   if (preserve_address) {
-    auto save_address = build_v_mov_b32_e32_vgpr_word(saved_address_vgpr, *site.addr_vgpr, arch);
+    auto save_address =
+        build_v_mov_b32_e32_vgpr_word(saved_address_vgpr, *site.operands.address_vgpr, arch);
     if (!save_address) {
       errors.emplace_back("ConSan LDS check/trap proof could not preserve a clobbered address");
       return std::nullopt;
@@ -944,14 +955,16 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
     words.push_back(*save_address);
   }
   if (gfx1250_two_address) {
-    const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *site.addr_vgpr;
-    const std::optional<uint16_t> first_data_vgpr =
-        site.kind == ConSanLdsAccessKind::Read ? site.dst_vgpr : site.data_vgpr;
+    const uint16_t replay_address_vgpr =
+        preserve_address ? saved_address_vgpr : *site.operands.address_vgpr;
+    const std::optional<uint16_t> first_data_vgpr = site.kind == ConSanLdsAccessKind::Read
+                                                        ? site.operands.destination_vgpr
+                                                        : site.operands.data_vgpr;
     const std::optional<uint16_t> second_data_vgpr =
         site.kind == ConSanLdsAccessKind::Read && first_data_vgpr
             ? std::optional<uint16_t>(
                   static_cast<uint16_t>(*first_data_vgpr + gfx1250_two_address->element_dwords))
-            : site.second_data_vgpr;
+            : site.operands.second_data_vgpr;
     const auto split =
         first_data_vgpr && second_data_vgpr
             ? build_gfx1250_single_address_lds_pair(
@@ -975,7 +988,8 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   if (!append_delay_words(words, arch, options, errors, "ConSan LDS check/trap proof"))
     return std::nullopt;
   if (gfx1250_two_address) {
-    const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *site.addr_vgpr;
+    const uint16_t replay_address_vgpr =
+        preserve_address ? saved_address_vgpr : *site.operands.address_vgpr;
     const auto split = build_gfx1250_single_address_lds_pair(
         *gfx1250_two_address, replay_address_vgpr, scratch_vgpr,
         static_cast<uint16_t>(scratch_vgpr + gfx1250_two_address->element_dwords),
@@ -996,9 +1010,10 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
-    if (site.dst_accvgpr && (consan_uses_gfx9_cdna_encoding(arch))) {
+    if (site.operands.destination_accvgpr && (consan_uses_gfx9_cdna_encoding(arch))) {
       const auto acc_read = build_cdna_accvgpr_read_b32(
-          compare_scratch_vgpr, static_cast<uint16_t>(*site.dst_accvgpr + i), arch);
+          compare_scratch_vgpr, static_cast<uint16_t>(*site.operands.destination_accvgpr + i),
+          arch);
       if (!acc_read) {
         errors.emplace_back("ConSan LDS check/trap proof could not encode accumulator read");
         return std::nullopt;

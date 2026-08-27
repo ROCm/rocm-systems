@@ -501,19 +501,11 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
          mnemonic == "ds_write2_b64" || mnemonic == "ds_write2st64_b64";
 }
 
-[[nodiscard]] bool is_two_address_lds_store(const ConSanLdsSite &site) {
-  return is_two_address_lds_store(site.mnemonic);
-}
-
 [[nodiscard]] bool is_two_address_lds_load(std::string_view mnemonic) {
   return mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_load_2addr_b64" ||
          mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_load_2addr_stride64_b64" ||
          mnemonic == "ds_read2_b32" || mnemonic == "ds_read2st64_b32" ||
          mnemonic == "ds_read2_b64" || mnemonic == "ds_read2st64_b64";
-}
-
-[[nodiscard]] bool is_two_address_lds_load(const ConSanLdsSite &site) {
-  return is_two_address_lds_load(site.mnemonic);
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -526,25 +518,18 @@ two_address_lds_element_width_bits(std::string_view mnemonic) {
 }
 
 [[nodiscard]] std::optional<uint32_t>
-two_address_lds_element_width_bits(const ConSanLdsSite &site) {
-  return two_address_lds_element_width_bits(site.mnemonic);
-}
-
-[[nodiscard]] std::optional<uint32_t>
-two_address_lds_offset_scale_bytes(const ConSanLdsSite &site) {
-  if (site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_store_2addr_b32" ||
-      site.mnemonic == "ds_read2_b32" || site.mnemonic == "ds_write2_b32")
+two_address_lds_offset_scale_bytes(std::string_view mnemonic) {
+  if (mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_store_2addr_b32" ||
+      mnemonic == "ds_read2_b32" || mnemonic == "ds_write2_b32")
     return 4u;
-  if (site.mnemonic == "ds_load_2addr_b64" || site.mnemonic == "ds_store_2addr_b64" ||
-      site.mnemonic == "ds_read2_b64" || site.mnemonic == "ds_write2_b64")
+  if (mnemonic == "ds_load_2addr_b64" || mnemonic == "ds_store_2addr_b64" ||
+      mnemonic == "ds_read2_b64" || mnemonic == "ds_write2_b64")
     return 8u;
-  if (site.mnemonic == "ds_load_2addr_stride64_b32" ||
-      site.mnemonic == "ds_store_2addr_stride64_b32" || site.mnemonic == "ds_read2st64_b32" ||
-      site.mnemonic == "ds_write2st64_b32")
+  if (mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b32" ||
+      mnemonic == "ds_read2st64_b32" || mnemonic == "ds_write2st64_b32")
     return 256u;
-  if (site.mnemonic == "ds_load_2addr_stride64_b64" ||
-      site.mnemonic == "ds_store_2addr_stride64_b64" || site.mnemonic == "ds_read2st64_b64" ||
-      site.mnemonic == "ds_write2st64_b64")
+  if (mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64" ||
+      mnemonic == "ds_read2st64_b64" || mnemonic == "ds_write2st64_b64")
     return 512u;
   return std::nullopt;
 }
@@ -555,8 +540,8 @@ struct TwoAddressLdsByteOffsets {
 };
 
 [[nodiscard]] std::optional<TwoAddressLdsByteOffsets>
-two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
-  const auto scale = two_address_lds_offset_scale_bytes(site);
+two_address_lds_byte_offsets(std::string_view mnemonic, uint32_t word0) {
+  const auto scale = two_address_lds_offset_scale_bytes(mnemonic);
   if (!scale)
     return std::nullopt;
   return TwoAddressLdsByteOffsets{
@@ -591,8 +576,8 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanLdsSite &site) {
-  return lds_dword_count(site.mnemonic, site.width_bits);
+[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access) {
+  return lds_dword_count(access.mnemonic, access.decoded_width_bits);
 }
 
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
@@ -611,47 +596,54 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
   return profile && profile->requires_even_vgpr_tuples;
 }
 
-[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site, rj_code_arch_t arch,
-                                                   uint16_t candidate) {
-  const auto dword_count = lds_dword_count(site);
+[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
+                                                   rj_code_arch_t arch, uint16_t candidate) {
+  const auto dword_count = lds_dword_count(access);
   if (!dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch))
     return true;
 
   // gfx1250's transposed 96-bit six-lane load is the sole admitted exception
   // to the target's even-tuple rule.
-  return (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.mnemonic == "ds_load_tr6_b96") ||
+  return (arch == ROCJITSU_CODE_ARCH_CDNA5 && access.mnemonic == "ds_load_tr6_b96") ||
          candidate % 2u == 0u;
 }
 
-[[nodiscard]] bool lds_load_clobbers_address(const ConSanLdsSite &site) {
-  const auto dword_count = lds_dword_count(site);
-  if (site.kind != ConSanLdsAccessKind::Read || !site.addr_vgpr || !site.dst_vgpr || !dword_count)
+[[nodiscard]] bool lds_load_clobbers_address(const ConSanAccessInventorySite &access) {
+  const auto dword_count = lds_dword_count(access);
+  if (access.kind != ConSanLdsAccessKind::Read || !access.operands.address_vgpr ||
+      !access.operands.destination_vgpr || !dword_count)
     return false;
-  return vgpr_ranges_overlap(*site.addr_vgpr, 1u, *site.dst_vgpr, *dword_count);
+  return vgpr_ranges_overlap(*access.operands.address_vgpr, 1u, *access.operands.destination_vgpr,
+                             *dword_count);
 }
 
-[[nodiscard]] bool is_forbidden_scratch_vgpr_run(const ConSanLdsSite &site, uint16_t candidate,
-                                                 uint16_t required_vgprs) {
-  if (site.addr_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.addr_vgpr, 1))
+[[nodiscard]] bool is_forbidden_scratch_vgpr_run(const ConSanAccessInventorySite &access,
+                                                 uint16_t candidate, uint16_t required_vgprs) {
+  if (access.operands.address_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.address_vgpr, 1))
     return true;
 
-  const uint16_t data_vgprs = lds_dword_count(site).value_or(1);
-  if (site.dst_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.dst_vgpr, data_vgprs))
+  const uint16_t data_vgprs = lds_dword_count(access).value_or(1);
+  if (access.operands.destination_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.destination_vgpr, data_vgprs))
     return true;
-  if (site.data_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.data_vgpr, data_vgprs))
+  if (access.operands.data_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.data_vgpr, data_vgprs))
     return true;
   const uint16_t data_vgprs_per_address =
-      site.second_data_vgpr
-          ? static_cast<uint16_t>(
-                two_address_lds_element_width_bits(site).value_or(site.width_bits) / 32u)
+      access.operands.second_data_vgpr
+          ? static_cast<uint16_t>(two_address_lds_element_width_bits(access.mnemonic)
+                                      .value_or(access.decoded_width_bits) /
+                                  32u)
           : data_vgprs;
-  if (site.second_data_vgpr && vgpr_ranges_overlap(candidate, required_vgprs,
-                                                   *site.second_data_vgpr, data_vgprs_per_address))
+  if (access.operands.second_data_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.second_data_vgpr,
+                          data_vgprs_per_address))
     return true;
   return false;
 }
 
-[[nodiscard]] uint16_t legacy_scratch_search_start(const ConSanLdsSite &site) {
+[[nodiscard]] uint16_t lds_scratch_search_start(const ConSanAccessInventorySite &access) {
   std::optional<uint32_t> first_after_operands;
   auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
     if (!base)
@@ -661,36 +653,33 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
       first_after_operands = end;
   };
 
-  const uint16_t data_vgprs = lds_dword_count(site).value_or(1);
-  note_range(site.addr_vgpr, 1);
-  note_range(site.dst_vgpr, data_vgprs);
-  note_range(site.data_vgpr, data_vgprs);
-  note_range(site.second_data_vgpr,
-             site.second_data_vgpr
-                 ? static_cast<uint16_t>(
-                       two_address_lds_element_width_bits(site).value_or(site.width_bits) / 32u)
+  const uint16_t data_vgprs = lds_dword_count(access).value_or(1);
+  note_range(access.operands.address_vgpr, 1);
+  note_range(access.operands.destination_vgpr, data_vgprs);
+  note_range(access.operands.data_vgpr, data_vgprs);
+  note_range(access.operands.second_data_vgpr,
+             access.operands.second_data_vgpr
+                 ? static_cast<uint16_t>(two_address_lds_element_width_bits(access.mnemonic)
+                                             .value_or(access.decoded_width_bits) /
+                                         32u)
                  : data_vgprs);
   if (!first_after_operands)
     return 0;
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
-[[nodiscard]] uint16_t scratch_search_start(const ConSanLdsSite &site,
-                                            std::optional<uint16_t> min_auto_scratch_vgpr) {
-  return std::max(legacy_scratch_search_start(site), min_auto_scratch_vgpr.value_or(0));
-}
-
-[[nodiscard]] bool needs_scratch_headroom_at_descriptor_edge(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_b64" || site.mnemonic == "ds_load_2addr_b64" ||
-         site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_read2_b64" ||
-         site.mnemonic == "ds_read2st64_b64";
+[[nodiscard]] bool
+needs_scratch_headroom_at_descriptor_edge(const ConSanAccessInventorySite &access) {
+  return access.mnemonic == "ds_load_b64" || access.mnemonic == "ds_load_2addr_b64" ||
+         access.mnemonic == "ds_load_2addr_stride64_b64" || access.mnemonic == "ds_read2_b64" ||
+         access.mnemonic == "ds_read2st64_b64";
 }
 
 [[nodiscard]] std::optional<uint16_t>
-required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint16_t scratch_vgpr,
-                                                uint16_t required_vgprs) {
+required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite &access,
+                                                uint16_t scratch_vgpr, uint16_t required_vgprs) {
   uint32_t required_count = static_cast<uint32_t>(scratch_vgpr) + required_vgprs;
-  if (needs_scratch_headroom_at_descriptor_edge(site))
+  if (needs_scratch_headroom_at_descriptor_edge(access))
     ++required_count;
   if (required_count > REGISTER_SET_MAX_VGPRS)
     return std::nullopt;
@@ -698,13 +687,14 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
 }
 
 [[nodiscard]] std::optional<uint16_t> find_liveness_scratch_vgpr(
-    const ConSanLdsSite &site, const Instruction *inst, const LivenessAnalysis *liveness,
-    std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
-    uint16_t required_vgprs, rj_code_arch_t arch) {
+    const ConSanAccessInventorySite &access, const Instruction *inst,
+    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
+    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
 
-  uint16_t search_start = scratch_search_start(site, min_auto_scratch_vgpr);
+  uint16_t search_start =
+      std::max(lds_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
   if (max_auto_scratch_vgpr && search_start >= *max_auto_scratch_vgpr)
     return std::nullopt;
   while (search_start < REGISTER_SET_MAX_VGPRS) {
@@ -715,10 +705,10 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
     if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
       return std::nullopt;
     if (max_auto_scratch_vgpr && candidate_end == *max_auto_scratch_vgpr &&
-        needs_scratch_headroom_at_descriptor_edge(site))
+        needs_scratch_headroom_at_descriptor_edge(access))
       return std::nullopt;
-    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(site, arch, *candidate) &&
-        !is_forbidden_scratch_vgpr_run(site, *candidate, required_vgprs))
+    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(access, arch, *candidate) &&
+        !is_forbidden_scratch_vgpr_run(access, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
       return std::nullopt;
@@ -728,33 +718,32 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_scratch_vgpr(
-    const ConSanLdsSite &site, const ConSanOptions &options, const Instruction *inst,
+    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
     const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        lds_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
-        !is_forbidden_scratch_vgpr_run(site, *options.scratch_vgpr, required_vgprs))
+        lds_scratch_tuple_base_is_valid(access, arch, *options.scratch_vgpr) &&
+        !is_forbidden_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
   }
 
-  if (auto scratch = find_liveness_scratch_vgpr(site, inst, liveness, min_auto_scratch_vgpr,
+  if (auto scratch = find_liveness_scratch_vgpr(access, inst, liveness, min_auto_scratch_vgpr,
                                                 max_auto_scratch_vgpr, required_vgprs, arch))
     return scratch;
 
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanLdsSite &site,
-                                                                uint16_t allocation_count,
-                                                                uint16_t required_vgprs,
-                                                                rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t>
+choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
+                          uint16_t required_vgprs, rj_code_arch_t arch) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
        ++candidate) {
-    if (lds_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(candidate)) &&
-        !is_forbidden_scratch_vgpr_run(site, static_cast<uint16_t>(candidate), required_vgprs))
+    if (lds_scratch_tuple_base_is_valid(access, arch, static_cast<uint16_t>(candidate)) &&
+        !is_forbidden_scratch_vgpr_run(access, static_cast<uint16_t>(candidate), required_vgprs))
       return static_cast<uint16_t>(candidate);
   }
   return std::nullopt;

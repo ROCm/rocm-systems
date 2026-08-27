@@ -53,7 +53,7 @@ enum class AtomicFaultEncoding : uint8_t {
   // gfx1250 two-address accesses are split during instrumentation, so there is
   // no single relocated instruction against which to prove this exact rewrite.
   return arch != ROCJITSU_CODE_ARCH_CDNA5 ||
-         (!is_two_address_lds_load(site) && !is_two_address_lds_store(site));
+         (!is_two_address_lds_load(site.mnemonic) && !is_two_address_lds_store(site.mnemonic));
 }
 
 template <typename Container>

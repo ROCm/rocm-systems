@@ -10,61 +10,27 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   if (!delay_words)
     return;
 
-  struct CanonicalLdsSite {
-    std::string_view container_name;
-    uint64_t container_entry_text_offset = 0;
-    ConSanLdsSite site;
-  };
   const std::unordered_set<uint64_t> admitted_lds_file_offsets =
       sc_admitted_access_file_offsets(result, ConSanAccessOrigin::NativeLds);
   const std::unordered_set<uint64_t> admitted_flat_file_offsets =
       sc_admitted_access_file_offsets(result, ConSanAccessOrigin::Flat);
-  std::map<uint64_t, CanonicalLdsSite> sites_by_file_offset;
-  const auto append_site = [&](std::string_view container_name,
-                               uint64_t container_entry_text_offset, ConSanLdsSite site) {
-    if (!admitted_lds_file_offsets.contains(site.file_offset))
-      return;
-    auto [retained, inserted] = sites_by_file_offset.try_emplace(
-        site.file_offset, CanonicalLdsSite{container_name, container_entry_text_offset, site});
-    if (!inserted) {
-      retained->second.site.owner_descriptor_file_offsets.insert(
-          retained->second.site.owner_descriptor_file_offsets.end(),
-          site.owner_descriptor_file_offsets.begin(), site.owner_descriptor_file_offsets.end());
-    }
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    for (const ConSanLdsSite &site : kernel.lds_sites) {
-      ConSanLdsSite owned_site = site;
-      owned_site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
-      append_site(kernel.name, kernel.entry_text_offset, std::move(owned_site));
-    }
-  }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    for (const ConSanLdsSite &site : function.lds_sites)
-      append_site(function.name, function.entry_text_offset, site);
-
-  std::vector<CanonicalLdsSite> canonical_sites;
-  canonical_sites.reserve(sites_by_file_offset.size());
-  for (auto &entry : sites_by_file_offset)
-    canonical_sites.push_back(std::move(entry.second));
-  for (CanonicalLdsSite &canonical : canonical_sites) {
-    auto &owners = canonical.site.owner_descriptor_file_offsets;
-    std::ranges::sort(owners);
-    owners.erase(std::ranges::unique(owners).begin(), owners.end());
-  }
+  std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
+  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
+    if (access.origin == ConSanAccessOrigin::NativeLds &&
+        admitted_lds_file_offsets.contains(access.file_offset))
+      admitted_sites.try_emplace(access.file_offset, &access);
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   const bool has_plannable_supported_site =
-      std::ranges::any_of(canonical_sites, [&](const CanonicalLdsSite &canonical) {
-        return !canonical.site.owner_descriptor_file_offsets.empty() &&
-               std::ranges::all_of(
-                   canonical.site.owner_descriptor_file_offsets, [&](uint64_t owner) {
-                     const auto kernel =
-                         std::ranges::find(result.program_inventory.kernels(), owner,
-                                           &ConSanKernelInfo::descriptor_file_offset);
-                     return kernel != result.program_inventory.kernels().end() &&
-                            kernel->preflight_action != ConSanPreflightAction::Blocked;
-                   });
+      std::ranges::any_of(admitted_sites, [&](const auto &entry) {
+        const std::vector<uint64_t> owners =
+            sc_execution_owner_descriptor_file_offsets(*entry.second);
+        return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
+          const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner,
+                                                &ConSanKernelInfo::descriptor_file_offset);
+          return kernel != result.program_inventory.kernels().end() &&
+                 kernel->preflight_action != ConSanPreflightAction::Blocked;
+        });
       });
   if (!has_plannable_supported_site) {
     publish_sc_access_coverage_support(result, ConSanAccessOrigin::NativeLds,
@@ -222,7 +188,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
 
   struct LdsCheckTrapCandidate {
-    const ConSanLdsSite *site = nullptr;
+    const ConSanAccessInventorySite *site = nullptr;
     const LocalNopCave *local_cave = nullptr;
     const LocalNopCave *entry_island = nullptr;
     bool entry_island_is_appended = false;
@@ -275,7 +241,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     uint16_t call_return_sgpr = 0;
     std::optional<uint16_t> explicit_key_sgpr;
     uint16_t required_sgpr_count = 0;
-    std::vector<const ConSanLdsSite *> sites;
+    std::vector<const ConSanAccessInventorySite *> sites;
   };
   constexpr uint16_t kDenseExplicitKeyMaximumSites = 64u;
   std::vector<ScDenseCallGroup> dense_call_groups;
@@ -389,31 +355,36 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
              kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
     };
     const auto site_has_matching_owner = [&](const auto &site) {
-      return std::ranges::any_of(site.owner_descriptor_file_offsets, owner_matches);
+      return site.container.name == container.name &&
+             site.container.entry_text_offset == container.entry_text_offset &&
+             std::ranges::any_of(site.execution_owner_descriptor_file_offsets, owner_matches);
     };
-    return std::ranges::any_of(container.lds_sites, site_has_matching_owner) ||
-           std::ranges::any_of(container.flat_sites, site_has_matching_owner);
+    return std::ranges::any_of(result.program_inventory.access_sites(), site_has_matching_owner);
   };
+  std::unordered_set<uint64_t> selected_container_entries;
   const auto index_container = [&](const auto &container, bool add_selected_range) {
     if (!container_is_selected(container))
       return;
+    selected_container_entries.insert(container.entry_text_offset);
     if (add_selected_range)
       selected_container_ranges.add(container.entry_text_offset, container.code_size);
-    if (options.probe_flat_check_trap) {
-      for (const ConSanFlatSite &site : container.flat_sites) {
-        if (admitted_flat_file_offsets.contains(site.file_offset))
-          future_flat_probe_ranges.add(site.text_offset, site.size);
-      }
-    }
-    for (const ConSanLdsSite &site : container.lds_sites) {
-      if (admitted_lds_file_offsets.contains(site.file_offset))
-        supported_lds_probe_ranges.add(site.text_offset, site.size);
-    }
   };
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     index_container(kernel, kernel.preflight_action != ConSanPreflightAction::Blocked);
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     index_container(function, true);
+  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
+    if (!selected_container_entries.contains(access.container.entry_text_offset))
+      continue;
+    if (options.probe_flat_check_trap && access.origin == ConSanAccessOrigin::Flat &&
+        admitted_flat_file_offsets.contains(access.file_offset))
+      future_flat_probe_ranges.add(access.physical_id.original_text_offset,
+                                   access.instruction_size);
+    if (access.origin == ConSanAccessOrigin::NativeLds &&
+        admitted_lds_file_offsets.contains(access.file_offset))
+      supported_lds_probe_ranges.add(access.physical_id.original_text_offset,
+                                     access.instruction_size);
+  }
   selected_container_ranges.finalize();
   future_flat_probe_ranges.finalize();
   supported_lds_probe_ranges.finalize();
@@ -719,7 +690,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   struct LdsSitePlanningContext {
     std::string_view container_name;
     uint64_t container_entry_text_offset = 0;
-    const ConSanLdsSite *site = nullptr;
+    const ConSanAccessInventorySite *site = nullptr;
     const Instruction *instruction = nullptr;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::vector<const ScReservoirOwnerContext *> owner_contexts;
@@ -749,8 +720,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
 
   std::vector<LdsSitePlanningContext> site_contexts;
-  const auto add_site_context = [&](std::string_view container_name,
-                                    uint64_t container_entry_text_offset, const ConSanLdsSite &site,
+  const auto add_site_context = [&](const ConSanAccessInventorySite &site,
                                     std::vector<uint64_t> owners) {
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
@@ -758,12 +728,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       return;
 
     LdsSitePlanningContext context;
-    context.container_name = container_name;
-    context.container_entry_text_offset = container_entry_text_offset;
+    context.container_name = site.container.name;
+    context.container_entry_text_offset = site.container.entry_text_offset;
     context.site = &site;
     context.owner_descriptor_file_offsets = std::move(owners);
-    context.instruction =
-        find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
+    context.instruction = find_instruction_at_text_offset(KernelBlockScope(block_ptrs),
+                                                          site.physical_id.original_text_offset);
     bool complete = true;
     bool first_owner = true;
     std::optional<uint16_t> max_owner_vgpr_ref;
@@ -779,7 +749,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           owner_context == reservoir_owner_contexts.end()
               ? nullptr
               : find_instruction_at_text_offset(KernelBlockScope(owner_context->scope.blocks),
-                                                site.text_offset);
+                                                site.physical_id.original_text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_context == reservoir_owner_contexts.end() || owner_context->liveness == nullptr ||
           context.instruction == nullptr || owner_site_inst != context.instruction ||
@@ -828,15 +798,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       context.min_preferred_vcc_save_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
     site_contexts.push_back(std::move(context));
   };
-  for (const CanonicalLdsSite &canonical : canonical_sites)
-    add_site_context(canonical.container_name, canonical.container_entry_text_offset,
-                     canonical.site, canonical.site.owner_descriptor_file_offsets);
+  for (const auto &[file_offset, site] : admitted_sites) {
+    (void)file_offset;
+    add_site_context(*site, sc_execution_owner_descriptor_file_offsets(*site));
+  }
 
   // Coverage is a physical decoded-site inventory, not an inventory of sites
   // that happened to survive owner, CFG, liveness, or placement planning.
   // Retain every canonical native-LDS access in the denominator and advertise
   // support only after its complete planning context has been established.
-  std::unordered_set<const ConSanLdsSite *> sites_with_complete_context;
+  std::unordered_set<const ConSanAccessInventorySite *> sites_with_complete_context;
   sites_with_complete_context.reserve(site_contexts.size());
   for (const LdsSitePlanningContext &context : site_contexts) {
     if (context.site != nullptr && !context.owner_contexts.empty())
@@ -845,7 +816,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::unordered_set<uint64_t> supported_physical_sites;
   supported_physical_sites.reserve(sites_with_complete_context.size());
   if (decoder != nullptr) {
-    for (const ConSanLdsSite *site : sites_with_complete_context) {
+    for (const ConSanAccessInventorySite *site : sites_with_complete_context) {
       if (site != nullptr)
         supported_physical_sites.insert(site->file_offset);
     }
@@ -884,17 +855,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // Candidate discovery records immutable requirements only. Stable private
   // slots are assigned transactionally when a concrete placement is selected,
   // so rejected candidates cannot inflate any descriptor.
-  std::unordered_map<const ConSanLdsSite *, ScBracketLocalPrivateSpillPlan> private_spill_plans;
-  auto reachable_local_caves = [&](const ConSanLdsSite &site, uint64_t owner_entry_text_offset,
-                                   uint64_t requested_words) {
+  std::unordered_map<const ConSanAccessInventorySite *, ScBracketLocalPrivateSpillPlan>
+      private_spill_plans;
+  auto reachable_local_caves = [&](const ConSanAccessInventorySite &site,
+                                   uint64_t owner_entry_text_offset, uint64_t requested_words) {
     std::vector<const LocalNopCave *> caves;
     const uint64_t cave_words = requested_words + 1u;
     for (const LocalNopCave &cave : local_nop_caves) {
       if (cave.owner_entry_text_offset != owner_entry_text_offset || cave.word_count < cave_words)
         continue;
       const uint64_t return_branch_pc = cave.text_offset + requested_words * sizeof(uint32_t);
-      if (compute_sopp_branch_simm16(site.text_offset, cave.text_offset) &&
-          compute_sopp_branch_simm16(return_branch_pc, site.text_offset + site.size))
+      if (compute_sopp_branch_simm16(site.physical_id.original_text_offset, cave.text_offset) &&
+          compute_sopp_branch_simm16(return_branch_pc,
+                                     site.physical_id.original_text_offset + site.instruction_size))
         caves.push_back(&cave);
     }
     return caves;
@@ -926,13 +899,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     const uint64_t primary_descriptor_file_offset =
         site_context.owner_descriptor_file_offsets.front();
     {
-      const ConSanLdsSite &site = *site_context.site;
+      const ConSanAccessInventorySite &site = *site_context.site;
       ++supported_candidate_count;
       const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 && site.file_offset >= site.text_offset
-              ? consan_gfx1250_vgpr_msb_mode_at(original_bytes, site.file_offset - site.text_offset,
-                                                site_context.container_entry_text_offset,
-                                                site.file_offset)
+          arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                  site.file_offset >= site.physical_id.original_text_offset
+              ? consan_gfx1250_vgpr_msb_mode_at(
+                    original_bytes, site.file_offset - site.physical_id.original_text_offset,
+                    site_context.container_entry_text_offset, site.file_offset)
               : std::nullopt;
       auto required_vgprs = lds_dword_count(site);
       if (!required_vgprs) {
@@ -942,7 +916,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto gfx1250_two_address =
           gfx1250_two_address_expansion_plan(original_bytes, site, arch);
       if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-          (is_two_address_lds_load(site) || is_two_address_lds_store(site)) &&
+          (is_two_address_lds_load(site.mnemonic) || is_two_address_lds_store(site.mnemonic)) &&
           !gfx1250_two_address) {
         ++missing_width_plan_site_count;
         continue;
@@ -997,18 +971,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  (2u + *action_words) * *required_vgprs + 1u;
       if (gfx1250_two_address)
         requested_words += gfx1250_two_address->total_additional_word_count();
-      if (site.dst_accvgpr && (consan_uses_gfx9_cdna_encoding(arch)))
+      if (site.operands.destination_accvgpr && (consan_uses_gfx9_cdna_encoding(arch)))
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 4u;
       if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
         requested_words += 2u;
       if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.kind == ConSanLdsAccessKind::Read &&
-          site.dst_vgpr) {
+          site.operands.destination_vgpr) {
         const uint32_t dst_bank =
             static_cast<uint32_t>((gfx1250_vgpr_msb_mode.value_or(0u) >> 6u) & 0x3u);
         for (uint16_t i = 0; i < *required_vgprs; ++i) {
-          if (dst_bank * 256u + *site.dst_vgpr + i >= 256u)
+          if (dst_bank * 256u + *site.operands.destination_vgpr + i >= 256u)
             requested_words += 2u;
         }
       }
@@ -1179,24 +1153,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
               ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + probe_scratch_vgprs))
               : std::nullopt;
       ++scratchable_candidate_count;
-      uint32_t observed_padding =
-          count_nop_padding(original_bytes, site.file_offset + site.size, padding_words, arch);
+      uint32_t observed_padding = count_nop_padding(
+          original_bytes, site.file_offset + site.instruction_size, padding_words, arch);
       if (overlaps_preapplied_reserved_range(
-              options,
-              {site.text_offset,
-               site.text_offset + requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
+              options, {site.physical_id.original_text_offset,
+                        site.physical_id.original_text_offset +
+                            requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
         observed_padding = 0;
       }
       max_observed_padding_words = std::max(max_observed_padding_words, observed_padding);
-      if (text_offset_is_inside_s_clause(kernel_scope, site.text_offset)) {
+      if (text_offset_is_inside_s_clause(kernel_scope, site.physical_id.original_text_offset)) {
         ++s_clause_blocked_candidate_count;
       } else {
         bool appended_cave_reachable = false;
         if (appended_cave_offset != 0) {
           const uint64_t return_branch_pc =
               appended_cave_offset + requested_words * sizeof(uint32_t);
-          if (compute_sopp_branch_simm16(site.text_offset, appended_cave_offset) &&
-              compute_sopp_branch_simm16(return_branch_pc, site.text_offset + site.size)) {
+          if (compute_sopp_branch_simm16(site.physical_id.original_text_offset,
+                                         appended_cave_offset) &&
+              compute_sopp_branch_simm16(return_branch_pc, site.physical_id.original_text_offset +
+                                                               site.instruction_size)) {
             appended_cave_reachable = true;
             LdsCheckTrapCandidate candidate{&site,
                                             nullptr,
@@ -1342,7 +1318,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
               bool found_reachable_island = false;
               for (const LocalNopCave &cave : local_entry_islands) {
                 if (cave.owner_entry_text_offset != site_context.container_entry_text_offset ||
-                    !compute_sopp_branch_simm16(site.text_offset, cave.text_offset)) {
+                    !compute_sopp_branch_simm16(site.physical_id.original_text_offset,
+                                                cave.text_offset)) {
                   continue;
                 }
                 found_reachable_island = true;
@@ -1457,7 +1434,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::ranges::sort(local_cave_candidates, candidate_order);
   std::ranges::sort(appended_cave_candidates, candidate_order);
   std::ranges::sort(generated_island_seed_candidates, [](const auto &lhs, const auto &rhs) {
-    return lhs.site->text_offset < rhs.site->text_offset;
+    return lhs.site->physical_id.original_text_offset < rhs.site->physical_id.original_text_offset;
   });
   std::ranges::sort(branch_only_candidates, candidate_order);
 
@@ -1465,15 +1442,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
   std::vector<LdsCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
-  std::unordered_set<const ConSanLdsSite *> selected_sites;
+  std::unordered_set<const ConSanAccessInventorySite *> selected_sites;
   struct ScSelectedSpillState {
     // Within this bracket-local lifetime domain, an exact owner set shares
     // stable register-to-slot mappings while distinct sets may reuse offsets.
     std::map<std::vector<uint64_t>, SpillManager> managers;
-    std::unordered_map<const ConSanLdsSite *, VgprSpillSequence> sequences;
+    std::unordered_map<const ConSanAccessInventorySite *, VgprSpillSequence> sequences;
   };
   ScSelectedSpillState selected_spills;
-  std::unordered_set<const ConSanLdsSite *> selection_spill_failure_sites;
+  std::unordered_set<const ConSanAccessInventorySite *> selection_spill_failure_sites;
   const auto try_add_selected_spill = [&](ScSelectedSpillState &state,
                                           const LdsCheckTrapCandidate &candidate) {
     const auto plan = private_spill_plans.find(candidate.site);
@@ -1513,19 +1490,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     state.sequences.insert_or_assign(candidate.site, std::move(*sequence));
     return true;
   };
-  const auto note_selection_spill_failure = [&](const ConSanLdsSite *site) {
+  const auto note_selection_spill_failure = [&](const ConSanAccessInventorySite *site) {
     if (selection_spill_failure_sites.insert(site).second)
       ++private_spill_encoding_failure_count;
   };
   DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
-  std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> direct_body_relay_slots;
+  std::unordered_map<const ConSanAccessInventorySite *, std::vector<uint64_t>>
+      direct_body_relay_slots;
 
   // Spill-backed sites have no scalar pair for an indirect continuation, so
   // their bodies must remain close enough to pristine text for SOPP relay
   // chains. Give those rare bodies the front of the appended region before
   // the ordinary direct bodies make that region many megabytes deep.
   std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
-    return lhs.site->text_offset < rhs.site->text_offset;
+    return lhs.site->physical_id.original_text_offset < rhs.site->physical_id.original_text_offset;
   });
   // Branch-only continuation uses only the shared GFX12 SOPP branch contract.
   // Reserving its appended bodies on another architecture would leave phantom
@@ -1535,7 +1513,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     for (LdsCheckTrapCandidate &candidate : branch_only_candidates) {
       DbiPatchPlacementPlanner tentative_planner = placement_planner;
       auto placement = tentative_planner.plan_indirect_appended(
-          candidate.site->text_offset, candidate.site->size,
+          candidate.site->physical_id.original_text_offset, candidate.site->instruction_size,
           (candidate.requested_words + 1u) * sizeof(uint32_t));
       if (!placement)
         continue;
@@ -1694,7 +1672,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::vector<const ScReservoirOwnerContext *> dense_owner_contexts;
       std::unordered_set<uint64_t> dense_owner_descriptors;
       for (const LdsCheckTrapCandidate &candidate : seed_group.candidates) {
-        for (uint64_t owner : candidate.site->owner_descriptor_file_offsets) {
+        for (uint64_t owner : sc_execution_owner_descriptor_file_offsets(*candidate.site)) {
           if (!dense_owner_descriptors.insert(owner).second)
             continue;
           const auto context = std::ranges::find(reservoir_owner_contexts, owner,
@@ -1780,11 +1758,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         uint64_t max_distance = 0;
         const bool reachable =
             std::ranges::all_of(seed_group.candidates, [&](const LdsCheckTrapCandidate &candidate) {
-              if (!compute_sopp_branch_simm16(candidate.site->text_offset, island_offset))
+              if (!compute_sopp_branch_simm16(candidate.site->physical_id.original_text_offset,
+                                              island_offset))
                 return false;
-              const uint64_t distance = candidate.site->text_offset < island_offset
-                                            ? island_offset - candidate.site->text_offset
-                                            : candidate.site->text_offset - island_offset;
+              const uint64_t distance =
+                  candidate.site->physical_id.original_text_offset < island_offset
+                      ? island_offset - candidate.site->physical_id.original_text_offset
+                      : candidate.site->physical_id.original_text_offset - island_offset;
               max_distance = std::max(max_distance, distance);
               return true;
             });
@@ -1862,7 +1842,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
            ++candidate_index) {
         LdsCheckTrapCandidate candidate = seed_group.candidates[candidate_index];
         auto placement = tentative_planner.plan_indirect_appended(
-            candidate.site->text_offset, candidate.site->size,
+            candidate.site->physical_id.original_text_offset, candidate.site->instruction_size,
             (candidate.requested_words + kLdsCheckTrapIndirectJumpWords) * sizeof(uint32_t));
         if (!placement) {
           complete_group = false;
@@ -1942,7 +1922,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       return;
     if (!allow_descriptor_growth && candidate.required_vgpr_allocation_count)
       return;
-    const ConSanLdsSite &site = *candidate.site;
+    const ConSanAccessInventorySite &site = *candidate.site;
     std::optional<ScSelectedSpillState> tentative_spills;
     if (private_spill_plans.contains(candidate.site)) {
       tentative_spills = selected_spills;
@@ -1953,8 +1933,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     DbiPatchPlacementPlanner tentative_planner = placement_planner;
     DbiPatchPlacementRequest request;
-    request.anchor_offset = site.text_offset;
-    request.original_size = site.size;
+    request.anchor_offset = site.physical_id.original_text_offset;
+    request.original_size = site.instruction_size;
     request.body_size =
         (candidate.requested_words +
          (candidate.entry_island != nullptr ? kLdsCheckTrapIndirectJumpWords : 0u)) *
@@ -1977,8 +1957,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ++indirect_candidate_placement_failure_count;
         return;
       }
-      placement =
-          tentative_planner.plan_indirect_appended(site.text_offset, site.size, request.body_size);
+      placement = tentative_planner.plan_indirect_appended(
+          site.physical_id.original_text_offset, site.instruction_size, request.body_size);
       if (!placement)
         ++indirect_candidate_placement_failure_count;
     } else if (auto relay_slot = direct_body_relay_slots.find(candidate.site);
@@ -2018,14 +1998,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   for (const LdsCheckTrapCandidate &candidate : inline_candidates)
     try_select_candidate(candidate, true);
 
-  const auto site_is_selected = [&](const ConSanLdsSite *site) {
+  const auto site_is_selected = [&](const ConSanAccessInventorySite *site) {
     return selected_sites.contains(site);
   };
   bool needs_generated_island_bank = false;
   {
     DbiPatchPlacementPlanner simulated_planner = placement_planner;
     size_t simulated_selected_count = selected_candidates.size();
-    std::unordered_set<const ConSanLdsSite *> simulated_selected_sites;
+    std::unordered_set<const ConSanAccessInventorySite *> simulated_selected_sites;
     for (const LdsCheckTrapCandidate &selected : selected_candidates)
       simulated_selected_sites.insert(selected.site);
 
@@ -2042,7 +2022,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                                     kLdsCheckTrapIndirectJumpWords *
                                                         sizeof(uint32_t)) ||
           !tentative_planner.plan_indirect_appended(
-              candidate.site->text_offset, candidate.site->size,
+              candidate.site->physical_id.original_text_offset, candidate.site->instruction_size,
               (candidate.requested_words + kLdsCheckTrapIndirectJumpWords) * sizeof(uint32_t)))
         continue;
       simulated_planner = std::move(tentative_planner);
@@ -2054,8 +2034,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           simulated_selected_count >= max_patches)
         continue;
       DbiPatchPlacementRequest request;
-      request.anchor_offset = candidate.site->text_offset;
-      request.original_size = candidate.site->size;
+      request.anchor_offset = candidate.site->physical_id.original_text_offset;
+      request.original_size = candidate.site->instruction_size;
       request.body_size = candidate.requested_words * sizeof(uint32_t);
       request.allow_appended_cave = true;
       if (!simulated_planner.plan(request)) {
@@ -2076,7 +2056,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   uint64_t generated_island_cursor = generated_island_bank_offset;
   uint64_t generated_relay_bank_offset = appended_cave_offset;
   size_t generated_relay_bank_word_count = 0;
-  std::unordered_set<const ConSanLdsSite *> relay_routed_sites;
+  std::unordered_set<const ConSanAccessInventorySite *> relay_routed_sites;
   bool use_relay_island_bank = local_nop_caves.empty() &&
                                indirect_island_unreachable_site_count != 0 &&
                                max_patches >= supported_candidate_count;
@@ -2087,7 +2067,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!site_is_selected(candidate.site))
         relay_owner_seeds.push_back(candidate);
     }
-    std::unordered_set<const ConSanLdsSite *> direct_sites;
+    std::unordered_set<const ConSanAccessInventorySite *> direct_sites;
     for (const LdsCheckTrapCandidate &candidate : appended_cave_candidates) {
       if (candidate.entry_island == nullptr)
         direct_sites.insert(candidate.site);
@@ -2194,8 +2174,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     // rather than geometric capacity guesses, decide whether a reservoir is
     // useful.
     struct RelayLayoutAttempt {
-      std::unordered_set<const ConSanLdsSite *> routed_sites;
-      std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> body_relay_slots;
+      std::unordered_set<const ConSanAccessInventorySite *> routed_sites;
+      std::unordered_map<const ConSanAccessInventorySite *, std::vector<uint64_t>> body_relay_slots;
       std::vector<LdsCheckTrapCandidate> relay_seeds;
       std::vector<uint64_t> source_offsets;
       uint64_t relay_bank_offset = 0;
@@ -2203,7 +2183,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       uint64_t island_bank_offset = 0;
       SoppBranchRelayPlan relay_plan;
     };
-    const std::unordered_set<const ConSanLdsSite *> required_relay_routed_sites =
+    const std::unordered_set<const ConSanAccessInventorySite *> required_relay_routed_sites =
         relay_routed_sites;
     const size_t relay_layout_inputs =
         saturated_add(required_relay_routed_sites.size(), relay_reservoir_candidates.size());
@@ -2223,20 +2203,22 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           *error_out = "LDS relay-layout replay exhausted its work allowance";
         return std::nullopt;
       }
-      std::unordered_set<const ConSanLdsSite *> routed_sites = required_relay_routed_sites;
+      std::unordered_set<const ConSanAccessInventorySite *> routed_sites =
+          required_relay_routed_sites;
       DbiPatchPlacementPlanner direct_layout = prefix_planner;
-      std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> body_relay_slots;
+      std::unordered_map<const ConSanAccessInventorySite *, std::vector<uint64_t>> body_relay_slots;
       for (;;) {
         DbiPatchPlacementPlanner direct_simulation = prefix_planner;
-        std::vector<const ConSanLdsSite *> newly_routed;
-        std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> simulated_slots;
+        std::vector<const ConSanAccessInventorySite *> newly_routed;
+        std::unordered_map<const ConSanAccessInventorySite *, std::vector<uint64_t>>
+            simulated_slots;
         for (const LdsCheckTrapCandidate &candidate : appended_cave_candidates) {
           if (candidate.entry_island != nullptr || routed_sites.contains(candidate.site) ||
               site_is_selected(candidate.site))
             continue;
           DbiPatchPlacementRequest request;
-          request.anchor_offset = candidate.site->text_offset;
-          request.original_size = candidate.site->size;
+          request.anchor_offset = candidate.site->physical_id.original_text_offset;
+          request.original_size = candidate.site->instruction_size;
           request.body_size = candidate.requested_words * sizeof(uint32_t);
           request.allow_appended_cave = true;
           if (!direct_simulation.plan(request)) {
@@ -2258,7 +2240,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           body_relay_slots = std::move(simulated_slots);
           break;
         }
-        for (const ConSanLdsSite *site : newly_routed)
+        for (const ConSanAccessInventorySite *site : newly_routed)
           routed_sites.insert(site);
       }
 
@@ -2271,7 +2253,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::vector<uint64_t> source_offsets;
       source_offsets.reserve(relay_seeds.size());
       for (const LdsCheckTrapCandidate &candidate : relay_seeds)
-        source_offsets.push_back(candidate.site->text_offset);
+        source_offsets.push_back(candidate.site->physical_id.original_text_offset);
 
       std::vector<uint64_t> relay_offsets;
       size_t reservoir_slot_count = 0;
@@ -2283,7 +2265,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                             3u * selected_wide_composite_relay_donors.size() +
                             reservoir_slot_count);
       for (const LdsCheckTrapCandidate &candidate : relay_owner_seeds)
-        relay_offsets.push_back(candidate.site->text_offset + sizeof(uint32_t));
+        relay_offsets.push_back(candidate.site->physical_id.original_text_offset +
+                                sizeof(uint32_t));
       for (const auto &[site, relay_site_offsets] : body_relay_slots) {
         (void)site;
         relay_offsets.insert(relay_offsets.end(), relay_site_offsets.begin(),
@@ -2664,7 +2647,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         }
         min_cut_owner_relay_count +=
             std::ranges::any_of(relay_owner_seeds, [&](const LdsCheckTrapCandidate &candidate) {
-              return candidate.site->text_offset + sizeof(uint32_t) == relay;
+              return candidate.site->physical_id.original_text_offset + sizeof(uint32_t) == relay;
             });
         min_cut_wide_relay_count +=
             std::ranges::any_of(selected_wide_composite_relay_donors,
@@ -2742,7 +2725,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     generated_island_cursor = generated_island_bank_offset;
     for (LdsCheckTrapCandidate candidate : generated_island_seed_candidates) {
       if (site_is_selected(candidate.site) ||
-          !compute_sopp_branch_simm16(candidate.site->text_offset, generated_island_cursor))
+          !compute_sopp_branch_simm16(candidate.site->physical_id.original_text_offset,
+                                      generated_island_cursor))
         continue;
       generated_entry_islands.push_back(LocalNopCave{
           .text_offset = generated_island_cursor,
@@ -2851,7 +2835,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       selected_candidates.size() < max_patches) {
     std::string branch_only_route_error;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
-      return lhs.site->text_offset < rhs.site->text_offset;
+      return lhs.site->physical_id.original_text_offset <
+             rhs.site->physical_id.original_text_offset;
     });
 
     // Reservoir discovery emits overlapping suffixes of each admissible run.
@@ -2940,8 +2925,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::unordered_set<uint64_t> owned_anchor_relays;
       const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
         if ((candidate.use_local_cave || candidate.use_appended_cave) &&
-            !candidate.dense_call_group_index && candidate.site->size == 2u * sizeof(uint32_t)) {
-          const uint64_t relay = candidate.site->text_offset + sizeof(uint32_t);
+            !candidate.dense_call_group_index &&
+            candidate.site->instruction_size == 2u * sizeof(uint32_t)) {
+          const uint64_t relay =
+              candidate.site->physical_id.original_text_offset + sizeof(uint32_t);
           available_relays.push_back(relay);
           owned_anchor_relays.insert(relay);
         }
@@ -3020,11 +3007,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       route_requests.reserve(tentative_candidates.size());
       for (const LdsCheckTrapCandidate &candidate : tentative_candidates) {
         route_requests.push_back({
-            .entry_source = candidate.site->text_offset,
+            .entry_source = candidate.site->physical_id.original_text_offset,
             .entry_target = candidate.placement->body_offset,
             .return_source =
                 candidate.placement->body_offset + candidate.requested_words * sizeof(uint32_t),
-            .return_target = candidate.site->text_offset + candidate.site->size,
+            .return_target =
+                candidate.site->physical_id.original_text_offset + candidate.site->instruction_size,
         });
       }
       std::string route_error;
@@ -3207,7 +3195,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
 
   struct PlannedLdsCheckTrapPatch {
-    const ConSanLdsSite *site = nullptr;
+    const ConSanAccessInventorySite *site = nullptr;
     const LocalNopCave *local_cave = nullptr;
     const LocalNopCave *entry_island = nullptr;
     std::vector<uint32_t> words;
@@ -3231,7 +3219,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<PlannedLdsCheckTrapPatch> planned_patches;
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
-    const ConSanLdsSite &site = *candidate.site;
+    const ConSanAccessInventorySite &site = *candidate.site;
     const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
     std::optional<uint32_t> guest_instruction_word_offset;
     auto words = build_lds_check_trap_words(original_bytes, site, arch, options, *delay_words,
@@ -3370,7 +3358,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     planned.info.kind =
         lds_check_trap_patch_kind(site, candidate.use_local_cave || candidate.use_appended_cave);
-    planned.info.anchor_offset = site.text_offset;
+    planned.info.anchor_offset = site.physical_id.original_text_offset;
     planned.info.branch_relay_offsets = planned.trailing_relay_offsets;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
     planned.info.scalar_vcc_spill_sgpr = candidate.scalar_vcc_spill_vgpr
@@ -3387,9 +3375,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           static_cast<uint16_t>(
               std::max(plan->second.saved_frame_base_sgpr, plan->second.saved_scc_sgpr) + 1u));
     }
-    planned.info.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
-    if (planned.info.owner_descriptor_file_offsets.empty())
-      planned.info.owner_descriptor_file_offsets = {candidate.descriptor_file_offset};
+    planned.info.owner_descriptor_file_offsets = sc_execution_owner_descriptor_file_offsets(site);
     if (spill != selected_spills.sequences.end()) {
       planned.info.spilled_vgpr_count = spill->second.vgpr_count;
       planned.info.required_private_segment_size = spill->second.total_private_bytes;
@@ -3407,7 +3393,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         result.errors.emplace_back("ConSan LDS check/trap proof selected missing local cave");
         return;
       }
-      if (site.size != 2u * sizeof(uint32_t)) {
+      if (site.instruction_size != 2u * sizeof(uint32_t)) {
         result.errors.emplace_back(
             "ConSan LDS check/trap proof local cave expects an 8-byte LDS site");
         return;
@@ -3496,7 +3482,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         if (planned.words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
           result.errors.emplace_back(
               "ConSan LDS check/trap proof body size changed after placement at text offset " +
-              std::to_string(site.text_offset) + ": planned " +
+              std::to_string(site.physical_id.original_text_offset) + ": planned " +
               std::to_string(candidate.placement->body_size) + " bytes, emitted " +
               std::to_string(planned.words.size() * sizeof(uint32_t)) + " bytes");
           return;
@@ -3575,7 +3561,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
 
       planned.info.trampoline_offset = trampoline_text_offset;
-      planned.info.original_size = site.size;
+      planned.info.original_size = site.instruction_size;
       planned.info.trampoline_size =
           static_cast<uint32_t>(planned.cave_words.size() * sizeof(uint32_t) +
                                 planned.trailing_relay_offsets.size() * sizeof(uint32_t));
@@ -3590,12 +3576,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         result.errors.emplace_back("ConSan LDS check/trap proof exceeds ELF bytes");
         return;
       }
-      planned.info.trampoline_offset = site.text_offset + site.size;
+      planned.info.trampoline_offset =
+          site.physical_id.original_text_offset + site.instruction_size;
       planned.info.original_size = static_cast<uint32_t>(patch_bytes);
       planned.info.trampoline_size = 0;
       if (planned.guest_instruction_word_offset) {
         planned.info.relocated_guest_instruction_offset =
-            site.text_offset + *planned.guest_instruction_word_offset * sizeof(uint32_t);
+            site.physical_id.original_text_offset +
+            *planned.guest_instruction_word_offset * sizeof(uint32_t);
       }
     }
 
@@ -3617,8 +3605,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::unordered_set<uint64_t> selected_relay_slots;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if ((planned.use_local_cave || planned.use_appended_cave) &&
-        planned.site->size == 2u * sizeof(uint32_t)) {
-      selected_relay_slots.insert(planned.site->text_offset + sizeof(uint32_t));
+        planned.site->instruction_size == 2u * sizeof(uint32_t)) {
+      selected_relay_slots.insert(planned.site->physical_id.original_text_offset +
+                                  sizeof(uint32_t));
     }
     selected_relay_slots.insert(planned.trailing_relay_offsets.begin(),
                                 planned.trailing_relay_offsets.end());
@@ -4039,15 +4028,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           return false;
         }
         for (size_t site_index = 0; site_index < group.sites.size(); ++site_index) {
-          const ConSanLdsSite *site = group.sites[site_index];
+          const ConSanAccessInventorySite *site = group.sites[site_index];
           const auto planned =
               std::ranges::find(planned_patches, site, &PlannedLdsCheckTrapPatch::site);
           if (planned == planned_patches.end() || !planned->placement ||
-              !append_target(
-                  group.explicit_key_sgpr
-                      ? static_cast<uint32_t>(site_index + 1u)
-                      : static_cast<uint32_t>(site->text_offset + sizeof(uint32_t) - island_offset),
-                  planned->placement->body_offset)) {
+              !append_target(group.explicit_key_sgpr
+                                 ? static_cast<uint32_t>(site_index + 1u)
+                                 : static_cast<uint32_t>(site->physical_id.original_text_offset +
+                                                         sizeof(uint32_t) - island_offset),
+                             planned->placement->body_offset)) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap could not encode a dense-call site dispatch");
             return false;
@@ -4078,7 +4067,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
 
         ConSanPatchInfo dispatcher_info;
         dispatcher_info.kind = ConSanPatchKind::TrampolineScDenseCallDispatcher;
-        dispatcher_info.anchor_offset = group.sites.front()->text_offset;
+        dispatcher_info.anchor_offset = group.sites.front()->physical_id.original_text_offset;
         dispatcher_info.trampoline_offset = group.dispatcher_offset;
         dispatcher_info.trampoline_size =
             static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
@@ -4118,10 +4107,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       return true;
     };
     for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-      const ConSanLdsSite &site = *planned.site;
+      const ConSanAccessInventorySite &site = *planned.site;
       if (planned.use_local_cave) {
-        std::memcpy(new_text.data() + site.text_offset, planned.anchor_words.data(),
-                    planned.anchor_words.size() * sizeof(uint32_t));
+        std::memcpy(new_text.data() + site.physical_id.original_text_offset,
+                    planned.anchor_words.data(), planned.anchor_words.size() * sizeof(uint32_t));
         std::memcpy(new_text.data() + planned.local_cave->text_offset, planned.cave_words.data(),
                     planned.cave_words.size() * sizeof(uint32_t));
       } else if (planned.use_appended_cave) {
@@ -4143,8 +4132,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           const uint64_t expected_offset = planned.placement ? planned.placement->body_offset : 0u;
           result.errors.emplace_back(
               "ConSan LDS check/trap proof emitted a stale appended-cave mapping: site=" +
-              std::to_string(site.text_offset) + " expected=" + std::to_string(expected_offset) +
-              " actual=" + std::to_string(new_text.size()));
+              std::to_string(site.physical_id.original_text_offset) + " expected=" +
+              std::to_string(expected_offset) + " actual=" + std::to_string(new_text.size()));
           result.patches.clear();
           return;
         }
@@ -4161,14 +4150,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           std::memcpy(new_text.data() + planned.entry_island->text_offset,
                       planned.entry_island_words.data(), island_bytes);
         }
-        std::memcpy(new_text.data() + site.text_offset, planned.anchor_words.data(),
-                    planned.anchor_words.size() * sizeof(uint32_t));
+        std::memcpy(new_text.data() + site.physical_id.original_text_offset,
+                    planned.anchor_words.data(), planned.anchor_words.size() * sizeof(uint32_t));
         append_words(new_text, planned.cave_words);
         for (uint64_t trailing_relay_offset : planned.trailing_relay_offsets) {
           if (new_text.size() != trailing_relay_offset) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap emitted a stale direct-body relay slot: site=" +
-                std::to_string(site.text_offset) +
+                std::to_string(site.physical_id.original_text_offset) +
                 " expected=" + std::to_string(trailing_relay_offset) +
                 " actual=" + std::to_string(new_text.size()));
             result.patches.clear();
@@ -4177,13 +4166,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           append_words(new_text, std::span<const uint32_t>(&padding_nop, 1));
         }
       } else {
-        std::memcpy(new_text.data() + site.text_offset, planned.words.data(),
+        std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),
                     planned.words.size() * sizeof(uint32_t));
       }
       if (planned.entry_island != nullptr) {
         ConSanPatchInfo island_info;
         island_info.kind = ConSanPatchKind::TrampolineScIndirectBranchIsland;
-        island_info.anchor_offset = site.text_offset;
+        island_info.anchor_offset = site.physical_id.original_text_offset;
         island_info.trampoline_offset = planned.entry_island->text_offset;
         island_info.trampoline_size =
             static_cast<uint32_t>(kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
@@ -4217,7 +4206,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::string relay_error;
       if (!BranchOnlyRelayRouter::emit_and_record(
               new_text, *planned.branch_only_route, planned.placement->body_offset,
-              planned.site->text_offset + planned.site->size, arch, result.patches, &relay_error)) {
+              planned.site->physical_id.original_text_offset + planned.site->instruction_size, arch,
+              result.patches, &relay_error)) {
         result.errors.emplace_back("ConSan LDS check/trap " + relay_error);
         result.patches.clear();
         return;
@@ -4297,7 +4287,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
   }
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-    const ConSanLdsSite &site = *planned.site;
+    const ConSanAccessInventorySite &site = *planned.site;
     if (planned.use_local_cave) {
       const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
       const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);

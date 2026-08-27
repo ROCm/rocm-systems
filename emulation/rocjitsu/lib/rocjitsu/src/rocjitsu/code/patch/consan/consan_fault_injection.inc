@@ -2476,27 +2476,28 @@ flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access) {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> check_trap_compare_vgpr(const ConSanLdsSite &site,
-                                                              uint16_t chunk_index,
-                                                              rj_code_arch_t arch,
-                                                              uint16_t gfx1250_vgpr_msb_mode) {
-  if (site.kind == ConSanLdsAccessKind::Read) {
+[[nodiscard]] std::optional<uint16_t>
+check_trap_compare_vgpr(const ConSanAccessInventorySite &access, uint16_t chunk_index,
+                        rj_code_arch_t arch, uint16_t gfx1250_vgpr_msb_mode) {
+  if (access.kind == ConSanLdsAccessKind::Read) {
     const uint32_t dst_bank = consan_arch_has_selectable_vgpr_bank(arch)
                                   ? static_cast<uint32_t>((gfx1250_vgpr_msb_mode >> 6u) & 0x3u)
                                   : 0u;
-    const uint32_t physical_vgpr = dst_bank * 256u + site.dst_vgpr.value_or(0u) + chunk_index;
+    const uint32_t physical_vgpr =
+        dst_bank * 256u + access.operands.destination_vgpr.value_or(0u) + chunk_index;
     const uint32_t register_limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
-    return site.dst_vgpr && physical_vgpr < register_limit
+    return access.operands.destination_vgpr && physical_vgpr < register_limit
                ? std::optional<uint16_t>(static_cast<uint16_t>(physical_vgpr))
                : std::nullopt;
   }
-  if (site.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address = is_two_address_lds_store(site);
+  if (access.kind == ConSanLdsAccessKind::Write) {
+    const bool two_address = is_two_address_lds_store(access.mnemonic);
     const uint16_t dwords_per_address = static_cast<uint16_t>(
-        two_address ? two_address_lds_element_width_bits(site).value_or(0u) / 32u
-                    : site.width_bits / 32u);
-    const std::optional<uint16_t> base =
-        two_address && chunk_index >= dwords_per_address ? site.second_data_vgpr : site.data_vgpr;
+        two_address ? two_address_lds_element_width_bits(access.mnemonic).value_or(0u) / 32u
+                    : access.decoded_width_bits / 32u);
+    const std::optional<uint16_t> base = two_address && chunk_index >= dwords_per_address
+                                             ? access.operands.second_data_vgpr
+                                             : access.operands.data_vgpr;
     const uint16_t relative_index = two_address && chunk_index >= dwords_per_address
                                         ? static_cast<uint16_t>(chunk_index - dwords_per_address)
                                         : chunk_index;
