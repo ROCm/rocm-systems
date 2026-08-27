@@ -69,6 +69,8 @@ enum backend_tag : int
     callback_domains_invalid                    = 101,
     callback_domains_rocshmem_hipfile_supported = 103,
     buffered_domains_callback_only_skipped      = 104,
+    callback_domains_buffer_only_no_warning     = 105,
+    buffered_domains_callback_only_no_warning   = 106,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -626,6 +628,40 @@ TEST_F(tracing_config_domains_test, get_callback_domains_invalid_domain)
     }
 }
 
+// kernel_dispatch is a buffered-only domain (present in make_buffer_name_info(),
+// absent from make_callback_name_info()). It must be silently skipped without
+// logging the "not supported by the loaded rocprofiler-sdk headers" warning,
+// which would otherwise misreport a valid, buffered-only domain as unsupported.
+TEST_F(tracing_config_domains_test,
+       get_callback_domains_skips_buffer_only_domain_without_warning)
+{
+    using backend_t = tagged_backend<callback_domains_buffer_only_no_warning>;
+    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "kernel_dispatch,hip_runtime_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+
+    gtest::internal::CaptureStdout();
+    gtest::internal::CaptureStderr();
+    const auto domains = sut::get_callback_domains();
+    const auto output =
+        gtest::internal::GetCapturedStdout() + gtest::internal::GetCapturedStderr();
+
+    EXPECT_THAT(domains,
+                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_HIP_RUNTIME_API));
+    EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("not supported")));
+}
+
 TEST_F(tracing_config_domains_test,
        get_callback_domains_rocshmem_and_hipfile_supported_when_version_at_or_above_gate)
 {
@@ -871,6 +907,41 @@ TEST_F(tracing_config_domains_test, get_buffered_domains_skips_callback_only_dom
 
     EXPECT_THAT(sut::get_buffered_domains(),
                 gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
+}
+
+// rccl_api is a callback-only domain. It must be silently skipped without
+// logging the "has no buffered-tracing equivalent" warning, which would
+// otherwise misreport a valid, callback-only domain as unsupported.
+TEST_F(tracing_config_domains_test,
+       get_buffered_domains_skips_callback_only_domain_without_warning)
+{
+    using backend_t = tagged_backend<buffered_domains_callback_only_no_warning>;
+    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "memory_copy,rccl_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    gtest::internal::CaptureStdout();
+    gtest::internal::CaptureStderr();
+    const auto domains = sut::get_buffered_domains();
+    const auto output =
+        gtest::internal::GetCapturedStdout() + gtest::internal::GetCapturedStderr();
+
+    EXPECT_THAT(domains,
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
+    EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("has no buffered-tracing "
+                                                            "equivalent")));
 }
 
 TEST_F(tracing_config_domains_test, get_buffered_domains_invalid_domain_throws)

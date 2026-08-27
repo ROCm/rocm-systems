@@ -294,7 +294,8 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
         }
     }
 
-    const auto domain_map = get_callback_domain_map();
+    const auto domain_map          = get_callback_domain_map();
+    const auto buffered_domain_map = get_buffered_domain_map();
 
     // Check that the domains are valid
     const auto valid_choices = get_domain_choices();
@@ -319,10 +320,11 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
             callback_domains.insert(domain_map_itr->second.begin(),
                                     domain_map_itr->second.end());
         }
-        else
+        else if(!buffered_domain_map.contains(itr))
         {
             // Domain passed validation but isn't in the compile-time supported
-            // set (e.g. an older SDK header).
+            // set (e.g. an older SDK header). Domains that are valid but
+            // buffered-only (e.g. kernel_dispatch) are skipped here silently.
             LOG_WARNING("ROCPROFSYS_ROCM_DOMAINS: domain '{}' is not supported by "
                         "the loaded rocprofiler-sdk headers and will be ignored.",
                         itr);
@@ -343,8 +345,9 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
 
-    const auto valid_choices = get_domain_choices();
-    const auto domain_map    = get_buffered_domain_map();
+    const auto valid_choices       = get_domain_choices();
+    const auto domain_map          = get_buffered_domain_map();
+    const auto callback_domain_map = get_callback_domain_map();
 
     const auto invalid_domain_fn = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
@@ -364,11 +367,12 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
         {
             data.insert(domain_map_itr->second.begin(), domain_map_itr->second.end());
         }
-        else
+        else if(!callback_domain_map.contains(itr))
         {
             // Domain passed validation but has no buffered-tracing equivalent:
-            // either it is a callback-only domain by design, or it isn't in the
-            // compile-time supported set (e.g. an older SDK header).
+            // either it isn't in the compile-time supported set (e.g. an older
+            // SDK header), or it's a callback-only domain, which is skipped
+            // here silently.
             LOG_WARNING("ROCPROFSYS_ROCM_DOMAINS: domain '{}' has no buffered-tracing "
                         "equivalent and will be ignored for buffer tracing.",
                         itr);
