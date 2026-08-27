@@ -265,9 +265,12 @@ for the DBI discussion.
 - All applicable tests remain green, especially the checked-in ConSan device
   contracts. Apply the behavioral-contract correction process described in
   Phase 2 if a test is found to encode a prototype accident.
-- This is internal restructuring, not permission for a broad rewrite. Establish
-  a design and validate it through narrow slices before moving large bodies of
-  code.
+- This is permission for a broad and deep internal redesign. ConSan's data
+  structures, algorithms, control and data flow, internal APIs, file and
+  component boundaries, engine decomposition, and architecture decomposition
+  may all be substantially replaced when doing so yields a smaller and more
+  principled implementation. Narrow slices constrain only how that redesign is
+  landed and validated; they do not constrain the ambition of the destination.
 - Do not rewrite production code during the initial design-only day. The gate
   into implementation requires a reviewed weekly end-state and a fully
   incremental, component-by-component migration sequence.
@@ -360,6 +363,16 @@ This phase optimizes jointly for three outcomes:
 3. maximize genuine sharing across all five targets while confining necessary
    ISA and ABI differences to narrow target adapters.
 
+This mandate permits and expects substantial replacement of the prototype's
+data structures, control/data flow, internal APIs, algorithms, file boundaries,
+engine decomposition, and architecture decomposition. No internal structure is
+preserved for compatibility with the prototype. The constraints are that all
+checked-in tests remain green and observable behavior does not change
+significantly in a direction misaligned with ConSan's goals. Incremental
+migration constrains how the redesign lands, not how deeply the destination may
+differ: design the end state and its dependency-ordered cut sequence first,
+then replace one testable component or vertical slice at a time.
+
 ### Optimization order
 
 Choose each remaining slice by the improvement it leaves in the final tree,
@@ -400,6 +413,11 @@ until its checked-in host and device test gate passes. End-to-end revalidation
 is not part of this gate for the present phase.
 
 ### Quantitative starting point
+
+[`IMPLEMENTATION_SIZE_STUDY.md`](IMPLEMENTATION_SIZE_STUDY.md) breaks the
+current implementation down by feature ownership, responsibility, file
+concentration, and architecture awareness, and uses those measurements to
+prioritize the next design work.
 
 Measured against `origin/shared/rocjitsu/sanitizers` at `97c1640b2f65`, and
 excluding tests, documentation, and build files, the implementation changed as
