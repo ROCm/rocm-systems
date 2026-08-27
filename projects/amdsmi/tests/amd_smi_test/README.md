@@ -15,6 +15,12 @@ split into three tiers:
 Invalid-input cases run even when the matching device is absent. Positive cases
 skip when there is no device to drive.
 
+A positive case passes only on `AMDSMI_STATUS_SUCCESS`. When the API reports the
+feature is absent here (`AMDSMI_STATUS_NOT_SUPPORTED`, a missing driver, ...) the
+device counts as skipped, and a test whose every device was unsupported reports
+SKIPPED rather than PASSED. A run against a library that answers "not supported"
+for everything therefore reads as skipped, not green.
+
 For the full design (directory layout, naming rules, component taxonomy) see
 [`docs/conceptual/test-design.md`](../../docs/conceptual/test-design.md). This
 file is the practical "how to build and run" guide.
@@ -71,7 +77,7 @@ sudo ./amdsmitst
 ./amdsmitst --gtest_filter="*Integration*"
 
 # All functional (read-only + read-write) — root for the read-write suites
-sudo AMDSMI_TEST_ALLOW_MUTATION=1 ./amdsmitst --gtest_filter="*Functional*"
+sudo ./amdsmitst --gtest_filter="*Functional*"
 
 # Functional read-only only (safe, no root)
 ./amdsmitst --gtest_filter="*FunctionalReadOnly*"
@@ -126,28 +132,27 @@ list in `amdsmitst.exclude`. To apply only the global blacklist, filter on
 Neither file is copied into the build tree. Running from a build directory,
 source them from the source tree (`tests/amd_smi_test/`) instead.
 
-## Controlling destructive writes
+## Controlling device writes
 
 Every device write lives in a `*FunctionalReadWrite` suite behind
-`AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`, and **writes are off by default**: a
-plain run skips them and never disturbs a shared GPU or CPU. Opt in explicitly:
+`AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`, which requires only the privilege the
+write needs:
 
 ```shell
-sudo AMDSMI_TEST_ALLOW_MUTATION=1 ./amdsmitst --gtest_filter="*FunctionalReadWrite*"
+sudo ./amdsmitst --gtest_filter="*FunctionalReadWrite*"
 ```
-
-Three conditions must all hold or the write is skipped:
 
 | Condition | Effect when unmet |
 |-----------|-------------------|
-| `AMDSMI_TEST_ALLOW_MUTATION` is set | skipped (the default) |
-| `AMDSMI_NON_PRIVILEGED` is **not** set | skipped — overrides the opt-in above |
+| `AMDSMI_NON_PRIVILEGED` is **not** set | skipped |
 | process is root | skipped |
 
 Each write test stores the original value, sets a different one, verifies the
 readback against what it set, then restores the original and confirms the
-restore took. A setter with no corresponding getter is marked write-only in a
-comment and is not verified rather than being verified misleadingly.
+restore took, so a run leaves the device as it found it.
+
+The one setter the API cannot read back, `amdsmi_set_cpu_msr_floor_freq_limit`,
+writes 0 to clear the floor, which is the default state, so it needs no restore.
 
 ## Known test skips
 

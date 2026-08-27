@@ -33,16 +33,6 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_core_floor_freq_limit / amdsmi_set_cpu_core_floor_freq_limit.
 // amdsmi_get_cpu_floor_freq_limit / amdsmi_set_cpu_floor_freq_limit.
 // MSR floor-frequency limit setters (no getter).
-// ---- amdsmi_set_cpu_core_boostlimit (per core) ----
-TEST_F(CpuFunctionalReadWrite, SetCoreBoostlimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_core_boostlimit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_core_boostlimit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, CoreBoostlimit_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty()) GTEST_SKIP() << "No CPU cores";
@@ -78,43 +68,6 @@ TEST_F(CpuFunctionalReadWrite, CoreBoostlimit_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- floor-frequency limit setters ----
-TEST_F(CpuFunctionalReadWrite, SetCoreFloorFreqLimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_core_floor_freq_limit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_core_floor_freq_limit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetFloorFreqLimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_floor_freq_limit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_floor_freq_limit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetMsrFloorFreqLimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_msr_floor_freq_limit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_msr_floor_freq_limit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetCoreMsrFloorFreqLimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_core_msr_floor_freq_limit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_core_msr_floor_freq_limit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
 TEST_F(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
@@ -195,10 +148,8 @@ TEST_F(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// Both MSR floor setters are write-only -- AMD SMI exposes no MSR floor getter,
-// so there is nothing to read back and compare against the value written.
-// Write-only: the *_eff_floor_* getters report the effective floor, not the MSR
-// value written, so there is nothing to read back and verify against the input.
+// Write-only: the API exposes no MSR floor getter. Writing 0 clears the floor,
+// which is the default state, so there is nothing to restore.
 TEST_F(CpuFunctionalReadWrite, MsrFloorFreqLimit_Set) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty() && cpus().empty()) GTEST_SKIP() << "No CPU processors or cores";

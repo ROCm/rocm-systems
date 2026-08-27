@@ -29,15 +29,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_fan_speed / amdsmi_set_gpu_fan_speed (sensor 0).
-TEST_F(GpuFunctionalReadWrite, SetFanSpeed_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_gpu_fan_speed(kInvalidHandle, 0, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, FanSpeed_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

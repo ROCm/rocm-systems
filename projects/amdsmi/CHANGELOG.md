@@ -255,7 +255,7 @@ GPU: 0
   - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
   - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
-  - Destructive writes in `*FunctionalReadWrite` suites are now opt-in: set `AMDSMI_TEST_ALLOW_MUTATION` (and run as root) to enable them. A default run never mutates device state.
+  - Device writes in `*FunctionalReadWrite` suites require root, and each test restores the value it changed.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Optimized

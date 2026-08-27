@@ -42,44 +42,6 @@ static uint64_t AllEventsMask() {
   return mask;
 }
 
-// ---------------- invalid parameters first (not gated) ----------------
-TEST_F(GpuFunctionalReadWrite, InitEventNotification_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_init_gpu_event_notification(kInvalidHandle);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(GpuFunctionalReadWrite, SetEventMask_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_gpu_event_notification_mask(kInvalidHandle, AllEventsMask());
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_INIT);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(GpuFunctionalReadWrite, GetEventNotification_NullCount) {
-  RequireInit();
-  amdsmi_evt_notification_data_t data[4];
-  memset(data, 0, sizeof(data));
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "num_elem=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_event_notification(0, nullptr, data);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
-}
-
-TEST_F(GpuFunctionalReadWrite, StopEventNotification_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_stop_gpu_event_notification(kInvalidHandle);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_INIT);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 // ---------------- full init -> set-mask -> collect -> stop workflow ----------------
 // init/set/stop allocate and mutate per-device event-notification state, so the
 // flow is gated with the shared mutation gate.

@@ -42,7 +42,7 @@ TEST_F(CpuIntegration, GetCoreBoostlimit_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_core_boostlimit(kInvalidHandle, &boost);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetCoreBoostlimit_AllCores) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_core_boostlimit");
@@ -53,12 +53,9 @@ TEST_F(CpuIntegration, GetCoreBoostlimit_AllCores) {
     amdsmi_status_t err = amdsmi_get_cpu_core_boostlimit(cpu_cores()[i], &boost);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("core=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("core=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_set_cpu_core_boostlimit (invalid input only; valid-input cases are in functional/)
@@ -68,7 +65,7 @@ TEST_F(CpuIntegration, SetCoreBoostlimit_InvalidHandle) {
   amdsmi_status_t err = amdsmi_set_cpu_core_boostlimit(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 // ---- amdsmi_set_cpu_socket_boostlimit (invalid input only; valid-input cases are in functional/)
 // ----
@@ -77,5 +74,5 @@ TEST_F(CpuIntegration, SetSocketBoostlimit_InvalidHandle) {
   amdsmi_status_t err = amdsmi_set_cpu_socket_boostlimit(kInvalidHandle, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }

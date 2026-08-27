@@ -40,7 +40,7 @@ TEST_F(CpuIntegration, GetSocketTemperature_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_socket_temperature(kInvalidHandle, &tmon);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetSocketTemperature_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_socket_temperature");
@@ -51,19 +51,15 @@ TEST_F(CpuIntegration, GetSocketTemperature_AllCpus) {
     amdsmi_status_t err = amdsmi_get_cpu_socket_temperature(cpus()[i], &tmon);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_tdelta (output guarded) ----
 TEST_F(CpuIntegration, GetTdelta_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_tdelta", "out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_cpu_tdelta(cpus()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_cpu_tdelta(any_cpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -73,7 +69,7 @@ TEST_F(CpuIntegration, GetTdelta_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_tdelta(kInvalidHandle, &tdelta);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetTdelta_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_tdelta");
@@ -84,21 +80,17 @@ TEST_F(CpuIntegration, GetTdelta_AllCpus) {
     amdsmi_status_t err = amdsmi_get_cpu_tdelta(cpus()[i], &tdelta);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_svi3_vr_controller_temp (outputs guarded) ----
 TEST_F(CpuIntegration, GetSvi3VrControllerTemp_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   uint32_t rail_index = 0, temp = 0;
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_svi3_vr_controller_temp", "rail_selection=nullptr", kVerbose);
   amdsmi_status_t err =
-      amdsmi_get_cpu_svi3_vr_controller_temp(cpus()[0], nullptr, &rail_index, &temp);
+      amdsmi_get_cpu_svi3_vr_controller_temp(any_cpu(), nullptr, &rail_index, &temp);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -109,7 +101,7 @@ TEST_F(CpuIntegration, GetSvi3VrControllerTemp_InvalidHandle) {
       amdsmi_get_cpu_svi3_vr_controller_temp(kInvalidHandle, &rail_selection, &rail_index, &temp);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetSvi3VrControllerTemp_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_svi3_vr_controller_temp");
@@ -122,10 +114,7 @@ TEST_F(CpuIntegration, GetSvi3VrControllerTemp_AllCpus) {
         amdsmi_get_cpu_svi3_vr_controller_temp(cpus()[i], &rail_selection, &rail_index, &temp);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }

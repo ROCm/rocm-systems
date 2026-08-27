@@ -52,7 +52,7 @@ an undocumented status instead of the expected `AMDSMI_STATUS_INVAL`.
 |-----|-----|-----------------|
 | `amdsmi_status_code_to_string` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `SystemIntegration.StatusCodeToString_NullOutput` |
 | `amdsmi_get_gpu_xcd_counter` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetXcdCounter_NullOutput` |
-| `amdsmi_gpu_control_counter` | Crashes on invalid processor handle; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.ControlCounter_InvalidHandle`, `GpuFunctionalReadOnly.ControlCounter_InvalidHandle` |
+| `amdsmi_gpu_control_counter` | Crashes on invalid processor handle; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.ControlCounter_InvalidHandle` |
 | `amdsmi_get_gpu_cper_entries` | Returns `AMDSMI_STATUS_OUT_OF_RESOURCES` for `nullptr` output instead of `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetCperEntries_NullOutput` |
 | `amdsmi_get_gpu_metrics_header_info` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetMetricsHeaderInfo_NullOutput` |
 | `amdsmi_topo_get_numa_node_number` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `SystemIntegration.TopoGetNumaNodeNumber_NullOutput` |

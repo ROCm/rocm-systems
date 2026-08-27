@@ -45,13 +45,71 @@ inline constexpr bool kVerbose = true;
 // Sentinel used for invalid-handle negative tests.
 inline constexpr amdsmi_processor_handle kInvalidHandle = nullptr;
 
+// Statuses that mean the feature is genuinely absent on this platform -- the
+// driver, the interface, or the privilege it needs is missing. A positive test
+// counts these as a SKIPPED device: never a pass, never a failure. Treating
+// them as passes is what let a suite stay green against a library that answers
+// AMDSMI_STATUS_NOT_SUPPORTED for everything.
+inline bool IsFeatureAbsent(amdsmi_status_t status) {
+  return status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NOT_YET_IMPLEMENTED ||
+         status == AMDSMI_STATUS_NO_PERM ||
+         // Required kernel driver / interface not present on this system.
+         status == AMDSMI_STATUS_NO_HSMP_MSG_SUP || status == AMDSMI_STATUS_NO_HSMP_SUP ||
+         status == AMDSMI_STATUS_NO_HSMP_DRV || status == AMDSMI_STATUS_NO_ENERGY_DRV ||
+         status == AMDSMI_STATUS_NO_MSR_DRV || status == AMDSMI_STATUS_NO_DRV ||
+         status == AMDSMI_STATUS_DRIVER_NOT_LOADED || status == AMDSMI_STATUS_NON_AMD_CPU;
+}
+
+// Human-readable "N (NAME)" for a status code.
+inline std::string AmdsmiStatusLabel(amdsmi_status_t err) {
+  const char* name = nullptr;
+  amdsmi_status_code_to_string(err, &name);
+  std::string out = std::to_string(static_cast<int>(err));
+  if (name != nullptr) out += std::string(" (") + name + ")";
+  return out;
+}
+
+// err is one of the caller-listed codes. Used by negative cases, where the set
+// of acceptable codes is exactly what the amdsmi.h contract names.
+template <typename... Args>
+inline bool AmdsmiStatusMatches(amdsmi_status_t err, Args... expected) {
+  const amdsmi_status_t codes[] = {expected...};
+  for (amdsmi_status_t c : codes) {
+    if (err == c) return true;
+  }
+  return false;
+}
+
+// The caller-listed codes plus any status meaning the call could not be
+// exercised here. Only for negative cases: an API that bails before reaching
+// its argument check makes that check unobservable, not wrong.
+template <typename... Args>
+inline bool AmdsmiStatusIsExpected(amdsmi_status_t err, Args... expected) {
+  return AmdsmiStatusMatches(err, expected...) || IsFeatureAbsent(err);
+}
+
+// True when buf holds a non-empty, NUL-terminated string within size.
+inline bool IsValidString(const char* buf, size_t size) {
+  if (buf == nullptr || size == 0) return false;
+  size_t len = strnlen(buf, size);
+  return len > 0 && len < size;
+}
+
 // Enumerates and classifies the processors AMD SMI reports. Acquire() and
-// Release() are driven from a fixture's test body and TearDown, never from a
-// constructor or destructor, so the GTest assertions inside TestBase::SetUp()
-// and TestBase::Close() run where GTest supports them.
+// Release() are driven from a fixture's SetUpTestSuite/TearDownTestSuite, never
+// from a constructor or destructor, so the GTest assertions inside
+// TestBase::SetUp() and TestBase::Close() run where GTest supports them.
 class DeviceInventory : public TestBase {
  public:
   void Acquire() {
+    // The inventory outlives a single acquire/release cycle, so drop the
+    // previous cycle's handles: amdsmi_shut_down() invalidated them and a stale
+    // one answers AMDSMI_STATUS_NOT_FOUND on every call.
+    gpus_.clear();
+    cpus_.clear();
+    cpu_cores_.clear();
+    nics_.clear();
+    cpu_supported_ = false;
     TestBase::SetUp(AMDSMI_INIT_ALL_PROCESSORS);
     Classify();
   }
@@ -149,36 +207,146 @@ class DeviceInventory : public TestBase {
   std::vector<amdsmi_processor_handle> nics_;
 };
 
-// Fixture base for the suites that drive the live AMD SMI C API. Initialization
-// and enumeration run in SetUp() and the shutdown in TearDown(), which is where
-// GTest supports the assertions TestBase::SetUp()/Close() make. Each test still
-// gets a fresh init so the reference-count tests see a zero refcount between
-// cases.
-class ApiTest : public ::testing::Test {
- protected:
-  // Suites that also carry tests driving amdsmi_init() themselves override this
-  // so the fixture never initializes behind their back.
-  virtual bool AcquireInSetUp() const { return true; }
+// One inventory shared by every suite that asks for it, reference counted so a
+// run pays for amdsmi_init once per suite instead of once per test.
+inline DeviceInventory& SharedInventory() {
+  static DeviceInventory inv;
+  return inv;
+}
 
-  void SetUp() override {
-    if (AcquireInSetUp()) EnsureAcquired();
+inline int& SharedInventoryRefs() {
+  static int refs = 0;
+  return refs;
+}
+
+inline void AcquireSharedInventory() {
+  if (SharedInventoryRefs()++ > 0) return;
+  DeviceInventory& inv = SharedInventory();
+  inv.set_title("AMD SMI C API suite");
+  inv.set_description("Shared device enumeration for the AMD SMI C API suites.");
+  uint32_t level = GetTestVerbosity();
+  if (level < TestBase::VERBOSE_STANDARD) level = TestBase::VERBOSE_STANDARD;
+  inv.set_verbosity(level);
+  inv.DisplayTestInfo();
+  inv.Acquire();
+  inv.Run();
+}
+
+inline void ReleaseSharedInventory() {
+  if (SharedInventoryRefs() == 0) return;
+  if (--SharedInventoryRefs() > 0) return;
+  SharedInventory().DisplayResults();
+  SharedInventory().Release();
+}
+
+// Accumulates the inputs whose call returned an unexpected result across a
+// multi-input (id / enum) loop, then fails the test once, listing every failed
+// input, instead of letting a bad code pass silently.
+class StatusCollector {
+ public:
+  explicit StatusCollector(std::string api) : api_(std::move(api)) {}
+
+  ~StatusCollector() {
+    // Stay quiet when the test is already unwinding from its own failure or a
+    // GTEST_SKIP(); a missing ExpectNoFailures() is then a symptom, not a cause.
+    if (total_ > 0 && !reported_ && !::testing::Test::HasFailure() && !::testing::Test::IsSkipped())
+      ADD_FAILURE() << api_ << ": StatusCollector destroyed without calling ExpectNoFailures()";
   }
 
+  StatusCollector(const StatusCollector&) = delete;
+  StatusCollector& operator=(const StatusCollector&) = delete;
+
+  const std::string& api() const { return api_; }
+
+  // Negative case: expected is the caller's own contract check.
+  void Record(const std::string& input, amdsmi_status_t err, bool expected) {
+    ++total_;
+    if (expected) {
+      ++passed_;
+    } else {
+      failures_.push_back(input + " -> returned " + AmdsmiStatusLabel(err));
+    }
+  }
+
+  // Positive case. SUCCESS counts only when the call actually wrote its output;
+  // a feature-absent status counts the device as skipped; anything else fails.
+  void RecordPositive(const std::string& input, amdsmi_status_t err, bool wrote_output) {
+    ++total_;
+    if (err == AMDSMI_STATUS_SUCCESS) {
+      if (wrote_output) {
+        ++passed_;
+      } else {
+        failures_.push_back(input + " -> returned SUCCESS but left the output untouched");
+      }
+      return;
+    }
+    if (IsFeatureAbsent(err)) {
+      ++skipped_;
+      return;
+    }
+    failures_.push_back(input + " -> returned " + AmdsmiStatusLabel(err) +
+                        ", expected SUCCESS or a feature-absent status");
+  }
+
+  // Status-only positive case, for a call whose output is validated separately
+  // (or whose "written" state cannot be judged from the bytes alone).
+  void RecordPositive(const std::string& input, amdsmi_status_t err) {
+    RecordPositive(input, err, true);
+  }
+
+  // Flags a value-level problem on a call that reported SUCCESS.
+  void RecordBadOutput(const std::string& input, const std::string& detail) {
+    failures_.push_back(input + " -> returned SUCCESS but " + detail);
+  }
+
+  // True when every input was feature-absent, so the test proved nothing here.
+  bool NothingExercised() const { return passed_ == 0 && failures_.empty() && skipped_ > 0; }
+
+  void ExpectNoFailures() {
+    reported_ = true;
+    if (failures_.empty()) return;
+    std::string msg = api_ + ": " + std::to_string(failures_.size()) + " of " +
+                      std::to_string(total_) + " input(s) returned an unexpected result:";
+    for (const auto& f : failures_) msg += "\n    " + f;
+    ADD_FAILURE() << msg;
+  }
+
+ private:
+  std::string api_;
+  std::size_t total_ = 0;
+  std::size_t passed_ = 0;
+  std::size_t skipped_ = 0;
+  bool reported_ = false;
+  std::vector<std::string> failures_;
+};
+
+// Fixture base for the suites that drive the live AMD SMI C API. The shared
+// inventory is acquired once per suite rather than once per test: the only test
+// that cares about the init refcount balances its own extra init/shut_down pair.
+class ApiTest : public ::testing::Test {
+ public:
+  static void SetUpTestSuite() { AcquireSharedInventory(); }
+  static void TearDownTestSuite() { ReleaseSharedInventory(); }
+
+ protected:
   void TearDown() override {
-    if (!acquired_) return;
-    inv_.DisplayResults();
-    inv_.Release();
-    acquired_ = false;
+    if (!test_scoped_ref_) return;
+    ReleaseSharedInventory();
+    test_scoped_ref_ = false;
+  }
+
+  // Acquire for a suite whose SetUpTestSuite deliberately does not, so a test
+  // that owns its own amdsmi_init sequence is never initialized behind its back.
+  void RequireInit() {
+    if (SharedInventoryRefs() > 0) return;
+    AcquireSharedInventory();
+    test_scoped_ref_ = true;
   }
 
   DeviceInventory& devices() {
-    EnsureAcquired();
-    return inv_;
+    RequireInit();
+    return SharedInventory();
   }
-
-  // For tests that call the API without going through a device handle, on a
-  // suite whose fixture does not initialize by itself.
-  void RequireInit() { EnsureAcquired(); }
 
   bool initialized() { return devices().initialized(); }
   bool cpu_supported() { return devices().cpu_supported(); }
@@ -200,168 +368,16 @@ class ApiTest : public ::testing::Test {
   amdsmi_processor_handle any_nic() { return nics().empty() ? kInvalidHandle : nics()[0]; }
 
  private:
-  void EnsureAcquired() {
-    if (acquired_) return;
-
-    const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    const std::string full_name =
-        std::string(info->test_suite_name()) + "." + std::string(info->name());
-    inv_.set_title(full_name);
-    inv_.set_description("Verification of the AMD SMI C API exercised by " + full_name + ".");
-
-    uint32_t level = GetTestVerbosity();
-    if (level < TestBase::VERBOSE_STANDARD) level = TestBase::VERBOSE_STANDARD;
-    inv_.set_verbosity(level);
-
-    acquired_ = true;  // set first so TearDown still releases a partial init
-    inv_.DisplayTestInfo();
-    inv_.Acquire();
-    inv_.Run();
-  }
-
-  DeviceInventory inv_;
-  bool acquired_ = false;
+  bool test_scoped_ref_ = false;
 };
 
 // Base for suites shared with tests that own their amdsmi_init()/shut_down()
 // sequence (the mutual-exclusion and cross-process cases in main.cc). Devices
 // are acquired only if the test actually asks for them.
 class SelfManagedApiTest : public ApiTest {
- protected:
-  bool AcquireInSetUp() const override { return false; }
-};
-
-// Statuses that mean a case could not be exercised on this platform (feature
-// absent, stack not brought up, or insufficient privilege) rather than a real
-// contract violation.
-inline bool IsUntestableHere(amdsmi_status_t status) {
-  return status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NOT_YET_IMPLEMENTED ||
-         status == AMDSMI_STATUS_NO_PERM ||
-         // Required kernel driver / interface not present on this system.
-         status == AMDSMI_STATUS_NO_HSMP_MSG_SUP || status == AMDSMI_STATUS_NO_HSMP_SUP ||
-         status == AMDSMI_STATUS_NO_HSMP_DRV || status == AMDSMI_STATUS_NO_ENERGY_DRV ||
-         status == AMDSMI_STATUS_NO_MSR_DRV || status == AMDSMI_STATUS_NO_DRV ||
-         status == AMDSMI_STATUS_DRIVER_NOT_LOADED || status == AMDSMI_STATUS_NON_AMD_CPU;
-}
-
-// Strict match: err must be one of the caller-listed codes.
-template <typename... Args>
-inline bool AmdsmiStatusMatches(amdsmi_status_t err, Args... expected) {
-  const amdsmi_status_t codes[] = {expected...};
-  for (amdsmi_status_t c : codes) {
-    if (err == c) return true;
-  }
-  return false;
-}
-
-// Lenient match: the caller-listed codes plus any status meaning the call could
-// not be exercised here.
-template <typename... Args>
-inline bool AmdsmiStatusIsExpected(amdsmi_status_t err, Args... expected) {
-  return AmdsmiStatusMatches(err, expected...) || IsUntestableHere(err);
-}
-
-// Human-readable "N (NAME)" for a status code.
-inline std::string AmdsmiStatusLabel(amdsmi_status_t err) {
-  const char* name = nullptr;
-  amdsmi_status_code_to_string(err, &name);
-  std::string out = std::to_string(static_cast<int>(err));
-  if (name != nullptr) out += std::string(" (") + name + ")";
-  return out;
-}
-
-// True when a zero-initialized output buffer was actually written. A call that
-// reports SUCCESS without touching its out-param violates its contract in a way
-// no status-only check can see.
-inline bool WroteOutput(const void* out, size_t size) {
-  const unsigned char* p = static_cast<const unsigned char*>(out);
-  for (size_t i = 0; i < size; ++i) {
-    if (p[i] != 0) return true;
-  }
-  return false;
-}
-
-// True when buf holds a non-empty, NUL-terminated string within size.
-inline bool IsValidString(const char* buf, size_t size) {
-  if (buf == nullptr || size == 0) return false;
-  size_t len = strnlen(buf, size);
-  return len > 0 && len < size;
-}
-
-// Accumulates the inputs whose call returned an unexpected result across a
-// multi-input (id / enum) loop, then fails the test once, listing every failed
-// input, instead of letting a bad code pass silently.
-class StatusCollector {
  public:
-  explicit StatusCollector(std::string api) : api_(std::move(api)) {}
-
-  ~StatusCollector() {
-    // Stay quiet when the test is already unwinding from its own failure or a
-    // GTEST_SKIP(); a missing ExpectNoFailures() is then a symptom, not a cause.
-    if (total_ > 0 && !reported_ && !::testing::Test::HasFailure() && !::testing::Test::IsSkipped())
-      ADD_FAILURE() << api_ << ": StatusCollector destroyed without calling ExpectNoFailures()";
-  }
-
-  StatusCollector(const StatusCollector&) = delete;
-  StatusCollector& operator=(const StatusCollector&) = delete;
-
-  void Record(const std::string& input, amdsmi_status_t err, bool expected) {
-    ++total_;
-    if (!expected) {
-      failures_.push_back(input + " -> returned " + AmdsmiStatusLabel(err));
-    }
-  }
-
-  // Flags a value-level problem on a call that reported SUCCESS.
-  void RecordBadOutput(const std::string& input, const std::string& detail) {
-    failures_.push_back(input + " -> returned SUCCESS but " + detail);
-  }
-
-  void ExpectNoFailures() {
-    reported_ = true;
-    if (failures_.empty()) return;
-    std::string msg = api_ + ": " + std::to_string(failures_.size()) + " of " +
-                      std::to_string(total_) + " input(s) returned an unexpected result:";
-    for (const auto& f : failures_) msg += "\n    " + f;
-    ADD_FAILURE() << msg;
-  }
-
- private:
-  std::string api_;
-  std::size_t total_ = 0;
-  bool reported_ = false;
-  std::vector<std::string> failures_;
-};
-
-// Puts a device value back when the test leaves scope, so a functional setter
-// test restores the hardware even if an assertion fails partway through.
-// Construct only after the original value has been read successfully.
-template <typename T>
-class ScopedRestore {
- public:
-  using Restore = amdsmi_status_t (*)(amdsmi_processor_handle, T);
-
-  ScopedRestore(amdsmi_processor_handle handle, T original, Restore restore)
-      : handle_(handle), original_(original), restore_(restore) {}
-
-  ~ScopedRestore() {
-    if (!armed_) return;
-    amdsmi_status_t err = restore_(handle_, original_);
-    if (err != AMDSMI_STATUS_SUCCESS && !IsUntestableHere(err))
-      ADD_FAILURE() << "failed to restore original value: " << AmdsmiStatusLabel(err);
-  }
-
-  ScopedRestore(const ScopedRestore&) = delete;
-  ScopedRestore& operator=(const ScopedRestore&) = delete;
-
-  T original() const { return original_; }
-  void disarm() { armed_ = false; }
-
- private:
-  amdsmi_processor_handle handle_;
-  T original_;
-  Restore restore_;
-  bool armed_ = true;
+  static void SetUpTestSuite() {}
+  static void TearDownTestSuite() {}
 };
 
 }  // namespace test
@@ -400,25 +416,55 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
   EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((actual), AMDSMI_STATUS_INVAL, \
                                                      AMDSMI_STATUS_ARG_PTR_NULL))   \
       << "returned " << ::amdsmi::test::AmdsmiStatusLabel(actual)                   \
-      << ", expected AMDSMI_STATUS_INVAL or AMDSMI_STATUS_NOT_SUPPORTED"
+      << ", expected AMDSMI_STATUS_INVAL or AMDSMI_STATUS_ARG_PTR_NULL "            \
+      << "(or a status meaning the feature is absent here)"
 
-// Non-fatal check for a single valid call: fails if err is neither one of the
+// Assert an API rejected an invalid processor handle. amdsmi.h names
+// AMDSMI_STATUS_INVAL for this; a feature-absent status is tolerated because the
+// call can bail before it reaches the handle check. Any other code -- a timeout,
+// an I/O error, SUCCESS -- is a real contract violation.
+#define AMDSMI_EXPECT_INVALID_HANDLE(actual)                                        \
+  EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((actual), AMDSMI_STATUS_INVAL, \
+                                                     AMDSMI_STATUS_ARG_PTR_NULL))   \
+      << "returned " << ::amdsmi::test::AmdsmiStatusLabel(actual)                   \
+      << ", expected AMDSMI_STATUS_INVAL for an invalid handle "                    \
+      << "(or a status meaning the feature is absent here)"
+
+// Non-fatal check for a single negative call: fails if err is neither one of the
 // listed acceptable codes nor a genuine platform limitation.
 #define AMDSMI_EXPECT_STATUS(err, ...)                                    \
   EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((err), __VA_ARGS__)) \
       << "returned " << ::amdsmi::test::AmdsmiStatusLabel(err)            \
       << ", which is not an expected status"
 
-// Destructive hardware writes are opt-in: off unless AMDSMI_TEST_ALLOW_MUTATION
-// is set, and skipped without the privilege the write needs, so a default run
-// never disturbs a shared GPU/CPU.
-#define AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()                                                     \
+// Single positive call: SUCCESS passes, a feature-absent status skips the test,
+// anything else fails. Never lets "not supported" masquerade as coverage.
+#define AMDSMI_EXPECT_POSITIVE(err, api)                                                          \
   do {                                                                                            \
-    if (std::getenv("AMDSMI_TEST_ALLOW_MUTATION") == nullptr)                                     \
-      GTEST_SKIP() << "destructive write skipped; set AMDSMI_TEST_ALLOW_MUTATION to run";         \
-    if (std::getenv("AMDSMI_NON_PRIVILEGED") != nullptr)                                          \
-      GTEST_SKIP() << "Skipped in non-privileged mode";                                           \
-    if (!amd::smi::is_sudo_user()) GTEST_SKIP() << "Invalid permission - Must run as super user"; \
+    if (::amdsmi::test::IsFeatureAbsent(err))                                                     \
+      GTEST_SKIP() << (api) << ": not supported here (" << ::amdsmi::test::AmdsmiStatusLabel(err) \
+                   << ")";                                                                        \
+    EXPECT_EQ((err), AMDSMI_STATUS_SUCCESS)                                                       \
+        << (api) << " returned " << ::amdsmi::test::AmdsmiStatusLabel(err);                       \
+  } while (0)
+
+// Close out a multi-input positive loop: report every bad input, then skip when
+// the feature was absent on every one so the pass is not mistaken for coverage.
+#define AMDSMI_FINISH_POSITIVE(col)                                        \
+  do {                                                                     \
+    (col).ExpectNoFailures();                                              \
+    if ((col).NothingExercised())                                          \
+      GTEST_SKIP() << (col).api() << ": not supported on any device here"; \
+  } while (0)
+
+// A device write needs the privilege to perform it, but is safe to run by
+// default: every *FunctionalReadWrite test records the original value and
+// restores it, so a plain root run leaves a shared GPU/CPU as it found it.
+#define AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()                                                      \
+  do {                                                                                             \
+    if (std::getenv("AMDSMI_NON_PRIVILEGED") != nullptr)                                           \
+      GTEST_SKIP() << "device write skipped; AMDSMI_NON_PRIVILEGED is set";                        \
+    if (!amd::smi::is_sudo_user()) GTEST_SKIP() << "device write skipped; must run as super user"; \
   } while (0)
 
 // The null-output / invalid-handle / all-GPUs trio below is the shape almost
@@ -437,9 +483,8 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
     memset(&info, 0, sizeof(info));                                                                \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
     amdsmi_status_t err = APINAME(::amdsmi::test::kInvalidHandle, &info);                          \
-    DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,  \
-                          AMDSMI_STATUS_NOT_SUPPORTED);                                            \
-    EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);                                                         \
+    DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
+    AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
   TEST_F(GpuIntegration, TESTBASE##_AllGpus) {                                                     \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
@@ -451,16 +496,10 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
       DISPLAY_AMDSMI_API(#APINAME, in, ::amdsmi::test::kVerbose);                                  \
       amdsmi_status_t err = APINAME(gpus()[i], &info);                                             \
       DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err,                     \
-                            AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,                    \
-                            AMDSMI_STATUS_NOT_YET_IMPLEMENTED);                                    \
-      col.Record(in, err,                                                                          \
-                 ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,                \
-                                                        AMDSMI_STATUS_NOT_SUPPORTED,               \
-                                                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED));       \
-      if (err == AMDSMI_STATUS_SUCCESS && !::amdsmi::test::WroteOutput(&info, sizeof(info)))       \
-        col.RecordBadOutput(in, "left the " #STRUCT " output untouched");                          \
+                            AMDSMI_STATUS_SUCCESS);                                                \
+      col.RecordPositive(in, err);                                                                 \
     }                                                                                              \
-    col.ExpectNoFailures();                                                                        \
+    AMDSMI_FINISH_POSITIVE(col);                                                                   \
   }
 
 // Same trio for getters that fill a caller-supplied character buffer.
@@ -476,9 +515,8 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
     memset(buf, 0, sizeof(buf));                                                                   \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
     amdsmi_status_t err = APINAME(::amdsmi::test::kInvalidHandle, buf, sizeof(buf));               \
-    DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,  \
-                          AMDSMI_STATUS_NOT_SUPPORTED);                                            \
-    EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);                                                         \
+    DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
+    AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
   TEST_F(GpuIntegration, TESTBASE##_AllGpus) {                                                     \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
@@ -490,16 +528,10 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
       DISPLAY_AMDSMI_API(#APINAME, in, ::amdsmi::test::kVerbose);                                  \
       amdsmi_status_t err = APINAME(gpus()[i], buf, sizeof(buf));                                  \
       DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err,                     \
-                            AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,                    \
-                            AMDSMI_STATUS_NOT_YET_IMPLEMENTED);                                    \
-      col.Record(in, err,                                                                          \
-                 ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,                \
-                                                        AMDSMI_STATUS_NOT_SUPPORTED,               \
-                                                        AMDSMI_STATUS_NOT_YET_IMPLEMENTED));       \
-      if (err == AMDSMI_STATUS_SUCCESS && !::amdsmi::test::IsValidString(buf, sizeof(buf)))        \
-        col.RecordBadOutput(in, "did not fill a NUL-terminated string");                           \
+                            AMDSMI_STATUS_SUCCESS);                                                \
+      col.RecordPositive(in, err, ::amdsmi::test::IsValidString(buf, sizeof(buf)));                \
     }                                                                                              \
-    col.ExpectNoFailures();                                                                        \
+    AMDSMI_FINISH_POSITIVE(col);                                                                   \
   }
 
 #endif  // TESTS_AMD_SMI_TEST_API_TEST_FRAMEWORK_H_
