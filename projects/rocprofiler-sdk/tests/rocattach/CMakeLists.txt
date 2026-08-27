@@ -54,6 +54,13 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
+add_executable(rocattach-register-library-alias-test)
+target_sources(rocattach-register-library-alias-test PRIVATE register_library_alias.cpp)
+target_link_libraries(
+    rocattach-register-library-alias-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::tests-build-flags)
+
 if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
    AND TARGET rocprofiler-sdk::rocprofiler-sdk-common-library)
     set(ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../source")
@@ -173,20 +180,20 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_execute_test(
     rocattach-equivalent-register-library-test-execute
-    COMMAND
-        $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-        $<TARGET_FILE:rocprofiler-sdk-c-tool> --equivalent-register-library
-        $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>
-    DEPENDS rocattach-parallel-attach-test
-    TIMEOUT 45
+    TARGET rocattach-register-library-alias-test
+    ARGS $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>
+    TIMEOUT 10
     LABELS "attachment"
-    ENVIRONMENT "${rocattach-test-env}"
-    DISABLED ${IS_DISABLED}
+    ENVIRONMENT
+        "ROCPROFILER_LIBRARY_CTOR=0"
+        "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION
-        "Attachment test observed ROCPROFILER_TEST_FORWARDING=equivalent"
+        "Test PASSED: equivalent ROCPROFILER_REGISTER_LIBRARY alias accepted"
     FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|ROCPROFILER_REGISTER_LIBRARY is already set")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|ROCPROFILER_REGISTER_LIBRARY is already set|Test FAILED"
+    )
 
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
 # them from the target mount namespace.
