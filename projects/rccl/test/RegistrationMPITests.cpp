@@ -1043,17 +1043,19 @@ protected:
  *
  * The collective operates on four segments per half, while ncclCommRegister
  * covers the complete eight-segment allocation. NET registration must count
- * that full range (numSegments 8). Intra-node IPC may still log the four-segment
- * operation half.
+ * that full range (numSegments 8). This regression requires multiple nodes so
+ * an IPC-only registration cannot satisfy the assertion.
  *
  * Confirmation in the logs (NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=REG):
  *   NET: "... numSegments 8"
- *   IPC: "... numSegments 4"
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -1108,11 +1110,9 @@ TEST_F(UBR_MultiSegment, Generic)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments) ||
-                checker.hasNumSegments(kNumSegments / 2))
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
         << "Expected NET 'numSegments " << kNumSegments
-        << "' for the complete ncclCommRegister range, or IPC 'numSegments "
-        << (kNumSegments / 2) << "' for the operation half";
+        << "' for the complete ncclCommRegister range";
 }
 
 /**
