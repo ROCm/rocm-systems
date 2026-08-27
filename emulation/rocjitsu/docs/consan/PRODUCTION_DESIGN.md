@@ -3660,6 +3660,27 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 67.44
   seconds. E2E validation remains outside this work.
 
+### Slice 5Q: delete abandoned placement and logging implementations
+
+- **Reachable placement surface:** The cave allocator retains its live generic
+  multi-anchor selection and its live owner-constrained single-word selection.
+  These are the two algorithms called by current lowering. It no longer also
+  carries a third owner-constrained variable-size multi-anchor algorithm that
+  no lowering path ever selected.
+- **Completed deletion:** The uncalled
+  `claim_reachable_from_all_for_owner` implementation and the uncalled hook
+  `consan_log_level_enabled` predicate are gone. A whole search, reachability,
+  owner-filtering, distance-ranking, and overlap-retirement path is therefore
+  no longer presented as supported placement behavior. Logging continues to
+  use its live emission path and atomic configured level directly.
+- **Deletion result:** Production source is 51 lines smaller. No replacement
+  behavior, adapter, state, or test hook was added; symbol-level reference
+  auditing proved that neither function had a caller.
+- **Completed checked-in gate:** The complete host gate passes 1,509 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 66.06
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

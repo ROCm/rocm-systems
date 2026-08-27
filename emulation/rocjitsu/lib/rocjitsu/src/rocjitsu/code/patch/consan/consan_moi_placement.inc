@@ -334,53 +334,6 @@ public:
   }
 
   [[nodiscard]] std::optional<uint64_t>
-  claim_reachable_from_all_for_owner(std::span<const uint64_t> anchor_offsets, uint64_t owner_entry,
-                                     uint32_t claim_words = 0u) {
-    if (anchor_offsets.empty())
-      return std::nullopt;
-    claim_words = claim_words == 0u ? island_words_ : claim_words;
-    uint64_t first_reachable = 0u;
-    uint64_t last_reachable = std::numeric_limits<uint64_t>::max();
-    for (uint64_t anchor_offset : anchor_offsets) {
-      const auto [first, last] = reachable_target_bounds(anchor_offset);
-      first_reachable = std::max(first_reachable, first);
-      last_reachable = std::min(last_reachable, last);
-    }
-    if (first_reachable > last_reachable)
-      return std::nullopt;
-    auto best = available_offsets_.end();
-    uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-    for (auto candidate = available_offsets_.lower_bound(first_reachable);
-         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
-      const auto owner = available_owner_entries_.find(*candidate);
-      if (owner == available_owner_entries_.end() || owner->second != owner_entry ||
-          !claim_fits(*candidate, claim_words)) {
-        continue;
-      }
-      uint64_t max_distance = 0;
-      bool reachable = true;
-      for (uint64_t anchor_offset : anchor_offsets) {
-        if (!compute_sopp_branch_simm16(anchor_offset, *candidate)) {
-          reachable = false;
-          break;
-        }
-        max_distance =
-            std::max(max_distance, anchor_offset < *candidate ? *candidate - anchor_offset
-                                                              : anchor_offset - *candidate);
-      }
-      if (reachable && max_distance < best_max_distance) {
-        best = candidate;
-        best_max_distance = max_distance;
-      }
-    }
-    if (best == available_offsets_.end())
-      return std::nullopt;
-    const uint64_t offset = *best;
-    retire_overlaps(offset, claim_words);
-    return offset;
-  }
-
-  [[nodiscard]] std::optional<uint64_t>
   claim_word_reachable_from_all_for_owner(std::span<const uint64_t> anchor_offsets,
                                           uint64_t owner_entry) {
     if (anchor_offsets.empty())

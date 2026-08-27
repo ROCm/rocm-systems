@@ -79,10 +79,6 @@ std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<uint64_t> g_dump_sequence{0};
 std::atomic<LogSinkOverride> g_test_log_sink_override{nullptr};
 
-[[nodiscard]] bool consan_log_level_enabled(int required_level) {
-  return g_log_level.load(std::memory_order_relaxed) >= required_level;
-}
-
 std::mutex &log_mutex();
 
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
