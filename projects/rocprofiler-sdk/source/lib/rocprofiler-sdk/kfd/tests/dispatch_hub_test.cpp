@@ -225,6 +225,15 @@ TEST(DispatchHub, resolution_rule)
     ASSERT_TRUE(register_win(hub, K, mk_window(5, 200), /*corr_id=*/2));
     EXPECT_FALSE(end_nostart(hub, K, 300).has_value());
 }
+{  // a stale EOP (its own START was lost, it predates this window) must NOT
+   // consume the newer entry: reject BEFORE take, leaving it PENDING for its own.
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_win(hub, K, mk_window(5, 100)));
+    EXPECT_FALSE(end_nostart(hub, K, 50).has_value()) << "EOP before t_open rejected";
+    EXPECT_FALSE(end_nostart(hub, K, 100).has_value()) << "EOP at t_open rejected";
+    EXPECT_EQ(hub.pending_count(), 1u) << "a rejected EOP consumes nothing";
+    EXPECT_TRUE(end_nostart(hub, K, 300).has_value()) << "its own later EOP still resolves";
+}
 }
 {  // a contained START with end < start is dropped (free sanity check).
     auto hub = hub_t{};

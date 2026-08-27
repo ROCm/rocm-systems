@@ -272,7 +272,9 @@ public:
     // (containment applied even for a sole candidate -- a stale pending entry could
     // be the sole candidate while the record's true owner is an unregistered later
     // dispatch on a colliding low-32 id). With no START (shape ii), accept only a
-    // sole candidate on a first_owner, non-superseded window. Otherwise drop.
+    // sole candidate on a first_owner, non-superseded window whose t_open the EOP
+    // postdates. Otherwise drop. EVERY acceptance test runs before the entry is
+    // taken, so a rejected record never consumes or retires anything.
     //
     // NO session-mode gate: an EOP arriving during the teardown drain still proves
     // its kernel finished. A key with no live entry is REJECTED, never cached.
@@ -318,6 +320,20 @@ public:
         const auto& w = first->second.window;
         if(!w || !w->first_owner) return std::nullopt;
         if(w->superseded.load(std::memory_order_acquire)) return std::nullopt;
+        // Terminal-time sanity, applied BEFORE take(): a kernel registered in this
+        // window cannot have ended at or before the window opened, so such an EOP
+        // belongs to an earlier dispatch on this raw key whose START was lost.
+        // Taking it would consume and retire a NEWER dispatch's entry against a
+        // foreign record -- the finalizer's staleness bound runs too late to undo
+        // that. Rejected here the entry stays PENDING for its own EOP. Same clock
+        // domain as the containment test above: raw agent GPU ticks, so no
+        // conversion and no host clock is involved. There is deliberately no upper
+        // bound: t_close bounds STARTs, not ends -- a kernel legitimately outlives
+        // its window -- and the hub holds no tick-domain `now` to bound the future
+        // with, so an implausibly-future EOP is still taken here and rejected by
+        // the finalizer's kMaxFutureNs test (a no-timing record, not a misattributed
+        // one).
+        if(end_ticks <= w->t_open) return std::nullopt;
         return take(first);
     }
 
