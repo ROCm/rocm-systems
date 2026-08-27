@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/timing/simulated_clock.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -16,7 +17,6 @@ RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
 #include <charconv>
-#include <chrono>
 #include <cstdint>
 #include <string_view>
 
@@ -176,10 +176,21 @@ int LinuxKfd::fill_get_clock_counters_ioctl(void *arg) {
     return -1;
   }
 
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
-  uint64_t ns =
-      static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-  args->system_clock_freq = 1000000000ULL;
+  // One read for all three counters. ROCR subtracts a GPU counter from a CPU
+  // counter to place a dispatch on the host timeline, and two reads of a clock
+  // that advances between them would show a skew the emulated machine does not
+  // have.
+  //
+  // counter_nanoseconds() rather than nanoseconds() because ROCR calibrates by
+  // issuing this ioctl twice and dividing by the difference: a model whose
+  // clock only advances at dispatch boundaries answers both reads with the
+  // same value, and the division is by zero. Only this path pays for the
+  // strict increase.
+  const uint64_t ns = amdgpu::SimulatedClock::instance().counter_nanoseconds();
+  // The tick rate of the unit this ioctl reports, not the modelled shader
+  // clock: the counters above are already nanoseconds, and the runtime divides
+  // by this to convert them.
+  args->system_clock_freq = amdgpu::SimulatedClock::kTimestampFrequencyHz;
   args->system_clock_counter = ns;
   args->cpu_clock_counter = ns;
   args->gpu_clock_counter = ns;

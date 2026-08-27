@@ -1742,8 +1742,15 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'dcache_wb')
     if upper == 'S_GL1_INV':
         return InstructionSemantics(name, 'gl1_inv')
-    if upper in ('S_MEMTIME', 'S_MEMREALTIME'):
+    # Split rather than one class: S_MEMTIME is LLVM's readcyclecounter and
+    # reports shader cycles, S_MEMREALTIME is readsteadycounter and reports the
+    # constant-rate wall clock the guest divides by a separately advertised
+    # frequency. Collapsing them makes every s_memrealtime interval wrong by
+    # the ratio of the two clocks while still type-checking.
+    if upper == 'S_MEMTIME':
         return InstructionSemantics(name, 'smem_time')
+    if upper == 'S_MEMREALTIME':
+        return InstructionSemantics(name, 'smem_realtime')
     # Remaining scalar cache / special instructions.
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
@@ -1826,9 +1833,9 @@ _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
     # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
-    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
-    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
-    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
+    # B64_TR_B8=3 (CDNA4 MFMA / CDNA5 DS layout), TR16_B128=4,
+    # B64_TR_B16=5,
+    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout). All textual aliases use the
     # same default here; instruction-family and ISA-profile overrides below
     # select the architecture's routing.
     'B64_TR_B4': ('b4', 4, 2, 1),

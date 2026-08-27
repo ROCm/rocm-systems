@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "rocjitsu/vm/timing/simulated_clock.h"
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -3334,8 +3335,19 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
             gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
         dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-        dev.gpu_counter_freq = 100000;
-        dev.max_engine_clock = gpu->max_engine_clk_fcompute;
+        // The wall-clock rate the guest divides s_memrealtime by. Derived from
+        // the clock's own constant rather than repeated here, because a guest
+        // that divides by a different number than the clock counts in is
+        // wrong by exactly their ratio: correctly typed, plausibly shaped, and
+        // silently scaled.
+        dev.gpu_counter_freq =
+            static_cast<uint32_t>(rocjitsu::amdgpu::SimulatedClock::kWallClockFrequencyHz / 1000);
+        // With a timing plane installed the engine clock the guest is told about
+        // is the one that produced the cycles it can read back, not the one the
+        // config file advertises for topology purposes.
+        const uint64_t modelled_hz = rocjitsu::amdgpu::SimulatedClock::instance().shader_clock_hz();
+        dev.max_engine_clock = modelled_hz != 0 ? static_cast<uint32_t>(modelled_hz / 1000000ULL)
+                                                : gpu->max_engine_clk_fcompute;
         dev.max_memory_clock = gpu->mem_clk_max;
         dev.wave_front_size = gpu->wave_front_size;
         dev.num_cu_per_sh = gpu->num_cu_per_sh;

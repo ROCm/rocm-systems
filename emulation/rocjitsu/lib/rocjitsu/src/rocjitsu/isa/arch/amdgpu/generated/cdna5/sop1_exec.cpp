@@ -6,8 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/shader_clock.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -43,8 +43,7 @@ void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SGetShaderCyclesU64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  auto *engine = wf.cu().engine();
-  uint64_t cycles = engine ? engine->global_time() : 0;
+  uint64_t cycles = amdgpu::shader_clock_ticks();
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, cycles);
 }
 

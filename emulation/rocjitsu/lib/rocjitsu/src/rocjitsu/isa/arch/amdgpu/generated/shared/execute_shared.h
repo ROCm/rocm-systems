@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/shader_clock.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1920,20 +1921,18 @@ inline void execute_s_maximum_f32_sop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  static thread_local uint64_t counter = 0;
-  counter += 100;
+  const uint64_t ticks = amdgpu::device_wall_clock_ticks();
   const uint32_t dst_sel = inst.inst_.sdata;
-  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));
-  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));
+  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(ticks));
+  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(ticks >> 32));
 }
 
 template <typename Inst>
 inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  static thread_local uint64_t counter = 0;
-  counter += 100;
+  const uint64_t ticks = amdgpu::shader_clock_ticks();
   const uint32_t dst_sel = inst.inst_.sdata;
-  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));
-  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));
+  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(ticks));
+  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(ticks >> 32));
 }
 
 template <typename Inst>
@@ -2454,11 +2453,9 @@ inline void execute_s_sendmsg_rtn_b32_sop1([[maybe_unused]] Inst &inst,
   uint32_t msg = static_cast<uint32_t>(inst.ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+  case 0x83:
+    value = amdgpu::device_wall_clock_ticks();
     break;
-  }
   case 0x80:
   case 0x81:
   case 0x82:
@@ -2484,11 +2481,9 @@ inline void execute_s_sendmsg_rtn_b64_sop1([[maybe_unused]] Inst &inst,
   uint32_t msg = static_cast<uint32_t>(inst.ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+  case 0x83:
+    value = amdgpu::device_wall_clock_ticks();
     break;
-  }
   case 0x80:
   case 0x81:
   case 0x82:

@@ -9,6 +9,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/timing/simulated_clock.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -28,6 +29,8 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  ShaderCyclesLo,
+  ShaderCyclesHi,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -224,7 +227,7 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     {26, "SCHED_MODE", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {27, "VGPR_OFFSET", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES", HwregState::ShaderCyclesLo, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor RDNA3_HWREGS[] = {
@@ -254,7 +257,7 @@ constexpr HwregDescriptor RDNA3_HWREGS[] = {
     {26, "SCHED_MODE", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {27, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES", HwregState::ShaderCyclesLo, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor RDNA4_HWREGS[] = {
@@ -278,8 +281,8 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {30, "SHADER_CYCLES_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES_LO", HwregState::ShaderCyclesLo, HwregWritePolicy::ReadOnly},
+    {30, "SHADER_CYCLES_HI", HwregState::ShaderCyclesHi, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor GFX1250_HWREGS[] = {
@@ -395,6 +398,17 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::ShaderCyclesLo:
+  case HwregState::ShaderCyclesHi: {
+    // The other spelling of `readcyclecounter`: on gfx10.3/gfx11 LLVM lowers it
+    // to a 20-bit S_GETREG of SHADER_CYCLES, and on gfx12 to the LO/HI pair.
+    // Both must read the clock s_memtime and s_get_shader_cycles_u64 read, or a
+    // kernel's self-timing would depend on which lowering the compiler picked.
+    // The caller's field decode narrows this to the encoded width.
+    const uint64_t cycles = SimulatedClock::instance().shader_cycles();
+    raw_value = static_cast<uint32_t>(state == HwregState::ShaderCyclesHi ? cycles >> 32 : cycles);
+    return HwregAccessResult::Success;
+  }
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -428,6 +442,8 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::ShaderCyclesLo:
+  case HwregState::ShaderCyclesHi:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }

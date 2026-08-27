@@ -6,8 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/shader_clock.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -325,11 +325,9 @@ void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+  case 0x83:
+    value = amdgpu::device_wall_clock_ticks();
     break;
-  }
   case 0x80:
   case 0x81:
   case 0x82:
@@ -353,11 +351,9 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+  case 0x83:
+    value = amdgpu::device_wall_clock_ticks();
     break;
-  }
   case 0x80:
   case 0x81:
   case 0x82:

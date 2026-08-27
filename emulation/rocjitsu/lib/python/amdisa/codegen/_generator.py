@@ -5787,8 +5787,12 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_shader_cycles':
-            L.append('  auto *engine = wf.cu().engine();')
-            L.append('  uint64_t cycles = engine ? engine->global_time() : 0;')
+            # The simulation engine's tick is not the guest's clock: it counts
+            # host-side scheduling steps and is unrelated to the timestamps the
+            # guest reads through every other path. Route through the shader
+            # clock so a kernel timing itself and a host bracketing the dispatch
+            # measure the same machine.
+            L.append('  uint64_t cycles = amdgpu::shader_clock_ticks();')
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, cycles);'
             )
@@ -5800,11 +5804,12 @@ class CodeGenerator:
             )
             L.append('  uint64_t value = 0;')
             L.append('  switch (msg) {')
-            L.append('  case 0x83: {')
-            L.append('    auto *engine = wf.cu().engine();')
-            L.append('    value = engine ? engine->global_time() : 0;')
+            # 0x83 is MSG_RTN_GET_REALTIME, which is how gfx11+ lowers
+            # readsteadycounter now that S_MEMREALTIME is gone -- the wall
+            # clock, not the shader clock. See shared/shader_clock.h.
+            L.append('  case 0x83:')
+            L.append('    value = amdgpu::device_wall_clock_ticks();')
             L.append('    break;')
-            L.append('  }')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
             L.append('  case 0x81:')  # MSG_RTN_GET_DDID
             L.append('  case 0x82:')  # MSG_RTN_GET_TMA
@@ -6348,13 +6353,21 @@ class CodeGenerator:
                 '  if (auto *l2 = wf.cu().l2())\n' '    l2->flush_all(wf.process_id());'
             )
 
-        if cls == 'smem_time':
+        if cls in ('smem_time', 'smem_realtime'):
+            # The value comes from the hand-written shader clock rather than a
+            # counter emitted here, so that what "time" means stays a modelling
+            # decision a regeneration cannot revert. The two classes read
+            # different counters on purpose: see shared/shader_clock.h.
+            reader = (
+                'shader_clock_ticks'
+                if cls == 'smem_time'
+                else 'device_wall_clock_ticks'
+            )
             return (
-                '  static thread_local uint64_t counter = 0;\n'
-                '  counter += 100;\n'
+                f'  const uint64_t ticks = amdgpu::{reader}();\n'
                 '  const uint32_t dst_sel = inst_.sdata;\n'
-                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));\n'
-                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
+                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(ticks));\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(ticks >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -7738,8 +7751,8 @@ class CodeGenerator:
         raw read.
         """
         # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, B64_TR_B8=3,
-        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
-        # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
+        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6. Defaults describe the
+        # B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
@@ -11105,16 +11118,30 @@ class CodeGenerator:
                 requires_compute_unit = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'scalar_shader_cycles',
-                        'scalar_sendmsg_rtn',
-                        'vector_cvt_scale',
-                    )
+                    and s.semantic_class == 'vector_cvt_scale'
                     for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
+                requires_shader_clock = any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class
+                    in (
+                        'scalar_shader_cycles',
+                        'scalar_sendmsg_rtn',
+                        'smem_time',
+                        'smem_realtime',
+                    )
+                    for i in all_insts
+                )
+                if requires_shader_clock:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/shader_clock.h',
+                            False,
+                        )
+                    )
                 if has_matrix_exec:
                     cpp_includes.append(
                         (
@@ -12014,6 +12041,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/shader_clock.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
