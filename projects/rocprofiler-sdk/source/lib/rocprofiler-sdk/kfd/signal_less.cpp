@@ -369,6 +369,46 @@ signal_less_id_is_leaked(uint64_t correlation_id)
     return signal_less_hub().is_ledgered(correlation_id);
 }
 
+namespace
+{
+// The one TERMINAL transition, fail-closed and idempotent: latch no-new-
+// eligibility, stop and JOIN the reader+processor so no further completion can
+// ever be produced, finalize what was left deferred, then ledger everything still
+// PENDING. Runs at most once per process; every later call no-ops. Returns
+// {deferred completions finalized, loss stats}.
+//
+// NOT DEADLOCK-PRONE BY CONSTRUCTION, two ways:
+//  - it never joins the task group. A signal-less completion runs as a TaskGroup
+//    task and may synchronously call a client callback that finalizes, reaching
+//    here on a task-group worker; TaskGroup::join spins on a task count that very
+//    task still holds, so joining there would wait for itself forever. Callers
+//    that must also wait out already-submitted completions do that themselves,
+//    after this returns.
+//  - it holds NO lock across the join. The processor takes g_submit_gate SHARED
+//    on its handoff path, so latching that gate exclusively around
+//    stop_kfd_reader() would deadlock against the very thread being joined. The
+//    threads joined here (reader, processor) never run client code and never
+//    submit-and-wait, so joining them from any other thread terminates.
+std::pair<size_t, loss_stats>
+signal_less_terminal_stop()
+{
+    static auto _once = std::atomic<bool>{false};
+    if(_once.exchange(true, std::memory_order_acq_rel)) return {};
+
+    // Latched BEFORE the stop so a batch that already passed eligibility cannot
+    // register into the hub after the drain below empties it: register_batch tests
+    // this latch under m_mu, which orders it against drain_for_teardown().
+    signal_less_disable_latch().store(true, std::memory_order_release);
+    // The sole producer of PENDING->EOP_PROVEN. Once joined, no record_kernel_end
+    // and therefore no hand_off_proven can run again.
+    stop_kfd_reader();
+    const size_t _flushed = flush_deferred_completions();
+    auto         _loss    = signal_less_hub().drain_for_teardown();
+    if(_loss.second.dispatches > 0) note_signal_less_losses();
+    return {_flushed, _loss.second};
+}
+}  // namespace
+
 void
 signal_less_teardown()
 {
@@ -403,20 +443,19 @@ signal_less_teardown()
     // below is stronger than the fence's abandon, and drain_for_teardown() ledgers
     // whatever is left.
     wait_for_reader_quiesce();
-    stop_kfd_reader();
-    const size_t _flushed = flush_deferred_completions();
-
-    auto         _loss   = signal_less_hub().drain_for_teardown();
-    const size_t _leaked = _loss.second.dispatches;
+    // Steps 3-5 in one idempotent primitive, shared with the F23/F24 fence: it may
+    // already have run there, in which case this no-ops and reports nothing left.
+    const auto   _stopped = signal_less_terminal_stop();
+    const size_t _flushed = _stopped.first;
+    const size_t _leaked  = _stopped.second.dispatches;
     if(_leaked > 0)
     {
-        note_signal_less_losses();
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log: {} signal-less dispatch(es) across {} correlation id(s) were still "
             "in flight at finalization; they emit no record and their correlation ids are not "
             "retired.",
-            _loss.second.dispatches,
-            _loss.second.correlation_ids);
+            _stopped.second.dispatches,
+            _stopped.second.correlation_ids);
     }
 
     join_signal_less_tasks();
@@ -487,10 +526,25 @@ signal_less_fence_completions()
             _loss.second.dispatches,
             _loss.second.correlation_ids);
     }
-    // (c) nothing is left deferred waiting to be finalized, and (d) every submitted
-    // completion has finished executing -- both before returning, because closing
-    // the gate stops further submissions but not already-queued ones.
-    flush_deferred_completions();
+    // (c) BOTH fence sites are TERMINAL, so quiescing is not enough: F23 frees the
+    // client's callback/buffer machinery and F24 lets the HSA runtime unload, both
+    // immediately after we return. A dispatch still PENDING here would otherwise
+    // complete afterwards and deref a freed context* out of the copied
+    // tracing_data, or convert ticks against a dead runtime. Make the transition
+    // terminal instead: stop+join the reader/processor so no completion can be
+    // produced at all, and ledger whatever never got an EOP. Fail-closed --
+    // signal-less stays off for the rest of the process, the accepted cost of a
+    // detach or an HSA shutdown. Idempotent, so the second fence call no-ops.
+    const auto _stopped = signal_less_terminal_stop();
+    ROCP_WARNING_IF(_stopped.second.dispatches > 0) << fmt::format(
+        "KFD dispatch-log fence: signal-less stopped terminally (client detach or HSA shutdown); "
+        "{} deferred completion(s) finalized, {} dispatch(es) across {} correlation id(s) were "
+        "still in flight and are ledgered.",
+        _stopped.first,
+        _stopped.second.dispatches,
+        _stopped.second.correlation_ids);
+    // (d) every submitted completion has finished executing before we return: the
+    // terminal stop closed every producer, but not already-queued tasks.
     join_signal_less_tasks();
 }
 }  // namespace kfd
