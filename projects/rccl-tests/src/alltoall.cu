@@ -415,8 +415,8 @@ __global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, 
 template <typename T>
 __global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
   for (int i = 0; i < skip + loop; i++) {
-    hybridTimedGridJoin(devComm);
     if (i == skip) {
+      hybridTimedGridJoin(devComm);
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
