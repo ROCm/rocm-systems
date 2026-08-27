@@ -5011,6 +5011,29 @@ analysis completed.
   the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
   remains outside this work.
 
+### Slice 5BL: delete the duplicate lowering flavor
+
+- **One flavor value through lowering:** `ConSanOptions` now uses its inherited
+  `ConSanRequest::flavor` directly. The deleted nonoptional member hid that
+  request field under the same name and copied it during construction, making
+  the apparent input depend on the static type through which it was read.
+- **Construction states stay explicit:** The typed request retains
+  `std::nullopt` as its validation-rejected construction sentinel. Focused
+  mechanism tests still default to disabled instrumentation by setting the
+  inherited request field to `ConSanFlavor::None` in the compatibility
+  lowerer's default constructor. Production construction preserves the
+  validated optional value unchanged instead of projecting it.
+- **Deletion accounting:** Production adds five and deletes eight physical
+  lines, a net deletion of three. No test or production source declares a
+  second ConSan flavor field.
+- **Checked-in gate:** All nine focused request and options-construction tests
+  pass. The host gate passes all 1,512 runnable tests with the two expected
+  benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests pass; and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 66.53 seconds. Slice 5BF remains the latest
+  physical-gfx950 gate, with all 593 tests passing; E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
