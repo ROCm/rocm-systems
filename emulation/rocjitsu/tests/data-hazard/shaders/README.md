@@ -294,6 +294,11 @@ plugin:
 | `BUILD_FAIL` | Modified assembly failed to assemble or link |
 | `RUN_FAIL` | Executable never started or never finished |
 
+A shader whose own baseline fails — it does not build, exits non-zero, or times
+out — is reported with no mutants at all. Every mutant is judged against the
+baseline's output and hazard count, so a baseline that did not run leaves
+nothing to judge them by.
+
 `BUILD_FAIL`, `TIMEOUT` and `RUN_FAIL` mutants never produced a comparable run,
 so they are reported as **inconclusive** and excluded from the mutation score
 rather than counted as killed. If every mutant is inconclusive the harness says
