@@ -224,7 +224,8 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
 // the guard wraps nothing and the function always returns ncclSuccess. That
 // leaves the two && arms as the only reachable branches.
 
-class SymBindTeamMemoryTest : public ::testing::Test {
+// Shared by the bind and unbind suites, which take the same arguments.
+class SymTeamMemoryTest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -241,6 +242,9 @@ protected:
     team = reinterpret_cast<ncclDevrTeam*>(teamStorage.data());
   }
 };
+
+// Kept distinct so each suite name still names one function.
+class SymBindTeamMemoryTest : public SymTeamMemoryTest {};
 
 // Branch: nvlsSupport == 0 short circuits the mcBasePtr check.
 TEST_F(SymBindTeamMemoryTest, NvlsUnsupported_ReturnsSuccess) {
@@ -261,6 +265,45 @@ TEST_F(SymBindTeamMemoryTest, NvlsWithMulticastBase_ReturnsSuccess) {
   comm->nvlsSupport = 1;
   team->mcBasePtr = reinterpret_cast<void*>(0x1000);
   EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
+// symUnbindTeamMemory is the counterpart to symBindTeamMemory, with a third
+// guard arm: !mem->globalHasSysmemSegment. Its body is behind the same
+// CUDART_VERSION check and so is likewise not compiled on HIP.
+
+class SymUnbindTeamMemoryTest : public SymTeamMemoryTest {};
+
+// Branch: nvlsSupport == 0 short circuits the rest.
+TEST_F(SymUnbindTeamMemoryTest, NvlsUnsupported_ReturnsSuccess) {
+  comm->nvlsSupport = 0;
+  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
+  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+// Branch: NVLS is available but the team has no multicast mapping.
+TEST_F(SymUnbindTeamMemoryTest, NoMulticastBase_ReturnsSuccess) {
+  comm->nvlsSupport = 1;
+  team->mcBasePtr = nullptr;
+  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+// Branch: CPU-backed memory is never multicast-bound, so there is nothing to
+// unbind -- the arm bind has no equivalent of.
+TEST_F(SymUnbindTeamMemoryTest, SysmemSegment_ReturnsSuccess) {
+  comm->nvlsSupport = 1;
+  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
+  mem.globalHasSysmemSegment = true;
+  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+// Branch: all three arms hold, entering the guarded block.
+TEST_F(SymUnbindTeamMemoryTest, NvlsDeviceMemory_ReturnsSuccess) {
+  comm->nvlsSupport = 1;
+  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
+  mem.globalHasSysmemSegment = false;
+  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
 }
 
 
