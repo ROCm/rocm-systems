@@ -90,7 +90,7 @@ class TestPython(RocprofsysTest):
     PYTHON_SOURCE_GENERAL = {
         "metric": "trip_count",  # Timemory
         "file": "trip_count.json",  # Timemory
-        "categories": ["python", "user"],  # Perfetto
+        "categories": ["python", "rocm_marker_api"],  # Perfetto
         "labels": [
             "main_loop",
             "run",
@@ -102,7 +102,10 @@ class TestPython(RocprofsysTest):
             "inefficient",
             "_sum",
         ],
-        "counts": [5, 3, 3, 6, 12, 18, 6, 3, 3],
+        # main_loop=4 as roctx.profilerPause() called mid 4th iteration
+        # supresses all marker writes from that point on.
+        # This includes the RoctxRange wrapper for 5th iteration
+        "counts": [4, 3, 3, 6, 12, 18, 6, 3, 3],
         "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 
@@ -364,7 +367,13 @@ class TestPython(RocprofsysTest):
             )
 
     @pytest.mark.rocpd("python_rocpd_env")
-    def test_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
+    def test_source(
+        self, python_version, python_rocpd_env, python_source_rocpd_rules, rocprof_config
+    ):
+        if not rocprof_config.capabilities.roctx_available_for(python_version):
+            pytest.skip(
+                f"roctx Python bindings not installed for Python {python_version}"
+            )
         result = self.run_test(
             "python",
             target="source.py",

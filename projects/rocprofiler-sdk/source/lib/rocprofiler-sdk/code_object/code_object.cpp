@@ -1086,9 +1086,13 @@ executable_freeze_internal(hsa_executable_t executable)
                                     // when kernel_symbol_device_map kernels are not present in
                                     // host_function_map, skip.
                                     if(host_data.device_function == nullptr) return;
-                                    host_data.code_object_id   = sym_data.code_object_id;
-                                    host_data.kernel_id        = sym_data.kernel_id;
-                                    host_data.host_function_id = ++get_host_function_id();
+                                    host_data.code_object_id = sym_data.code_object_id;
+                                    host_data.kernel_id      = sym_data.kernel_id;
+                                    // the id identifies the symbol, not this notification, so
+                                    // allocate it on the first context and reuse it for the rest
+                                    if(sitr->host_function_id == 0)
+                                        sitr->host_function_id = ++get_host_function_id();
+                                    host_data.host_function_id = sitr->host_function_id;
                                     auto hip_record = rocprofiler_callback_tracing_record_t{
                                         .context_id = rocprofiler_context_id_t{citr->context_idx},
                                         .thread_id  = tidx,

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
 #if defined(TIMEMORY_PERFETTO_CATEGORIES)
 #    error "TIMEMORY_PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"

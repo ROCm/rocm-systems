@@ -52,7 +52,6 @@ try:
         "profile",
         "noprofile",
         "coverage",
-        "user",
     ]
 
     def _load_profiler_bindings():
@@ -60,12 +59,10 @@ try:
         bindings = importlib.import_module(".libpyrocprofsys", __name__)
         profiler = importlib.import_module(".profiler", __name__)
         native_profiler = importlib.import_module(".libpyrocprofsys.profiler", __name__)
-        user = importlib.import_module(".user", __name__)
 
         globals().update(
             {
                 "coverage": bindings.coverage,
-                "user": user,
                 "Profiler": profiler.Profiler,
                 "FakeProfiler": profiler.FakeProfiler,
                 "profiler_function": native_profiler.profiler_function,

@@ -376,7 +376,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttribute` | hipFuncGetAttribute | scalar max-threads-per-block query agrees with the struct query for the same function |
+| `Contract_FuncAttributes_HipFuncGetAttribute_Scalar_MatchesScalarGetAttribute` | hipFuncGetAttribute | scalar max-threads-per-block query agrees with the struct query for the same function |
 | `Contract_FuncAttributes_HipFuncGetAttributes_Default_ReturnsSaneStruct` | hipFuncGetAttributes | populates a sane attribute struct with positive max-threads and non-negative resource/version fields |
 | `Contract_FuncAttributes_HipFuncGetAttributes_NullAttr_IsRejected` | hipFuncGetAttributes | a null output struct is rejected with a non-success status |
 | `Contract_FuncAttributes_HipFuncSetAttribute_MaxDynamicSharedMemory_IsAccepted` | hipFuncSetAttribute | an in-range max-dynamic-shared-memory hint is accepted |
@@ -408,7 +408,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_GraphCapture_HipStreamBeginCapture_dMemcpy_RoundTripsBytes` | hipStreamBeginCapture | a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact |
+| `Contract_GraphCapture_HipStreamBeginCapture_Memcpy_RoundTripsBytes` | hipStreamBeginCapture | a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact |
 | `Contract_GraphCapture_HipStreamEndCapture_BeginEndEmptyStream_ProducesGraph` | hipStreamEndCapture | begin/end capture over an empty stream produces a non-null graph |
 | `Contract_GraphCapture_HipStreamGetCaptureInfo_Default_ReturnsActiveState` | hipStreamGetCaptureInfo | reports Active status and a nonzero capture id while a stream is capturing |
 | `Contract_GraphCapture_HipStreamIsCapturing_Default_ReportsActiveDuringCapture` | hipStreamIsCapturing | reports capture status Active on a stream between begin and end capture |

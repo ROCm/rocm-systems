@@ -280,7 +280,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: CPC
           event: 24
     - name: CPC_ALWAYS_COUNT
@@ -1723,7 +1722,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 31
     - name: GRBM_CP_BUSY
@@ -1767,7 +1765,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 35
     - name: GRBM_GDS_BUSY
@@ -1872,7 +1869,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 13
     - name: GRBM_TC_BUSY
@@ -1886,7 +1882,6 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-            - gfx1250
           block: GRBM
           event: 28
     - name: GRBM_UTCL2_BUSY
@@ -14399,14 +14394,6 @@ rocprofiler-sdk:
             - gfx1250
           block: GL2C
           event: 180
-    - name: GL2C_BUBBLE
-      description: Total number of bubble requests sent to the GL2A
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1250
-          block: GL2C
-          event: 46
     - name: GL2C_BYPASS_REQ
       description: total number of client bypass requests. This is measured at tag block.
       properties: []

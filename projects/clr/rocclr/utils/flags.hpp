@@ -139,8 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
-release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                 \
-        "Enable per-stream AQL barrier-bit optimization on shared HW queues")   \
+release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
+        "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
         "Enables image buffer workaround")                                    \
 release(cstring, HIP_VISIBLE_DEVICES, "",                                     \
@@ -292,6 +292,8 @@ release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
+release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
+        "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 
 namespace amd {
 

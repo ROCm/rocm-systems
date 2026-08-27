@@ -310,7 +310,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "ainic",
         "network",
         "fork",
-        "user_api",
         "thread_limit",
         "pthreads",
         "rewrite_caller",

@@ -4007,7 +4007,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
             if (j < ngpus) {
               while (str[start_offset] != '(' && str[start_offset] != ')') start_offset++;
               char number_str[10];
-              sprintf(number_str, "%d", g);
+              sprintf(number_str, "%d", system->nodes[GPU].nodes[j].gpu.rank);
               int k = 0;
               while (number_str[k] != 0) {
                 graph->treeBase[x][y] = number_str[k];
@@ -4661,7 +4661,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     if (romeTopoModels[i].treeRail != nullptr && !rcclParamDisableRailTrees()) {
       // If so, parse the lines in advanced
       // These lines will be modified appropriately during ncclTopoPostset
-      NCCLCHECK(parseGraph(romeTopoModels[i].treeRail, system, graph, g8, nnets > 1 ? n : NULL, 0));
+      NCCLCHECK(parseGraph(romeTopoModels[i].treeRail, system, graph, rdm.data(), nnets > 1 ? n : NULL, 0));
       if (graph->nChannels) {
         system->useRailOptimizedTrees = true;
       }
@@ -4847,7 +4847,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
     break;
   case NCCL_TOPO_PATTERN_BALANCED_TREE:
     if (romeTopoModels[i].treeBase != nullptr) {
-      NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, g));
+      NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm));
     }
 
     if (!graph->nChannels) {

@@ -50,6 +50,8 @@ public:
   explicit ThroughputPlugin(const char *config_json = nullptr);
   ~ThroughputPlugin() override;
 
+  bool observes_sgpr_reads() const override { return false; }
+
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
   void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override;

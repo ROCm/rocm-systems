@@ -1,26 +1,7 @@
 #!/bin/bash -e
 
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 SCRIPT_DIR=$(realpath $(dirname ${BASH_SOURCE[0]}))
 cd $(dirname ${SCRIPT_DIR})
@@ -44,7 +25,7 @@ if [ -d "$(realpath /tmp)" ]; then
 fi
 
 : ${EXAMPLE_DIR:=examples}
-: ${EXAMPLE_NAME:=user-api}
+: ${EXAMPLE_NAME:=causal}
 : ${SOURCE_DIR:=$(mktemp -t -d rocprof-sys-test-source-XXXX)}
 : ${BINARY_DIR:=$(mktemp -t -d rocprof-sys-test-build-XXXX)}
 : ${INSTALL_DIR:=$(mktemp -t -d rocprof-sys-install-XXXX)}
@@ -114,9 +95,9 @@ do
     esac
 done
 
-if [ ! -f "${INSTALL_DIR}/include/rocprofiler-systems/user.h" ]; then
+if [ ! -f "${INSTALL_DIR}/include/rocprofiler-systems/causal_api.h" ]; then
     if [ -z "${INSTALL_SCRIPT}" ]; then
-        error-message "Unable to find \"rocprofiler-systems/user.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
+        error-message "Unable to find \"rocprofiler-systems/causal_api.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
     elif [ ! -f "${INSTALL_SCRIPT}" ]; then
         error-message "Unable to locate \"${INSTALL_SCRIPT}\" in directory \"${PWD}\""
     else
@@ -144,7 +125,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 find_package(Threads REQUIRED)
 
 get_target_property(LIBS rocprofiler-systems::rocprofiler-systems INTERFACE_LINK_LIBRARIES)
@@ -159,10 +140,33 @@ endforeach()
 
 file(GLOB sources \${CMAKE_CURRENT_LIST_DIR}/*.cpp \${CMAKE_CURRENT_LIST_DIR}/*.c)
 add_executable(app \${sources})
+# USE_RNG/USE_CPU give the causal example real work; USE_OMNI routes its
+# CAUSAL_* macros to the real rocprofiler-systems/causal.h calls instead of
+# no-ops, so this smoke test actually exercises the causal-api component.
+target_compile_definitions(app PRIVATE USE_RNG=1 USE_CPU=1 USE_OMNI=1)
 target_link_libraries(app PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems)
 EOF
 
 export CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH}
+
+# A find_package() call naming no COMPONENTS must still succeed. On that path
+# <project>_LIBRARIES is populated only from PROJECT_BUILD_TARGETS, and it is a
+# REQUIRED_VAR of the package config, so an empty list fails here while every
+# COMPONENTS-based call keeps working.
+NO_COMPONENTS_DIR=$(mktemp -t -d rocprof-sys-test-nocomp-XXXX)
+
+cat << EOF > ${NO_COMPONENTS_DIR}/CMakeLists.txt
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+project(test-no-components LANGUAGES CXX)
+
+find_package(rocprofiler-systems REQUIRED)
+
+message(STATUS "rocprofiler-systems_LIBRARIES :: \${rocprofiler-systems_LIBRARIES}")
+EOF
+
+verbose-run cmake -B ${NO_COMPONENTS_DIR}/build ${NO_COMPONENTS_DIR} ||
+    error-message "find_package(rocprofiler-systems REQUIRED) failed without COMPONENTS"
 
 verbose-run find .
 verbose-run cmake -B ${BINARY_DIR} ${SOURCE_DIR}

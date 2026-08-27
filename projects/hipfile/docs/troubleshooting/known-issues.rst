@@ -40,6 +40,9 @@ Example:
 
 hipFile's fastpath is only supported on GPU physical functions (PFs).
 
+``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
+when one is present. This warning won't change the exit code.
+
 High memory utilization with hipFile
 ====================================
 

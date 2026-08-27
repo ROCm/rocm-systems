@@ -98,6 +98,13 @@ public:
   }
 };
 
+class ComputeUnitTestAccess {
+public:
+  static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
+    return cu.sgpr_owner(reg_idx);
+  }
+};
+
 } // namespace rocjitsu::test
 
 namespace {
@@ -404,6 +411,15 @@ class SerialHotHookPlugin final : public ExecutionPlugin {
 public:
   SerialHotHookPlugin() : ExecutionPlugin("serial_hot_hook") {}
   bool requires_serial_hot_hooks() const override { return true; }
+};
+
+class NoSgprReadPlugin final : public ExecutionPlugin {
+public:
+  NoSgprReadPlugin() : ExecutionPlugin("no_sgpr_read") {}
+  bool observes_sgpr_reads() const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++callbacks; }
+
+  uint32_t callbacks = 0;
 };
 
 class OverlapProbe {
@@ -794,7 +810,7 @@ struct PluginFixture {
   amdgpu::GpuMemory *mem = nullptr;
 
   explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
-                         uint32_t wavefront_size = 64) {
+                         uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104) {
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
       "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{}}}}}}},
@@ -806,7 +822,7 @@ struct PluginFixture {
           {{"name":"se0","type":"shader_engine","children":[
             {{"name":"cu[0:1]","type":"compute_unit","config":[
               {{"key":"num_wf_slots","value":"{}"}},
-              {{"key":"sgprs_per_wf","value":"104"}},
+              {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"256"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
@@ -817,7 +833,7 @@ struct PluginFixture {
         {{"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}}
       ]}}}}
     )",
-                                   arch, wavefront_size, num_wf_slots);
+                                   arch, wavefront_size, num_wf_slots, sgprs_per_wf);
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
@@ -874,6 +890,57 @@ struct PluginFixture {
     run_until_idle();
   }
 };
+
+TEST(ExecutionPluginTest, SgprBlockOwnersTrackDispatchAndSlotReuseAcrossTargets) {
+  struct TargetCase {
+    std::string_view arch;
+    uint32_t wave_size;
+    uint32_t sgprs_per_wf;
+  };
+
+  for (const TargetCase target : {TargetCase{"cdna4", 64, 104}, TargetCase{"cdna5", 32, 128}}) {
+    SCOPED_TRACE(target.arch);
+    PluginFixture f(/*num_wf_slots=*/3, target.arch, target.wave_size, target.sgprs_per_wf);
+    auto *plugin = f.attach_ordering_plugin();
+    const uint32_t first_sgpr_count = target.sgprs_per_wf / 2;
+    auto *first = f.cu()->dispatch_wf(/*wg_id=*/10, /*pc=*/0, first_sgpr_count,
+                                      /*vgprs=*/32);
+    auto *second = f.cu()->dispatch_wf(/*wg_id=*/20, /*pc=*/0, target.sgprs_per_wf,
+                                       /*vgprs=*/32);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_EQ(first->sgpr_alloc().base, 0u);
+    ASSERT_EQ(second->sgpr_alloc().base, target.sgprs_per_wf);
+
+    auto expect_owner = [&](const Wavefront &owner, uint32_t physical_reg) {
+      plugin->events.clear();
+      EXPECT_EQ(f.cu()->read_sgpr(physical_reg), 0u);
+      ASSERT_EQ(plugin->events.size(), 1u);
+      EXPECT_EQ(plugin->events[0].kind, HookEvent::READ_SGPR);
+      EXPECT_EQ(plugin->events[0].wf_id, owner.wf_id());
+      EXPECT_EQ(plugin->events[0].wg_id, owner.wg_id());
+      EXPECT_EQ(plugin->events[0].physical_reg, physical_reg);
+    };
+
+    expect_owner(*first, first->sgpr_alloc().base + first_sgpr_count - 1);
+    expect_owner(*second, second->sgpr_alloc().base);
+    plugin->events.clear();
+    EXPECT_EQ(f.cu()->read_sgpr(first->sgpr_alloc().base + first_sgpr_count), 0u);
+    EXPECT_TRUE(plugin->events.empty());
+
+    const uint32_t reused_base = first->sgpr_alloc().base;
+    const uint32_t reused_slot = first->wf_id();
+    first->halt(Wavefront::CpCompletionNotice::Suppress);
+    EXPECT_EQ(test::ComputeUnitTestAccess::sgpr_owner(*f.cu(), reused_base), nullptr);
+    auto *reused = f.cu()->dispatch_wf(/*wg_id=*/30, /*pc=*/0, target.sgprs_per_wf,
+                                       /*vgprs=*/32);
+    ASSERT_NE(reused, nullptr);
+    EXPECT_EQ(reused->wf_id(), reused_slot);
+    EXPECT_EQ(reused->sgpr_alloc().base, reused_base);
+    expect_owner(*reused, reused_base + target.sgprs_per_wf - 1);
+    expect_owner(*second, second->sgpr_alloc().base + target.sgprs_per_wf - 1);
+  }
+}
 
 struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::GpuMemory> gpu_mem;
@@ -1334,6 +1401,32 @@ TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
 
   ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
   EXPECT_TRUE(group.requires_serial_hot_hooks());
+}
+
+TEST(ExecutionPluginTest, SgprReadPolicyComesFromContainedPlugins) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_FALSE(group.observes_sgpr_reads());
+
+  ASSERT_TRUE(group.add(std::make_unique<NoSgprReadPlugin>()));
+  EXPECT_FALSE(group.observes_sgpr_reads());
+
+  ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+  EXPECT_TRUE(group.observes_sgpr_reads());
+}
+
+TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<NoSgprReadPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  f.soc->set_plugin_group(group);
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+  ASSERT_NE(wf, nullptr);
+  f.cu()->write_sgpr(wf->sgpr_alloc().base, 0x12345678u);
+  EXPECT_EQ(f.cu()->read_sgpr(wf->sgpr_alloc().base), 0x12345678u);
+  EXPECT_EQ(plugin_ptr->callbacks, 0u);
 }
 
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {

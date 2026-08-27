@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 /** @file causal.h */
 
@@ -26,7 +7,7 @@
 #define ROCPROFSYS_CAUSAL_H_
 
 /**
- * @defgroup ROCPROFSYS_CASUAL_GROUP ROCm Systems Profiler Causal Profiling Defines
+ * @defgroup ROCPROFSYS_CAUSAL_GROUP ROCm Systems Profiler Causal Profiling Defines
  *
  * @{
  */
@@ -37,7 +18,7 @@
 #endif
 
 #if ROCPROFSYS_CAUSAL_ENABLED > 0
-#    include <rocprofiler-systems/user.h>
+#    include <rocprofiler-systems/causal_api.h>  // NOLINT(misc-include-cleaner)
 
 #    if !defined(ROCPROFSYS_CAUSAL_LABEL)
 /** @cond ROCPROFSYS_HIDDEN_DEFINES */
@@ -50,22 +31,22 @@
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS)
 /** Adds a throughput progress point with label `<file>:<line>` */
 #        define ROCPROFSYS_CAUSAL_PROGRESS                                               \
-            rocprofsys_user_progress(ROCPROFSYS_CAUSAL_LABEL);
+            rocprofsys_causal_progress(ROCPROFSYS_CAUSAL_LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS_NAMED)
 /** Adds a throughput progress point with user defined label. Each instance should use a
  * unique label. */
-#        define ROCPROFSYS_CAUSAL_PROGRESS_NAMED(LABEL) rocprofsys_user_progress(LABEL);
+#        define ROCPROFSYS_CAUSAL_PROGRESS_NAMED(LABEL) rocprofsys_causal_progress(LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_BEGIN)
 /** Starts a latency progress point (region of interest) with user defined label. Each
  * instance should use a unique label. */
-#        define ROCPROFSYS_CAUSAL_BEGIN(LABEL) rocprofsys_user_push_region(LABEL);
+#        define ROCPROFSYS_CAUSAL_BEGIN(LABEL) rocprofsys_causal_begin(LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_END)
 /** End the latency progress point (region of interest) for the matching user defined
  * label. */
-#        define ROCPROFSYS_CAUSAL_END(LABEL) rocprofsys_user_pop_region(LABEL);
+#        define ROCPROFSYS_CAUSAL_END(LABEL) rocprofsys_causal_end(LABEL);
 #    endif
 #else
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS)

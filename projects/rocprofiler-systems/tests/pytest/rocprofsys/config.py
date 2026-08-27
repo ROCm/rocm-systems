@@ -125,8 +125,11 @@ class RocprofsysConfig:
                     found_paths.append(candidate)
         return found_paths
 
-    def get_library_path(self) -> str:
+    def get_library_path(self, python_version: Optional[str] = None) -> str:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
+
+        Args:
+            python_version: Interpreter the run targets, when it targets one.
 
         Returns:
             LD_LIBRARY_PATH string with rocprofiler-systems libraries
@@ -146,6 +149,14 @@ class RocprofsysConfig:
         # Add ROCm LLVM lib as fallback
         for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
+
+        # The python base environment puts ROCm's roctx bindings on PYTHONPATH;
+        # on some builds their compiled extension resolves libpython through the
+        # loader search path, so the interpreter's own lib dir has to be here.
+        if python_version and self.capabilities.roctx_site_packages(python_version):
+            python_lib_dir = self.capabilities.python_lib_dir(python_version)
+            if python_lib_dir:
+                paths.append(str(python_lib_dir))
 
         return ":".join(paths)
 

@@ -55,7 +55,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
