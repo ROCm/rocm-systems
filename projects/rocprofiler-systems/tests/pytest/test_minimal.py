@@ -172,3 +172,52 @@ class TestMinimal(RocprofsysTest):
             subtest_name="Paused sampling leaves sleeps undisturbed",
             pass_regex=[r"sleep_interrupts:.*interrupted=0 short_sleeps=0"],
         )
+
+    def test_sampling_resumes_after_delay(self):
+        """
+        The delay above outlasts the whole run, so it never proves the timers
+        come back. Here the delay elapses partway through, so any
+        interruption in the aggregate count can only have come from sampling
+        that resumed.
+        """
+        resumed = self._run_sleep_interrupts({"ROCPROFSYS_TRACE_DELAY": "0.5"})
+        self.assert_regex(
+            resumed,
+            subtest_name="Sampling resumes once the delay elapses",
+            pass_regex=[r"sleep_interrupts:.*interrupted=[1-9]\d*"],
+        )
+
+    # <nfib> <nthreads> <nitr>. Long enough that a thread accrues far more CPU
+    # time than the delay below, so the CPU-time timer is guaranteed to fire.
+    CPU_WORKLOAD_ARGS = ["20", "2", "100000"]
+
+    def test_cputime_sampling_survives_pause_resume(self):
+        """
+        The sleep-interrupts tests above run realtime-only, so nothing here
+        covered CPU-time sampling across a pause. Routing the CPU-time timer
+        outside the sampler's trigger list once left SIGPROF with no handler,
+        and the first expiry killed the target outright.
+
+        The workload is CPU-bound so the timer genuinely expires, and the delay
+        elapses partway through so the timer survives a full pause/resume
+        cycle. run_test fails on a non-zero return code, which is what catches
+        the SIGPROF kill; the regex keeps the test from passing vacuously if
+        CPU-time sampling were silently skipped instead of exercised.
+        """
+        result = self.run_test(
+            "sys_run",
+            "parallel-overhead",
+            env={
+                "ROCPROFSYS_USE_SAMPLING": "ON",
+                "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
+                "ROCPROFSYS_SAMPLING_REALTIME": "OFF",
+                "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "300",
+                "ROCPROFSYS_TRACE_DELAY": "0.5",
+            },
+            run_args=self.CPU_WORKLOAD_ARGS,
+        )
+        self.assert_regex(
+            result,
+            subtest_name="CPU-time sampling survives a pause/resume cycle",
+            pass_regex=[r"Sampler for thread \d+ will be triggered .*of CPU-time"],
+        )
