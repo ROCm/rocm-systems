@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
 #include <algorithm>
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +84,90 @@ struct ConSanMoiWorkgroupSource {
 };
 
 namespace consan_detail {
+
+/// Return whether one native LDS mnemonic has the single-range operand shape
+/// understood by every MOI access lowerer on `arch`.
+///
+/// This is both the semantic-policy capability predicate and the lowering
+/// admission predicate. Keeping it here prevents a newly supported mnemonic
+/// from being planned without an emitter, or emitted without appearing in the
+/// typed observation plan.
+[[nodiscard]] inline bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
+                                                              rj_code_arch_t arch) {
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+       consan_uses_gfx12_encoding(arch)) &&
+      (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
+    return true;
+  }
+  if (consan_uses_gfx9_cdna_encoding(arch) &&
+      (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
+    return true;
+  }
+  constexpr std::array always = {
+      "ds_load_i8",         "ds_load_u8",          "ds_load_i16",       "ds_load_u16",
+      "ds_load_u8_d16",     "ds_load_u8_d16_hi",   "ds_load_i8_d16",    "ds_load_i8_d16_hi",
+      "ds_load_u16_d16",    "ds_load_u16_d16_hi",  "ds_store_b8",       "ds_store_b16",
+      "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_u8",        "ds_read_u16",
+      "ds_write_b8",        "ds_write_b16",        "ds_load_b32",       "ds_load_b64",
+      "ds_load_b128",       "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",
+      "ds_read_b64",        "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32",
+      "ds_store_b64",       "ds_store_b128",       "ds_write_b32",      "ds_write_b64",
+      "ds_write_b128",      "ds_add_f32",          "ds_add_f64",        "ds_add_u32",
+      "ds_add_u64",         "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32",
+  };
+  if (std::ranges::find(always, mnemonic) != always.end())
+    return true;
+  constexpr std::array gfx9 = {
+      "ds_read_i8",         "ds_read_u8_d16",     "ds_read_u8_d16_hi",
+      "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
+      "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
+  };
+  return consan_uses_gfx9_cdna_encoding(arch) && std::ranges::find(gfx9, mnemonic) != gfx9.end();
+}
+
+/// Return the byte scale between the two independently addressed LDS ranges,
+/// or no value when `mnemonic` is not a supported two-range native operation.
+/// The scale is retained as policy data because emission needs the same fact
+/// to size scratch resources and materialize both effective addresses.
+[[nodiscard]] inline std::optional<uint32_t>
+two_address_native_lds_offset_scale(std::string_view mnemonic) {
+  constexpr std::array<std::pair<std::string_view, uint32_t>, 16> forms = {{
+      {"ds_load_2addr_b32", 4u},
+      {"ds_store_2addr_b32", 4u},
+      {"ds_read2_b32", 4u},
+      {"ds_write2_b32", 4u},
+      {"ds_load_2addr_b64", 8u},
+      {"ds_store_2addr_b64", 8u},
+      {"ds_read2_b64", 8u},
+      {"ds_write2_b64", 8u},
+      {"ds_load_2addr_stride64_b32", 256u},
+      {"ds_store_2addr_stride64_b32", 256u},
+      {"ds_read2st64_b32", 256u},
+      {"ds_write2st64_b32", 256u},
+      {"ds_load_2addr_stride64_b64", 512u},
+      {"ds_store_2addr_stride64_b64", 512u},
+      {"ds_read2st64_b64", 512u},
+      {"ds_write2st64_b64", 512u},
+  }};
+  const auto form = std::ranges::find_if(
+      forms, [&](const auto &candidate) { return candidate.first == mnemonic; });
+  return form == forms.end() ? std::nullopt : std::optional<uint32_t>(form->second);
+}
+
+/// Return whether one decoded FLAT mnemonic has an LDS access shape supported
+/// by every MOI engine. Address-space provenance and target operand legality
+/// are separate policy checks and deliberately do not enter this vocabulary.
+[[nodiscard]] inline bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
+  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
+    return true;
+  constexpr std::array forms = {
+      "flat_load_b32",     "flat_load_b64",    "flat_load_b128",     "flat_store_b32",
+      "flat_store_b64",    "flat_store_b128",  "flat_load_dword",    "flat_load_dwordx2",
+      "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx4",
+      "flat_load_ushort",  "flat_store_short", "flat_load_u16",      "flat_store_b16",
+  };
+  return std::ranges::find(forms, mnemonic) != forms.end();
+}
 
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///

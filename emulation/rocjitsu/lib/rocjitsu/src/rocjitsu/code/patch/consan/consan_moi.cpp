@@ -159,6 +159,10 @@ uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary 
 
 namespace {
 
+using consan_detail::is_single_range_native_lds_mnemonic;
+using consan_detail::is_supported_moi_flat_access_mnemonic;
+using consan_detail::two_address_native_lds_offset_scale;
+
 [[nodiscard]] std::optional<uint16_t>
 scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
   constexpr uint32_t kSgprGranularity = 8u;

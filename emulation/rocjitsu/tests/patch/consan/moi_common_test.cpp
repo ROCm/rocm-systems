@@ -2367,6 +2367,22 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
   }
 }
 
+TEST(ConSanMoi, SharedAccessShapeContractOwnsTwoRangeAndFlatVocabulary) {
+  using consan_detail::is_supported_moi_flat_access_mnemonic;
+  using consan_detail::two_address_native_lds_offset_scale;
+
+  EXPECT_EQ(two_address_native_lds_offset_scale("ds_load_2addr_b32"), 4u);
+  EXPECT_EQ(two_address_native_lds_offset_scale("ds_write2_b64"), 8u);
+  EXPECT_EQ(two_address_native_lds_offset_scale("ds_read2st64_b32"), 256u);
+  EXPECT_EQ(two_address_native_lds_offset_scale("ds_store_2addr_stride64_b64"), 512u);
+  EXPECT_FALSE(two_address_native_lds_offset_scale("ds_load_b32"));
+
+  EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_load_b128"));
+  EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_store_short"));
+  EXPECT_FALSE(is_supported_moi_flat_access_mnemonic("flat_load_dwordx3"));
+  EXPECT_FALSE(is_supported_moi_flat_access_mnemonic("global_load_dword"));
+}
+
 TEST(ConSanMoi, CdnaMoiEnginesAdmitNativeB96Accesses) {
   constexpr auto cdna3_store = cdna3::build_ds(cdna3::kDsWriteB96Ds, {.addr = 0, .data0 = 1});
   constexpr auto cdna3_load = cdna3::build_ds(cdna3::kDsReadB96Ds, {.addr = 0, .vdst = 4});

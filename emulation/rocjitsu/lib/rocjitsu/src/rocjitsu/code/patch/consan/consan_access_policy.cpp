@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
@@ -138,72 +139,6 @@ inventory_exclusion_reason(const ConSanAccessInventorySite &access) {
          mnemonic == "ds_add_u64" || mnemonic == "ds_cmpstore_rtn_b32" ||
          mnemonic == "ds_cmpst_rtn_b32";
 }
-
-[[nodiscard]] bool is_supported_single_range_native_lds(std::string_view mnemonic,
-                                                        rj_code_arch_t arch) {
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-       is_rdna4_family_arch(arch)) &&
-      (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96"))
-    return true;
-  if (consan_uses_gfx9_cdna_encoding(arch) &&
-      (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96"))
-    return true;
-  constexpr std::array always = {
-      "ds_load_i8",         "ds_load_u8",          "ds_load_i16",       "ds_load_u16",
-      "ds_load_u8_d16",     "ds_load_u8_d16_hi",   "ds_load_i8_d16",    "ds_load_i8_d16_hi",
-      "ds_load_u16_d16",    "ds_load_u16_d16_hi",  "ds_store_b8",       "ds_store_b16",
-      "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_u8",        "ds_read_u16",
-      "ds_write_b8",        "ds_write_b16",        "ds_load_b32",       "ds_load_b64",
-      "ds_load_b128",       "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",
-      "ds_read_b64",        "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32",
-      "ds_store_b64",       "ds_store_b128",       "ds_write_b32",      "ds_write_b64",
-      "ds_write_b128",      "ds_add_f32",          "ds_add_f64",        "ds_add_u32",
-      "ds_add_u64",         "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32",
-  };
-  if (std::ranges::find(always, mnemonic) != always.end())
-    return true;
-  constexpr std::array gfx9 = {
-      "ds_read_i8",         "ds_read_u8_d16",     "ds_read_u8_d16_hi",
-      "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
-      "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
-  };
-  return consan_uses_gfx9_cdna_encoding(arch) && std::ranges::find(gfx9, mnemonic) != gfx9.end();
-}
-
-[[nodiscard]] bool is_supported_two_range_native_lds(std::string_view mnemonic) {
-  constexpr std::array forms = {
-      "ds_load_2addr_b32",
-      "ds_store_2addr_b32",
-      "ds_read2_b32",
-      "ds_write2_b32",
-      "ds_load_2addr_b64",
-      "ds_store_2addr_b64",
-      "ds_read2_b64",
-      "ds_write2_b64",
-      "ds_load_2addr_stride64_b32",
-      "ds_store_2addr_stride64_b32",
-      "ds_read2st64_b32",
-      "ds_write2st64_b32",
-      "ds_load_2addr_stride64_b64",
-      "ds_store_2addr_stride64_b64",
-      "ds_read2st64_b64",
-      "ds_write2st64_b64",
-  };
-  return std::ranges::find(forms, mnemonic) != forms.end();
-}
-
-[[nodiscard]] bool is_supported_flat_access(std::string_view mnemonic) {
-  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
-    return true;
-  constexpr std::array forms = {
-      "flat_load_b32",     "flat_load_b64",    "flat_load_b128",     "flat_store_b32",
-      "flat_store_b64",    "flat_store_b128",  "flat_load_dword",    "flat_load_dwordx2",
-      "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx4",
-      "flat_load_ushort",  "flat_store_short", "flat_load_u16",      "flat_store_b16",
-  };
-  return std::ranges::find(forms, mnemonic) != forms.end();
-}
-
 [[nodiscard]] uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch))
     return 0u;
@@ -224,8 +159,8 @@ classify_moi_access_support(const ConSanAccessInventorySite &access, rj_code_arc
   if (access.origin != ConSanAccessOrigin::Flat) {
     if (access.origin == ConSanAccessOrigin::DirectToLds)
       return ConSanAccessPolicyReason::None;
-    return is_supported_single_range_native_lds(access.mnemonic, arch) ||
-                   is_supported_two_range_native_lds(access.mnemonic)
+    return consan_detail::is_single_range_native_lds_mnemonic(access.mnemonic, arch) ||
+                   consan_detail::two_address_native_lds_offset_scale(access.mnemonic)
                ? ConSanAccessPolicyReason::None
                : ConSanAccessPolicyReason::UnsupportedMnemonic;
   }
@@ -247,8 +182,9 @@ classify_moi_access_support(const ConSanAccessInventorySite &access, rj_code_arc
   if (access.operands.address_vgpr && *access.operands.address_vgpr >= 255u &&
       !scalar_vector_address)
     return ConSanAccessPolicyReason::ReservedFlatAddressRegister;
-  return is_supported_flat_access(access.mnemonic) ? ConSanAccessPolicyReason::None
-                                                   : ConSanAccessPolicyReason::UnsupportedMnemonic;
+  return consan_detail::is_supported_moi_flat_access_mnemonic(access.mnemonic)
+             ? ConSanAccessPolicyReason::None
+             : ConSanAccessPolicyReason::UnsupportedMnemonic;
 }
 
 [[nodiscard]] ConSanAccessPolicyReason

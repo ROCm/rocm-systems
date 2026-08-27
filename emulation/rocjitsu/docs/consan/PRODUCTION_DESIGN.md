@@ -5568,6 +5568,28 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CF: make access shape one policy/lowering contract
+
+- **One mnemonic-shape vocabulary:** Access policy and all MOI emitters now
+  consume the same directly tested predicates for single-range native LDS,
+  two-range native LDS plus its byte scale, and supported FLAT access forms.
+  Provenance, target operand legality, and engine evidence semantics remain
+  separate decisions.
+- **No policy/lowering drift:** The duplicate access-policy and compatibility-
+  lowering whitelists are deleted. Public capability queries delegate to the
+  same internal contract, so no third classification path remains.
+- **Focused contract coverage:** Direct unit coverage pins all four two-range
+  scales, unsupported single-range input, representative FLAT load/store
+  forms, and rejected FLAT/global forms. Existing B96 boundary tests exercise
+  RDNA3, RDNA4, CDNA3, CDNA4, and CDNA5, while access-policy tests cover all
+  four engines and typed unsupported decisions.
+- **Deletion accounting:** Implementation files add 95 and delete 141 physical
+  lines, a net deletion of 46. Tests add sixteen lines.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

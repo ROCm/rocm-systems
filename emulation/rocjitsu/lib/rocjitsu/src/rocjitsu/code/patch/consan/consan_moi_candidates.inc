@@ -290,22 +290,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
   return words;
 }
 
-[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
-                                                       rj_code_arch_t arch);
-
-[[nodiscard]] std::optional<uint32_t>
-two_address_native_lds_offset_scale(std::string_view mnemonic);
-
-[[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
-  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
-    return true;
-  return equals_any(mnemonic, {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
-                               "flat_store_b64", "flat_store_b128", "flat_load_dword",
-                               "flat_load_dwordx2", "flat_load_dwordx4", "flat_store_dword",
-                               "flat_store_dwordx2", "flat_store_dwordx4", "flat_load_ushort",
-                               "flat_store_short", "flat_load_u16", "flat_store_b16"});
-}
-
 using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
 
 [[nodiscard]] std::set<OrderedOrdinarySyncSiteKey>
@@ -528,61 +512,6 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
     offset += sizeof(uint32_t);
   }
   return count;
-}
-
-[[nodiscard]] bool is_unconditionally_single_range_native_lds_mnemonic(std::string_view mnemonic) {
-  if (equals_any(mnemonic,
-                 {"ds_load_i8", "ds_load_u8", "ds_load_i16", "ds_load_u16", "ds_load_u8_d16",
-                  "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
-                  "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
-                  "ds_store_b16_d16_hi", "ds_read_u8", "ds_read_u16", "ds_write_b8",
-                  "ds_write_b16"}))
-    return true;
-
-  return equals_any(mnemonic,
-                    {"ds_load_b32",       "ds_load_b64",  "ds_load_b128",  "ds_load_tr8_b64",
-                     "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",   "ds_read_b64_tr_b16",
-                     "ds_read_b128",      "ds_store_b32", "ds_store_b64",  "ds_store_b128",
-                     "ds_write_b32",      "ds_write_b64", "ds_write_b128", "ds_add_f32",
-                     "ds_add_f64",        "ds_add_u32",   "ds_add_u64",    "ds_cmpstore_rtn_b32",
-                     "ds_cmpst_rtn_b32"});
-}
-
-[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
-                                                       rj_code_arch_t arch) {
-  // RDNA3, RDNA4, and CDNA5 B96 share the qualified three-dword resource plan
-  // and fixed-register lowering. The gfx11 spelling differs only in its
-  // completion wait, which remains part of the relocated guest sequence.
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-       is_rdna4_family_arch(arch)) &&
-      equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
-    return true;
-  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      equals_any(mnemonic, {"ds_read_b96", "ds_write_b96"}))
-    return true;
-  return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
-         ((consan_uses_gfx9_cdna_encoding(arch)) &&
-          equals_any(mnemonic,
-                     {"ds_read_i8", "ds_read_u8_d16", "ds_read_u8_d16_hi", "ds_read_i8_d16",
-                      "ds_read_i8_d16_hi", "ds_read_u16_d16", "ds_read_u16_d16_hi",
-                      "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"}));
-}
-
-[[nodiscard]] std::optional<uint32_t>
-two_address_native_lds_offset_scale(std::string_view mnemonic) {
-  if (equals_any(mnemonic,
-                 {"ds_load_2addr_b32", "ds_store_2addr_b32", "ds_read2_b32", "ds_write2_b32"}))
-    return 4u;
-  if (equals_any(mnemonic,
-                 {"ds_load_2addr_b64", "ds_store_2addr_b64", "ds_read2_b64", "ds_write2_b64"}))
-    return 8u;
-  if (equals_any(mnemonic, {"ds_load_2addr_stride64_b32", "ds_store_2addr_stride64_b32",
-                            "ds_read2st64_b32", "ds_write2st64_b32"}))
-    return 256u;
-  if (equals_any(mnemonic, {"ds_load_2addr_stride64_b64", "ds_store_2addr_stride64_b64",
-                            "ds_read2st64_b64", "ds_write2st64_b64"}))
-    return 512u;
-  return std::nullopt;
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>

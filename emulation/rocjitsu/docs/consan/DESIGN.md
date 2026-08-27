@@ -243,6 +243,14 @@ also carries the site's normalized byte ranges. Emitters consume those ranges
 directly instead of reopening pristine instruction bytes and independently
 decoding offsets and widths.
 
+The access-policy and lowering layers also share one native-LDS and FLAT
+mnemonic-shape vocabulary in `consan_detail`. The single-range predicate, the
+two-range byte scale, and the FLAT lowering predicate are the authority for
+both policy admission and emitter resource/operand selection. Target
+provenance and operand legality remain separate policy decisions. This keeps a
+new mnemonic from being planned without an emitter—or emitted without a typed
+observation decision—without maintaining parallel whitelists.
+
 `ConSanObservationPlan` combines the domain decisions and intents.
 `ConSanCoverageLedger` keeps policy separate from mechanism: for each admitted
 intent it records whether lowering instrumented it, excluded it for a typed
