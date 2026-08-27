@@ -27,17 +27,19 @@ constexpr size_t kGinAllReduceLsaOneShotMaxBytes = 8ULL * 1024 * 1024;
 constexpr size_t kGinAllReduceLsaTwoShotMidBytes = 32ULL * 1024 * 1024;
 constexpr size_t kGinAllReduceGinTwoShotMinBytes = 256ULL * 1024 * 1024;
 
-constexpr size_t kGinAllReduceTwoShotSyncBytes = 16;
 constexpr size_t kGinAllReduceMinPutBytes = 128;
 
 // Lazily created on the first eligible AllReduce and torn down with the comm.
 // Declared unconditionally: ncclComm embeds this even when ENABLE_ROCSHMEM_GIN is off.
+//
+// Deliberately holds no per-launch host state. All cross-rank synchronization lives on the
+// device (LSA barrier epochs in the resource window, GIN signals and their shadows) and is
+// re-read by the kernel on every launch, which is what lets these collectives be captured
+// into a graph and replayed: a host-side counter baked into a kernel argument at capture time
+// would freeze at its captured value while the device counters kept advancing.
 struct ncclGinAllReduceState {
   bool initialized;
   struct ncclDevComm devComm;
-  uint64_t* twoShotSync; // device [reduceDoneSync, agDoneSync]
-  uint64_t twoShotReduceEpoch; // host shadow: next reduce-phase target base
-  uint64_t twoShotAgEpoch;       // host shadow: next AG-phase target base
 };
 
 #if defined(ENABLE_ROCSHMEM_GIN)

@@ -29,19 +29,6 @@ __device__ __forceinline__ T allReduceLsaSumAdd(T a, T b) {
   }
 }
 
-__device__ __forceinline__ void allReduceTwoShotCtaArrive(uint64_t* counter, uint64_t target, ncclCoopCta cta) {
-  cta.sync();
-  if (threadIdx.x == 0) {
-    __hip_atomic_fetch_add(counter, 1ULL, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-  }
-  cta.sync();
-  while (__hip_atomic_load(counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) < target) {
-    __builtin_amdgcn_s_sleep(1);
-  }
-  cta.sync();
-  __threadfence_system();
-}
-
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -215,6 +202,8 @@ __launch_bounds__(512)
   bar.sync(cta, cuda::memory_order_release);
 }
 
+// One-time init only, never part of a captured graph: replaying this would zero signals that
+// peers are concurrently incrementing. ncclGinAllReduceInitOnce runs it on a private stream.
 __global__ void ginAllReduceResetSignalsKernel(struct ncclDevComm devComm) {
   if (threadIdx.x != 0) {
     return;
@@ -228,9 +217,7 @@ template <typename T>
 __launch_bounds__(512)
 #endif
   __global__ void ginAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff,
-                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank,
-                                            uint64_t* reduceDoneSync, uint64_t reduceTarget, uint64_t* agDoneSync,
-                                            uint64_t agTarget, int nRanks) {
+                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank, int nRanks) {
   constexpr int ginContext = 0;
 
   ncclGin gin{devComm, ginContext};
@@ -275,6 +262,8 @@ __launch_bounds__(512)
   bar.sync(cta, cuda::memory_order_release);
 
   // --- Shot 2: multi-CTA GIN all-gather (rccl-tests GinAlltoAllKernel) ---
+  // The wait target is relative to a baseline read on the device at launch time, so it stays
+  // correct across graph replays: nothing about the expected signal value is fixed on the host.
   const unsigned int signalIndex = static_cast<unsigned int>(blockIdx.x);
   const uint64_t signalValue = gin.readSignal(signalIndex);
   ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
