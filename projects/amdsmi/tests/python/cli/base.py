@@ -11,7 +11,9 @@ so the per-feature CLI suites can share it: the per-command ``cli/test_*.py``
 files each subclass ``TestCliBase`` and add their own test_* methods.
 """
 
+import collections
 import json
+import math
 import os
 import stat
 import sys
@@ -19,47 +21,85 @@ import unittest
 
 import common.common as common
 import common.runcmd as runcmd
+from common.common import amdsmi
 
 
-def _build_exit_code_names():
-    """Exit code -> name. Library statuses reach the shell folded to their low
-    byte by the CLI's library_code_to_exit_code(); the CLI's own codes occupy a
-    reserved high band and come straight from AmdSmiExitCode."""
-    names = {}
-    for value, name in getattr(common, "ERROR_MAP", {}).items():
-        try:
-            names.setdefault(abs(int(value)) & 0xFF, name)
-        except (TypeError, ValueError):
-            continue
+def _load_cli_exceptions():
+    """The CLI's own exception module, from whichever amd-smi is under test."""
     cli_dir = common.find_cli_dir(common.amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
     if cli_dir and cli_dir not in sys.path:
         sys.path.append(cli_dir)
+    # Tests name AmdSmiExitCode, so a miss has to fail here rather than as an
+    # attribute error on None once a test is already running.
     try:
         import amdsmi_cli_exceptions
-
-        for member in amdsmi_cli_exceptions.AmdSmiExitCode:
-            if member.value:
-                names[int(member.value)] = member.name
     except ImportError as exc:
-        # Non-fatal: names are a display aid. Announce it, though -- silently
-        # losing them degrades every failure line to a bare rc.
-        print(f"WARNING: amd-smi CLI exit-code names unavailable ({cli_dir}): {exc}", flush=True)
+        raise ImportError(
+            f"amd-smi CLI not found under {cli_dir!r}; the CLI tests need it for exit codes"
+        ) from exc
+
+    return amdsmi_cli_exceptions
+
+
+AmdSmiExitCode = _load_cli_exceptions().AmdSmiExitCode
+
+
+def _build_exit_code_names():
+    """Exit code -> name, e.g. ``NOT_SUPPORTED``."""
+    names = {}
+    # Folding a status to its low byte can collide, so the first member wins.
+    for member in amdsmi.AmdSmiStatus:
+        names.setdefault(abs(int(member.value)) & 0xFF, member.name)
+    # CLI codes are exact, so they override any collision above.
+    for member in AmdSmiExitCode:
+        if member.value:
+            names[member.value] = member.name
     return names
 
 
 EXIT_CODE_NAMES = _build_exit_code_names()
 
 
-def _exit_code_for(status_name, fallback):
-    """Exit code the CLI reports for a library status, looked up by name so it
-    tracks the enum instead of hard-coding a number."""
-    for code, name in EXIT_CODE_NAMES.items():
-        if name == status_name:
-            return code
-    return fallback
+def _describe_codes(codes):
+    """Accepted exit codes, named, for a failure message."""
+    named = ", ".join(f"{EXIT_CODE_NAMES.get(code, 'UNKNOWN')}({code})" for code in codes)
+    return f"[{named}]"
 
 
-NOT_SUPPORTED_EXIT = _exit_code_for("AMDSMI_STATUS_NOT_SUPPORTED", 2)
+# One command's verdict: the line RunCmds prints, and whether it counts as a
+# test failure -- which is not the same as the command failing, since a command
+# declared to fail counts as a pass when it does.
+Verdict = collections.namedtuple("Verdict", "message counts_as_failure")
+
+# --clk-level placeholder -> the clock name the CLI expects. PCIE is sized from
+# a different source than the rest; see _clk_level_count().
+CLK_LEVEL_TYPES = {
+    "{clk_level_sclk}": "SCLK",
+    "{clk_level_mclk}": "MCLK",
+    "{clk_level_fclk}": "FCLK",
+    "{clk_level_socclk}": "SOCCLK",
+    "{clk_level_pcie}": "PCIE",
+}
+
+# --clk-limit placeholder -> (clock name the CLI expects, which bound to set).
+# The metric key and the value key both follow from these, so they cannot drift
+# apart the way separately written entries did.
+CLK_LIMIT_TARGETS = {
+    "{clk_limit_sclk_max}": ("SCLK", "MAX"),
+    "{clk_limit_sclk_min}": ("SCLK", "MIN"),
+    "{clk_limit_mclk_max}": ("MCLK", "MAX"),
+    "{clk_limit_mclk_min}": ("MCLK", "MIN"),
+    "{clk_limit_fclk_max}": ("FCLK", "MAX"),
+    "{clk_limit_fclk_min}": ("FCLK", "MIN"),
+}
+
+# Clock name -> the ``metric --json`` key reporting its min_clk/max_clk. SCLK is
+# the graphics clock (the CLI maps it to AmdSmiClkType.GFX), not the SOC clock.
+CLK_LIMIT_METRIC_KEYS = {"SCLK": "gfx_0", "MCLK": "mem_0", "FCLK": "fclk_0"}
+
+# --clk-limit probe values are rounded up to a multiple of this. Cosmetic only:
+# the driver accepts any MHz within range.
+CLK_LIMIT_MHZ_STEP = 10
 
 
 class TestCliBase(unittest.TestCase):
@@ -76,15 +116,15 @@ class TestCliBase(unittest.TestCase):
 
     # TODO(amdsmi_team): drop these once the CLI tests supports automated
     #                     input
-    SWEEP_EXCLUDED_ARGS = {
-        "set": {
-            "--memory-partition": "waits for confirmation",
-            "--compute-partition": "waits for confirmation",
-        }
-    }
+    SWEEP_EXCLUDED_ARGS = {"set": {"--compute-partition": "waits for confirmation"}}
 
     # TODO(amdsmi_team): User input is not a problem, we just need to test above ^
-    PROMPT_ANSWERS = {"set": {"--fan": "y\n"}}
+    PROMPT_ANSWERS = {"set": {"--fan": "y\n", "--memory-partition": "y\n"}}
+
+    # Commands whose sweep also accepts NOT_SUPPORTED. A write may legitimately
+    # refuse a feature the ASIC lacks, but a read answering NOT_SUPPORTED is a
+    # regression the sweep should catch. Add "reset" when that suite is enabled.
+    NOT_SUPPORTED_TOLERANT_COMMANDS = {"set"}
 
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
@@ -97,6 +137,7 @@ class TestCliBase(unittest.TestCase):
     static_data: dict
     metric_data: dict
     partition_data: dict
+    clk_freq: list
     gpus: list
     sub_args: dict
 
@@ -122,6 +163,7 @@ class TestCliBase(unittest.TestCase):
         TestCliBase.static_data = baseline["static_data"]
         TestCliBase.list_data = baseline["list_data"]
         TestCliBase.partition_data = baseline["partition_data"]
+        TestCliBase.clk_freq = baseline["clk_freq"]
         TestCliBase.gpus = baseline["gpus"]
         TestCliBase.sub_args = baseline["sub_args"]
         TestCliBase._initialized = True
@@ -188,7 +230,59 @@ class TestCliBase(unittest.TestCase):
             "FILE_LIMIT": [10],
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
+        baseline["clk_freq"] = cls._read_clk_freq()
         return baseline
+
+    @classmethod
+    def _read_clk_freq(cls):
+        """Per-GPU DPM clock tables, read from the library rather than the CLI.
+
+        Neither CLI command can say how many levels are settable, and combining them
+        does not close the gap either:
+
+        - ``amd-smi static --clock`` lists every row of the table as ``Level N``,
+          including the non-settable deep-sleep row, and does not mark which one it
+          is. A three-entry list is therefore either three settable levels, or two
+          plus an ``S`` row, and the two cases are indistinguishable.
+        - ``amd-smi metric --clock`` does report a per-clock ``deep_sleep``, but it
+          discards the library value and recomputes it as (current clk < min clk).
+          That is a runtime state which flips as the GPU idles, so it cannot identify
+          the row static left ambiguous -- the same device answers differently
+          depending on how busy it was when the command ran.
+
+        ``amdsmi_get_clock_info`` returns ``clk_deep_sleep`` before the CLI recomputes
+        it, and it is populated only when the table carries the ``S`` row, which is
+        what decides the settable level indices.
+
+        Returns:
+            list: one dict per GPU, keyed by the CLI's clock names; a value is None
+            when the device does not expose that clock.
+        """
+        clk_types = {
+            "SCLK": amdsmi.AmdSmiClkType.SYS,
+            "MCLK": amdsmi.AmdSmiClkType.MEM,
+            "FCLK": amdsmi.AmdSmiClkType.DF,
+            "SOCCLK": amdsmi.AmdSmiClkType.SOC,
+        }
+        per_gpu = []
+        # Common.__init__ shuts the library down once it has read its own data.
+        cls.common.amdsmi_smart_init()
+        try:
+            for processor in amdsmi.amdsmi_get_processor_handles():
+                entry = {}
+                for name, clk_type in clk_types.items():
+                    try:
+                        freq = amdsmi.amdsmi_get_clk_freq(processor, clk_type)
+                        info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
+                    except amdsmi.AmdSmiLibraryException:
+                        entry[name] = None
+                        continue
+                    freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
+                    entry[name] = freq
+                per_gpu.append(entry)
+        finally:
+            amdsmi.amdsmi_shut_down()
+        return per_gpu
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -201,12 +295,8 @@ class TestCliBase(unittest.TestCase):
         self.AddWatchArgs = True
         self.AddLogLevel = "--loglevel DEBUG"
 
-        self.PASS = 0
+        self.PASS = amdsmi.AmdSmiStatus.SUCCESS
         self.FAIL = 1
-        # Condition for help-derived sweeps (CreateCmds), which enumerate every
-        # advertised option without knowing what this ASIC supports. Any other
-        # non-zero code still fails.
-        self.PASS_OR_UNSUPPORTED = "pass_or_unsupported"
         self.tab = "    "
         self.tmp_filename = self.TMP_FILENAME
         self.tmp_folder = self.TMP_FOLDER
@@ -240,8 +330,8 @@ class TestCliBase(unittest.TestCase):
         self.memory_partition_modes = ["NPS1", "NPS2", "NPS4", "NPS8"]
         self.power_types = ["ppt0", "ppt1"]
         self.ptl_formats = ["I8", "F16", "BF16", "F32", "F64", "F8", "VECTOR"]
-        self.clk_limits = ["SCLK", "MCLK"]
-        self.limit_types = ["MIN", "MAX"]
+        self.clk_limits = ["SCLK", "MCLK", "FCLK"]
+        self.limit_types = ["MAX", "MIN"]
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal
@@ -406,10 +496,15 @@ class TestCliBase(unittest.TestCase):
                             elif (
                                 sub_arg == "CLK_TYPE" and "limit" in items[item_index]
                             ):  # arg --clk-limit
-                                options.append(f"{items[item_index]} {{clk_limit_sclk_min}}")
+                                # Raise the ceiling before the floor: a MIN above the
+                                # current MAX is refused, so MIN-first cannot widen a
+                                # range upwards.
                                 options.append(f"{items[item_index]} {{clk_limit_sclk_max}}")
-                                options.append(f"{items[item_index]} {{clk_limit_mclk_min}}")
+                                options.append(f"{items[item_index]} {{clk_limit_sclk_min}}")
                                 options.append(f"{items[item_index]} {{clk_limit_mclk_max}}")
+                                options.append(f"{items[item_index]} {{clk_limit_mclk_min}}")
+                                options.append(f"{items[item_index]} {{clk_limit_fclk_max}}")
+                                options.append(f"{items[item_index]} {{clk_limit_fclk_min}}")
                             elif (
                                 sub_arg == "STATUS" and "process" in items[item_index]
                             ):  # arg --process-isolation
@@ -427,6 +522,7 @@ class TestCliBase(unittest.TestCase):
                             options.append(items[item_index])
             if match_str in line:
                 found = True
+
         if not options:
             return ["pass"]
         return options
@@ -449,7 +545,9 @@ class TestCliBase(unittest.TestCase):
 
         cmds = []
         cmd = f"amd-smi {cmd_name}"
-        ok = self.PASS_OR_UNSUPPORTED
+        ok = [self.PASS]
+        if cmd_name in self.NOT_SUPPORTED_TOLERANT_COMMANDS:
+            ok.append(amdsmi.AmdSmiStatus.NOT_SUPPORTED)
         for list1_arg in list1_args:
             if list1_arg != "pass":
                 cmds.append((f"{cmd} {list1_arg} {self.AddLogLevel}", ok))
@@ -492,12 +590,14 @@ class TestCliBase(unittest.TestCase):
             cmd, cond = cmd_cond
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
-                # Find gpu index
+                # Find gpu index. No --gpu, "all" or a bdf all target every device.
+                explicit_gpu = False
                 try:
                     i = items.index("--gpu")
                     gpu = items[i + 1]
                     if gpu.isdigit():
                         gpu_index = int(gpu)
+                        explicit_gpu = True
                     else:
                         gpu_index = 0
                 except ValueError:
@@ -552,14 +652,15 @@ class TestCliBase(unittest.TestCase):
                     nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
                 ):
                     # For setting --power-cap
-                    # Find power_type
+                    # Stop at the match; a later iteration would overwrite it with "N/A".
                     for power_type in self.power_types:
                         if power_type in cmd:
                             power_type = self.static_data["gpu_data"][gpu_index]["limit"][
                                 power_type
                             ]
-                        else:
-                            power_type = "N/A"
+                            break
+                    else:
+                        power_type = "N/A"
                     if (
                         power_type == "N/A"
                         or not isinstance(power_type, dict)
@@ -568,7 +669,14 @@ class TestCliBase(unittest.TestCase):
                     ):
                         cmd = ""
                     else:
-                        min_power = power_type["min_power_limit"]["value"]
+                        # A current cap of 0 means the CLI refuses every write to this
+                        # sensor, whatever value is asked for.
+                        current_cap = power_type["socket_power_limit"]
+                        if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                            cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                        # The CLI clamps its lower bound to 1, so a reported min of 0
+                        # is refused rather than being the smallest settable cap.
+                        min_power = max(power_type["min_power_limit"]["value"], 1)
                         max_power = power_type["max_power_limit"]["value"]
                         avg_power = int((min_power + max_power) / 2)
                         if nameStr == "{min_power}":
@@ -589,69 +697,26 @@ class TestCliBase(unittest.TestCase):
                     else:
                         cmd = ""
                 elif "clk_limit" in nameStr:
-                    clock = self.metric_data["gpu_data"][gpu_index]["clock"]
-                    clk_type = clk_type_name = limit_type = clk_limit_name = ""
-                    if nameStr == "{clk_limit_sclk_min}":
-                        clk_type = "SCLK"
-                        clk_type_name = "socclk_0"
-                        limit_type = "MIN"
-                        clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_sclk_max}":
-                        clk_type = "SCLK"
-                        clk_type_name = "socclk_0"
-                        limit_type = "MAX"
-                        clk_limit_name = "max_clk"
-                    elif nameStr == "{clk_limit_mclk_min}":
-                        clk_type = "MCLK"
-                        clk_type_name = "mem_0"
-                        limit_type = "MAX"
-                        clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_mclk_max}":
-                        clk_type = "MCLK"
-                        clk_type_name = "mem_0"
-                        limit_type = "MIN"
-                        clk_limit_name = "max_clk"
-                    clk_type_limit_name = clock[clk_type_name][clk_limit_name]
-                    if type(clk_type_limit_name) is dict:
-                        value = clk_type_limit_name["value"]
-                        cmd = cmd.replace(nameStr, f"{clk_type} {limit_type} {value}", 1)
-                    else:
+                    clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
+                    value = self._clk_limit_probe_value(
+                        self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
+                    )
+                    if value is None:
                         cmd = ""
+                    else:
+                        cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
                 elif "clk_level" in nameStr:
-                    clock = self.static_data["gpu_data"][gpu_index]["clock"]
-                    value = -1
-                    clk_type = clk_type_name = ""
-                    if nameStr == "{clk_level_sclk}":
-                        clk_type = "SCLK"
-                        clk_type_name = "sys"
-                    elif nameStr == "{clk_level_mclk}":
-                        clk_type = "MCLK"
-                        clk_type_name = "mem"
-                    elif nameStr == "{clk_level_fclk}":
-                        clk_type = "FCLK"
-                        clk_type_name = "df"
-                    elif nameStr == "{clk_level_socclk}":
-                        clk_type = "SOCCLK"
-                        clk_type_name = "soc"
-                    elif nameStr == "{clk_level_pcie}":
-                        bus = self.static_data["gpu_data"][gpu_index]["bus"]
-                        clk_type = "PCIE"
-                        pcie_levels = bus["pcie_levels"]
-                        if type(pcie_levels) is dict:
-                            value = len(pcie_levels)
-                            if value > 0:
-                                value = 0
-                    if clk_type != "PCIE" and value < 0:
-                        clk_type_name = clock[clk_type_name]
-                        if type(clk_type_name) is dict:
-                            current_level = clk_type_name["current_level"]
-                            freq_levels = clk_type_name["frequency_levels"]
-                            if current_level == 0:
-                                value = len(freq_levels) - 1
-                            else:
-                                value = 0
-                    if value >= 0:
-                        cmd = cmd.replace(nameStr, f"{clk_type} {value}", 1)
+                    clk_type = CLK_LEVEL_TYPES[nameStr]
+                    count = self._clk_level_count(clk_type, gpu_index, explicit_gpu)
+                    if clk_type != "PCIE":
+                        # A DPM table's length is a runtime value, not a fixed property:
+                        # the same device reports fewer levels when the domain is idle.
+                        # The CLI re-reads it as the command runs, so a mask sized here
+                        # can name a level it no longer accepts.
+                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                    if count:
+                        levels = " ".join(str(level) for level in range(count))
+                        cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
                     else:
                         cmd = ""
                 elif nameStr == "{soc_pstate}":
@@ -792,27 +857,139 @@ class TestCliBase(unittest.TestCase):
         """Reply to pipe to a command whose parser prompts, else None."""
         return self._lookup(self.PROMPT_ANSWERS, cmd)
 
-    def _grade(self, cond, rc, file_error, detail):
-        """Judge one command result -> (message suffix, counts as a failure).
+    def _clk_level_count(self, clk_type, gpu_index, explicit_gpu):
+        """How many levels a ``--clk-level`` mask for *clk_type* may name.
 
-        Ordered most-specific first so each case reads on its own; the tolerated
-        case has to come first or every later branch needs to exclude it.
+        Args:
+            clk_type: clock name as the CLI spells it, e.g. ``SOCCLK``.
+            gpu_index: device the command reads its values from.
+            explicit_gpu: whether the command named that device, as opposed to
+                defaulting to it while actually running on every device.
+
+        Returns:
+            int: the highest settable level plus one, or 0 when the device does
+            not expose the clock -- in which case the caller drops the command.
         """
-        # The device lacks the feature. Only the help-derived sweep asks for this
-        # leniency, and only for this one code -- any other failure still counts.
-        if cond == self.PASS_OR_UNSUPPORTED and rc == NOT_SUPPORTED_EXIT:
-            return f" Unsupported: Received and Allowed FAIL ({detail})", False
+        if clk_type == "PCIE":
+            pcie_levels = self.static_data["gpu_data"][gpu_index]["bus"]["pcie_levels"]
+            return len(pcie_levels) if isinstance(pcie_levels, dict) else 0
 
-        expects_pass = cond in (self.PASS, self.PASS_OR_UNSUPPORTED)
-        if rc and expects_pass:
-            return f" Failure: Received FAIL ({detail}), expected PASS (0)", True
-        if not rc and not expects_pass:
-            return " Failure: Received PASS (0), expected FAIL (!0)", True
-        if file_error is not None and expects_pass:
-            return f" Failure: {file_error}", True
+        # Without an explicit --gpu the command runs on every device, so the mask
+        # has to be one the smallest table also accepts.
+        tables = [self.clk_freq[gpu_index]] if explicit_gpu else self.clk_freq
+        per_gpu = []
+        for table in tables:
+            freq = table.get(clk_type)
+            if freq and freq["num_supported"]:
+                # The deep-sleep row occupies a table slot but is not settable.
+                per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
+        return min(per_gpu) if per_gpu else 0
 
-        expected = "PASS" if not rc else "FAIL"
-        return f" Success: Received and Expected {expected} ({detail})", False
+    @staticmethod
+    def _clk_limit_value(clocks, clk_type, bound):
+        """The clock's currently reported *bound*, or None when it is not readable.
+
+        Args:
+            clocks: the ``clock`` object from ``metric --json`` for one device.
+            clk_type: clock name as the CLI spells it, e.g. ``SCLK``.
+            bound: ``"MIN"`` or ``"MAX"``.
+
+        Returns:
+            int | None: the reported value, or None when the device does not
+            report it.
+        """
+        entry = clocks.get(CLK_LIMIT_METRIC_KEYS[clk_type])
+        if not isinstance(entry, dict):
+            return None
+        value = entry["min_clk" if bound == "MIN" else "max_clk"]
+        return value["value"] if isinstance(value, dict) else None
+
+    @classmethod
+    def _clk_limit_probe_value(cls, clocks, clk_type, bound):
+        """A value inside the clock's reported range, or None when there is none.
+
+        Replaying the reported bound is a no-op -- the CLI answers "already set"
+        -- so a sweep built from it never shows that a limit can move.
+
+        Args:
+            clocks: the ``clock`` object from ``metric --json`` for one device.
+            clk_type: clock name as the CLI spells it, e.g. ``SCLK``.
+            bound: ``"MIN"`` or ``"MAX"``.
+
+        Returns:
+            int | None: the value to send, or None when the clock is unreadable
+            or its range is too narrow to step into.
+        """
+        low = cls._clk_limit_value(clocks, clk_type, "MIN")
+        high = cls._clk_limit_value(clocks, clk_type, "MAX")
+        if low is None or high is None:
+            return None
+
+        # A quarter in from each end leaves MIN below MAX whichever is written first.
+        quarter = (high - low) // 4
+        if quarter <= 0:
+            return None
+        target = low + quarter if bound == "MIN" else high - quarter
+
+        # Rounding up can carry a narrow range past its own ceiling. It cannot fall
+        # below the floor: quarter is at least 1, so target already exceeds it.
+        target = math.ceil(target / CLK_LIMIT_MHZ_STEP) * CLK_LIMIT_MHZ_STEP
+        return min(target, high)
+
+    def _accepted_codes(self, cond):
+        """Exit codes *cond* names, as a tuple; a bare code becomes a 1-tuple.
+
+        Args:
+            cond: one exit code, or a list/tuple of the codes that are acceptable.
+
+        Returns:
+            tuple: the accepted codes, in the order they were declared.
+        """
+        if isinstance(cond, (list, tuple)):
+            return tuple(cond)
+        return (cond,)
+
+    def _grade(self, cond, rc, file_error, detail):
+        """Judge one command result against the outcome it declared.
+
+        Args:
+            cond: the declared outcome -- an exit code, a list of acceptable
+                codes, or ``self.FAIL`` for "any non-zero code will do".
+            rc: the exit code the command actually returned.
+            file_error: complaint about the ``--file`` output, or None.
+            detail: the ``rc=N NAME`` fragment every verdict line ends with.
+
+        Returns:
+            Verdict: the message to print and whether it counts as a failure.
+        """
+        # The one condition naming no specific code, so it cannot go through
+        # the accepted-code comparison below.
+        if cond == self.FAIL:
+            if not rc:
+                return Verdict(" Failure: Received PASS (0), expected FAIL (!0)", True)
+            return Verdict(f" Success: Received and Expected FAIL ({detail})", False)
+
+        accept = self._accepted_codes(cond)
+        if rc not in accept:
+            received = "PASS" if not rc else "FAIL"
+            return Verdict(
+                f" Failure: Received {received} ({detail}), expected {_describe_codes(accept)}",
+                True,
+            )
+
+        tolerates_pass = self.PASS in accept
+        if file_error is not None and tolerates_pass:
+            return Verdict(f" Failure: {file_error}", True)
+
+        if not rc:
+            if accept == (self.PASS,):
+                return Verdict(f" Success: Received and Expected PASS ({detail})", False)
+            return Verdict(f" Success: Received PASS ({detail})", False)
+        # A non-zero code accepted alongside PASS is leniency, not a declared outcome.
+        if tolerates_pass:
+            prefix = "Unsupported" if rc == amdsmi.AmdSmiStatus.NOT_SUPPORTED else "Success"
+            return Verdict(f" {prefix}: Received and Allowed FAIL ({detail})", False)
+        return Verdict(f" Success: Received and Expected FAIL ({detail})", False)
 
     def RunCmds(self, cmds):
         errors = []
@@ -854,9 +1031,9 @@ class TestCliBase(unittest.TestCase):
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            outcome, is_error = self._grade(cond, rc, file_error, detail)
-            msg += outcome
-            if is_error:
+            verdict = self._grade(cond, rc, file_error, detail)
+            msg += verdict.message
+            if verdict.counts_as_failure:
                 errors.append(msg)
 
             self.common.print(f"{self.tab}{msg}")

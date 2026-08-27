@@ -408,7 +408,11 @@ def build_type_lists():
         elif member.name in ["NPS1", "NPS2", "NPS4", "NPS8"]:
             # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
             # BTW - no asic supports NPS8...
-            cond = [PASS, FAIL, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            cond = [
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.INVAL,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            ]
         memory_partition_types.append(
             (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
         )
