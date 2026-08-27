@@ -113,19 +113,22 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                 : std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &item) {
                     return item.name == kernel->name;
                   });
-        if (active_kernel == code_object.kernels().end() ||
-            active_kernel->descriptor_file_offset > active_bytes.size() ||
-            sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+        if (active_kernel == code_object.kernels().end()) {
           result.warnings.emplace_back(
               "ConSan MOI fence record spill could not resolve its active descriptor");
           active_descriptor_missing = true;
           break;
         }
-        KD descriptor{};
-        std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
-                    sizeof(descriptor));
+        const auto descriptor =
+            read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
+        if (!descriptor) {
+          result.warnings.emplace_back(
+              "ConSan MOI fence record spill could not resolve its active descriptor");
+          active_descriptor_missing = true;
+          break;
+        }
         *active_private_size =
-            std::max(*active_private_size, descriptor.private_segment_fixed_size);
+            std::max(*active_private_size, descriptor->private_segment_fixed_size);
       }
       if (active_descriptor_missing)
         continue;

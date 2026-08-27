@@ -214,13 +214,12 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
   const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+    const auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+    if (!descriptor) {
       warnings.emplace_back("ConSan MOI workgroup shadow descriptor exceeds ELF bytes");
       return std::nullopt;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    auto layout = plan_consan_moi_workgroup_shadow(descriptor.group_segment_fixed_size,
+    auto layout = plan_consan_moi_workgroup_shadow(descriptor->group_segment_fixed_size,
                                                    max_workgroup_lds_bytes);
     if (!layout) {
       warnings.emplace_back(
@@ -236,11 +235,11 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // not fit, the caller uses the semantically equivalent external table.
     if (consan_uses_gfx12_encoding(arch)) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
-              descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {
+              descriptor->group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;
       }
     }
-    const auto workitem_id_dimensions = moi_descriptor_workitem_id_dimensions(descriptor);
+    const auto workitem_id_dimensions = moi_descriptor_workitem_id_dimensions(*descriptor);
     if (!workitem_id_dimensions) {
       warnings.emplace_back("ConSan MOI workgroup shadow has invalid workitem-ID dimensions");
       return std::nullopt;
@@ -618,23 +617,25 @@ private:
     const AmdGpuKernelInfo *active_kernel =
         kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (kernel == nullptr || active_kernel == nullptr ||
-        active_kernel->descriptor_file_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - active_kernel->descriptor_file_offset) {
+    if (kernel == nullptr || active_kernel == nullptr) {
       errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
       return false;
     }
-
-    std::vector<uint8_t> descriptor(sizeof(KD));
-    std::memcpy(descriptor.data(), current_image.data() + active_kernel->descriptor_file_offset,
-                sizeof(KD));
+    auto descriptor = read_kernel_descriptor(current_image, active_kernel->descriptor_file_offset);
+    if (!descriptor) {
+      errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
+      return false;
+    }
     const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        descriptor, /*descriptor_file_offset=*/0, required_private_bytes);
+        {reinterpret_cast<uint8_t *>(&*descriptor), sizeof(*descriptor)},
+        /*descriptor_file_offset=*/0, required_private_bytes);
     if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
       errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
       return false;
     }
-    if (!patcher.patch_kernel_descriptor(active_kernel->descriptor_file_offset, descriptor)) {
+    if (!patcher.patch_kernel_descriptor(
+            active_kernel->descriptor_file_offset,
+            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
       errors.emplace_back("ConSan MOI could not patch the owning kernel spill descriptor");
       return false;
     }
@@ -657,22 +658,19 @@ private:
     }
     const uint64_t active_descriptor_offset = active_kernel->descriptor_file_offset;
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (active_descriptor_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - active_descriptor_offset) {
+    auto descriptor = read_kernel_descriptor(current_image, active_descriptor_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (!grow_descriptor_sgpr_allocation(descriptor, required_count,
+    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count,
                                          result.program_inventory.arch())) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
     if (!patcher.patch_kernel_descriptor(
             active_descriptor_offset,
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&descriptor),
-                                     sizeof(descriptor)))) {
+            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
       errors.emplace_back("ConSan MOI could not patch the planned descriptor SGPR allocation");
       return false;
     }
@@ -695,23 +693,20 @@ private:
     }
     const uint64_t active_descriptor_offset = active_kernel->descriptor_file_offset;
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (active_descriptor_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - active_descriptor_offset) {
+    auto descriptor = read_kernel_descriptor(current_image, active_descriptor_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
     if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
-        descriptor.group_segment_fixed_size > required_bytes) {
+        descriptor->group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
     }
-    descriptor.group_segment_fixed_size = required_bytes;
+    descriptor->group_segment_fixed_size = required_bytes;
     if (!patcher.patch_kernel_descriptor(
             active_descriptor_offset,
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&descriptor),
-                                     sizeof(descriptor)))) {
+            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
       errors.emplace_back("ConSan MOI could not patch the planned fixed-LDS reservation");
       return false;
     }
@@ -725,7 +720,8 @@ private:
                                                  rj_code_arch_t arch,
                                                  std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
-    if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan MOI resource-plan descriptor exceeds ELF bytes");
       return false;
     }
@@ -735,10 +731,8 @@ private:
       errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
     if (!grow_descriptor_vgpr_allocation(
-            descriptor,
+            *descriptor,
             {.required_ordinary_count = required_count,
              .maximum_ordinary_count = kMaxVgprs,
              .accumulator_bank_is_proven_empty = kernel->agpr_count == 0u},
@@ -746,7 +740,8 @@ private:
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
       return false;
     }
-    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
+      return false;
   }
   return true;
 }
@@ -755,7 +750,8 @@ private:
     std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
     const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
-    if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
       return false;
     }
@@ -763,14 +759,13 @@ private:
       errors.emplace_back("ConSan MOI scalar plan references an unknown kernel descriptor");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_descriptor_sgpr_allocation(descriptor, required_count,
+    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count,
                                          result.program_inventory.arch())) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
-    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
+      return false;
   }
   return true;
 }
@@ -780,20 +775,20 @@ private:
     const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
     rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
-    if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
+    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+    if (!descriptor ||
         result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes or has no owner");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
     if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
-        descriptor.group_segment_fixed_size > required_bytes) {
+        descriptor->group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
     }
-    descriptor.group_segment_fixed_size = required_bytes;
-    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+    descriptor->group_segment_fixed_size = required_bytes;
+    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
+      return false;
   }
   return true;
 }

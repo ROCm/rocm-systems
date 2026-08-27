@@ -1624,13 +1624,12 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     }
     const uint64_t descriptor_offset = kernel.descriptor_file_offset;
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (descriptor_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - descriptor_offset) {
+    auto descriptor_value = read_kernel_descriptor(current_image, descriptor_offset);
+    if (!descriptor_value) {
       result.errors.emplace_back("ConSan MOI workgroup-ID descriptor exceeds replacement bytes");
       return false;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
+    KD &descriptor = *descriptor_value;
     if (consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
       const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(descriptor);
       const uint32_t required_sgpr_count =
@@ -1673,16 +1672,14 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
                                      uint32_t required_vgpr_count, uint32_t required_sgpr_count,
                                      rj_code_arch_t arch, std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
-  if (kernel.descriptor_file_offset > current_image.size() ||
-      sizeof(KD) > current_image.size() - kernel.descriptor_file_offset) {
+  auto descriptor = read_kernel_descriptor(current_image, kernel.descriptor_file_offset);
+  if (!descriptor) {
     errors.emplace_back("ConSan MOI descriptor register growth exceeds ELF bytes");
     return false;
   }
 
-  KD desc{};
-  std::memcpy(&desc, current_image.data() + kernel.descriptor_file_offset, sizeof(desc));
   if (!grow_descriptor_vgpr_allocation(
-          desc,
+          *descriptor,
           {.required_ordinary_count = required_vgpr_count,
            .maximum_ordinary_count = kMaxVgprs,
            .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
@@ -1692,12 +1689,13 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
     return false;
   }
   if (required_sgpr_count != 0 &&
-      !grow_descriptor_sgpr_allocation(desc, required_sgpr_count, arch)) {
+      !grow_descriptor_sgpr_allocation(*descriptor, required_sgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor SGPR allocation");
     return false;
   }
-  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset,
-                                       {reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)})) {
+  if (!patcher.patch_kernel_descriptor(
+          kernel.descriptor_file_offset,
+          {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
     errors.emplace_back("ConSan MOI could not patch descriptor register allocation");
     return false;
   }
@@ -1711,8 +1709,8 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
                                                     rj_code_arch_t arch,
                                                     std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
-  if (descriptor_file_offset > current_image.size() ||
-      sizeof(KD) > current_image.size() - descriptor_file_offset) {
+  auto descriptor_value = read_kernel_descriptor(current_image, descriptor_file_offset);
+  if (!descriptor_value) {
     errors.emplace_back("ConSan MOI dispatch-ID descriptor exceeds ELF bytes");
     return false;
   }
@@ -1723,8 +1721,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
     return false;
   }
 
-  KD desc{};
-  std::memcpy(&desc, current_image.data() + descriptor_file_offset, sizeof(desc));
+  KD &desc = *descriptor_value;
   const ConSanMoiDispatchIdPreloadPlan current_plan =
       moi_descriptor_dispatch_id_preload_plan(desc, arch);
   if (current_plan.support != plan.support ||
@@ -1867,14 +1864,13 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       continue;
     }
 
-    if (active_kernel->descriptor_file_offset > active_bytes.size() ||
-        sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+    const auto descriptor_value =
+        read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
+    if (!descriptor_value) {
       result.errors.emplace_back("ConSan MOI private-epoch descriptor exceeds ELF bytes");
       return;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
-                sizeof(descriptor));
+    const KD &descriptor = *descriptor_value;
 
     if (!access_patch->persistent_epoch_private_offset)
       continue;
@@ -1972,16 +1968,14 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     SpillManager manager(layout.ephemeral_base, *private_limit);
     uint8_t workitem_id_dimensions = 1u;
     if (access_patch->workgroup_shadow_size != 0u) {
-      if (active_kernel->descriptor_file_offset > active_bytes.size() ||
-          sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+      const auto workitem_descriptor =
+          read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
+      if (!workitem_descriptor) {
         result.errors.emplace_back(
             "ConSan MOI private-epoch prologue workitem descriptor exceeds ELF bytes");
         return;
       }
-      KD descriptor{};
-      std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
-                  sizeof(descriptor));
-      const auto dimensions = moi_descriptor_workitem_id_dimensions(descriptor);
+      const auto dimensions = moi_descriptor_workitem_id_dimensions(*workitem_descriptor);
       if (!dimensions) {
         result.errors.emplace_back(
             "ConSan MOI private-epoch prologue has invalid workitem-ID dimensions");
@@ -2011,17 +2005,16 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_private_record_replay_workgroup &&
           consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
-        if (active_kernel->descriptor_file_offset > active_bytes.size() ||
-            sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+        const auto exact_tuple_descriptor =
+            read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
+        if (!exact_tuple_descriptor) {
           result.errors.emplace_back("ConSan MOI private exact-tuple descriptor exceeds ELF bytes");
           return;
         }
-        KD descriptor{};
-        std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
-                    sizeof(descriptor));
         full_payload_user_sgpr_count =
-            dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
-                          : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor));
+            dispatch_plan
+                ? dispatch_plan->expanded_user_sgpr_count
+                : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(*exact_tuple_descriptor));
       }
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active_kernel->descriptor_file_offset, arch, source_errors,
@@ -2485,8 +2478,9 @@ void try_apply_owner_epoch_prologue_patch(
       kernel_options.moi_owner_vgpr = scratch->scratch_vgpr;
       kernel_options.moi_epoch_vgpr = static_cast<uint16_t>(scratch->scratch_vgpr + 1u);
     }
-    if (active.descriptor_file_offset > active_bytes.size() ||
-        sizeof(KD) > active_bytes.size() - active.descriptor_file_offset) {
+    const auto descriptor_value =
+        read_kernel_descriptor(active_bytes, active.descriptor_file_offset);
+    if (!descriptor_value) {
       if (dispatch_capture.present()) {
         rollback_moi_dispatch_id_as_unsupported(result, "owner descriptor exceeds ELF bytes");
         return;
@@ -2494,9 +2488,7 @@ void try_apply_owner_epoch_prologue_patch(
       result.errors.emplace_back("ConSan MOI owner/epoch descriptor exceeds ELF bytes");
       return;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, active_bytes.data() + active.descriptor_file_offset,
-                sizeof(descriptor));
+    const KD &descriptor = *descriptor_value;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     if (dispatch_capture.present()) {
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
@@ -2641,16 +2633,13 @@ void try_apply_owner_epoch_prologue_patch(
             "ConSan MOI entry scalar backup overlaps persistent output state");
         return;
       }
-      if (kernel.descriptor_file_offset > bytes.size() ||
-          sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
+      const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
+      if (!original_descriptor) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup descriptor exceeds original ELF bytes");
         return;
       }
-      KD original_descriptor{};
-      std::memcpy(&original_descriptor, bytes.data() + kernel.descriptor_file_offset,
-                  sizeof(original_descriptor));
-      if (sgpr_count > kernel_wavefront_size(arch, original_descriptor)) {
+      if (sgpr_count > kernel_wavefront_size(arch, *original_descriptor)) {
         result.outcome = ConSanTransformOutcome::Unsupported;
         result.warnings.emplace_back(
             "ConSan MOI entry scalar window exceeds one wave-local VGPR carrier");
@@ -2659,9 +2648,9 @@ void try_apply_owner_epoch_prologue_patch(
 
       const uint32_t entry_abi_vgpr_count = *workitem_id_dimensions;
       const uint32_t original_allocation =
-          descriptor_ordinary_vgpr_allocation_count(original_descriptor, arch);
+          descriptor_ordinary_vgpr_allocation_count(*original_descriptor, arch);
       const uint32_t unified_allocation =
-          descriptor_vgpr_allocation_count(original_descriptor, arch);
+          descriptor_vgpr_allocation_count(*original_descriptor, arch);
       const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
       const uint32_t tail_begin = std::max(original_allocation, entry_abi_vgpr_count);
       const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
