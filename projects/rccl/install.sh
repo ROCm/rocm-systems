@@ -38,6 +38,8 @@ use_ninja=false
 force_reduce_pipeline=false
 generate_sym_kernels=true
 device_linker=true
+enable_object_linking=false
+enable_thinlto=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
 quiet_warnings=false
@@ -94,6 +96,7 @@ function display_help()
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
     echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
+    echo "       --object-linking        Enable offload object linking (-foffload-object-linking; implies --no-device-linker)"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
@@ -105,6 +108,7 @@ function display_help()
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
+    echo "       --thinlto               Enable offload ThinLTO (-foffload-lto=thin; implies --no-device-linker)"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
     echo "       --ninja                 Use the Ninja generator instead of Make (requires \`ninja-build\`; recommended for multi-arch builds)"
     echo "       --verbose               Show compile commands"
@@ -113,6 +117,8 @@ function display_help()
     echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
+    echo "    -DENABLE_OBJECT_LINKING=ON            Enable offload object linking (default: OFF; incompatible with device linker)"
+    echo "    -DENABLE_THINLTO=ON                   Enable offload ThinLTO (default: OFF; incompatible with device linker)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
@@ -137,7 +143,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,object-linking,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,thinlto,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -178,6 +184,7 @@ while true; do
          --ninja)                    use_ninja=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --no-device-linker)         device_linker=false;                                                                              shift ;;
+         --object-linking)           enable_object_linking=true;                                                                       shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
     -p | --package_build)            build_package=true;                                                                               shift ;;
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
@@ -188,6 +195,7 @@ while true; do
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
+         --thinlto)                  enable_thinlto=true;                                                                              shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
          --verbose)                  build_verbose=true;                                                                               shift ;;
     --) shift ; break ;;
@@ -200,6 +208,14 @@ done
 if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
     echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
     exit 1
+fi
+
+# Object linking / ThinLTO cannot be used with the assembly-extract device linker.
+if [[ "${enable_object_linking}" == true || "${enable_thinlto}" == true ]]; then
+    if [[ "${device_linker}" == true ]]; then
+        echo "Disabling device linker: --object-linking/--thinlto is incompatible with ENABLE_DEVICE_LINKER"
+        device_linker=false
+    fi
 fi
 
 # /etc/*-release files describe the system
@@ -434,6 +450,16 @@ fi
 # Enabled by default; pass -DENABLE_DEVICE_LINKER=OFF when explicitly disabled.
 if [[ "${device_linker}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
+fi
+
+# Offload object linking (-foffload-object-linking)
+if [[ "${enable_object_linking}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_OBJECT_LINKING=ON"
+fi
+
+# Offload ThinLTO (-foffload-lto=thin)
+if [[ "${enable_thinlto}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_THINLTO=ON"
 fi
 
 # Enable WARP_SPEED only on MI350/MI300 platforms

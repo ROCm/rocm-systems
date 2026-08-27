@@ -49,6 +49,7 @@ if(TARGET roc::rccl)
   add_library(verifiable STATIC "${VERIFIABLE_HIPIFIED_SOURCE}")
   add_dependencies(verifiable verifiable_hipify)
   set_target_properties(verifiable PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  rccl_tests_apply_offload_flags(verifiable)
 
   target_link_libraries(verifiable
     PUBLIC
