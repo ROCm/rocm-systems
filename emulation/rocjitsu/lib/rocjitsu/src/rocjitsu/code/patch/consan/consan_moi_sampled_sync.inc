@@ -108,7 +108,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
     std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
-  const bool scalar_persistent = moi_uses_scalar_persistent_state(options);
+  const bool scalar_persistent = options.moi_persistent_sgprs.complete();
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_epoch_vgpr ||
       !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       options.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
@@ -992,7 +992,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       continue;
     }
     const uint16_t scratch_count = candidate_options.automatic_moi_private_epoch ||
-                                           moi_uses_scalar_persistent_state(candidate_options)
+                                           candidate_options.moi_persistent_sgprs.complete()
                                        ? 9u
                                        : 7u;
     if (plan.scratch_vgpr_count != scratch_count) {
@@ -1059,7 +1059,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
       return false;
     }
-    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
+    if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
     } else if (!apply_moi_persistent_vgpr_assignment(
@@ -1352,7 +1352,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
               "ConSan MOI sampled dense barrier lost its transient scalar assignment");
           return;
         }
-        if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
+        if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
         } else if (!apply_moi_persistent_vgpr_assignment(
@@ -2215,7 +2215,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
       return std::nullopt;
     }
-    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
+    if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
       candidate_options.moi_owner_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
       candidate_options.moi_epoch_vgpr =

@@ -1133,7 +1133,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.operands.destination_vgpr &&
          candidate.origin != ConSanAccessOrigin::DirectToLds && options.moi_owner_vgpr &&
-         !options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
+         !options.automatic_moi_private_epoch && !options.moi_persistent_sgprs.complete() &&
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
 }
 
@@ -1143,7 +1143,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
     return true;
   if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.operands.destination_vgpr ||
       candidate.origin == ConSanAccessOrigin::DirectToLds || options.automatic_moi_private_epoch ||
-      moi_uses_scalar_persistent_state(options) ||
+      options.moi_persistent_sgprs.complete() ||
       candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
     return false;
   }
@@ -1231,8 +1231,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
            : 0u) +
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
-       : moi_uses_scalar_persistent_state(options) ? 2u
-                                                   : 0u) +
+       : options.moi_persistent_sgprs.complete() ? 2u
+                                                 : 0u) +
       two_address_replay_count);
 }
 
@@ -1514,7 +1514,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
                                      const ConSanMoiRegisterAllocation &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
   if (allocation.owner_persistent_vgprs.empty()) {
-    return options.moi_owner_vgpr.has_value() || moi_uses_scalar_persistent_state(options) ||
+    return options.moi_owner_vgpr.has_value() || options.moi_persistent_sgprs.complete() ||
            options.automatic_moi_private_epoch;
   }
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
@@ -7109,7 +7109,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
 }
 
 [[nodiscard]] bool automatic_moi_persistent_state(const ConSanOptions &options) {
-  return options.automatic_moi_persistent_vgprs || moi_uses_scalar_persistent_state(options) ||
+  return options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete() ||
          options.automatic_moi_private_epoch;
 }
 

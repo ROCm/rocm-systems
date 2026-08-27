@@ -1512,7 +1512,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             words, bytes, *candidate.kernel_descriptor_file_offset, options,
                             *private_layout, arch, errors))
     return false;
-  if (moi_uses_scalar_persistent_state(options)) {
+  if (options.moi_persistent_sgprs.complete()) {
     if (!consan_detail::validate_scalar_state_temporaries(options, "sampled atomic prelude",
                                                           errors))
       return false;

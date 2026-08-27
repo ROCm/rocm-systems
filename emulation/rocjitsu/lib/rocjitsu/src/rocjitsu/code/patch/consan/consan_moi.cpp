@@ -231,7 +231,7 @@ bool consan_detail::scalar_owner_contexts_admit_reserved_window(
 bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,
                                                       std::string_view consumer,
                                                       std::vector<std::string> &errors) {
-  if (!moi_uses_scalar_persistent_state(options) ||
+  if (!options.moi_persistent_sgprs.complete() ||
       (options.moi_owner_vgpr && options.moi_epoch_vgpr)) {
     return true;
   }

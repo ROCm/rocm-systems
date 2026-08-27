@@ -572,7 +572,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       const auto scratch_count_for = [](const ConSanOptions &site_options) {
         return static_cast<uint16_t>(site_options.moi_engine == ConSanMoiEngine::Sampled
                                          ? (site_options.automatic_moi_private_epoch ||
-                                                    moi_uses_scalar_persistent_state(site_options)
+                                                    site_options.moi_persistent_sgprs.complete()
                                                 ? 9u
                                                 : 7u)
                                      : site_options.moi_engine == ConSanMoiEngine::InlineShadow

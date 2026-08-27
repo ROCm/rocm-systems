@@ -513,7 +513,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         continue;
       }
     }
-    if (private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
+    if (private_layout || candidate_options.moi_persistent_sgprs.complete()) {
       uint16_t state_vgpr = static_cast<uint16_t>(resources->base + resources->count);
       if (!private_layout || private_layout->owner_offset)
         candidate_options.moi_owner_vgpr = --state_vgpr;
@@ -857,8 +857,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
-      if (planned_patch.private_epoch_offset ||
-          moi_uses_scalar_persistent_state(candidate_options)) {
+      if (planned_patch.private_epoch_offset || candidate_options.moi_persistent_sgprs.complete()) {
         uint16_t state_vgpr =
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count);
         if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
@@ -1235,7 +1234,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             if (planned_patch.private_epoch_offset ||
-                moi_uses_scalar_persistent_state(candidate_options)) {
+                candidate_options.moi_persistent_sgprs.complete()) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
                                                           planned_patch.resources.count);
               if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)

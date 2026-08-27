@@ -261,6 +261,10 @@ struct ConSanMoiPersistentSgprState {
   /// Exact x/y/z and optional gfx1250 cluster coordinates retained by
   /// Record/Replay and Sampled instrumentation.
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+
+  /// Return whether the mandatory owner/epoch pair is present. Optional
+  /// workgroup state refines that pair but cannot make a partial pair usable.
+  [[nodiscard]] bool complete() const { return owner && epoch; }
 };
 
 /// Persistent vector state selected for one connected set of owning kernels.
@@ -864,10 +868,6 @@ struct ConSanOptions : ConSanRequest,
   /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
 };
-
-[[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
-  return options.moi_persistent_sgprs.owner && options.moi_persistent_sgprs.epoch;
-}
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load

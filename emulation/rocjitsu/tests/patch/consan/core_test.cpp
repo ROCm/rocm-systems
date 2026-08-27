@@ -110,6 +110,20 @@ TEST(ConSan, MoiRegisterAllocationEqualityCoversEveryFrozenSelection) {
   EXPECT_NE(changed, allocation);
 }
 
+TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
+  ConSanMoiPersistentSgprState state;
+  EXPECT_FALSE(state.complete());
+
+  state.owner = 12u;
+  EXPECT_FALSE(state.complete());
+
+  state.epoch = 13u;
+  EXPECT_TRUE(state.complete());
+
+  state.owner.reset();
+  EXPECT_FALSE(state.complete());
+}
+
 TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
   std::vector<PhysicalAliasTestCandidate> candidates{
       {.file_offset = 24u,

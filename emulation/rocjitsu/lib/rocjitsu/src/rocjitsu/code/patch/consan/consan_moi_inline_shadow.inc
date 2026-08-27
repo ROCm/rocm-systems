@@ -870,7 +870,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 }
                 return kernel->uses_dynamic_stack.value_or(false) ||
                        options.automatic_moi_persistent_vgprs ||
-                       moi_uses_scalar_persistent_state(options);
+                       options.moi_persistent_sgprs.complete();
               });
       DbiPatchPlacementRequest placement_request;
       placement_request.anchor_offset = candidate.anchor();
@@ -1950,10 +1950,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
-  if ((!options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
+  if ((!options.automatic_moi_private_epoch && !options.moi_persistent_sgprs.complete() &&
        reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
                                              scratch_count, "MOI owner", errors)) ||
-      (!options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
+      (!options.automatic_moi_private_epoch && !options.moi_persistent_sgprs.complete() &&
        reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                              scratch_count, "MOI epoch", errors)))
     return std::nullopt;
@@ -2775,7 +2775,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*wait);
     words.push_back(*owner);
   }
-  if (moi_uses_scalar_persistent_state(options)) {
+  if (options.moi_persistent_sgprs.complete()) {
     if (!consan_detail::validate_scalar_state_temporaries(options, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
