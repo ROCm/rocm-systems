@@ -4826,6 +4826,31 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 71.21 seconds. Slice 5AS remains the latest
   periodic physical-gfx950 gate; E2E validation remains outside this work.
 
+### Slice 5BE: share typed debug overrides with lowering
+
+- **One debug representation:** The temporary mutable `ConSanOptions` now
+  inherits the production `ConSanDebugOverrides` instead of redeclaring probe,
+  diagnostic, kernel-filter, and explicit-register controls. Existing lowerer
+  code therefore reads the actual typed debug subobject. The base also retains
+  hook-only runtime assertions without exposing them as lowering mechanics.
+- **Only semantic translations remain:** `LegacyOptionsAdapter` copies the
+  complete debug subobject in one value-semantic assignment, then translates
+  only `test_force_vgpr_spill` and `test_force_private_epoch` to the lowerer's
+  intentionally shorter internal selector names. The removed thirteen-field
+  projection could drift whenever debug controls changed.
+- **Deletion accounting:** Production adds 63 and deletes 94 physical lines, a
+  net deletion of 31. Most additions relocate the existing documented
+  `ConSanDebugOverrides` definition before its temporary derived lowerer state;
+  no second debug type, accessor layer, or fallback remains. The adapter test
+  adds seven lines to prove the entire inherited value, including hook-only
+  controls, as well as the two explicit name translations.
+- **Checked-in gate:** All seven focused debug-contract and adapter tests pass.
+  The host gate passes all 1,508 runnable tests with the two expected
+  benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests pass; and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 74.07 seconds. Slice 5AS remains the latest
+  periodic physical-gfx950 gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

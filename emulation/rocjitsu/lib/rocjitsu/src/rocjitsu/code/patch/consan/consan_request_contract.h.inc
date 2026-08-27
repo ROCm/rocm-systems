@@ -26,61 +26,6 @@ struct RuntimePolicy {
   bool operator==(const RuntimePolicy &) const = default;
 };
 
-/// Focused-test, diagnostic, and early-development controls that are outside
-/// ConSan's supported semantic request.
-///
-/// Keeping this type separate makes a call site visibly opt into prototype
-/// probes, forced allocation paths, or explicit registers. None of these
-/// fields may influence the meaning of a normal `ConSanRequest`.
-struct ConSanDebugOverrides {
-  /// Replace a selected instruction with a NOP for focused patch testing.
-  bool probe_nop = false;
-  /// Route a selected instruction through a NOP trampoline.
-  bool probe_trampoline_nop = false;
-  /// Replace a selected instruction with program termination.
-  bool probe_endpgm = false;
-  /// Apply the termination probe only to native LDS instructions.
-  bool probe_lds_endpgm = false;
-  /// Replace a selected group-FLAT site with a direct trap probe.
-  bool probe_flat_trap = false;
-  /// Turn a statically unique unmatched barrier wait into a fail-fast probe.
-  bool abort_unmatched_barrier_wait = false;
-  /// Retain address-partition masks for diagnostic inspection.
-  bool moi_partition_mask_debug = false;
-  /// Force the legacy VGPR spill path even when a cheaper plan exists.
-  bool test_force_vgpr_spill = false;
-  /// Force private epoch state even when persistent VGPR state is available.
-  bool test_force_private_epoch = false;
-  /// Seed an odd Inline exact-shadow publication for a teardown fixture.
-  bool test_seed_inline_exact_odd = false;
-  /// Restrict candidate discovery to matching kernel names in focused tests.
-  std::string test_kernel_name_filter;
-
-  /// Explicit scratch VGPR, bypassing normal resource selection.
-  std::optional<uint16_t> scratch_vgpr;
-  /// Explicit even SGPR pair used to preserve EXEC.
-  std::optional<uint16_t> moi_exec_save_sgpr;
-  /// Explicit scalar owner register.
-  std::optional<uint16_t> moi_owner_sgpr;
-  /// Explicit vector owner register.
-  std::optional<uint16_t> moi_owner_vgpr;
-  /// Explicit vector epoch register.
-  std::optional<uint16_t> moi_epoch_vgpr;
-
-  /// Runtime assertion requiring at least one visible MOI record.
-  bool moi_require_records = false;
-  /// Runtime assertion requiring at least one emitted diagnostic.
-  bool moi_require_diagnostics = false;
-  /// Runtime assertion forbidding emitted diagnostics.
-  bool moi_forbid_diagnostics = false;
-  /// Runtime assertion requiring a Record/Replay conflict.
-  bool moi_require_replay_conflict = false;
-  /// Runtime assertion forbidding bounded-evidence overflow.
-  bool moi_forbid_overflow = false;
-
-  bool operator==(const ConSanDebugOverrides &) const = default;
-};
-
 /// Explicit request to corrupt or perturb a program for validation.
 ///
 /// Mutation is transformational and is never implied by ordinary sanitizer
@@ -720,21 +665,9 @@ public:
 
     static_cast<TransformPolicy &>(options) = transform_policy;
 
-    options.probe_nop = debug.probe_nop;
-    options.probe_trampoline_nop = debug.probe_trampoline_nop;
-    options.probe_endpgm = debug.probe_endpgm;
-    options.probe_lds_endpgm = debug.probe_lds_endpgm;
-    options.probe_flat_trap = debug.probe_flat_trap;
-    options.abort_unmatched_barrier_wait = debug.abort_unmatched_barrier_wait;
-    options.moi_partition_mask_debug = debug.moi_partition_mask_debug;
+    static_cast<ConSanDebugOverrides &>(options) = debug;
     options.force_vgpr_spill = debug.test_force_vgpr_spill;
     options.force_private_epoch = debug.test_force_private_epoch;
-    options.test_kernel_name_filter = debug.test_kernel_name_filter;
-    options.scratch_vgpr = debug.scratch_vgpr;
-    options.moi_exec_save_sgpr = debug.moi_exec_save_sgpr;
-    options.moi_owner_sgpr = debug.moi_owner_sgpr;
-    options.moi_owner_vgpr = debug.moi_owner_vgpr;
-    options.moi_epoch_vgpr = debug.moi_epoch_vgpr;
 
     options.fault_drop_barrier = mutation.fault_drop_barrier;
     options.fault_allow_destructive_incomplete_barrier_drop =

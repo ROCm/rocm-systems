@@ -390,6 +390,61 @@ struct ConSanRequest {
   bool operator==(const ConSanRequest &) const = default;
 };
 
+/// Focused-test, diagnostic, and early-development controls that are outside
+/// ConSan's supported semantic request.
+///
+/// Keeping this type separate makes a call site visibly opt into prototype
+/// probes, forced allocation paths, or explicit registers. None of these
+/// fields may influence the meaning of a normal `ConSanRequest`.
+struct ConSanDebugOverrides {
+  /// Replace a selected instruction with a NOP for focused patch testing.
+  bool probe_nop = false;
+  /// Route a selected instruction through a NOP trampoline.
+  bool probe_trampoline_nop = false;
+  /// Replace a selected instruction with program termination.
+  bool probe_endpgm = false;
+  /// Apply the termination probe only to native LDS instructions.
+  bool probe_lds_endpgm = false;
+  /// Replace a selected group-FLAT site with a direct trap probe.
+  bool probe_flat_trap = false;
+  /// Turn a statically unique unmatched barrier wait into a fail-fast probe.
+  bool abort_unmatched_barrier_wait = false;
+  /// Retain address-partition masks for diagnostic inspection.
+  bool moi_partition_mask_debug = false;
+  /// Force the legacy VGPR spill path even when a cheaper plan exists.
+  bool test_force_vgpr_spill = false;
+  /// Force private epoch state even when persistent VGPR state is available.
+  bool test_force_private_epoch = false;
+  /// Seed an odd Inline exact-shadow publication for a teardown fixture.
+  bool test_seed_inline_exact_odd = false;
+  /// Restrict candidate discovery to matching kernel names in focused tests.
+  std::string test_kernel_name_filter;
+
+  /// Explicit scratch VGPR, bypassing normal resource selection.
+  std::optional<uint16_t> scratch_vgpr;
+  /// Explicit even SGPR pair used to preserve EXEC.
+  std::optional<uint16_t> moi_exec_save_sgpr;
+  /// Explicit scalar owner register.
+  std::optional<uint16_t> moi_owner_sgpr;
+  /// Explicit vector owner register.
+  std::optional<uint16_t> moi_owner_vgpr;
+  /// Explicit vector epoch register.
+  std::optional<uint16_t> moi_epoch_vgpr;
+
+  /// Runtime assertion requiring at least one visible MOI record.
+  bool moi_require_records = false;
+  /// Runtime assertion requiring at least one emitted diagnostic.
+  bool moi_require_diagnostics = false;
+  /// Runtime assertion forbidding emitted diagnostics.
+  bool moi_forbid_diagnostics = false;
+  /// Runtime assertion requiring a Record/Replay conflict.
+  bool moi_require_replay_conflict = false;
+  /// Runtime assertion forbidding bounded-evidence overflow.
+  bool moi_forbid_overflow = false;
+
+  bool operator==(const ConSanDebugOverrides &) const = default;
+};
+
 /// Limits on the amount of transformation and placement work one code object
 /// may consume.
 ///
@@ -432,23 +487,14 @@ struct TransformPolicy {
 
 /// Mutable lowerer state retained while the prototype mechanism is migrated.
 ///
-/// The inherited request and transform-policy subobjects are the sole
-/// representations of caller-owned semantic choices and work limits, except
-/// for the temporary non-optional `flavor` lowering sentinel. Members declared
-/// here are state selected and mutated during lowering or input families that
-/// have not yet crossed the compatibility boundary.
-struct ConSanOptions : ConSanRequest, TransformPolicy {
+/// The inherited request, debug-override, and transform-policy subobjects are
+/// the sole representations of those caller-owned inputs, except for the
+/// temporary non-optional `flavor` lowering sentinel and two renamed test-path
+/// selectors. Members declared here are state selected and mutated during
+/// lowering or input families that have not yet crossed the compatibility
+/// boundary.
+struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, TransformPolicy {
   ConSanFlavor flavor = ConSanFlavor::None;
-  bool probe_nop = false;
-  bool probe_trampoline_nop = false;
-  bool probe_endpgm = false;
-  bool probe_lds_endpgm = false;
-  bool probe_flat_trap = false;
-  /// Replace a statically unique immediate barrier wait that belongs to no
-  /// decoded synchronization sequence with a terminal instruction. This is a
-  /// bounded fail-fast diagnostic for definitely ill-formed programs, not a
-  /// guess about dynamic or ambiguous barrier state.
-  bool abort_unmatched_barrier_wait = false;
   bool fault_drop_barrier = false;
   /// Explicit destructive-test opt-in for dropping only one instruction from
   /// an otherwise qualified logical barrier pair.
@@ -501,17 +547,12 @@ struct ConSanOptions : ConSanRequest, TransformPolicy {
   /// shadow. The hook enables this for InlineShadow; direct patcher tests may
   /// leave it disabled while exercising the legacy global layout.
   bool moi_inline_workgroup_shadow = false;
-  /// Debug-only retained capture of the first address-partition pending/group
-  /// masks. Never enable this for qualification or acceptance runs.
-  bool moi_partition_mask_debug = false;
   /// Test-only control that exercises the spill tier even when a dead or
   /// descriptor-growth VGPR window is available.
   bool force_vgpr_spill = false;
   /// Test-only control that exercises derived-owner/private-epoch state even
   /// when a dedicated persistent VGPR pair is available.
   bool force_private_epoch = false;
-  /// Test-only substring filter for selecting MOI candidates from one kernel.
-  std::string test_kernel_name_filter;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal per-owner assignments used when one CDNA4 code-object-wide
@@ -600,8 +641,6 @@ struct ConSanOptions : ConSanRequest, TransformPolicy {
   uint16_t fault_barrier_marker_imm = 42;
   /// Internal recursion guard: faults have already been applied to this ELF.
   bool faults_preapplied = false;
-  std::optional<uint16_t> scratch_vgpr;
-  std::optional<uint16_t> moi_exec_save_sgpr;
   /// Scalar state kept outside a spill-backed Inline transient window.
   std::optional<uint16_t> moi_inline_indirect_pc_sgpr;
   std::optional<uint16_t> moi_inline_call_return_sgpr;
@@ -617,11 +656,8 @@ struct ConSanOptions : ConSanRequest, TransformPolicy {
   std::optional<uint16_t> moi_inline_dynamic_stack_borrowed_sgpr;
   std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;
   std::optional<uint16_t> moi_record_replay_call_return_sgpr;
-  std::optional<uint16_t> moi_owner_sgpr;
   std::optional<uint16_t> moi_dispatch_id_sgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
-  std::optional<uint16_t> moi_owner_vgpr;
-  std::optional<uint16_t> moi_epoch_vgpr;
   /// Uniform persistent state used when a dynamic-stack MOI owner has no
   /// ordinary-VGPR tuple available below its compiler-defined accumulator
   /// boundary. The owner is the wave ID captured from the entry workitem ID;

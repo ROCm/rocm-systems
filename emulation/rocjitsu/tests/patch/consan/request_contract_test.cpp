@@ -746,12 +746,18 @@ TEST(LegacyOptionsAdapterTest, ProjectsTransformDebugAndRuntimeCapabilityFields)
   debug.moi_partition_mask_debug = true;
   debug.test_force_vgpr_spill = true;
   debug.test_force_private_epoch = true;
+  debug.test_seed_inline_exact_odd = true;
   debug.test_kernel_name_filter = "kernel";
   debug.scratch_vgpr = 1;
   debug.moi_exec_save_sgpr = 2;
   debug.moi_owner_sgpr = 3;
   debug.moi_owner_vgpr = 4;
   debug.moi_epoch_vgpr = 5;
+  debug.moi_require_records = true;
+  debug.moi_require_diagnostics = true;
+  debug.moi_forbid_diagnostics = true;
+  debug.moi_require_replay_conflict = true;
+  debug.moi_forbid_overflow = true;
   RuntimeCapabilities capabilities;
   capabilities.backend = ConSanRuntimeBackend::RocJitsuSimulator;
   capabilities.max_workgroup_lds_bytes = 327680;
@@ -759,6 +765,7 @@ TEST(LegacyOptionsAdapterTest, ProjectsTransformDebugAndRuntimeCapabilityFields)
   const ConSanOptions options =
       LegacyOptionsAdapter::adapt(valid_moi_request(ConSanMoiEngine::RecordReplay), transform,
                                   debug, MutationRequest{}, capabilities, BoundRuntimeResources{});
+  EXPECT_EQ(static_cast<const ConSanDebugOverrides &>(options), debug);
   EXPECT_EQ(options.patched_image_growth_limit.absolute_bytes, 1234u);
   EXPECT_EQ(options.max_patches, 23u);
   EXPECT_FALSE(options.max_patches_is_expert_limit);
