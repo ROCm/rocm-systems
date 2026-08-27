@@ -503,9 +503,10 @@ void VaapiVideoDecoder::GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3],
 
 rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
-    if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr ||
-        pic_idx >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr ||
-        d3d12_copy_queue_ == nullptr) {
+    if (pic_idx < 0 || static_cast<size_t>(pic_idx) >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr ||
+        static_cast<size_t>(pic_idx) >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr ||
+        d3d12_device_ == nullptr || d3d12_copy_queue_ == nullptr || d3d12_cmd_allocator_ == nullptr || d3d12_cmd_list_ == nullptr ||
+        d3d12_fence_ == nullptr || d3d12_fence_event_ == nullptr) {
         CriticalLog(g_rocdec_logger, "D3D12 staging infrastructure not available for pic_idx=" + ROCDEC_TOSTR(pic_idx));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
