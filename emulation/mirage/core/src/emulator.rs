@@ -221,6 +221,19 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
         self.runtime().installed
     }
 
+    /// Whether this backend can model how long the emulated device would
+    /// have taken, given numbers to do it with.
+    ///
+    /// `false` — the default — for a backend that has no device time to
+    /// model: one that runs the workload on real hardware has the
+    /// hardware's timing already, and one that only translates has
+    /// somebody else's. `mirage run --timing` refuses a backend that
+    /// answers `false` rather than reporting a timing model that will
+    /// not run, which is the one report worse than none.
+    fn models_time(&self) -> bool {
+        false
+    }
+
     /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
     fn supported(&self) -> SupportStatus;
 

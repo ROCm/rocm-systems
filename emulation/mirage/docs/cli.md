@@ -52,7 +52,9 @@ mirage run [--profile NAME] [--emulator NAME]
            [--image IMAGE] [--mount SPEC]... [--port SPEC]...
            [--container-provider PROV] [--hack HACK]...
            [--exec-mode functional|clocked] [-o|--option KEY=VALUE]...
-           [--plugin NAME]... [--config PATH]
+           [--plugin NAME]...
+           [--timing | --no-timing] [--timing-tuning PATH]
+           [--config PATH]
            [--daemon | --in-process] [--clear-env-vars]
            -- <cmd> [args...]
 ```
@@ -199,6 +201,14 @@ which is the better of the two failures for a checkpoint request.
   with its schema defaults. Repeatable, and merged with whatever the
   profile already enables. An unknown name is refused and the available
   ones listed, on the same reasoning as `-o`.
+* `--timing` models how long the emulated device would have taken, and
+  makes the device's clock say so. The numbers come from the agent's own
+  timing table and are **baked into** the config this run hands the
+  emulator, so the run is reproducible from that one file. `--no-timing`
+  turns it off whatever the profile selects. `--timing-tuning PATH`
+  merges a JSON file of numbers over the agent's and implies `--timing`.
+  See [Timing](timing.md) for the layers, the key names and where a
+  private tuning table goes.
 * `--config PATH` hands the backend an explicit emulator config file
   instead of synthesising one from the profile (this is the upstream
   `rocjitsu --config`). The path is made absolute, so it resolves
@@ -207,9 +217,11 @@ which is the better of the two failures for a checkpoint request.
 
   Because the file goes to the backend verbatim, the flags that would
   have gone into a synthesised config cannot also be honoured:
-  `--gpus-per-node`, `--exec-mode`, `-o`/`--option` and `--plugin` are
-  **refused** alongside `--config` rather than silently ignored. Put them
-  in the config file instead. `--num-nodes` is not among them — it shapes
+  `--gpus-per-node`, `--exec-mode`, `-o`/`--option`, `--plugin`,
+  `--timing`, `--timing-tuning` and `--no-timing` are **refused**
+  alongside `--config` rather than silently ignored. Put them in the
+  config file instead — a supplied config carries its own `timing` block
+  and mirage adds nothing to it. `--num-nodes` is not among them — it shapes
   the process grid mirage builds, not the emulator's configuration, so
   the two compose.
 * `--daemon` runs the emulator out-of-process. This is the default; the

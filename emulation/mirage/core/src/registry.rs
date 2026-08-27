@@ -54,6 +54,10 @@ pub struct EmulatorInfo {
     pub runtime: RuntimeLocation,
     /// Whether this host's hardware/environment can run the backend.
     pub support: SupportStatus,
+    /// Whether this backend models device time when asked to. See
+    /// [`crate::emulator::EmulatorBackend::models_time`].
+    #[serde(default)]
+    pub models_time: bool,
 }
 
 /// Build the full emulator registry by probing every backend that was
@@ -89,6 +93,7 @@ pub fn registry() -> Vec<EmulatorInfo> {
                 installed: runtime.installed,
                 runtime: runtime.location,
                 support: def.backend.supported(),
+                models_time: def.backend.models_time(),
             }
         })
         .collect();
@@ -144,6 +149,7 @@ mod tests {
 
     fn info(name: &str, installed: bool) -> EmulatorInfo {
         EmulatorInfo {
+            models_time: false,
             name: name.to_string(),
             version: "0".to_string(),
             description: String::new(),

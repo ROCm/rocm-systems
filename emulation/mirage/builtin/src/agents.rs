@@ -26,6 +26,16 @@
 //! a transcription of the hardware, and `every_agent_is_256_cus` holds it
 //! there so that a later widening of this sync cannot quietly change what
 //! a profile emulates.
+//!
+//! # How fast it is
+//!
+//! Each agent also carries the timing table mirage bakes into the
+//! architecture config it hands the emulator. The numbers, and the
+//! provenance of every one of them, are in [`crate::timing`]; the shape
+//! half of the table is derived from the device and component tree built
+//! here, so it cannot drift from them. Nothing in it is measured, and
+//! nothing measured belongs in this repository — see `docs/timing.md`
+//! for where a private table goes.
 
 use mirage_core::agent::{
     AgentDef, AgentTopologyDef, AmdgpuConfig, ComponentDef, ConfigEntry, ForRange, KfdDeviceInfo,
@@ -33,6 +43,7 @@ use mirage_core::agent::{
 };
 
 use crate::presets::{MI300X, MI350X, MI450X, Preset};
+use crate::timing;
 
 /// All builtin agents, keyed by the name written to disk.
 ///
@@ -52,7 +63,43 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
 /// name "AMD Instinct MI300X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 4-IOD memory tier.
 pub fn mi300x() -> AgentDef {
+    let device = KfdDeviceInfo {
+        gpu_id: 50148,
+        gfx_target_version: 90402,
+        vendor_id: 4098,
+        device_id: 29856,
+        family_id: 146,
+        unique_id: 0,
+        marketing_name: "AMD Instinct MI300X".to_string(),
+        // First DRM render node (`/dev/dri/renderD128`); the
+        // rocjitsu schema defaults this to 128 and a 0 here
+        // maps the emulated GPU onto a non-existent render
+        // node, so HSA aborts with OUT_OF_RESOURCES.
+        drm_render_minor: 128,
+        simd_count: 1216,
+        max_waves_per_simd: 8,
+        num_shader_engines: 4,
+        num_shader_arrays_per_engine: 2,
+        num_cu_per_sh: 5,
+        simd_per_cu: 4,
+        wave_front_size: 64,
+        local_mem_size: 206158430208,
+        lds_size_kb: 64,
+        mem_width: 8192,
+        mem_clk_max: 1300,
+        l2_size_kb: 4096,
+        num_sdma_engines: 4,
+        num_sdma_xgmi_engines: 6,
+        num_cp_queues: 128,
+        max_engine_clk_fcompute: 2100,
+        ..Default::default()
+    };
+    let topology = topology(4, "2", &MI300X);
     AgentDef {
+        // Built before the device and the tree are moved into place, and
+        // from them, so the shape half of the table cannot drift from the
+        // machine it describes.
+        timing: timing::table(&device, &MI300X, &timing::MI300X, &topology.root),
         vm: VirtualMachineConfig {
             arch: MI300X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -60,40 +107,10 @@ pub fn mi300x() -> AgentDef {
                 num_iods: 0,
                 memory: None,
                 num_gpus: 1,
-                device: KfdDeviceInfo {
-                    gpu_id: 50148,
-                    gfx_target_version: 90402,
-                    vendor_id: 4098,
-                    device_id: 29856,
-                    family_id: 146,
-                    unique_id: 0,
-                    marketing_name: "AMD Instinct MI300X".to_string(),
-                    // First DRM render node (`/dev/dri/renderD128`); the
-                    // rocjitsu schema defaults this to 128 and a 0 here
-                    // maps the emulated GPU onto a non-existent render
-                    // node, so HSA aborts with OUT_OF_RESOURCES.
-                    drm_render_minor: 128,
-                    simd_count: 1216,
-                    max_waves_per_simd: 8,
-                    num_shader_engines: 4,
-                    num_shader_arrays_per_engine: 2,
-                    num_cu_per_sh: 5,
-                    simd_per_cu: 4,
-                    wave_front_size: 64,
-                    local_mem_size: 206158430208,
-                    lds_size_kb: 64,
-                    mem_width: 8192,
-                    mem_clk_max: 1300,
-                    l2_size_kb: 4096,
-                    num_sdma_engines: 4,
-                    num_sdma_xgmi_engines: 6,
-                    num_cp_queues: 128,
-                    max_engine_clk_fcompute: 2100,
-                    ..Default::default()
-                },
+                device,
             },
         },
-        topology: topology(4, "2", &MI300X),
+        topology,
     }
 }
 
@@ -102,7 +119,43 @@ pub fn mi300x() -> AgentDef {
 /// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 2-IOD memory tier.
 pub fn mi350x() -> AgentDef {
+    let device = KfdDeviceInfo {
+        gpu_id: 38144,
+        gfx_target_version: 90500,
+        vendor_id: 4098,
+        device_id: 5892,
+        family_id: 160,
+        unique_id: 5929628898254127105,
+        marketing_name: "AMD Instinct MI350X".to_string(),
+        // First DRM render node (`/dev/dri/renderD128`); the
+        // rocjitsu schema defaults this to 128 and a 0 here
+        // maps the emulated GPU onto a non-existent render
+        // node, so HSA aborts with OUT_OF_RESOURCES.
+        drm_render_minor: 128,
+        simd_count: 1024,
+        max_waves_per_simd: 8,
+        num_shader_engines: 4,
+        num_shader_arrays_per_engine: 2,
+        num_cu_per_sh: 4,
+        simd_per_cu: 4,
+        wave_front_size: 64,
+        local_mem_size: 309237645312,
+        lds_size_kb: 160,
+        mem_width: 8192,
+        mem_clk_max: 1600,
+        l2_size_kb: 4096,
+        num_sdma_engines: 5,
+        num_sdma_xgmi_engines: 12,
+        num_cp_queues: 128,
+        max_engine_clk_fcompute: 2700,
+        ..Default::default()
+    };
+    let topology = topology(2, "4", &MI350X);
     AgentDef {
+        // Built before the device and the tree are moved into place, and
+        // from them, so the shape half of the table cannot drift from the
+        // machine it describes.
+        timing: timing::table(&device, &MI350X, &timing::MI350X, &topology.root),
         vm: VirtualMachineConfig {
             arch: MI350X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -110,40 +163,10 @@ pub fn mi350x() -> AgentDef {
                 num_iods: 0,
                 memory: None,
                 num_gpus: 1,
-                device: KfdDeviceInfo {
-                    gpu_id: 38144,
-                    gfx_target_version: 90500,
-                    vendor_id: 4098,
-                    device_id: 5892,
-                    family_id: 160,
-                    unique_id: 5929628898254127105,
-                    marketing_name: "AMD Instinct MI350X".to_string(),
-                    // First DRM render node (`/dev/dri/renderD128`); the
-                    // rocjitsu schema defaults this to 128 and a 0 here
-                    // maps the emulated GPU onto a non-existent render
-                    // node, so HSA aborts with OUT_OF_RESOURCES.
-                    drm_render_minor: 128,
-                    simd_count: 1024,
-                    max_waves_per_simd: 8,
-                    num_shader_engines: 4,
-                    num_shader_arrays_per_engine: 2,
-                    num_cu_per_sh: 4,
-                    simd_per_cu: 4,
-                    wave_front_size: 64,
-                    local_mem_size: 309237645312,
-                    lds_size_kb: 160,
-                    mem_width: 8192,
-                    mem_clk_max: 1600,
-                    l2_size_kb: 4096,
-                    num_sdma_engines: 5,
-                    num_sdma_xgmi_engines: 12,
-                    num_cp_queues: 128,
-                    max_engine_clk_fcompute: 2700,
-                    ..Default::default()
-                },
+                device,
             },
         },
-        topology: topology(2, "4", &MI350X),
+        topology,
     }
 }
 
@@ -151,7 +174,43 @@ pub fn mi350x() -> AgentDef {
 /// rocjitsu `gfx1250_mi455x.json` config: `arch = cdna5`, an
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
+    let device = KfdDeviceInfo {
+        gpu_id: 1250,
+        gfx_target_version: 120500,
+        vendor_id: 4098,
+        device_id: 1250,
+        family_id: 0,
+        unique_id: 1250,
+        marketing_name: "gfx1250".to_string(),
+        // First DRM render node (`/dev/dri/renderD128`); the
+        // rocjitsu schema defaults this to 128 and a 0 here
+        // maps the emulated GPU onto a non-existent render
+        // node, so HSA aborts with OUT_OF_RESOURCES.
+        drm_render_minor: 128,
+        simd_count: 1024,
+        max_waves_per_simd: 20,
+        num_shader_engines: 4,
+        num_shader_arrays_per_engine: 2,
+        num_cu_per_sh: 4,
+        simd_per_cu: 4,
+        wave_front_size: 32,
+        local_mem_size: 309237645312,
+        lds_size_kb: 160,
+        mem_width: 8192,
+        mem_clk_max: 1600,
+        l2_size_kb: 4096,
+        num_sdma_engines: 5,
+        num_sdma_xgmi_engines: 12,
+        num_cp_queues: 128,
+        max_engine_clk_fcompute: 2700,
+        ..Default::default()
+    };
+    let topology = topology(2, "4", &MI450X);
     AgentDef {
+        // Built before the device and the tree are moved into place, and
+        // from them, so the shape half of the table cannot drift from the
+        // machine it describes.
+        timing: timing::table(&device, &MI450X, &timing::MI450X, &topology.root),
         vm: VirtualMachineConfig {
             arch: MI450X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -159,40 +218,10 @@ pub fn mi450x() -> AgentDef {
                 num_iods: 0,
                 memory: None,
                 num_gpus: 1,
-                device: KfdDeviceInfo {
-                    gpu_id: 1250,
-                    gfx_target_version: 120500,
-                    vendor_id: 4098,
-                    device_id: 1250,
-                    family_id: 0,
-                    unique_id: 1250,
-                    marketing_name: "gfx1250".to_string(),
-                    // First DRM render node (`/dev/dri/renderD128`); the
-                    // rocjitsu schema defaults this to 128 and a 0 here
-                    // maps the emulated GPU onto a non-existent render
-                    // node, so HSA aborts with OUT_OF_RESOURCES.
-                    drm_render_minor: 128,
-                    simd_count: 1024,
-                    max_waves_per_simd: 20,
-                    num_shader_engines: 4,
-                    num_shader_arrays_per_engine: 2,
-                    num_cu_per_sh: 4,
-                    simd_per_cu: 4,
-                    wave_front_size: 32,
-                    local_mem_size: 309237645312,
-                    lds_size_kb: 160,
-                    mem_width: 8192,
-                    mem_clk_max: 1600,
-                    l2_size_kb: 4096,
-                    num_sdma_engines: 5,
-                    num_sdma_xgmi_engines: 12,
-                    num_cp_queues: 128,
-                    max_engine_clk_fcompute: 2700,
-                    ..Default::default()
-                },
+                device,
             },
         },
-        topology: topology(2, "4", &MI450X),
+        topology,
     }
 }
 
@@ -348,7 +377,7 @@ mod tests {
     fn every_agent_is_256_cus() {
         for (name, agent) in agents() {
             assert_eq!(
-                compute_units(&agent.topology.root),
+                timing::count_of_type(&agent.topology.root, "compute_unit"),
                 256,
                 "`{name}` no longer emulates 256 CUs; the preset's own CU \
                  count is not mirage's to adopt — see the module docs"
@@ -379,21 +408,6 @@ mod tests {
                 assert_eq!(cu_config(&agent, key), want, "{} {key}", preset.preset);
             }
         }
-    }
-
-    /// Every compute unit under `node`, multiplying out the `[0:N]`
-    /// ranges on the way down.
-    fn compute_units(node: &ComponentDef) -> u32 {
-        let span = node
-            .name
-            .rsplit_once("[0:")
-            .and_then(|(_, rest)| rest.strip_suffix(']'))
-            .and_then(|n| n.parse::<u32>().ok())
-            .unwrap_or(1);
-        if node.r#type == "compute_unit" {
-            return span;
-        }
-        span * node.children.iter().map(compute_units).sum::<u32>()
     }
 
     /// One per-CU config value from an agent's component tree.

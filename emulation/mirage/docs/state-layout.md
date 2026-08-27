@@ -67,7 +67,7 @@ The config directory holds three resource trees:
 ```text
 <config>/mirage/
 ├── profile/<name>.json     # ProfileDef
-├── agent/<name>.json       # AgentDef   (hardware GPU definition)
+├── agent/<name>.json       # AgentDef   (hardware GPU definition + timing table)
 └── topology/<name>.json    # TopologyDef (rack/node/GPU layout)
 ```
 
@@ -101,6 +101,12 @@ A profile is a JSON `ProfileDef` named by its filename:
   topology in `<config>/mirage/topology/`.
 * `topology.agent` may likewise be an inline object or a string naming an
   agent in `<config>/mirage/agent/`.
+* An agent's optional `timing` object is a flat map of dotted keys to
+  numbers — how fast the device is, as the emulator's timing plane reads
+  it. Mirage bakes it into the config a `mirage run --timing` hands the
+  backend, which lands in the session's scratch directory under
+  `$XDG_RUNTIME_DIR` and not here. See [`timing.md`](timing.md); an agent
+  without one still loads and still runs functionally.
 * A containerised profile additionally carries a `containerize` object
   (`image`, optional `provider`, and `mounts`).
 

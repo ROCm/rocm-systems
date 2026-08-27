@@ -257,6 +257,20 @@ pub struct VirtualMachineConfig {
 pub struct AgentDef {
     pub vm: VirtualMachineConfig,
     pub topology: AgentTopologyDef,
+
+    /// How fast this device is, as the timing plane reads it: a flat map
+    /// of dotted keys to numbers, baked into the architecture config
+    /// mirage synthesises. See [`crate::timing`].
+    ///
+    /// Here rather than under [`VirtualMachineConfig`] because it is not
+    /// part of the `vm` block the emulator's device model consumes: it
+    /// describes the same device from the timing plane's side, and the
+    /// two blocks land side by side in the config. Optional, so an agent
+    /// written before mirage had a timing table still loads — with the
+    /// timing plane refusing to run for want of numbers, which is the
+    /// honest outcome rather than a device timed by guesswork.
+    #[serde(default, skip_serializing_if = "crate::timing::TimingTable::is_empty")]
+    pub timing: crate::timing::TimingTable,
 }
 
 /// On-disk agent store backed by `<MIRAGE_CONFIG>/agent/`.

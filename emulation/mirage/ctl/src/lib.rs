@@ -21,6 +21,7 @@
 //! All commands are documented in `docs/cli.md`.
 
 pub mod run;
+mod timing;
 pub mod usage;
 
 use std::io::IsTerminal;
@@ -826,18 +827,58 @@ pub struct RunArgs {
     /// plugins the profile already enables.
     #[arg(long = "plugin", value_name = "NAME")]
     plugins: Vec<String>,
+    /// Model how long the emulated device would have taken, and make its
+    /// clock say so.
+    ///
+    /// The numbers come from the agent's own timing table and are baked
+    /// into the config this run hands the emulator, so the run is
+    /// reproducible from that one file and the file can be given to
+    /// somebody else. `mirage run` prints where every number came from.
+    /// Without this the emulator computes the right answer as fast as it
+    /// can and has no opinion about how long the device would have taken.
+    #[arg(long, conflicts_with = "no_timing")]
+    timing: bool,
+    /// JSON file of timing numbers to use instead of the agent's, merged
+    /// over them and baked in. Implies `--timing`.
+    ///
+    /// Keys are the agent's, spelled dotted (`{"dram.latency_cycles":
+    /// 900}`) or nested (`{"dram": {"latency_cycles": 900}}`), and a key
+    /// the agent does not have is an error rather than a new parameter.
+    /// The file is read and merged; it is never copied anywhere.
+    #[arg(
+        long = "timing-tuning",
+        value_name = "PATH",
+        conflicts_with = "no_timing"
+    )]
+    timing_tuning: Option<String>,
+    /// Run with no timing model, whatever the profile selects.
+    ///
+    /// A profile that enables one enables it for every run made from it,
+    /// and there is otherwise no way to ask for the functional speed of a
+    /// profile you did not write.
+    #[arg(long = "no-timing")]
+    no_timing: bool,
     /// Use an explicit emulator config file instead of synthesising one
     /// from the profile (the upstream `rocjitsu --config`).
     ///
     /// The file is handed to the backend verbatim, so the flags that
     /// would have gone into a synthesised config — `--gpus-per-node`,
-    /// `--exec-mode`, `-o`/`--option`, `--plugin` — cannot also be
-    /// honoured and are refused rather than ignored. Put them in the
-    /// config file instead.
+    /// `--exec-mode`, `-o`/`--option`, `--plugin`, the `--timing` flags —
+    /// cannot also be honoured and are refused rather than ignored. Put
+    /// them in the config file instead; a supplied config carries its own
+    /// `timing` block and mirage adds nothing to it.
     #[arg(
         long,
         value_name = "PATH",
-        conflicts_with_all = ["gpus_per_node", "exec_mode", "options", "plugins"]
+        conflicts_with_all = [
+            "gpus_per_node",
+            "exec_mode",
+            "options",
+            "plugins",
+            "timing",
+            "timing_tuning",
+            "no_timing",
+        ]
     )]
     config: Option<String>,
     /// Run the emulator in out-of-process daemon mode. This is the
@@ -925,6 +966,9 @@ impl Default for RunArgs {
             exec_mode: None,
             options: Vec::new(),
             plugins: Vec::new(),
+            timing: false,
+            timing_tuning: None,
+            no_timing: false,
             config: None,
             daemon: false,
             in_process: false,
@@ -2140,6 +2184,17 @@ fn apply_profile_overrides(
     profile: &mut ProfileDef,
     a: &RunArgs,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
+    // Timing first, and off the profile as it was stored: the plan is
+    // the three layers the docs promise, and it has to be assembled and
+    // said out loud before anything here starts rewriting the layer
+    // underneath it. Reported whether or not this run added anything of
+    // its own, because a profile that carries a timing table is timing a
+    // run that never mentioned it.
+    let timing = timing::plan(profile, a)?;
+    for line in timing.report_lines(a.no_timing) {
+        eprintln!("mirage: {line}");
+    }
+
     if a.image.is_none()
         && a.mounts.is_empty()
         && a.ports.is_empty()
@@ -2148,6 +2203,9 @@ fn apply_profile_overrides(
         && a.exec_mode.is_none()
         && a.options.is_empty()
         && a.plugins.is_empty()
+        && !a.timing
+        && a.timing_tuning.is_none()
+        && !a.no_timing
         && a.config.is_none()
         && a.num_nodes.is_none()
         && a.gpus_per_node.is_none()
@@ -2253,6 +2311,12 @@ fn apply_profile_overrides(
 
     profile.emulator.options.extend(options);
     profile.emulator.plugins.extend(plugins);
+    // Only when this run said something about timing. A run that said
+    // nothing leaves the profile's own selection and overrides exactly
+    // as they are, which is what the plan above just reported.
+    if a.timing || a.timing_tuning.is_some() || a.no_timing {
+        timing.apply(&mut profile.emulator.options);
+    }
     // Drop-in `--config <path>`: an explicit emulator config file
     // (the upstream `rocjitsu --config`). Stored as the `config`
     // emulator option (absolute, so it resolves regardless of the
@@ -3300,7 +3364,7 @@ mod tests {
     use mirage_core::emulator::{EmulatorDef, EmulatorKind};
     use mirage_core::topology::TopologyDef;
 
-    fn sample_profile() -> ProfileDef {
+    pub(crate) fn sample_profile() -> ProfileDef {
         ProfileDef {
             name: "mi450x".to_string(),
             description: None,
@@ -3519,7 +3583,7 @@ mod tests {
     }
 
     /// Parse `mirage run`'s arguments exactly as the real command does.
-    fn parse_run(args: &[&str]) -> Result<RunArgs, clap::Error> {
+    pub(crate) fn parse_run(args: &[&str]) -> Result<RunArgs, clap::Error> {
         use clap::Parser;
         #[derive(Parser)]
         struct Wrap {
@@ -4574,6 +4638,98 @@ exit 0
         assert_eq!(
             and_list(&["--mount", "--port", "--hack"]),
             "--mount, --port and --hack"
+        );
+    }
+
+    /// The predicate that returns the cheap by-name reference lists
+    /// every override flag by hand, so a flag left out of it is accepted
+    /// and then silently dropped.
+    #[test]
+    fn every_timing_flag_counts_as_an_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tuning = tmp.path().join("t.json");
+        std::fs::write(&tuning, br#"{"xcds": 4}"#).unwrap();
+        let tuning = tuning.display().to_string();
+        for flags in [
+            vec!["--timing"],
+            vec!["--no-timing"],
+            vec!["--timing-tuning", &tuning],
+        ] {
+            let mut argv = flags.clone();
+            argv.extend_from_slice(&["--", "./app"]);
+            let a = parse_run(&argv).unwrap();
+            let mut p = sample_profile();
+            // The sample profile's agent is a by-name reference and no
+            // store exists here, so an inline one stands in.
+            p.emulator.topology = MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(mirage_builtin::mi450x()),
+            });
+            let r = apply_profile_overrides(&mut p, &a).unwrap();
+            assert!(
+                matches!(r, MaybeRef::Owned(_)),
+                "{flags:?} must inline the profile, not keep the by-name reference"
+            );
+        }
+    }
+
+    /// A drop-in `--config` carries its own `timing` block, so mirage
+    /// cannot also honour these; they are refused rather than ignored,
+    /// exactly like `--exec-mode` and `--plugin`.
+    #[test]
+    fn timing_flags_are_refused_alongside_a_drop_in_config() {
+        for flags in [
+            vec!["--config", "/tmp/cfg.json", "--timing"],
+            vec![
+                "--config",
+                "/tmp/cfg.json",
+                "--timing-tuning",
+                "/tmp/t.json",
+            ],
+            vec!["--config", "/tmp/cfg.json", "--no-timing"],
+            vec!["--timing", "--no-timing"],
+            vec!["--timing-tuning", "/tmp/t.json", "--no-timing"],
+        ] {
+            let mut argv = flags.clone();
+            argv.extend_from_slice(&["--", "./app"]);
+            assert!(
+                parse_run(&argv).is_err(),
+                "{flags:?} must be refused, not silently ignored"
+            );
+        }
+    }
+
+    /// `--timing` writes the whole merged set into the profile's
+    /// options, so what the backend reads is what the report described.
+    #[test]
+    fn a_timing_run_stores_its_overrides_on_the_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tuning = tmp.path().join("t.json");
+        std::fs::write(&tuning, br#"{"xcds": 4}"#).unwrap();
+        let a = parse_run(&[
+            "--timing-tuning",
+            &tuning.display().to_string(),
+            "--",
+            "./app",
+        ])
+        .unwrap();
+        let mut p = sample_profile();
+        p.emulator.topology = MaybeRef::Owned(TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Owned(mirage_builtin::mi450x()),
+        });
+        let MaybeRef::Owned(owned) = apply_profile_overrides(&mut p, &a).unwrap() else {
+            panic!("expected an inlined profile");
+        };
+        assert_eq!(
+            owned.emulator.options.get("timing"),
+            Some(&SimpleValue::Boolean(true))
+        );
+        assert_eq!(
+            owned.emulator.options.get("timing.machine.xcds"),
+            Some(&SimpleValue::String("4".to_string()))
         );
     }
 

@@ -28,6 +28,7 @@ use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
 use mirage_core::session::{SessionContext, SessionHealth, state};
+use mirage_core::timing::TimingTable;
 use mirage_core::topology::TopologyDef;
 
 pub mod dbt;
@@ -101,6 +102,12 @@ impl EmulatorBackend for Rocjitsu {
         // second route to the same search that could only ever agree or
         // be a bug.
         RuntimeStatus::from_location(runtime_location())
+    }
+
+    fn models_time(&self) -> bool {
+        // rocjitsu emulates the device in software, so the only clock it
+        // has is the one the timing block describes.
+        true
     }
 
     fn supported(&self) -> SupportStatus {
@@ -683,6 +690,53 @@ enum SimConfig {
     Synthesised(Vec<u8>),
 }
 
+/// The `timing` block a profile's emulator options ask for, or `None`
+/// when it asks for none.
+///
+/// Three layers reach here already merged into two: the device's own
+/// table, and the `timing.machine.*` options mirage's control plane wrote
+/// after folding a profile's stored overrides and any `--timing-tuning`
+/// file together. They are re-checked rather than trusted, because a
+/// profile is a document a user can edit by hand and this is the last
+/// place that can tell a mistyped key from a new parameter — after this
+/// it is a number in a config file, indistinguishable from one the device
+/// really has.
+///
+/// # Errors
+///
+/// Returns an error when timing is asked for and the agent carries no
+/// table, when an override is not a number, or when an override names a
+/// key the device does not have.
+fn timing_block(options: &SimpleMap, table: &TimingTable) -> Result<Option<serde_json::Value>> {
+    if !mirage_core::timing::enabled_in_options(options) {
+        return Ok(None);
+    }
+    if table.is_empty() {
+        return Err(MirageError::Other(
+            "this run asks for timing and its agent carries no timing table. \
+             An agent from before mirage shipped one keeps working functionally; \
+             to time it, run `mirage agent delete <name>` for a builtin, which \
+             puts the shipped agent -- timing table and all -- straight back in \
+             its place, or add a `timing` object to the agent JSON."
+                .to_string(),
+        ));
+    }
+    let overrides =
+        mirage_core::timing::overrides_from_options(options).map_err(MirageError::Other)?;
+    let mut resolved = table.clone();
+    resolved.overlay(&overrides).map_err(|unknown| {
+        MirageError::Other(mirage_core::timing::unknown_keys_message(
+            &unknown,
+            table,
+            "this profile",
+        ))
+    })?;
+    resolved
+        .to_config_block()
+        .map(Some)
+        .map_err(MirageError::Other)
+}
+
 /// Resolve the rocjitsu `SimulationConfig` `def` asks for, writing
 /// nothing.
 ///
@@ -769,6 +823,19 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         && let serde_json::Value::Object(map) = &mut sim
     {
         map.insert("plugins".to_string(), plugins_to_json(&def.plugins));
+    }
+    // Bake the timing numbers in rather than pointing at them. The
+    // emulator is given exactly one architecture config and the timing
+    // block in it is the whole description of how fast the part is, so a
+    // run's timing is reproducible from that one file and the file can be
+    // handed to somebody else without them needing anything more. A
+    // profile that does not ask for timing gets no block at all, and the
+    // emulator runs functionally — which is what `enabled` would say
+    // anyway, said by omission so a timing-free config stays minimal.
+    if let Some(block) = timing_block(&def.options, &agent.timing)?
+        && let serde_json::Value::Object(map) = &mut sim
+    {
+        map.insert("timing".to_string(), block);
     }
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
@@ -1242,5 +1309,150 @@ mod tests {
             libs[0].file_name().and_then(|n| n.to_str()),
             Some("librocjitsu_plugin_race.so")
         );
+    }
+
+    /// An [`EmulatorDef`] on the MI350X builtin, resolvable without
+    /// touching the stores, with `options` as given.
+    fn def_with_options(options: SimpleMap) -> EmulatorDef {
+        EmulatorDef {
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options,
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(mirage_builtin::mi350x()),
+            }),
+        }
+    }
+
+    /// The synthesised config, as JSON.
+    fn synthesised(def: &EmulatorDef) -> serde_json::Value {
+        match resolve_sim_config(def).expect("this profile resolves") {
+            SimConfig::Synthesised(bytes) => {
+                serde_json::from_slice(&bytes).expect("mirage writes valid JSON")
+            }
+            SimConfig::Supplied(path) => {
+                panic!("expected a synthesised config, got {}", path.display())
+            }
+        }
+    }
+
+    fn timing_on() -> SimpleMap {
+        let mut options = SimpleMap::new();
+        options.insert("timing".to_string(), SimpleValue::Boolean(true));
+        options
+    }
+
+    /// The whole point of the design: the numbers are *in* the config,
+    /// so the run is reproducible from the one file it was handed.
+    #[test]
+    fn the_timing_block_carries_the_numbers_not_a_reference_to_them() {
+        let sim = synthesised(&def_with_options(timing_on()));
+        let timing = &sim["timing"];
+        assert_eq!(timing["enabled"], serde_json::json!(true));
+        assert_eq!(timing["clock_mhz"], serde_json::json!(2700));
+
+        let machine = timing["machine"]
+            .as_object()
+            .expect("`machine` is an object of numbers");
+        // Every key the agent has, less the clock, which is lifted out.
+        assert_eq!(machine.len(), mirage_builtin::mi350x().timing.len() - 1);
+        assert!(machine.values().all(serde_json::Value::is_number));
+        assert_eq!(machine["xcds"], serde_json::json!(8));
+        assert_eq!(machine["compute_units"], serde_json::json!(256));
+        // No second file is named anywhere in the document.
+        let text = sim.to_string();
+        assert!(!text.contains("tuning_file"), "{text}");
+        assert!(!text.contains("\"model\""), "{text}");
+    }
+
+    /// Counts must stay integers: a `sets` of `2048.0` is a different
+    /// JSON type, and a parser reading unsigned integers may refuse it.
+    #[test]
+    fn counts_stay_integers_and_rates_stay_rates() {
+        let sim = synthesised(&def_with_options(timing_on()));
+        let machine = &sim["timing"]["machine"];
+        assert!(machine["l2.sets"].is_u64());
+        assert!(machine["dram.latency_cycles"].is_u64());
+        assert!(machine["dram.bytes_per_cycle"].is_f64());
+        assert!(machine["dispatch.workgroups_per_cycle"].is_f64());
+    }
+
+    #[test]
+    fn no_timing_block_unless_it_was_asked_for() {
+        let sim = synthesised(&def_with_options(SimpleMap::new()));
+        assert!(sim.get("timing").is_none(), "{sim}");
+    }
+
+    #[test]
+    fn an_override_replaces_exactly_one_number() {
+        let mut options = timing_on();
+        options.insert(
+            "timing.machine.dram.latency_cycles".to_string(),
+            SimpleValue::String("900".to_string()),
+        );
+        options.insert(
+            "timing.machine.fabric.bytes_per_cycle".to_string(),
+            SimpleValue::String("1234.5".to_string()),
+        );
+        let machine = synthesised(&def_with_options(options))["timing"]["machine"].clone();
+        assert_eq!(machine["dram.latency_cycles"], serde_json::json!(900));
+        assert_eq!(machine["fabric.bytes_per_cycle"], serde_json::json!(1234.5));
+        // And nothing else moved.
+        assert_eq!(machine["dram.bytes_per_cycle"], serde_json::json!(2962.963));
+    }
+
+    /// The control plane checks this too, and this is the check that
+    /// matters: a profile is a document a user can edit by hand, and
+    /// after here a bad key is just a number in a config file.
+    #[test]
+    fn an_unknown_override_is_refused_at_the_last_place_that_can_tell() {
+        let mut options = timing_on();
+        options.insert(
+            "timing.machine.dram.latency_cyles".to_string(),
+            SimpleValue::String("900".to_string()),
+        );
+        let e = resolve_sim_config(&def_with_options(options))
+            .expect_err("a key the device does not have is an error")
+            .to_string();
+        assert!(e.contains("dram.latency_cyles"), "{e}");
+    }
+
+    #[test]
+    fn timing_an_agent_with_no_table_is_refused() {
+        let mut def = def_with_options(timing_on());
+        def.topology = MaybeRef::Owned(TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Owned(AgentDef::default()),
+        });
+        let e = resolve_sim_config(&def)
+            .expect_err("an agent with no numbers cannot be timed")
+            .to_string();
+        assert!(e.contains("no timing table"), "{e}");
+    }
+
+    /// A supplied config is the whole machine description. Mirage hands
+    /// it over byte for byte, timing block or no timing block.
+    #[test]
+    fn a_drop_in_config_is_passed_through_unmodified() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("cfg.json");
+        let body = br#"{"vm": {}, "timing": {"enabled": true, "clock_mhz": 1, "machine": {}}}"#;
+        std::fs::write(&cfg, body).unwrap();
+
+        let mut options = timing_on();
+        options.insert(
+            "config".to_string(),
+            SimpleValue::String(cfg.display().to_string()),
+        );
+        match resolve_sim_config(&def_with_options(options)).unwrap() {
+            SimConfig::Supplied(path) => assert_eq!(path, cfg),
+            SimConfig::Synthesised(_) => panic!("a supplied config must not be synthesised over"),
+        }
+        // Nothing was written to it, either.
+        assert_eq!(std::fs::read(&cfg).unwrap(), body);
     }
 }

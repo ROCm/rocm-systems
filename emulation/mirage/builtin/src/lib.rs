@@ -17,6 +17,7 @@
 pub mod agents;
 pub mod presets;
 pub mod profiles;
+pub mod timing;
 pub mod topologies;
 
 use std::path::PathBuf;

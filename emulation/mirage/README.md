@@ -279,6 +279,9 @@ guard off deliberately.
 * [`docs/cli.md`](docs/cli.md) — complete CLI reference.
 * [`docs/architecture.md`](docs/architecture.md) — design and crate overview.
 * [`docs/building.md`](docs/building.md) — building mirage and rocjitsu.
+* [`docs/timing.md`](docs/timing.md) — modelling device time: the three
+  layers of numbers, how they are baked into the one config a run is
+  given, and where a private tuning table goes (never in this repo).
 * [`docs/state-layout.md`](docs/state-layout.md) — authoritative on-disk layout reference.
 * [`docs/ddp-training.md`](docs/ddp-training.md) — tutorial: PyTorch DDP
   across several emulated MI350X GPUs, with `torchrun`.
