@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "fakes/ras_client_fakes.h"
+#include "fakes/libc_fakes.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -17,13 +17,13 @@
 #include <new>
 
 // LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
-// which this binary already links. client.cc reports via plain fprintf(stderr),
-// so CaptureLog works without raising the level.
+// which this binary already links. A libc-only unit reports via plain
+// fprintf(stderr), so CaptureLog works without raising the level.
 
 std::string g_writtenData;
 std::string g_stdoutData;
 std::vector<int> g_closedFds;
-std::vector<RasReadStep> g_readScript;
+std::vector<MicroReadStep> g_readScript;
 size_t g_readScriptPos = 0;
 int g_nextSocketFd = 42;
 int g_socketFailErrno = EAFNOSUPPORT;
@@ -31,6 +31,8 @@ int g_lastSetsockoptOptname = -1;
 struct timeval g_lastSetsockoptTimeval = {-1, -1};
 int g_getaddrinfoResult = 0;
 int g_addrinfoCount = 1;
+// Arbitrary non-privileged base; a unit that asserts on the port should set it.
+int g_addrinfoBasePort = 28028;
 int g_freeaddrinfoCalls = 0;
 int g_connectResult = 0;
 int g_connectErrno = ECONNREFUSED;
@@ -46,7 +48,7 @@ static ssize_t DefaultWrite(int, const void* buf, size_t count) {
 
 static ssize_t DefaultRead(int, void* buf, size_t count) {
   if (g_readScriptPos >= g_readScript.size()) return 0;  // EOF past the end of the script
-  const RasReadStep& step = g_readScript[g_readScriptPos++];
+  const MicroReadStep& step = g_readScript[g_readScriptPos++];
   if (step.ret < 0) {
     errno = step.err;
     return step.ret;
@@ -90,7 +92,7 @@ static int DefaultGetaddrinfo(const char*, const char*, const struct addrinfo*, 
     auto* ai = static_cast<struct addrinfo*>(std::calloc(1, sizeof(struct addrinfo)));
     auto* sa = static_cast<struct sockaddr_in*>(std::calloc(1, sizeof(struct sockaddr_in)));
     sa->sin_family = AF_INET;
-    sa->sin_port = htons(static_cast<uint16_t>(28028 + i));
+    sa->sin_port = htons(static_cast<uint16_t>(g_addrinfoBasePort + i));
     sa->sin_addr.s_addr = htonl(INADDR_LOOPBACK + i);
     ai->ai_family = AF_INET;
     ai->ai_socktype = SOCK_STREAM;
@@ -133,7 +135,7 @@ static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE*) {
 
 static int DefaultFflush(FILE*) { return 0; }
 
-static void DefaultExit(int status) { throw RasClientExit{status}; }
+static void DefaultExit(int status) { throw MicroExit{status}; }
 
 // ---------------------------------------------------------------------------
 
@@ -154,15 +156,15 @@ std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(int)> g_exit = DefaultExit;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
-  g_readScript.push_back(RasReadStep{ret, err, std::move(data)});
+  g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
 }
 
 void ScriptReadData(std::string data) {
   const ssize_t n = static_cast<ssize_t>(data.size());
-  g_readScript.push_back(RasReadStep{n, 0, std::move(data)});
+  g_readScript.push_back(MicroReadStep{n, 0, std::move(data)});
 }
 
-void ResetRasClientFakes() {
+void ResetLibcFakes() {
   g_write = DefaultWrite;
   g_read = DefaultRead;
   g_close = DefaultClose;
@@ -188,6 +190,7 @@ void ResetRasClientFakes() {
   g_lastSetsockoptTimeval = {-1, -1};
   g_getaddrinfoResult = 0;
   g_addrinfoCount = 1;
+  g_addrinfoBasePort = 28028;
   g_freeaddrinfoCalls = 0;
   g_connectResult = 0;
   g_connectErrno = ECONNREFUSED;
@@ -195,9 +198,9 @@ void ResetRasClientFakes() {
 }
 
 // ---------------------------------------------------------------------------
-// Trampolines. ras-client-test.cc macro-renames each libc call in client.cc to
-// the matching micro_* name; these dispatch through the slots above so the
-// seam is swappable per test rather than baked in at compile time.
+// Trampolines. fakes/libc_seam.h macro-renames each libc call in the unit
+// under test to the matching micro_* name; these dispatch through the slots
+// above so the seam is swappable per test rather than baked in at compile time.
 // ---------------------------------------------------------------------------
 extern "C" {
 
@@ -223,7 +226,7 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
 
-// noreturn: the default throws RasClientExit. If a hook ever returns normally
+// noreturn: the default throws MicroExit. If a hook ever returns normally
 // the unit would fall through a path production treats as unreachable, so make
 // that a loud abort rather than silent corruption.
 void micro_exit(int status) {

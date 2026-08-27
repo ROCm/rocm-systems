@@ -27,7 +27,7 @@ if(BUILD_TESTS)
     ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
     fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
     fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
-    fakes/ras_client_fakes.cc            # libc seams for the RAS client (sockets/getopt/stdio)
+    fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
     fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
     ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
     ../common/ProcessIsolatedTestRunner.cpp
@@ -501,7 +501,7 @@ add_executable(rccl-UnitTestsMicro
   ras-client-test.cc
   fakes/nccl_fakes.cc
   fakes/p2p_fakes.cc
-  fakes/ras_client_fakes.cc
+  fakes/libc_fakes.cc
   fakes/hip_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp

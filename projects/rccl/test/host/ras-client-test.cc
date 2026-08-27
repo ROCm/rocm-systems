@@ -9,8 +9,8 @@
 // client.cc is a standalone executable: every helper is `static` and its whole
 // dependency surface is libc plus four macros from ras_internal.h. This TU
 // #includes the hipified client.cc directly, so the statics become callable,
-// and macro-renames each libc entry point to a micro_* trampoline that
-// dispatches through a swappable slot in fakes/ras_client_fakes.h.
+// with fakes/libc_seam.h renaming each libc entry point to a micro_*
+// trampoline that dispatches through a swappable slot in fakes/libc_fakes.h.
 //
 // getopt_long is deliberately NOT seamed: its parse behaviour is part of what
 // parseArgs is being tested for. ResetRasClientGlobals() resets optind instead.
@@ -36,56 +36,16 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
-#include "fakes/ras_client_fakes.h"
+#include "fakes/libc_fakes.h"
+#include "fakes/libc_seam.h"
 
-extern "C" {
-ssize_t micro_write(int, const void*, size_t);
-ssize_t micro_read(int, void*, size_t);
-int micro_close(int);
-int micro_socket(int, int, int);
-int micro_connect(int, const struct sockaddr*, socklen_t);
-int micro_setsockopt(int, int, int, const void*, socklen_t);
-int micro_getaddrinfo(const char*, const char*, const struct addrinfo*, struct addrinfo**);
-void micro_freeaddrinfo(struct addrinfo*);
-int micro_getnameinfo(const struct sockaddr*, socklen_t, char*, socklen_t, char*, socklen_t, int);
-const char* micro_gai_strerror(int);
-size_t micro_fwrite(const void*, size_t, size_t, FILE*);
-int micro_fflush(FILE*);
-void micro_exit(int) __attribute__((noreturn));
-}
-
-#define write micro_write
-#define read micro_read
-#define close micro_close
-#define socket micro_socket
-#define connect micro_connect
-#define setsockopt micro_setsockopt
-#define getaddrinfo micro_getaddrinfo
-#define freeaddrinfo micro_freeaddrinfo
-#define getnameinfo micro_getnameinfo
-#define gai_strerror micro_gai_strerror
-#define fwrite micro_fwrite
-#define fflush micro_fflush
-#define exit micro_exit
 // client.cc's main() would collide with the gtest main in main_altrsmi.cpp.
 #define main rasClientMain
 
 #include RAS_CLIENT_CC_PATH
 
 #undef main
-#undef exit
-#undef fflush
-#undef fwrite
-#undef gai_strerror
-#undef getnameinfo
-#undef freeaddrinfo
-#undef getaddrinfo
-#undef setsockopt
-#undef connect
-#undef socket
-#undef close
-#undef read
-#undef write
+#include "fakes/libc_seam_undef.h"
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
@@ -113,11 +73,11 @@ void ResetRasClientGlobals() {
 class RasClientMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ResetRasClientFakes();
+    ResetLibcFakes();
     ResetRasClientGlobals();
   }
   void TearDown() override {
-    ResetRasClientFakes();
+    ResetLibcFakes();
     ResetRasClientGlobals();
   }
 };
@@ -137,7 +97,7 @@ TEST_F(RasClientMicrotest, Scaffolding_DefaultSeams_AreReachableAndReset) {
   EXPECT_EQ(3, rasRead(7, buf, sizeof(buf)));
   EXPECT_STREQ("hi\n", buf);
 
-  EXPECT_THROW(micro_exit(3), RasClientExit);
+  EXPECT_THROW(micro_exit(3), MicroExit);
 }
 
 // ===========================================================================
@@ -171,7 +131,7 @@ ParseArgsOutcome RunParseArgs(const std::vector<std::string>& args) {
   out.log = CaptureLog([&]() {
     try {
       InvokeParseArgs(args);
-    } catch (const RasClientExit& e) {
+    } catch (const MicroExit& e) {
       out.exitStatus = e.status;
     }
   });
@@ -961,7 +921,7 @@ ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
   out.log = CaptureLog([&]() {
     try {
       parseArgs(argv.argc(), argv.argv());
-    } catch (const RasClientExit& e) {
+    } catch (const MicroExit& e) {
       out.exitStatus = e.status;
     }
   });
