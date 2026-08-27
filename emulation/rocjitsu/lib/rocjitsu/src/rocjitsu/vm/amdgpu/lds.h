@@ -72,8 +72,7 @@ public:
   void write16(uint32_t addr, uint16_t val) {
     if (!contains(addr, 2))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 2);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 32 bits (little-endian) from LDS. OOB returns 0.
@@ -89,8 +88,7 @@ public:
   void write32(uint32_t addr, uint32_t val) {
     if (!contains(addr, 4))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 4);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 64 bits (little-endian) from LDS. OOB returns 0.
@@ -106,8 +104,7 @@ public:
   void write64(uint32_t addr, uint64_t val) {
     if (!contains(addr, 8))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + sizeof(val));
-    std::memcpy(&data_[addr], &val, 8);
+    write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Bulk read of arbitrary size from LDS. OOB returns 0.
@@ -125,8 +122,7 @@ public:
   void write(uint32_t addr, const uint8_t *src, uint32_t size) {
     if (size == 0 || !contains(addr, size))
       return;
-    ensure_materialized(static_cast<size_t>(addr) + size);
-    std::memcpy(&data_[addr], src, size);
+    write_backing(addr, src, size);
   }
 
   /// @brief MemoryInterface read (truncates addr to 32-bit local address).
@@ -144,8 +140,7 @@ public:
       return;
     auto a = static_cast<uint32_t>(addr);
     assert(contains(a, size));
-    ensure_materialized(static_cast<size_t>(a) + size);
-    std::memcpy(&data_[a], src, size);
+    write_backing(a, src, size);
   }
 
   /// @brief Per-lane vector load from LDS.
@@ -191,8 +186,7 @@ public:
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_)
           continue;
-        ensure_materialized(static_cast<size_t>(ea) + elem_size);
-        std::memcpy(&data_[ea], src + lane * stride + e * elem_size, elem_size);
+        write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
       }
     }
   }
@@ -224,6 +218,15 @@ private:
       std::memcpy(dst, &data_[begin], backed);
     if (backed != size)
       std::memset(dst + backed, 0, size - backed);
+  }
+
+  void write_backing(size_t offset, const uint8_t *src, size_t size) {
+    assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
+    ensure_materialized(offset + size);
+    // Keep the checked loop explicit: GCC 15 can retain the vector's old object
+    // size across resize and report a false stringop-overflow for memcpy here.
+    for (size_t i = 0; i < size; ++i)
+      data_[offset + i] = src[i];
   }
 
   void ensure_materialized(size_t required) {

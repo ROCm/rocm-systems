@@ -36,8 +36,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 // drm_amdgpu_memory_info structs so the interposer services the amdgpu DRM
 // ioctl ABI directly. These are kernel ABI, not libdrm library types, so this
 // keeps the interposer independent of libdrm.
-#include "amdgpu_drm.h"
-#include "drm.h"
+#include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include "util/dynamic_loader.h"
