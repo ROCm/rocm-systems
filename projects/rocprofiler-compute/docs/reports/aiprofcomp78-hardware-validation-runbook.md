@@ -9,13 +9,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Recommended node** | `ctr-cx71-mi300x-01` (MI300X, gfx942) |
-| **Conductor pool** | `AIG-SW-Alola` (entity `6e2c399f-b1af-40fa-8e19-3004d3930c72`) |
-| **Alola Slurm** | `--gres=gpu:gfx942-mi300x:1 -w ctr-cx71-mi300x-01` |
-| **Partition mode** | CPX (`amd-smi set --compute-partition CPX` — requires **reservation/sudo** on Alola) |
-| **Window** | 4 h (policy full-panel + block-17 re-profiles) |
+| **Booked node** | `hpe-darkstar-ccs-aus-e12-03` (MI300X, gfx942) |
+| **Conductor pool** | `MI300X-AIG-SW-ML-LIBRARIES` |
+| **Entity ID** | `dff206e0-2724-4bd1-9d67-f21cf3158a45` |
+| **Hostname** | `hpe-darkstar-ccs-aus-e12-03.cs-aus.dcgpu` |
+| **Reservation** | `06a90967-5dce-7ed0-8000-95ffbeeefaa0` |
+| **Window** | 2026-08-27 **21:00–01:00 CDT** (4 h) |
+| **Partition mode** | CPX (`amd-smi set --compute-partition CPX` — typically available with Conductor reservation/sudo) |
 
-**Conductor access note:** `fei.zheng@amd.com` is on the active team reservation **`rocprof-compute`** (`06a87e2c-7744-783e-8000-198db5aebe85`, `asrock-1w300-f2-1`, MI350X) but does **not** currently have permission to create new reservations on `AIG-SW-Alola` MI300X nodes. Request pool access or ask a pool admin to book `ctr-cx71-mi300x-01` for 4 h.
+**Alternates** (dry-run OK with `rocprof-compute` team, same pool class):
+
+| Node | Pool | Entity ID |
+|------|------|-----------|
+| `splinter-odcdh4-wbc1-c` | `MI300X-AIG-SW-Shared-Pool` | `17c3f3ec-89a2-4da7-b48d-f86b8c1b8e06` |
+| `dell300x-ccs-aus-f03-19` | `MI300X-AIG-SW-Shared-Pool` | `21c999cd-4a73-4149-8142-8c65fa9a30e8` |
+
+Access via Conductor reservation (not Alola Slurm). If SSH fails, run `conductor system sut-auth-remediate --system hpe-darkstar-ccs-aus-e12-03` or use Conductor batch jobs against the reserved entity.
 
 ---
 
@@ -74,9 +83,9 @@
 
 ---
 
-## CPX setup (Alola reservation mode)
+## CPX setup (Conductor reservation)
 
-After Conductor/Slurm reservation with sudo:
+After Conductor reservation is active on the SUT:
 
 ```bash
 amd-smi set --compute-partition CPX || rocm-smi --setcomputepartition CPX

@@ -224,9 +224,9 @@ Smoke test: `python3 tools/test_counter_grouping_inspector_manual.py`
 | **1. Policy pass count + wall time** | **Done** — `{}` → 13 passes; priority entries → **19** (+6) | Profile full panel on MI300X CPX with/without policy YAML; compare `perfmon/` file count + wall time |
 | **2. Block 17 single-pass HBM** | **Done** — `--block 17` → **8 passes**, HBM partners co-located | Re-profile mat_exp + occupancy with `--block 17` in CPX; compare raw `a/b` to merged full-panel data |
 
-**Recommended Conductor target:** `ctr-cx71-mi300x-01` (MI300X gfx942, pool `AIG-SW-Alola`, deployable). Book **4 h**, set **CPX** (`amd-smi set --compute-partition CPX` — needs reservation/sudo on Alola).
+**Booked Conductor target:** `hpe-darkstar-ccs-aus-e12-03` (MI300X gfx942, pool `MI300X-AIG-SW-ML-LIBRARIES`). Reservation **`06a90967-5dce-7ed0-8000-95ffbeeefaa0`**, 4 h from 2026-08-27 21:00 CDT. Set **CPX** on the SUT before profiling.
 
-**Access note:** Creating new Conductor reservations on `AIG-SW-Alola` MI300X nodes returned 422 (no create permission). Active team reservation **`rocprof-compute`** includes `fei.zheng@amd.com` but targets **`asrock-1w300-f2-1`** (MI350X). Request Alola pool access or an admin booking for `ctr-cx71-mi300x-01`.
+**Alternates** (Conductor deployable, `rocprof-compute` team): `splinter-odcdh4-wbc1-c`, `dell300x-ccs-aus-f03-19` in `MI300X-AIG-SW-Shared-Pool`.
 
 Step-by-step commands: [aiprofcomp78-hardware-validation-runbook.md](../reports/aiprofcomp78-hardware-validation-runbook.md).
 
