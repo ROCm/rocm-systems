@@ -280,6 +280,37 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(wf.sgpr(3), args[2]);
 }
 
+TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  std::array<uint32_t, 30> args{};
+  for (uint32_t i = 0; i < args.size(); ++i)
+    args[i] = 0x1000u + i;
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
+                         args.size() * sizeof(args[0]), kKernargAddr);
+  uint64_t kernel_object =
+      sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 32, false, false, false,
+                       kernel_code_properties, args.size() * sizeof(args[0]), args.size(), 0);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr64(0), kKernargAddr);
+  for (uint32_t i = 0; i < args.size(); ++i)
+    EXPECT_EQ(wf.sgpr(i + 2), args[i]);
+}
+
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 

@@ -6303,6 +6303,35 @@ def test_gfx1250_ds_atomic_routes_data_through_vgpr_resolver():
     assert 'VgprMsbRole::Src2' in expr_cmp
 
 
+@pytest.mark.parametrize(
+    ('dst_operands', 'returns_data'),
+    [
+        (['dsmem'], False),
+        (['vdst', 'dsmem'], True),
+    ],
+)
+def test_ds_atomic_codegen_returns_only_with_explicit_vdst(
+    dst_operands: list[str], returns_data: bool
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
+    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
+        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    )
+    sem = InstructionSemantics(
+        'DS_ADD_RTN_U64' if returns_data else 'DS_ADD_U64',
+        'ds_atomic',
+        operation='add',
+        elem_size=8,
+        num_elems=2,
+    )
+
+    body = codegen._gen_ds_atomic(dst_operands, [], sem)
+
+    assert f'd->is_load = {str(returns_data).lower()};' in body
+    assert ('d->dst_reg_base = vdst;' in body) is returns_data
+
+
 def test_rdna4_ds_atomic_uses_raw_encoding():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
