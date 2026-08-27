@@ -13,14 +13,18 @@ import importlib.util
 import os
 import sys
 
+from importlib.machinery import SourceFileLoader
+
 
 def load_rocprofv3(script_path):
     """Import rocprofv3.py as a module. Its top level is guarded by __main__, so this is safe."""
     if not os.path.exists(script_path):
         raise FileNotFoundError(f"rocprofv3 script not found: {script_path}")
-    spec = importlib.util.spec_from_file_location("rocprofv3_under_test", script_path)
+    # Installed launcher is named "rocprofv3" (no .py), so load via explicit loader.
+    loader = SourceFileLoader("rocprofv3_under_test", script_path)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
