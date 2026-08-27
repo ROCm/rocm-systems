@@ -105,6 +105,10 @@ def config_defaults(config: dict[str, float]) -> dict[str, float]:
             lookup(f"front_end.{name}.issue_cycles", shared) * FRONT_END_SCALE
         )
     tuning["straggler_base"] = lookup("straggler_cycles", 0.0)
+    tuning["gamma_base"] = lookup("issue_occupancy_exponent", 0.0)
+    tuning["barrier_base"] = lookup("barrier_cycles", 0.0)
+    tuning["issue_occupancy_exponent"] = tuning["gamma_base"]
+    tuning["barrier_cycles"] = tuning["barrier_base"]
     return tuning
 
 
@@ -351,32 +355,6 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
         rate = tuning.get("bandwidth_scale", 1.0) * tuning.get(f"level.{level}", 1.0)
         bandwidth = max(bandwidth, dispatch[f"{level}_cycles"] / rate)
 
-    # Little's law on the requesting side.  A level's rate is what it can serve,
-    # not what this dispatch can ask for: bytes in flight are bounded by the
-    # wavefronts actually resident times what each may leave outstanding, and
-    # dividing that by the round trip gives the bandwidth the kernel can reach.
-    # A grid too small to fill the machine cannot reach peak however fast the
-    # memory system is, which is why a thirty-two kilobyte transfer measures at
-    # tens of gigabytes a second on a part rated in terabytes.
-    lines = tuning.get("mlp_lines_per_wave", 0.0)
-    if lines > 0.0:
-        units = max(
-            1.0, min(float(dispatch["workgroups"]), tuning.get("compute_units", 256.0))
-        )
-        per_unit = min(
-            tuning.get("mshrs_per_cu", 64.0),
-            max(1.0, float(dispatch["resident"])) * lines,
-        )
-        inflight = units * per_unit * tuning.get("mlp_line_bytes", 128.0)
-        # The round trip is the one the dispatch's traffic actually took, which
-        # the fill term already names, and the traffic it applies to is the part
-        # that left the die -- what a cache served never paid it.
-        trip = max(1.0, float(dispatch["fill"]) * tuning.get("mlp_latency_scale", 1.0))
-        far = float(dispatch["mall_bytes"] + dispatch["dram_bytes"])
-        rate = inflight / trip
-        if rate > 0.0 and far > 0.0:
-            bandwidth = max(bandwidth, far / rate)
-
     placement = float(dispatch["placement"]) * tuning.get("placement_scale", 1.0)
     # Per-instruction issue cost is not independent of how many wavefronts are
     # resident. The model charges a unit's queue linearly in the work on it,
@@ -384,7 +362,9 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     # sixteen does not scale that way: the low-occupancy case reaches a higher
     # instruction rate, because fewer wavefronts contend for the same issue
     # slot. An exponent on the resident count is the smallest form of that.
-    gamma = tuning.get("issue_occupancy_exponent", 0.0)
+    # Relative to the exponent the config already applies, because the recorded
+    # issue term was produced with it. Adding it again would double it.
+    gamma = tuning.get("issue_occupancy_exponent", 0.0) - tuning.get("gamma_base", 0.0)
     if gamma != 0.0:
         issue *= (max(1.0, float(dispatch["resident"])) / 8.0) ** gamma
 
@@ -407,8 +387,10 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     # the wavefronts arrive skewed by whatever their memory accesses did, and a
     # kernel that barriers thousands of times per wavefront pays for it. Charged
     # per barrier on the wavefront's own path.
-    per_barrier = tuning.get("barrier_cycles", 0.0)
-    if per_barrier > 0.0:
+    # Likewise relative: the wavefront chains in the trace were already charged
+    # whatever the config says a barrier costs.
+    per_barrier = tuning.get("barrier_cycles", 0.0) - tuning.get("barrier_base", 0.0)
+    if per_barrier != 0.0:
         waves_here = max(1.0, float(dispatch["waves"]))
         share = float(dispatch["latency_waves"]) / waves_here
         barriers = dispatch["class_counts"].get("barrier", 0) * share
