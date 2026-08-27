@@ -1,69 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// User-visible sanitizer choices that determine which semantic observations
-/// ConSan requests from a code object.
-///
-/// This value is mutable only while a configuration source constructs it and
-/// is thereafter passed by const reference. It deliberately contains no
-/// selected registers, patch geometry, device addresses, mutation controls, or
-/// test-only switches. `flavor == std::nullopt` is the single construction-time
-/// sentinel; validation rejects it before the request reaches the transformer.
-struct ConSanRequest {
-  /// Selected sanitizer family. The parser resolves load-only activation to
-  /// the supported default before validating the request.
-  std::optional<ConSanFlavor> flavor;
-  /// MOI implementation selected when `flavor` is `ConSanFlavor::Moi`.
-  ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
-  /// Source of the logical owner identity recorded by MOI probes.
-  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
-  /// Admission policy for FLAT sites whose group provenance is heuristic.
-  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
-
-  /// SuperCollider observes native LDS sites when this domain is enabled.
-  bool probe_lds_check_trap = false;
-  /// SuperCollider observes group-FLAT sites when this domain is enabled.
-  bool probe_flat_check_trap = false;
-  /// Capture persistent owner/epoch state at kernel entry for MOI engines that
-  /// require it.
-  bool moi_init_owner_epoch = false;
-  /// Include supported barrier semantics in the MOI observation request.
-  bool moi_track_barriers = false;
-  /// Include supported atomic and fence semantics in the MOI observation
-  /// request.
-  bool moi_track_atomics = false;
-  /// Request Record/Replay's dynamic access-record representation.
-  bool moi_dynamic_access_records = false;
-  /// Request Sampled's immediate in-kernel conflict check in addition to its
-  /// retained evidence.
-  bool moi_sampled_check = false;
-
-  /// Static site selection stride used by the Sampled engine.
-  uint32_t moi_sample_stride = 1;
-  /// Selected residue in the static Sampled site stride.
-  uint32_t moi_sample_offset = 0;
-  /// Power-of-two dynamic selector stride used by Record/Replay and Sampled.
-  uint32_t moi_runtime_sample_stride = 1;
-  /// Selected residue in the dynamic runtime stride.
-  uint32_t moi_runtime_sample_offset = 0;
-
-  /// SuperCollider delay implementation used between the original and repeat
-  /// observation.
-  ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
-  /// Immediate delay amount interpreted by `delay_mode`.
-  uint32_t delay_nops = 0;
-  /// Scalar source used only by the variable-delay form.
-  uint16_t delay_var_ssrc = 106;
-  /// Sticky value written when SuperCollider observes instability.
-  uint32_t report_marker = 1;
-
-  /// Maximum automatic MOI evidence allocation requested for one code object.
-  /// Zero disables automatic allocation without supplying an address.
-  uint64_t moi_auto_report_buffer_size = 0;
-
-  bool operator==(const ConSanRequest &) const = default;
-};
-
 /// Process and installation policy owned by the runtime hook rather than the
 /// code-object transformer.
 ///
@@ -776,27 +713,10 @@ public:
         const ConSanDebugOverrides &debug, const MutationRequest &mutation,
         const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
     ConSanOptions options;
+    static_cast<ConSanRequest &>(options) = request;
     options.flavor = request.flavor.value_or(ConSanFlavor::None);
-    options.moi_engine = request.moi_engine;
-    options.moi_owner_source = request.moi_owner_source;
-    options.flat_provenance_mode = request.flat_provenance_mode;
-    options.probe_lds_check_trap = request.probe_lds_check_trap;
-    options.probe_flat_check_trap = request.probe_flat_check_trap;
-    options.moi_init_owner_epoch = request.moi_init_owner_epoch;
-    options.moi_track_barriers = request.moi_track_barriers;
-    options.moi_track_atomics = request.moi_track_atomics;
-    options.moi_dynamic_access_records = request.moi_dynamic_access_records;
     options.moi_inline_workgroup_shadow =
         request.flavor == ConSanFlavor::Moi && request.moi_engine == ConSanMoiEngine::InlineShadow;
-    options.moi_sampled_check = request.moi_sampled_check;
-    options.moi_sample_stride = request.moi_sample_stride;
-    options.moi_sample_offset = request.moi_sample_offset;
-    options.moi_runtime_sample_stride = request.moi_runtime_sample_stride;
-    options.moi_runtime_sample_offset = request.moi_runtime_sample_offset;
-    options.delay_mode = request.delay_mode;
-    options.delay_nops = request.delay_nops;
-    options.delay_var_ssrc = request.delay_var_ssrc;
-    options.report_marker = request.report_marker;
 
     static_cast<TransformPolicy &>(options) = transform_policy;
 

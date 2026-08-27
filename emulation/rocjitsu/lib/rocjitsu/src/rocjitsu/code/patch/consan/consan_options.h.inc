@@ -327,6 +327,69 @@ struct ConSanMoiTransientSgprAssignment {
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
 
+/// User-visible sanitizer choices that determine which semantic observations
+/// ConSan requests from a code object.
+///
+/// This value is mutable only while a configuration source constructs it and
+/// is thereafter passed by const reference. It deliberately contains no
+/// selected registers, patch geometry, device addresses, mutation controls, or
+/// test-only switches. `flavor == std::nullopt` is the single construction-time
+/// sentinel; validation rejects it before the request reaches the transformer.
+struct ConSanRequest {
+  /// Selected sanitizer family. The parser resolves load-only activation to
+  /// the supported default before validating the request.
+  std::optional<ConSanFlavor> flavor;
+  /// MOI implementation selected when `flavor` is `ConSanFlavor::Moi`.
+  ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
+  /// Source of the logical owner identity recorded by MOI probes.
+  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
+  /// Admission policy for FLAT sites whose group provenance is heuristic.
+  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
+
+  /// SuperCollider observes native LDS sites when this domain is enabled.
+  bool probe_lds_check_trap = false;
+  /// SuperCollider observes group-FLAT sites when this domain is enabled.
+  bool probe_flat_check_trap = false;
+  /// Capture persistent owner/epoch state at kernel entry for MOI engines that
+  /// require it.
+  bool moi_init_owner_epoch = false;
+  /// Include supported barrier semantics in the MOI observation request.
+  bool moi_track_barriers = false;
+  /// Include supported atomic and fence semantics in the MOI observation
+  /// request.
+  bool moi_track_atomics = false;
+  /// Request Record/Replay's dynamic access-record representation.
+  bool moi_dynamic_access_records = false;
+  /// Request Sampled's immediate in-kernel conflict check in addition to its
+  /// retained evidence.
+  bool moi_sampled_check = false;
+
+  /// Static site selection stride used by the Sampled engine.
+  uint32_t moi_sample_stride = 1;
+  /// Selected residue in the static Sampled site stride.
+  uint32_t moi_sample_offset = 0;
+  /// Power-of-two dynamic selector stride used by Record/Replay and Sampled.
+  uint32_t moi_runtime_sample_stride = 1;
+  /// Selected residue in the dynamic runtime stride.
+  uint32_t moi_runtime_sample_offset = 0;
+
+  /// SuperCollider delay implementation used between the original and repeat
+  /// observation.
+  ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
+  /// Immediate delay amount interpreted by `delay_mode`.
+  uint32_t delay_nops = 0;
+  /// Scalar source used only by the variable-delay form.
+  uint16_t delay_var_ssrc = 106;
+  /// Sticky value written when SuperCollider observes instability.
+  uint32_t report_marker = 1;
+
+  /// Maximum automatic MOI evidence allocation requested for one code object.
+  /// Zero disables automatic allocation without supplying an address.
+  uint64_t moi_auto_report_buffer_size = 0;
+
+  bool operator==(const ConSanRequest &) const = default;
+};
+
 /// Limits on the amount of transformation and placement work one code object
 /// may consume.
 ///
@@ -369,22 +432,17 @@ struct TransformPolicy {
 
 /// Mutable lowerer state retained while the prototype mechanism is migrated.
 ///
-/// The inherited `TransformPolicy` is the sole representation of caller-owned
-/// growth, patch-count, and planning-work limits. Members declared here are
-/// sanitizer semantics or state selected and mutated during lowering.
-struct ConSanOptions : TransformPolicy {
+/// The inherited request and transform-policy subobjects are the sole
+/// representations of caller-owned semantic choices and work limits, except
+/// for the temporary non-optional `flavor` lowering sentinel. Members declared
+/// here are state selected and mutated during lowering or input families that
+/// have not yet crossed the compatibility boundary.
+struct ConSanOptions : ConSanRequest, TransformPolicy {
   ConSanFlavor flavor = ConSanFlavor::None;
-  ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
-  /// Automatic selects a normalized resident-wave identity for Inline Shadow
-  /// and the entry workitem identity used by the other engines.
-  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
-  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
   bool probe_nop = false;
   bool probe_trampoline_nop = false;
   bool probe_endpgm = false;
   bool probe_lds_endpgm = false;
-  bool probe_lds_check_trap = false;
-  bool probe_flat_check_trap = false;
   bool probe_flat_trap = false;
   /// Replace a statically unique immediate barrier wait that belongs to no
   /// decoded synchronization sequence with a terminal instruction. This is a
@@ -439,17 +497,10 @@ struct ConSanOptions : TransformPolicy {
   uint32_t sc_perturb_max = 1;
   uint32_t sc_perturb_sleep = 1;
   uint32_t sc_perturb_required_count = 0;
-  bool moi_init_owner_epoch = false;
-  bool moi_track_barriers = false;
-  bool moi_track_atomics = false;
-  bool moi_dynamic_access_records = false;
   /// Internal rollout marker for the collision-free per-workgroup Inline
   /// shadow. The hook enables this for InlineShadow; direct patcher tests may
   /// leave it disabled while exercising the legacy global layout.
   bool moi_inline_workgroup_shadow = false;
-  /// Check the immediately preceding direct-sampled slot in-kernel and
-  /// increment the shared diagnostic counter on a sampled conflict.
-  bool moi_sampled_check = false;
   /// Debug-only retained capture of the first address-partition pending/group
   /// masks. Never enable this for qualification or acceptance runs.
   bool moi_partition_mask_debug = false;
@@ -549,8 +600,6 @@ struct ConSanOptions : TransformPolicy {
   uint16_t fault_barrier_marker_imm = 42;
   /// Internal recursion guard: faults have already been applied to this ELF.
   bool faults_preapplied = false;
-  ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
-  uint16_t delay_var_ssrc = 106;
   std::optional<uint16_t> scratch_vgpr;
   std::optional<uint16_t> moi_exec_save_sgpr;
   /// Scalar state kept outside a spill-backed Inline transient window.
@@ -604,17 +653,9 @@ struct ConSanOptions : TransformPolicy {
   /// Dispatch identity stored in direct sampled causal-window descriptors.
   /// Auto report buffers use the stable code-object reader identity.
   uint64_t moi_report_dispatch_id = 0;
-  uint32_t delay_nops = 0;
   /// Internal immutable baseline set by the public transform entry point and
   /// retained by every staged composition pass.
   std::optional<size_t> patched_image_growth_input_bytes;
-  uint32_t moi_sample_stride = 1;
-  uint32_t moi_sample_offset = 0;
-  /// Runtime deterministic wave selector for direct sampled probes. The
-  /// Stride is a power of two and selects a dispatch/workgroup/wave/access hash.
-  uint32_t moi_runtime_sample_stride = 1;
-  uint32_t moi_runtime_sample_offset = 0;
-  uint32_t report_marker = 1;
 };
 
 [[nodiscard]] inline bool consan_qualifies_extended_barrier_pairs(const ConSanOptions &options) {

@@ -4800,6 +4800,32 @@ analysis completed.
   `gfx1250` pass in 74.68 seconds. Slice 5AS remains the latest periodic
   physical-gfx950 gate; E2E validation remains outside this work.
 
+### Slice 5BD: share the typed transform request with lowering
+
+- **One request representation:** The temporary mutable `ConSanOptions` now
+  inherits the production `ConSanRequest` instead of redeclaring the engine,
+  owner-source, provenance, probe, owner-tracking, sampling, delay, and report
+  marker inputs. Existing lowerer code therefore reads and mutates the actual
+  typed request subobject while the remaining raw members are limited to other
+  not-yet-migrated inputs and lowering-selected state.
+- **One bounded adapter operation:** `LegacyOptionsAdapter` copies the complete
+  request subobject in one value-semantic assignment. It then normalizes only
+  the lowerer's temporary nonoptional flavor and derives the InlineShadow
+  workgroup-shadow flag. The removed field-by-field projection could drift as
+  the request contract evolved; the request-contract and adapter tests exercise
+  every request family and preserve fresh outputs and unchanged typed inputs.
+- **Deletion accounting:** Production adds 70 and deletes 109 physical lines, a
+  net deletion of 39. Most additions relocate the existing documented
+  `ConSanRequest` definition before its temporary derived lowerer state; no
+  second request type, accessor layer, or fallback remains. Tests are
+  unchanged.
+- **Checked-in gate:** All nine focused request-contract and adapter tests pass.
+  The host gate passes all 1,508 runnable tests with the two expected
+  benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests pass; and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 71.21 seconds. Slice 5AS remains the latest
+  periodic physical-gfx950 gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
