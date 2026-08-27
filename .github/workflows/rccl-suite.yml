@@ -295,8 +295,8 @@ jobs:
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_WORKDIR}/.ci-out/cache"
           mkdir -p "${RCCL_DEVICE_API_CACHE}"/{ompi,downloads}
           ci_lib="${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib"
-          # submit_slurm_job.py does sbatch --wait + sacct cross-check (a bare
-          # --wait exits 0 even for scheduler-killed jobs).
+          # submit_slurm_job.py submits --parsable, waits on sacct, scancels on
+          # INT/TERM/HUP (GHA cancel-in-progress), then sacct-checks the result.
           python3 "${ci_lib}/submit_slurm_job.py" \
             --script "${ci_lib}/${SUITE}.sbatch" \
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
