@@ -2889,8 +2889,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           static_cast<uint64_t>(std::distance(guest, staged.cave_words.rend()) - 1u) *
               sizeof(uint32_t);
     }
-    info.scratch_vgpr = planned.resources.base;
-    info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    note_moi_probe_patch_info(info, planned);
     if (branch_only_route) {
       info.branch_only_continuation = true;
       info.branch_only_entry_relay_offsets = branch_only_route->entry_relay_offsets;
@@ -2902,24 +2901,6 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
       info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
       info.branch_only_borrowed_backup_vgpr = staged.borrowed_entry->backup_vgpr;
-    }
-    if (planned.private_layout) {
-      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
-      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
-      info.required_private_segment_size = planned.private_layout->ephemeral_base;
-    }
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.spill->total_private_bytes);
-      note_dynamic_stack_private_requirement(info, &*planned.spill);
-    }
-    if (planned.scalar_spill) {
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
     // Descriptor mutations belong to emitted patches, not merely to
     // resource-admitted candidates.  Accumulating them here keeps a later

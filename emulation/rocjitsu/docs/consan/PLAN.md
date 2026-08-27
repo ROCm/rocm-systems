@@ -492,6 +492,14 @@ The main Inline Shadow access path deliberately remains outside this cutover
 because its branch-only dynamic-stack bootstrap is a different preservation
 algorithm, not another textual copy of the ordinary transaction.
 
+Successfully emitted probes now also publish their common resource telemetry
+through that plan. Eight Record/Replay, Sampled, and Inline Shadow emission
+paths no longer reconstruct scratch ownership, private identity offsets,
+fixed/dynamic spill extent, and descriptor owners independently. Semantic
+patch identity, placement, coverage, and evidence remain caller-owned, and
+resource admission still performs no publication for a patch that later proves
+unreachable.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

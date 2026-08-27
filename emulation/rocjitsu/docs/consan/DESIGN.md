@@ -674,6 +674,14 @@ probe paths accumulate descriptor private-memory requirements from the common
 resource plan, so they cannot quietly diverge on spill or persistent-state
 sizing.
 
+Only an emitted patch publishes resource telemetry. Once placement succeeds,
+`note_moi_probe_patch_info` projects the common plan into `ConSanPatchInfo`:
+scratch and kernel owners, private epoch/owner/workgroup/dispatch offsets, the
+fixed private-segment extent, VGPR spill count, and dynamic-stack addend. The
+caller still owns semantic patch kind, placement, covered events, and
+engine-specific evidence. This keeps validation and later prologue synthesis
+consistent without making telemetry part of resource admission.
+
 The native event emitters still accept the mutable compatibility options.
 `bind_moi_record_event_options` is the one explicit boundary that projects a
 typed event plan into that old interface. It is not a second resource plan:

@@ -6117,6 +6117,42 @@ for nominal line-count reductions.
   matrix then passed on a clean rerun. E2E validation remains outside this
   deletion work.
 
+### Slice 5CZ: publish probe-resource telemetry once
+
+- **One telemetry projection:** `note_moi_probe_patch_info` publishes scratch
+  and descriptor owners, every private identity offset, the complete fixed
+  private extent, VGPR spill count, and dynamic-stack addend from
+  `MoiPlannedProbeResources`. Record/Replay atomic/barrier/fence, Sampled
+  atomic/barrier, and both Inline Shadow atomic emission routes call it.
+- **Correct publication boundary:** The projection runs only after an emitted
+  patch has a placement. Resource admission and descriptor planning remain
+  separate, so a later reachability rejection cannot claim telemetry for an
+  uninstrumented site.
+- **Explicit non-responsibilities:** The helper does not choose a patch kind or
+  placement and does not publish covered events, relocated guest positions,
+  branch routing, persistent register values, sampling windows, or evidence.
+  Those facts remain with the semantic emitter that owns them.
+- **Sharing and target boundary:** The projection contains no architecture
+  branch or instruction encoding. Target-sensitive dynamic-stack geometry is
+  already a fact on the spill plan; publication merely transfers it to the
+  patch record consumed by validation.
+- **Test policy:** The helper is a projection of a fully exercised plan into
+  existing observable patch metadata. Host tests already assert private
+  epoch/owner/workgroup/dispatch offsets, fixed and dynamic spill extents,
+  descriptor ownership, and emitted patch validation across all affected
+  engines and targets; adding a private field-copy test would duplicate those
+  stronger contracts.
+- **Accounting:** Across the six affected implementation files, physical lines
+  fall from 10,009 to 9,902, nonblank lines from 9,750 to 9,642, and estimated
+  comment-excluded code lines from 9,471 to 9,354. The slice adds 36 and deletes
+  143 physical implementation lines, a net deletion of 107. No compatibility
+  path, target branch, public option, or alternate telemetry representation is
+  added.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -292,26 +292,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
-    info.scratch_vgpr = planned.resources.base;
-    info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    if (planned.private_layout) {
-      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
-      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
-      info.required_private_segment_size = planned.private_layout->ephemeral_base;
-    }
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.spill->total_private_bytes);
-      note_dynamic_stack_private_requirement(info, &*planned.spill);
-    }
-    if (planned.scalar_spill) {
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
-    }
+    note_moi_probe_patch_info(info, planned);
     patches.push_back(info);
     ++record_index;
   }

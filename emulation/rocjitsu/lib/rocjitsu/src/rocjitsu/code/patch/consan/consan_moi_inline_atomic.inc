@@ -695,29 +695,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           info.original_size = planned.relocated_guest_size;
           info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
-          info.scratch_vgpr = planned.resources.base;
-          info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+          note_moi_probe_patch_info(info, planned);
           note_moi_persistent_vgpr_state(info, group_options);
           info.persistent_sgpr_state = moi_persistent_sgpr_state(group_options);
-          if (planned.spill) {
-            info.spilled_vgpr_count = planned.spill->vgpr_count;
-            info.required_private_segment_size = planned.spill->total_private_bytes;
-            note_dynamic_stack_private_requirement(info, &*planned.spill);
-          }
-          if (planned.scalar_spill) {
-            info.required_private_segment_size = std::max(
-                info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
-          }
-          if (planned.private_layout) {
-            info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
-            info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-            info.persistent_workgroup_key_private_offset =
-                planned.private_layout->workgroup_key_offset;
-            info.persistent_dispatch_id_private_offset = planned.private_layout->dispatch_id_offset;
-            info.persistent_private_state_end = planned.private_layout->ephemeral_base;
-            info.required_private_segment_size = std::max(info.required_private_segment_size,
-                                                          planned.private_layout->ephemeral_base);
-          }
           patches.push_back(std::move(info));
           routed_by_dense_relay[body.planned_index] = true;
         }
@@ -823,28 +803,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.original_size = planned.relocated_guest_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
-    info.scratch_vgpr = planned.resources.base;
-    info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    note_moi_probe_patch_info(info, planned);
     note_moi_persistent_vgpr_state(info, candidate_options);
     info.persistent_sgpr_state = moi_persistent_sgpr_state(candidate_options);
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size = planned.spill->total_private_bytes;
-      note_dynamic_stack_private_requirement(info, &*planned.spill);
-    }
-    if (planned.scalar_spill) {
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
-    }
-    if (planned.private_layout) {
-      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
-      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_workgroup_key_private_offset = planned.private_layout->workgroup_key_offset;
-      info.persistent_dispatch_id_private_offset = planned.private_layout->dispatch_id_offset;
-      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
-      info.required_private_segment_size =
-          std::max(info.required_private_segment_size, planned.private_layout->ephemeral_base);
-    }
     patches.push_back(info);
   }
 
