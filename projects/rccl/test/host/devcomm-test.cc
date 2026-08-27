@@ -9,8 +9,14 @@
 // are directly callable; every external they reach is faked in devcomm_fakes.
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
+#include <new>
+#include <type_traits>
+#include <vector>
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
@@ -49,8 +55,12 @@ class DevcommMicrotest : public ::testing::Test {
 // ---- block: ncclCommPropertiesFilter_v22902 ----
 namespace {
 
-// The modern layout the caller passes; the shim writes ginType through the
-// v22902 layout instead, so the two ginType offsets must be checked apart.
+// This block arms a MODERN-layout buffer so the two ginType offsets can be told apart byte for
+// byte. In production the buffer really is old-layout and the type-pun is deliberate:
+// getNcclVersionCompat only reaches this shim for [2.29.2, 2.29.3], and the caller in
+// src/dev_runtime.cc writes the <= byte-33 prefix unconditionally while gating every modern field
+// behind `props->version > NCCL_VERSION(2,29,3)`. Do not "fix" the pun into a 4-byte store at
+// offset 36 -- that would leave the app-visible byte at offset 34 uninitialised.
 constexpr std::size_t kPropsSize = sizeof(struct ncclCommProperties);
 constexpr std::size_t kDeviceApiOff = offsetof(struct ncclCommProperties, deviceApiSupport);
 constexpr std::size_t kModernGinOff = offsetof(struct ncclCommProperties, ginType);
@@ -74,6 +84,11 @@ class DevcommPropsFilterV22902Microtest : public DevcommMicrotest {
   // Poisons the whole buffer, then writes only the two inputs the block reads.
   void ArmProps(bool deviceApiSupport) {
     std::memset(raw_, kPoison, sizeof(raw_));
+    // Start an ncclCommProperties lifetime in raw_ so the reinterpret_cast above is not UB under
+    // -O3 strict aliasing. The type is trivially default-constructible, so the poison survives.
+    static_assert(std::is_trivially_default_constructible_v<struct ncclCommProperties>,
+                  "placement-new here would overwrite the poison bytes the oracle depends on");
+    new (raw_) struct ncclCommProperties;
     props()->size = kPropsSize;
     props()->rank = 3;
     props()->nRanks = 8;
@@ -85,8 +100,12 @@ class DevcommPropsFilterV22902Microtest : public DevcommMicrotest {
   void ExpectBytesUnchangedExcept(std::initializer_list<std::size_t> allowed) {
     for (std::size_t i = 0; i < kPropsSize; ++i) {
       bool skip = false;
-      for (std::size_t a : allowed) skip = skip || (a == i);
-      if (skip) continue;
+      for (std::size_t a : allowed) {
+        skip = skip || (a == i);
+      }
+      if (skip) {
+        continue;
+      }
       EXPECT_EQ(raw_[i], before_[i]) << "byte " << i << " was modified";
     }
   }
@@ -469,7 +488,7 @@ TEST_F(DevcommReqsFilterV22902Microtest, ZeroBarrierCount_StillZeroesRailGinBarr
 
 // Arm (c) pins current behaviour for a negative barrierCount: `if (barrierCount)` is a
 // truthiness test, so the merge runs and std::max discards the negative.
-TEST_F(DevcommReqsFilterV22902Microtest, NegativeBarrierCount_IsClearedAndDiscarded) {
+TEST_F(DevcommReqsFilterV22902Microtest, PinsTruthinessBug_NegativeBarrierCountEntersTheMergeBody) {
   reqs_.barrierCount = -3;
   reqs_.lsaBarrierCount = 2;
 
@@ -511,20 +530,28 @@ namespace {
 // The shim memcpys this many bytes into a 200-byte v22902 struct whose railGinBarrier sits at 128.
 // If the modern ncclDevComm ever grows a field before railGinBarrier the copy silently overruns into
 // the old struct's GIN tail, so pin the span rather than derive it.
-constexpr size_t kCopyNewToOld22902LsaSpan =
+constexpr std::size_t kCopyNewToOld22902LsaSpan =
     offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank);
 static_assert(kCopyNewToOld22902LsaSpan == 128, "LSA prefix no longer fits below v22902 railGinBarrier");
-static_assert(offsetof(struct ncclDevComm_v22902, railGinBarrier) == 128);
-static_assert(sizeof(struct ncclDevComm_v22902) == 200);
+static_assert(offsetof(struct ncclDevComm_v22902, railGinBarrier) == 128,
+              "v22902 railGinBarrier moved; the GIN-tail oracle below indexes the wrong bytes");
+static_assert(sizeof(struct ncclDevComm_v22902) == 200,
+              "v22902 devComm resized; the guard-band arena and the memset span below must follow");
 
-constexpr size_t kCopyNewToOld22902Guard = 64;
+constexpr std::size_t kCopyNewToOld22902Guard = 64;
 constexpr unsigned char kCopyNewToOld22902Poison = 0xA5;
 
 // Destination arena: the v22902 struct followed by a poisoned guard, so an oversized memset shows up.
 struct CopyNewToOld22902Dest {
   alignas(16) unsigned char bytes[sizeof(struct ncclDevComm_v22902) + kCopyNewToOld22902Guard];
 
-  CopyNewToOld22902Dest() { std::memset(bytes, kCopyNewToOld22902Poison, sizeof(bytes)); }
+  CopyNewToOld22902Dest() {
+    std::memset(bytes, kCopyNewToOld22902Poison, sizeof(bytes));
+    // See ArmProps: start the object's lifetime so old() is not a strict-aliasing violation.
+    static_assert(std::is_trivially_default_constructible_v<struct ncclDevComm_v22902>,
+                  "placement-new here would overwrite the poison the guard band depends on");
+    new (bytes) struct ncclDevComm_v22902;
+  }
   struct ncclDevComm_v22902* old() { return reinterpret_cast<struct ncclDevComm_v22902*>(bytes); }
 };
 
@@ -544,14 +571,14 @@ std::unique_ptr<struct ncclDevComm> MakeCopyNewToOld22902Source() {
   return dev;
 }
 
-bool CopyNewToOld22902AllBytesAre(const unsigned char* p, size_t n, unsigned char v) {
-  for (size_t i = 0; i < n; ++i) {
-    if (p[i] != v) return false;
+bool CopyNewToOld22902AllBytesAre(const unsigned char* p, std::size_t n, unsigned char v) {
+  for (std::size_t i = 0; i < n; ++i) {
+    if (p[i] != v) {
+      return false;
+    }
   }
   return true;
 }
-
-}  // namespace
 
 // Arm: the whole body on the real CopyLsaData default -- memset zeroes all 200 bytes, then the LSA
 // prefix is copied in from newDevComm, leaving the GIN tail zero and the source untouched.
@@ -652,14 +679,11 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetRunsBeforeTheCopy) {
   EXPECT_EQ(7, dst.old()->rank);
   EXPECT_EQ(0xCAFEBABEu, dst.old()->lsaSize_rcp32);
 }
+
+}  // namespace
 // ---- end block ----
 
 // ---- block: ncclDevCommCopyOldToNew_v22902 ----
-
-#include <cstddef>
-#include <cstdint>
-#include <vector>
-
 namespace {
 
 // Offsets the shim's copy is defined in terms of. Length comes from the NEW struct
@@ -675,15 +699,21 @@ static_assert(kOldRankOff + kLsaLen <= sizeof(struct ncclDevComm_v22902),
 // every byte of the copied range, so "dst changed" and "src intact" stay decidable.
 void FillPattern(void* p, std::size_t n, uint8_t base, uint8_t step) {
   uint8_t* b = static_cast<uint8_t*>(p);
-  for (std::size_t i = 0; i < n; ++i) b[i] = static_cast<uint8_t>(base + step * i);
+  for (std::size_t i = 0; i < n; ++i) {
+    b[i] = static_cast<uint8_t>(base + step * i);
+  }
 }
 
 // -1 when equal, else the index of the first differing byte (a bare memcmp says only "no").
-long FirstDiff(void const* a, void const* b, std::size_t n) {
+// ptrdiff_t, not long: it states the "byte index or -1" contract without depending on the
+// platform's long width.
+std::ptrdiff_t FirstDiff(void const* a, void const* b, std::size_t n) {
   uint8_t const* x = static_cast<uint8_t const*>(a);
   uint8_t const* y = static_cast<uint8_t const*>(b);
   for (std::size_t i = 0; i < n; ++i) {
-    if (x[i] != y[i]) return static_cast<long>(i);
+    if (x[i] != y[i]) {
+      return static_cast<std::ptrdiff_t>(i);
+    }
   }
   return -1;
 }
@@ -970,6 +1000,23 @@ TEST_F(DevcommMicrotest, PropsFilter22907_LeavesEveryOtherPropertyUntouched) {
   EXPECT_TRUE(props.multimemSupport);
   EXPECT_EQ(7, props.nLsaTeams);
   EXPECT_TRUE(props.hostRmaSupport);
+
+  // Exhaustive backstop: the named assertions above enumerate today's 10 siblings, so a field
+  // added later would escape them. Compare every byte outside the two the filter is allowed to
+  // write, using a fresh reference copy rather than a hand-maintained list.
+  const ncclCommProperties reference = PoisonedProps22907(true);
+  const auto* got = reinterpret_cast<const unsigned char*>(&props);
+  const auto* want = reinterpret_cast<const unsigned char*>(&reference);
+  for (std::size_t i = 0; i < sizeof(props); ++i) {
+    const bool isGin = i >= offsetof(ncclCommProperties, ginType) &&
+                       i < offsetof(ncclCommProperties, ginType) + sizeof(props.ginType);
+    const bool isRailedGin = i >= offsetof(ncclCommProperties, railedGinType) &&
+                             i < offsetof(ncclCommProperties, railedGinType) + sizeof(props.railedGinType);
+    if (isGin || isRailedGin) {
+      continue;
+    }
+    EXPECT_EQ(want[i], got[i]) << "byte " << i << " outside ginType/railedGinType was modified";
+  }
 }
 
 // comm->nRanks is the right-hand operand: with props.nRanks deliberately different from comm->nRanks,
@@ -992,17 +1039,23 @@ TEST_F(DevcommMicrotest, PropsFilter22907_ComparesAgainstCommNRanksNotPropsNRank
 // ---- block: ncclDevCommRequirementsFilter_v22907 ----
 namespace {
 
-// Formats to "123.45.67": nine chars, so a shrunken version buffer truncates it, and unmistakable next to the runtime version.
+// Formats to "123.45.67": nine chars, so a shrunken version buffer truncates it, and
+// unmistakable next to the runtime version.
 constexpr int kCompiledVersion22907 = 1234567;
 // WARN routes __FILE__ through the log fake, so this pins the v22907 copy of a diagnostic v22902 emits verbatim.
 constexpr const char kWarnSite22907[] = "devcomm_v22907.cc:";
 constexpr const char kWarnLead22907[] = "The application was compiled with too old version of NCCL.";
 
+// The compiled half is a literal, not a second call to ncclVersionToString: an oracle that reuses
+// the formatter under test would agree with a bug in it. The runtime half has to stay derived --
+// NCCL_VERSION_CODE moves every release, and a literal there would be a per-release landmine.
+constexpr const char kCompiledVersionString22907[] = "123.45.67";
+
 std::string ExpectedVersionPhrase22907() {
-  char compiled[16], runtime[16], phrase[160];
+  char runtime[16], phrase[160];
   snprintf(phrase, sizeof(phrase),
            "compiled with NCCL version %s, but is running with NCCL library version %s.",
-           ncclVersionToString(kCompiledVersion22907, compiled, sizeof(compiled)),
+           kCompiledVersionString22907,
            ncclVersionToString(NCCL_VERSION_CODE, runtime, sizeof(runtime)));
   return phrase;
 }
@@ -1084,7 +1137,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, CounterCountAloneRejects) {
   EXPECT_TRUE(ReqsUnchanged());
 }
 
-// Arm: reqs->barrierCount > 0 alone trips it -- v22907 counts plain barriers as GIN and, unlike v22902, never promotes them.
+// Arm: reqs->barrierCount > 0 alone trips it -- v22907 counts plain barriers as GIN and,
+// unlike v22902, never promotes them.
 TEST_F(DevcommReqsFilterV22907Microtest, BarrierCountAloneRejectsAndIsNotPromoted) {
   reqs_.barrierCount = 2;
   reqs_.lsaBarrierCount = 0;
@@ -1133,7 +1187,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, NoRequestEmptyListReturnsSuccessWithout
   EXPECT_TRUE(ReqsUnchanged());
 }
 
-// Arm: the loop walks a three-node list in which no node requests GIN, exits on node == nullptr, and still reports success.
+// Arm: the loop walks a three-node list in which no node requests GIN, exits on
+// node == nullptr, and still reports success.
 TEST_F(DevcommReqsFilterV22907Microtest, AllZeroNodeListWalksToEndAndSucceeds) {
   LinkNodes(3);
   reqs_.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
@@ -1183,7 +1238,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, MiddleNodeCounterCountRejects) {
   EXPECT_TRUE(NodesUnchanged());
 }
 
-// Arm: GIN resources requested but the outer gate's second operand is false on both sides -- v22907's distinguishing arm.
+// Arm: GIN resources requested but the outer gate's second operand is false on both sides --
+// v22907's distinguishing arm.
 TEST_F(DevcommReqsFilterV22907Microtest, GinRequestedWithoutConnectionOrForceSucceedsSilently) {
   reqs_.ginSignalCount = 4;
   reqs_.ginCounterCount = 6;
@@ -1264,21 +1320,18 @@ TEST_F(DevcommReqsFilterV22907Microtest, WarnNamesCompiledThenRuntimeVersion) {
 // ---- end block ----
 
 // ---- block: ncclDevCommCopyNewToOld_v22907 ----
-#include <cstddef>
-#include <cstdint>
-
 namespace {
 
-constexpr size_t kOld907Size = sizeof(struct ncclDevComm_v22907);
-constexpr size_t kOld907AbortOff = offsetof(struct ncclDevComm_v22907, abortFlag);
+constexpr std::size_t kOld907Size = sizeof(struct ncclDevComm_v22907);
+constexpr std::size_t kOld907AbortOff = offsetof(struct ncclDevComm_v22907, abortFlag);
 // What ncclDevCommCopyLsaData actually moves; anything past it in `old` can only be zero or abortFlag.
-constexpr size_t kLsaPrefixLen =
+constexpr std::size_t kLsaPrefixLen =
     offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank);
-constexpr size_t kGuardLen = 32;
+constexpr std::size_t kGuardLen = 32;
 
 // Never nullptr: a 0x00 abortFlag is indistinguishable from the memset result.
 uint32_t* const kAbortA = reinterpret_cast<uint32_t*>(0xABCDEF0012345678ull);
-uint32_t* const kAbortB = reinterpret_cast<uint32_t*>(0x0FEDCBA987654321ull);
+uint32_t* const kAbortB = reinterpret_cast<uint32_t*>(0x0FEDCBA987654320ull);
 
 // Destination flanked by 0x5A guard bands so a memset running past sizeof(*old) is visible.
 class Old907Buf {
@@ -1286,13 +1339,19 @@ class Old907Buf {
   explicit Old907Buf(unsigned char poison) {
     std::memset(bytes_, 0x5A, sizeof(bytes_));
     std::memset(bytes_ + kGuardLen, poison, kOld907Size);
+    // See ArmProps: start the object's lifetime so old() is not a strict-aliasing violation.
+    static_assert(std::is_trivially_default_constructible_v<struct ncclDevComm_v22907>,
+                  "placement-new here would overwrite the poison the guard band depends on");
+    new (bytes_ + kGuardLen) struct ncclDevComm_v22907;
   }
   void* raw() { return bytes_ + kGuardLen; }
   struct ncclDevComm_v22907* old() { return reinterpret_cast<struct ncclDevComm_v22907*>(raw()); }
-  unsigned char byteAt(size_t i) const { return bytes_[kGuardLen + i]; }
+  unsigned char byteAt(std::size_t i) const { return bytes_[kGuardLen + i]; }
   bool GuardsIntact() const {
-    for (size_t i = 0; i < kGuardLen; ++i) {
-      if (bytes_[i] != 0x5A || bytes_[kGuardLen + kOld907Size + i] != 0x5A) return false;
+    for (std::size_t i = 0; i < kGuardLen; ++i) {
+      if (bytes_[i] != 0x5A || bytes_[kGuardLen + kOld907Size + i] != 0x5A) {
+        return false;
+      }
     }
     return true;
   }
@@ -1318,8 +1377,10 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsEveryByte_ThenStoresAbortFlagAf
   EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
   EXPECT_EQ(1, copyLsa.calls);
 
-  for (size_t i = 0; i < kOld907Size; ++i) {
-    if (i >= kOld907AbortOff && i < kOld907AbortOff + sizeof(uint32_t*)) continue;
+  for (std::size_t i = 0; i < kOld907Size; ++i) {
+    if (i >= kOld907AbortOff && i < kOld907AbortOff + sizeof(uint32_t*)) {
+      continue;
+    }
     EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " of old was not cleared";
   }
   EXPECT_EQ(kAbortA, buf.old()->abortFlag);
@@ -1382,7 +1443,7 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_RealCopyMovesLsaPrefixAndLeavesSource
             static_cast<void*>(buf.old()->resourceWindow));
   EXPECT_EQ(kAbortA, buf.old()->abortFlag);
 
-  for (size_t i = kLsaPrefixLen; i < kOld907AbortOff; ++i) {
+  for (std::size_t i = kLsaPrefixLen; i < kOld907AbortOff; ++i) {
     EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " past the LSA prefix was not cleared";
   }
   EXPECT_EQ(0, std::memcmp(srcBefore.get(), newDev.get(), sizeof(*newDev)));
