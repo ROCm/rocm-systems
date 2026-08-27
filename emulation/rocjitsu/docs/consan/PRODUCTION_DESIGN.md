@@ -4706,6 +4706,28 @@ analysis completed.
   the latest periodic physical-gfx950 gate; E2E validation remains outside this
   work.
 
+### Slice 5AZ: delete copied growth-budget inputs
+
+- **Budget outputs only:** `ConSanPatchedImageGrowthBudget` no longer copies the
+  original and current image byte counts into its returned value. The resolver
+  uses both inputs to compute the operative total limit, existing growth,
+  remaining growth, and already-exceeded status, but no production consumer
+  read the copied inputs afterward.
+- **Computed behavior remains covered:** The growth-policy tests still exercise
+  absolute and percentage resolution, staged original-input accounting, exact
+  admission and rejection boundaries, saturation, and distinct malformed or
+  allocation failures. Two assertions that merely compared returned copies to
+  the arguments have no behavioral content and are deleted.
+- **Deletion accounting:** Production deletes four physical lines and adds
+  none; tests delete two input-echo assertions and add none. No accessor or
+  alternate stored representation replaces them.
+- **Checked-in gate:** All thirteen focused growth-policy tests pass. The host
+  gate passes all 1,508 runnable tests with the two expected benchmark-object
+  skips; all 172 HSA-hook and hook-lifecycle tests pass; and all 2,908
+  simulator-device tests across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and
+  `gfx1250` pass in 79.32 seconds. Slice 5AS remains the latest periodic
+  physical-gfx950 gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

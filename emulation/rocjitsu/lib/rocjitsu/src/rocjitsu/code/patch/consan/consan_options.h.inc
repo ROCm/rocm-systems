@@ -56,8 +56,6 @@ consan_patched_image_growth_limit_bytes(const ConSanPatchedImageGrowthLimit &pol
 }
 
 struct ConSanPatchedImageGrowthBudget {
-  size_t input_image_bytes = 0;
-  size_t current_image_bytes = 0;
   size_t total_limit_bytes = 0;
   size_t existing_growth_bytes = 0;
   size_t remaining_growth_bytes = 0;
@@ -76,8 +74,6 @@ consan_patched_image_growth_budget(const ConSanPatchedImageGrowthLimit &policy,
   const size_t existing_growth =
       current_image_bytes > input_image_bytes ? current_image_bytes - input_image_bytes : 0u;
   return ConSanPatchedImageGrowthBudget{
-      .input_image_bytes = input_image_bytes,
-      .current_image_bytes = current_image_bytes,
       .total_limit_bytes = *total_limit,
       .existing_growth_bytes = existing_growth,
       .remaining_growth_bytes =

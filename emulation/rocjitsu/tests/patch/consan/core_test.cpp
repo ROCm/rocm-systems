@@ -329,8 +329,6 @@ TEST(ConSan, PatchedImageGrowthBudgetIsSharedAcrossStages) {
   };
   const auto budget = consan_patched_image_growth_budget(policy, 1000u, 1100u);
   ASSERT_TRUE(budget);
-  EXPECT_EQ(budget->input_image_bytes, 1000u);
-  EXPECT_EQ(budget->current_image_bytes, 1100u);
   EXPECT_EQ(budget->total_limit_bytes, 250u);
   EXPECT_EQ(budget->existing_growth_bytes, 100u);
   EXPECT_EQ(budget->remaining_growth_bytes, 150u);
