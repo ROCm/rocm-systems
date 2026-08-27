@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RESOURCE_GUARDS_HPP
+#define RESOURCE_GUARDS_HPP
 
 #include "nccl.h"
 #include "net.h"
@@ -492,4 +493,6 @@ inline NcclCommAutoGuard makeCommAutoGuard(ncclComm_t comm)
 }
 
 } // namespace RCCLTestGuards
+
+#endif // RESOURCE_GUARDS_HPP
 
