@@ -8,7 +8,6 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce — no GPU hardware required.
 """
 
-from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -562,23 +561,19 @@ def _make_roofline_soc(tmp_path: Path, filter_blocks: list[str]) -> OmniSoC_Base
     ],
 )
 def test_post_profiling_roofline_gating(
-    tmp_path: Path, filter_blocks: list[str], expect_benchmark: bool
+    tmp_path: Path, monkeypatch, filter_blocks: list[str], expect_benchmark: bool
 ) -> None:
     """Roofline runs only when the effective filter blocks cover block 4."""
     soc = _make_roofline_soc(tmp_path, filter_blocks)
+    mock_benchmark = MagicMock()
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.run_roofline_benchmark", mock_benchmark
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.validate_roofline_csv",
+        lambda _workload_dir: (True, ""),
+    )
 
-    with ExitStack() as patch_stack:
-        mock_benchmark = patch_stack.enter_context(
-            patch("rocprof_compute_soc.soc_base.run_roofline_benchmark")
-        )
-        patch_stack.enter_context(
-            patch(
-                "rocprof_compute_soc.soc_base.validate_roofline_csv",
-                return_value=(True, ""),
-            )
-        )
-        patch_stack.enter_context(patch("rocprof_compute_soc.soc_base.console_log"))
-        patch_stack.enter_context(patch("rocprof_compute_soc.soc_base.console_debug"))
-        soc.post_profiling()
+    soc.post_profiling()
 
     assert mock_benchmark.called is expect_benchmark
