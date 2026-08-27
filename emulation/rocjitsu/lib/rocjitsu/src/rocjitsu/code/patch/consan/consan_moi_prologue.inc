@@ -543,7 +543,7 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
 [[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
                                                         uint64_t cave_text_offset,
                                                         uint64_t return_text_offset,
-                                                        const ConSanOptions &options,
+                                                        const MoiOptions &options,
                                                         rj_code_arch_t arch) {
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -567,7 +567,7 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
 [[nodiscard]] bool
 emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
                                      uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const ConSanOptions &options,
+                                     const MoiOptions &options,
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context) {
@@ -1281,7 +1281,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
       return std::nullopt;
     }
     words.push_back(build_v_mov_b32_e32(*workgroup_key_vgpr, scalar_positive_inline_u32(0), arch));
-    ConSanOptions key_options;
+    MoiOptions key_options;
     key_options.moi_exec_save_sgpr = return_pc_sgpr;
     if (!append_inline_workgroup_key(words, *workgroup_sources, key_options, *workgroup_key_vgpr,
                                      owner_vgpr, epoch_vgpr,
@@ -1499,7 +1499,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
       errors.emplace_back("ConSan MOI private workgroup key requires entry ABI sources");
       return std::nullopt;
     }
-    ConSanOptions key_options;
+    MoiOptions key_options;
     key_options.moi_exec_save_sgpr = return_pc_sgpr;
     if (!append_inline_workgroup_key(words, *workgroup_sources, key_options, scratch_vgpr,
                                      static_cast<uint16_t>(scratch_vgpr + 1u),
@@ -1795,7 +1795,7 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
   info.dispatch_id_preload_inserted = plan.descriptor_change_required();
 }
 
-void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_code_arch_t arch,
+void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_arch_t arch,
                                             ConSanTransformArtifacts &result) {
   if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
@@ -1825,7 +1825,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     uint64_t active_descriptor_file_offset = 0;
     uint64_t active_entry_text_offset = 0;
     uint16_t scratch_vgpr = 0;
-    ConSanOptions kernel_options;
+    MoiOptions kernel_options;
     MoiPrivateEpochLayout layout;
     VgprSpillSequence spill;
     std::optional<SgprSpillSequence> entry_scalar_spill;
@@ -1867,7 +1867,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
 
     if (!access_patch->persistent_epoch_private_offset)
       continue;
-    ConSanOptions kernel_options = options;
+    MoiOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
         !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_operating_point,
@@ -2247,7 +2247,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
 }
 
 [[nodiscard]] uint32_t moi_owner_epoch_prologue_required_vgpr_count(
-    const ConSanOptions &options,
+    const MoiOptions &options,
     const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, rj_code_arch_t arch) {
   if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr)
     return 0u;
@@ -2271,9 +2271,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   return required;
 }
 
-[[nodiscard]] bool
-moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &options,
-                                                     uint16_t sgpr_base, uint16_t sgpr_count) {
+[[nodiscard]] bool moi_entry_scalar_backup_preserves_persistent_outputs(const MoiOptions &options,
+                                                                        uint16_t sgpr_base,
+                                                                        uint16_t sgpr_count) {
   const auto overlaps = [&](std::optional<uint16_t> reg, uint16_t width = 1u) {
     return reg && range_overlaps(sgpr_base, sgpr_count, *reg, width);
   };
@@ -2297,7 +2297,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
 }
 
 [[nodiscard]] bool moi_owner_epoch_prologue_uses_vgpr(
-    const ConSanOptions &options,
+    const MoiOptions &options,
     const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, uint16_t vgpr,
     rj_code_arch_t arch) {
   const auto overlaps = [vgpr](std::optional<uint16_t> base, uint16_t width = 1u) {
@@ -2326,7 +2326,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
 }
 
 void try_apply_owner_epoch_prologue_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    std::span<const uint8_t> bytes, const MoiOptions &options,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_init_owner_epoch)
@@ -2382,7 +2382,7 @@ void try_apply_owner_epoch_prologue_patch(
           : 0u;
   struct PlannedOwnerEpochPrologue {
     ConSanKernelInfo kernel;
-    ConSanOptions persistent_options;
+    MoiOptions persistent_options;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
@@ -2432,7 +2432,7 @@ void try_apply_owner_epoch_prologue_patch(
     active.descriptor_file_offset = active_kernel->descriptor_file_offset;
     active.entry_text_offset = active_kernel->entry_text_offset;
     active.text_file_offset = active_kernel->text_file_offset;
-    ConSanOptions kernel_options = options;
+    MoiOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!apply_moi_persistent_vgpr_assignment(kernel_options, result.moi_operating_point,
                                               kernel_owner)) {
@@ -2691,7 +2691,7 @@ void try_apply_owner_epoch_prologue_patch(
                               has_kernarg_preload});
   }
   for (PlannedOwnerEpochPrologue &item : target_kernels) {
-    const ConSanOptions &kernel_options = item.persistent_options;
+    const MoiOptions &kernel_options = item.persistent_options;
     uint32_t required_vgpr_count =
         moi_owner_epoch_prologue_required_vgpr_count(kernel_options, item.workgroup_shadow, arch);
     if (item.entry_scalar_backup)
@@ -2748,7 +2748,7 @@ void try_apply_owner_epoch_prologue_patch(
       return;
     }
     const std::array<uint64_t, 1> canonical_owner = {canonical_kernel->descriptor_file_offset};
-    const ConSanOptions &kernel_options = item.persistent_options;
+    const MoiOptions &kernel_options = item.persistent_options;
     const ConSanMoiDispatchIdCapture dispatch_capture{.sgpr = kernel_options.moi_dispatch_id_sgpr,
                                                       .vgpr = kernel_options.moi_dispatch_id_vgpr};
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = item.workgroup_shadow;

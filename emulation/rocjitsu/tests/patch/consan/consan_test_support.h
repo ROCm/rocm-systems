@@ -53,22 +53,22 @@ namespace rocjitsu {
 /// Explicitly test-only access to compatibility-lowering working state. No
 /// production header declares this symbol.
 [[nodiscard]] ConSanTransformArtifacts complete_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {});
 [[nodiscard]] inline ConSanTransformArtifacts
-test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
 }
 
 /// Lower one focused fixture whose input image already contains committed
 /// mutation geometry. This keeps staged-image ownership out of mutable
-/// `ConSanOptions` while allowing placement and CFG tests to construct the
+/// `MoiOptions` while allowing placement and CFG tests to construct the
 /// exact composition boundary they exercise.
 [[nodiscard]] inline ConSanTransformArtifacts test_lower_consan_with_preapplied_mutation(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanPreappliedMutationLayout &preapplied_mutation) {
   return complete_consan_lowering(code_object_bytes, options, nullptr, preapplied_mutation);
 }
@@ -80,7 +80,7 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOption
 /// the upstream placement search.
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan_with_owner_transient_sgpr_assignment(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanMoiTransientSgprAssignment &assignment) {
   return complete_consan_lowering(code_object_bytes, options, nullptr, {},
                                   std::span{&assignment, 1u});
@@ -90,7 +90,7 @@ test_lower_consan_with_owner_transient_sgpr_assignment(
 /// by analysis-focused tests. This exercises the public mutation dry-run
 /// contract while leaving the caller's options unchanged.
 [[nodiscard]] inline ConSanTransformArtifacts
-test_semantic_inventory(std::span<const uint8_t> code_object_bytes, ConSanOptions options,
+test_semantic_inventory(std::span<const uint8_t> code_object_bytes, MoiOptions options,
                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_dry_run = true;
   return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
@@ -100,7 +100,7 @@ test_semantic_inventory(std::span<const uint8_t> code_object_bytes, ConSanOption
 /// destination through the real mutation request, rather than through a
 /// lowerer-only inventory switch.
 [[nodiscard]] inline ConSanTransformArtifacts
-test_barrier_move_inventory(std::span<const uint8_t> code_object_bytes, ConSanOptions options,
+test_barrier_move_inventory(std::span<const uint8_t> code_object_bytes, MoiOptions options,
                             ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_move_barrier = true;
   options.fault_dry_run = true;
@@ -474,8 +474,8 @@ std::vector<uint32_t> text_words_at_offset(const AmdGpuCodeObject &code_object, 
   return words;
 }
 
-ConSanOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay) {
-  ConSanOptions options;
+MoiOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay) {
+  MoiOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = engine;
   return options;
@@ -1872,7 +1872,8 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u,
+        7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -2152,7 +2153,8 @@ std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() 
       0x00000000u, // ds_store_b32 v0, v0
   };
   const std::array<uint32_t, 3> release = {
-      0xEE0B0000u, 0x00000000u,
+      0xEE0B0000u,
+      0x00000000u,
       0x00000000u, // global_wb
   };
   const size_t minimum_word_count =
@@ -2445,7 +2447,8 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u, 0x00980000u,
+      0xEE158004u,
+      0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -2505,7 +2508,9 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
+      0xC40D4000u,
+      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
+      2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -2536,7 +2541,9 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);
@@ -2910,11 +2917,11 @@ std::vector<uint8_t> make_rdna4_successful_cas_self_loop_acquire_code_object() {
 
 struct ConSanTransformProfile {
   std::string_view name;
-  ConSanOptions options;
+  MoiOptions options;
 };
 
 std::array<ConSanTransformProfile, 4> all_consan_transform_profiles() {
-  ConSanOptions supercollider;
+  MoiOptions supercollider;
   supercollider.flavor = ConSanFlavor::SuperCollider;
   supercollider.probe_lds_check_trap = true;
   supercollider.probe_flat_check_trap = true;
@@ -2930,7 +2937,7 @@ std::array<ConSanTransformProfile, 4> all_consan_transform_profiles() {
 std::array<ConSanTransformProfile, 4> all_consan_replacement_profiles() {
   auto profiles = all_consan_transform_profiles();
   for (auto &profile : profiles) {
-    ConSanOptions &options = profile.options;
+    MoiOptions &options = profile.options;
     if (options.flavor != ConSanFlavor::Moi)
       continue;
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -3018,7 +3025,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
                                   ConSanLdsAccessKind expected_kind) {
   const std::vector<uint32_t> text_words = make_padded_moi_first_light_text(word0, word1);
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;

@@ -1,5 +1,5 @@
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const MoiOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t old_value_vgpr,
     uint16_t old_value_hi_vgpr, uint16_t current_value_vgpr, uint16_t current_field_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
@@ -964,7 +964,7 @@
 // protocol. Every entering lane that still cannot commit increments
 // undercoverage exactly once.
 [[nodiscard]] bool append_versioned_exact_shadow_transaction(
-    std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
+    std::vector<uint32_t> &words, const MoiOptions &options, rj_code_arch_t arch,
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention,
     std::vector<std::string> &errors) {
@@ -1711,7 +1711,7 @@
 // at least one lane on every iteration, so runtime work is bounded by the
 // hardware wave size while generated code size remains constant.
 [[nodiscard]] bool append_wave_coalesced_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const MoiOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
@@ -2024,7 +2024,7 @@
 // lane then polls that ready bit before the normal exact exchange. Two bits
 // per slot allow neighboring cells to share one atomic state word safely.
 [[nodiscard]] bool append_workgroup_local_lazy_shadow_ready(
-    std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
+    std::vector<uint32_t> &words, const MoiOptions &options, rj_code_arch_t arch,
     const ConSanMoiWorkgroupShadowLayout &workgroup_shadow, uint16_t saved_cell_vgpr,
     std::vector<std::string> &errors) {
   if (!workgroup_shadow.lazy_initialization)
@@ -2183,7 +2183,7 @@
 // the complete prior 64-bit entry, so it needs neither dispatch qualification
 // nor a multi-instruction reservation protocol.
 [[nodiscard]] bool append_workgroup_local_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const MoiOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &report_layout,
     const ConSanMoiWorkgroupShadowLayout &workgroup_shadow, uint16_t address_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
@@ -2398,8 +2398,8 @@
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanOptions &options, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
+    rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
     const ConSanMoiWorkgroupSources &workgroup_sources,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
@@ -2658,7 +2658,7 @@
   const bool generation_tagged_local_shadow =
       workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
-  ConSanOptions key_options = options;
+  MoiOptions key_options = options;
   // Eagerly initialized and bitmap-backed workgroup-local mirrors are
   // physically unreachable from every other live workgroup and omit the
   // generation field. A generation-tagged local mirror deliberately retains

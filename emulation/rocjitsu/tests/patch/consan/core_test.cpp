@@ -110,6 +110,82 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   EXPECT_NE(changed, allocation);
 }
 
+TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
+  const ConSanMoiResolvedState state{
+      .automatic_moi_persistent_vgprs = true,
+      .automatic_moi_private_epoch = true,
+      .automatic_moi_partial_exec_save_sgprs = true,
+      .automatic_moi_inline_sgpr_spill = true,
+      .automatic_moi_record_replay_sgpr_spill = true,
+      .moi_record_replay_dense_barrier_router = true,
+      .moi_exec_save_sgprs_persistent = true,
+      .moi_dynamic_stack_spill = true,
+      .moi_inline_access_present = true,
+      .automatic_moi_owner_sgpr = true,
+      .automatic_moi_dispatch_id_sgprs = true,
+      .automatic_moi_private_dispatch_id = true,
+      .moi_inline_indirect_pc_sgpr = 2u,
+      .moi_inline_call_return_sgpr = 4u,
+      .moi_inline_dispatch_key_sgpr = 6u,
+      .moi_inline_indirect_scc_sgpr = 7u,
+      .moi_inline_visible_evidence_sgpr = 8u,
+      .moi_inline_branch_only_scalar_spill = true,
+      .moi_inline_dynamic_stack_borrowed_sgpr = 10u,
+      .moi_record_replay_dispatch_key_sgpr = 12u,
+      .moi_record_replay_call_return_sgpr = 14u,
+      .moi_dispatch_id_sgpr = 16u,
+      .moi_dispatch_id_vgpr = 18u,
+      .moi_persistent_sgprs = {.owner = 20u,
+                               .epoch = 21u,
+                               .workgroup_key = 22u,
+                               .record_replay_workgroup = {.x = 23u, .y = 24u, .z = 25u}},
+      .moi_record_replay_workgroup_vgprs = {.x = 26u, .y = 27u, .z = 28u},
+      .moi_record_replay_workgroup_private_offsets = {.x = 32u, .y = 36u, .z = 40u},
+      .moi_workgroup_key_vgpr = 29u,
+  };
+
+  EXPECT_EQ(ConSanMoiResolvedState{}, ConSanMoiResolvedState{});
+  EXPECT_EQ(state, ConSanMoiResolvedState(state));
+
+  auto expect_field_participates = [&](auto mutate) {
+    ConSanMoiResolvedState changed = state;
+    mutate(changed);
+    EXPECT_NE(changed, state);
+  };
+  expect_field_participates([](auto &value) { value.automatic_moi_persistent_vgprs = false; });
+  expect_field_participates([](auto &value) { value.automatic_moi_private_epoch = false; });
+  expect_field_participates(
+      [](auto &value) { value.automatic_moi_partial_exec_save_sgprs = false; });
+  expect_field_participates([](auto &value) { value.automatic_moi_inline_sgpr_spill = false; });
+  expect_field_participates(
+      [](auto &value) { value.automatic_moi_record_replay_sgpr_spill = false; });
+  expect_field_participates(
+      [](auto &value) { value.moi_record_replay_dense_barrier_router = false; });
+  expect_field_participates([](auto &value) { value.moi_exec_save_sgprs_persistent = false; });
+  expect_field_participates([](auto &value) { value.moi_dynamic_stack_spill = false; });
+  expect_field_participates([](auto &value) { value.moi_inline_access_present = false; });
+  expect_field_participates([](auto &value) { value.automatic_moi_owner_sgpr = false; });
+  expect_field_participates([](auto &value) { value.automatic_moi_dispatch_id_sgprs = false; });
+  expect_field_participates([](auto &value) { value.automatic_moi_private_dispatch_id = false; });
+  expect_field_participates([](auto &value) { value.moi_inline_indirect_pc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_inline_call_return_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_inline_dispatch_key_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_inline_indirect_scc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_inline_branch_only_scalar_spill = false; });
+  expect_field_participates(
+      [](auto &value) { value.moi_inline_dynamic_stack_borrowed_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_record_replay_dispatch_key_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_record_replay_call_return_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_dispatch_id_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_dispatch_id_vgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });
+  expect_field_participates([](auto &value) { value.moi_record_replay_workgroup_vgprs = {}; });
+  expect_field_participates(
+      [](auto &value) { value.moi_record_replay_workgroup_private_offsets = {}; });
+  expect_field_participates([](auto &value) { value.moi_workgroup_key_vgpr.reset(); });
+}
+
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   ConSanMoiPersistentSgprState state;
   EXPECT_FALSE(state.complete());

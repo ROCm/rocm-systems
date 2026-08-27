@@ -1,4 +1,4 @@
-void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                   rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
@@ -153,7 +153,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                               "ConSan MOI fence record patch", active_private_size);
     if (!record_event)
       continue;
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
                                        *record_event)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
@@ -232,9 +232,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   };
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
-    ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
-                                       planned)) {
+    MoiOptions candidate_options = options;
+    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
     }
@@ -545,7 +544,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
 }
 
 void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
-                                           const ConSanOptions &options,
+                                           const MoiOptions &options,
                                            ConSanTransformArtifacts &result) {
   const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
@@ -569,7 +568,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     erase_redundant_adjacent_full_barrier_candidates(candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
       const BarrierRecordCandidate &candidate = candidates[index];
-      const auto scratch_count_for = [](const ConSanOptions &site_options) {
+      const auto scratch_count_for = [](const MoiOptions &site_options) {
         return static_cast<uint16_t>(site_options.moi_engine == ConSanMoiEngine::Sampled
                                          ? (site_options.automatic_moi_private_epoch ||
                                                     site_options.moi_persistent_sgprs.complete()
@@ -579,12 +578,12 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                          ? inline_shadow_barrier_scratch_count(site_options)
                                          : 6u);
       };
-      ConSanOptions site_options = options;
+      MoiOptions site_options = options;
       uint16_t scratch_count = scratch_count_for(site_options);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, site_options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count);
-      ConSanOptions owner_options = site_options;
+      MoiOptions owner_options = site_options;
       if (apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
                                                plan.owner_descriptor_file_offsets)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_options);
@@ -848,7 +847,7 @@ void finalize_moi_site_lowering_outcomes(ConSanTransformArtifacts &result) {
   }
 }
 
-void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
                                 std::span<const ConSanMoiCandidate> candidates,
                                 ConSanTransformArtifacts &result) {
   append_moi_resource_plans(state, options, candidates, result);
@@ -856,7 +855,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
   if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      ConSanOptions owner_options = options;
+      MoiOptions owner_options = options;
       if (!state.register_allocation.owner_transient_sgprs.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
                                                plan.owner_descriptor_file_offsets)) {
@@ -906,7 +905,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
                                                       descriptor_offset) != nullptr;
           });
       if (has_owner_override) {
-        ConSanOptions owner_options = options;
+        MoiOptions owner_options = options;
         if (apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
                                                 plan.owner_descriptor_file_offsets))
           continue;

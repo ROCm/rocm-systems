@@ -377,7 +377,7 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
 }
 
 ConSanTransformArtifacts complete_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
@@ -385,7 +385,7 @@ ConSanTransformArtifacts complete_consan_lowering(
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    ConSanOptions effective_options = options;
+    MoiOptions effective_options = options;
     ConSanTransformArtifacts result = try_patch_consan_impl(
         code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation,
         preapplied_mutation, initial_owner_transient_sgprs);

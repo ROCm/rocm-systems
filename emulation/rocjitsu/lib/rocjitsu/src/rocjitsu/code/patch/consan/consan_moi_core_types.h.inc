@@ -46,7 +46,7 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
   return profile ? profile->max_group_segment_bytes : 64u * 1024u;
 }
 
-[[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const ConSanOptions &options,
+[[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const MoiOptions &options,
                                                                     rj_code_arch_t arch) {
   return options.max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
 }

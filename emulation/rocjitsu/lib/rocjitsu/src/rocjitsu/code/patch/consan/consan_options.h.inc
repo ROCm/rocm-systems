@@ -265,6 +265,8 @@ struct ConSanMoiPersistentSgprState {
   /// Return whether the mandatory owner/epoch pair is present. Optional
   /// workgroup state refines that pair but cannot make a partial pair usable.
   [[nodiscard]] bool complete() const { return owner && epoch; }
+
+  auto operator<=>(const ConSanMoiPersistentSgprState &) const = default;
 };
 
 /// Persistent vector state selected for one connected set of owning kernels.
@@ -775,32 +777,44 @@ struct TransformPolicy {
   }
 };
 
-/// Mutable lowerer state retained while the prototype mechanism is migrated.
+/// Complete caller-owned input to the compatibility ConSan transformer.
 ///
 /// The inherited request, debug-override, mutation, runtime-fact, binding, and
-/// transform-policy subobjects are the sole representations of caller-owned
-/// inputs, except for a few explicitly derived lowerer controls. Members
-/// declared here are state selected and mutated during lowering.
+/// transform-policy subobjects are the sole representations of input state.
+/// Placement and emission must not add selected registers, storage, routes, or
+/// retry markers to this value; MOI attempt-local state lives in
+/// `ConSanMoiResolvedState`, while an accepted result lives in
+/// `ConSanMoiOperatingPoint`.
 struct ConSanOptions : ConSanRequest,
                        ConSanDebugOverrides,
                        MutationRequest,
                        RuntimeCapabilities,
                        BoundRuntimeResources,
                        TransformPolicy {
-  /// Default construction is retained for focused mechanism tests that build
-  /// mutable lowering state directly. Production orchestration uses the typed
-  /// constructor below.
+  /// Default construction is retained for focused mechanism tests. Production
+  /// orchestration uses the typed constructor below.
   ConSanOptions() { flavor = ConSanFlavor::None; }
 
-  /// Construct one fresh lowerer state from the complete immutable production
-  /// inputs. The six base subobjects preserve those inputs verbatim; only the
-  /// lowerer-specific derived controls are computed here.
+  /// Construct one immutable input aggregate from the complete production
+  /// contracts. The six base subobjects preserve those inputs verbatim.
   ConSanOptions(const ConSanRequest &request, const TransformPolicy &transform_policy,
                 const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                 const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources)
       : ConSanRequest(request), ConSanDebugOverrides(debug), MutationRequest(mutation),
         RuntimeCapabilities(capabilities), BoundRuntimeResources(resources),
         TransformPolicy(transform_policy) {}
+};
+
+/// Attempt- or site-local MOI representation selected while lowering.
+///
+/// This value is intentionally separate from `ConSanOptions`: none of its
+/// fields are caller configuration. A code-object attempt refines these fields
+/// while searching for a valid operating point, and a site-local copy may bind
+/// one owner-component assignment without changing either the caller input or
+/// the accepted code-object-wide allocation. Stage 2 progressively replaces
+/// these compatibility fields with typed variants in `ConSanMoiOperatingPoint`
+/// and narrow per-patch plans.
+struct ConSanMoiResolvedState {
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
@@ -871,6 +885,24 @@ struct ConSanOptions : ConSanRequest,
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
+
+  bool operator==(const ConSanMoiResolvedState &) const = default;
+};
+
+/// Transitional aggregate used only by MOI planning and legacy emitters.
+///
+/// It combines immutable caller input with one independently copyable resolved
+/// state. Keeping the types separate makes every remaining broad emitter
+/// dependency visible and prevents non-MOI code from acquiring placement
+/// output. Stage 3 removes this aggregate from emitters after Stage 2 moves the
+/// accepted state into `ConSanMoiOperatingPoint` and per-patch plans.
+struct MoiOptions : ConSanOptions, ConSanMoiResolvedState {
+  MoiOptions() = default;
+  /// Start a fresh MOI attempt from caller input. The implicit conversion is
+  /// intentional at the compatibility boundary: production callers carry no
+  /// resolved state, while focused mechanism tests may pass this derived type
+  /// directly to preserve an explicitly seeded downstream state.
+  MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {}
 };
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable

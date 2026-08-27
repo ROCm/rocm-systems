@@ -201,7 +201,8 @@ inline_ordinary_acquire_load(const InlineReleaseSequenceTarget &target) {
     };
   }
   return {
-      0xEE050004u, 4u | (2u << 18u),
+      0xEE050004u,
+      4u | (2u << 18u),
       2u, // global_load_b32 v4, v2, s[4:5], scope:device
   };
 }
@@ -214,7 +215,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
   const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
       target, atomic_words, {}, InlineAtomicSequenceKind::Acquire);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -273,7 +274,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
         target, atomic_words, {}, InlineAtomicSequenceKind::Acquire);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
@@ -330,7 +331,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
         target, atomic_words, acquire_load, InlineAtomicSequenceKind::Acquire,
         /*ordinary_load=*/true);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
@@ -474,7 +475,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
   const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
       target, atomic_words, {}, InlineAtomicSequenceKind::AcquireRelease);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -537,7 +538,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
     const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
         target, atomic_words, test_case.words, InlineAtomicSequenceKind::Acquire);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
@@ -595,7 +596,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
   const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
       target, atomic_words, atomic, InlineAtomicSequenceKind::Acquire);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.max_patches = 1;
@@ -637,7 +638,7 @@ TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
   };
   const auto acquire_count = [&](std::span<const uint32_t> cache_words,
                                  std::string_view kernel_name) {
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
     const ConSanTransformArtifacts result =
         test_semantic_inventory(fixture(cache_words, kernel_name), options);
@@ -668,7 +669,7 @@ TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
 
 TEST(ConSanMoi, InlineShadowSkipsUnusedAtomicTransactionScratch) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -706,7 +707,7 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "atomic_acquire_release");
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -762,7 +763,7 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
 TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
   const Cdna4CasOrdinaryAcquireFixture fixture =
       make_cdna4_cas_ordinary_acquire_fixture("inline_cas_ordinary_acquire");
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr = 60;
@@ -831,7 +832,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
                                  /*uses_dynamic_stack=*/false,
                                  /*workgroup_id_dimension_mask=*/1u);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr = 60;
@@ -917,7 +918,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   ASSERT_TRUE(original.is_valid());
   ASSERT_EQ(original.kernels().size(), 1u);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8u;
@@ -1002,7 +1003,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     std::vector<uint32_t> atomic_words;
     const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(target, atomic_words);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
@@ -1228,7 +1229,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
       const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
           target, atomic_words, test_case.words, test_case.sequence_kind);
       ASSERT_FALSE(bytes.empty());
-      ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+      MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
       options.moi_track_atomics = true;
       options.scratch_vgpr = 8;
       options.moi_exec_save_sgpr = 80;
@@ -1311,7 +1312,7 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   fixture.second_private_bytes = 20;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
@@ -1386,7 +1387,7 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
   ASSERT_FALSE(bytes.empty());
   mutate_first_kernel_descriptor(
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1024u; });
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16;
   options.moi_owner_vgpr = 48;
@@ -2108,7 +2109,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedCausalReleaseTransaction) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_global_cas_code_object(
       /*return_old_value=*/true, /*vector_only_address=*/false);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -2821,7 +2822,7 @@ TEST(ConSanMoi, InlineAtomicSupportReasonNamesAreStable) {
 }
 
 TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
   const ConSanTransformArtifacts global_inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
@@ -2885,7 +2886,7 @@ TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
       {.saddr = 0u, .scale_offset = 1u, .scope = 2u, .vsrc = 1u, .vaddr = 2u, .ioffset = 4u});
   const std::array<uint32_t, 4> words = {atomic[0], atomic[1], atomic[2],
                                          build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
 
   const ConSanTransformArtifacts inventory =
@@ -3058,7 +3059,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250LdsTokenWithByteOffset) {
 }
 
 TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffset) {
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
@@ -3120,7 +3121,7 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
 }
 
 TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) {
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
   const ConSanTransformArtifacts inventory = test_lower_consan(
       make_rdna4_displaced_vglobal_atomic_release_acquire_code_object(), inventory_options);
@@ -3182,7 +3183,7 @@ TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) 
 }
 
 TEST(ConSanMoi, VglobalAddressPlanAcceptsSpillResourcesAndPinsPrivatePair) {
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
@@ -3206,7 +3207,7 @@ TEST(ConSanMoi, VglobalAddressPlanAcceptsSpillResourcesAndPinsPrivatePair) {
 }
 
 TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
   const ConSanTransformArtifacts inventory =
       test_lower_consan(make_rdna4_global_atomic_code_object(), inventory_options);
@@ -3269,7 +3270,7 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
 
 TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(1);
@@ -3312,7 +3313,7 @@ TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {
     words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 20;
@@ -3349,7 +3350,7 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   }
   const std::vector<uint8_t> bytes = make_rdna4_atomic_fence_sequence_code_object(live_sgprs);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.max_patches = 3;
   options.scratch_vgpr = 8;
@@ -3456,7 +3457,8 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
   for (const InlineReleaseSequenceTarget &target : targets) {
     SCOPED_TRACE(target.label);
     const std::array<uint32_t, 3> load = {
-        0xEE050004u, 2u | (2u << 18u),
+        0xEE050004u,
+        2u | (2u << 18u),
         2u, // global_load_b32 v2, v2, s[4:5], scope:device
     };
     std::vector<uint32_t> guest_words;
@@ -3465,7 +3467,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
         /*ordinary_load=*/true);
     ASSERT_FALSE(bytes.empty());
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
@@ -3584,7 +3586,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
                                      : "scalar-plus-vector VGLOBAL address");
     const std::vector<uint8_t> bytes =
         make_rdna4_ordered_global_cas_code_object(/*return_old_value=*/true, vector_only_address);
-    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_owner_vgpr = 16;
@@ -3620,7 +3622,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
 TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -3928,7 +3930,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
 TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16;
   options.moi_owner_vgpr = 48;
@@ -4197,7 +4199,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
 TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -4270,7 +4272,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   const std::vector<uint8_t> bytes =
       make_rdna4_displaced_vglobal_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 12;
   options.moi_exec_save_sgpr = 80;
@@ -4358,7 +4360,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
 TEST(ConSanMoi, InlineAtomicRetainsIsolatedNoReturnReleaseAndExactShadowAccess) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_store_and_release_wait_no_return_bitwise_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4387,7 +4389,7 @@ TEST(ConSanMoi, InlineAtomicRetainsIsolatedNoReturnReleaseAndExactShadowAccess) 
 TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_global_atomic_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -4435,7 +4437,7 @@ TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
 TEST(ConSanMoi, InlineAtomicReturningCasClaimsBeforeGuestAndRollsBackFailedLanes) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_cas_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -4529,7 +4531,7 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
     const std::vector<uint8_t> bytes = make_rdna4_ordered_global_cas_code_object(
         /*return_old_value=*/true, vector_only_address);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
@@ -4650,7 +4652,7 @@ TEST(ConSanMoi, InlineVglobalNoReturnCasFailsClosedWithoutOutcome) {
     const std::vector<uint8_t> bytes = make_rdna4_ordered_global_cas_code_object(
         /*return_old_value=*/false, vector_only_address);
     ASSERT_FALSE(bytes.empty());
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
@@ -4674,7 +4676,7 @@ TEST(ConSanMoi, InlineAtomicNoReturnCasFailsClosedWithoutOutcome) {
   const std::vector<uint8_t> bytes =
       make_rdna4_ordered_flat_cas_code_object(/*return_old_value=*/false);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -4695,7 +4697,7 @@ TEST(ConSanMoi, InlineAtomicNoReturnCasFailsClosedWithoutOutcome) {
 
 TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4757,7 +4759,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "inline_atomic_scalar_spill");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
@@ -4790,7 +4792,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   std::vector<uint32_t> atomic_only_words = text_words;
   atomic_only_words[lds_access_word] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   atomic_only_words[lds_access_word + 1u] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions atomic_only_options = options;
+  MoiOptions atomic_only_options = options;
   atomic_only_options.scratch_vgpr = 82u;
   atomic_only_options.moi_owner_vgpr = 80u;
   atomic_only_options.moi_epoch_vgpr = 81u;
@@ -4830,7 +4832,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
 TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_global_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 82u;
   options.moi_owner_vgpr = 80u;
@@ -4874,7 +4876,7 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
       (*acquire)[2], 0xEE0AC000u,   0x00000000u,   0x00000000u, // global_inv
       0xBFB00000u,                                              // s_endpgm
   };
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4905,7 +4907,7 @@ TEST(ConSanMoi, InlineAtomicOnlyObjectOmitsUnusedWorkgroupFilterSgprs) {
   const std::vector<uint8_t> bytes =
       make_rdna4_ordered_flat_atomic_high_sgpr_pressure_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4936,7 +4938,7 @@ TEST(ConSanMoi, InlineAtomicFitsAboveMetadataOwnedOddSgprCount) {
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   ASSERT_TRUE(original.is_valid());
   ASSERT_EQ(original.kernels().size(), 1u);
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -5023,7 +5025,7 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   append_kernel_metadata_note(bytes, "lds_probe", /*uses_dynamic_stack=*/true,
                               /*sgpr_count=*/0u);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 80;
@@ -5060,7 +5062,7 @@ TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseCompari
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ASSERT_FALSE(bytes.empty());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
@@ -5150,7 +5152,7 @@ TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ASSERT_FALSE(bytes.empty());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
@@ -5238,7 +5240,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
@@ -5304,7 +5306,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlo
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;

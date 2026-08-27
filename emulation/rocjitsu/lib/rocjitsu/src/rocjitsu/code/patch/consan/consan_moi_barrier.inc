@@ -145,7 +145,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
                           function.text_file_offset});
 }
 
-[[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanOptions &options) {
+[[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const MoiOptions &options) {
   if (options.moi_engine == ConSanMoiEngine::RecordReplay)
     return 6u;
   // An object with no Inline access probes has no other way to prove that its
@@ -161,7 +161,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const BarrierRecordCandidate &candidate,
-    const ConSanOptions &options, const VgprSpillSequence *spill,
+    const MoiOptions &options, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
     uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -385,7 +385,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
-    const ConSanBarrierSite &site, const ConSanOptions &options, rj_code_arch_t arch,
+    const ConSanBarrierSite &site, const MoiOptions &options, rj_code_arch_t arch,
     std::optional<uint16_t> visible_evidence_scratch_vgpr, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, uint32_t original_barrier_word,
     uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -606,7 +606,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_private_epoch_barrier_cave_words(
-    const ConSanBarrierSite &site, const ConSanOptions &options, uint16_t scratch_vgpr,
+    const ConSanBarrierSite &site, const MoiOptions &options, uint16_t scratch_vgpr,
     uint32_t epoch_offset, const VgprSpillSequence &spill,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -941,7 +941,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 }
 
 void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
-                                                 const ConSanOptions &options, rj_code_arch_t arch,
+                                                 const MoiOptions &options, rj_code_arch_t arch,
                                                  MoiResourcePlanningState &resource_state,
                                                  const MoiRecordReplayAccessOutput &access_output,
                                                  ConSanTransformArtifacts &result) {
@@ -1081,7 +1081,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
-      ConSanOptions owner_options = options;
+      MoiOptions owner_options = options;
       if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
                                                 owners)) {
         result.warnings.emplace_back(
@@ -1110,14 +1110,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               candidate.container_name);
           continue;
         }
-        ConSanOptions candidate_options = std::move(owner_options);
+        MoiOptions candidate_options = std::move(owner_options);
         candidate_options.scratch_vgpr = resources->base;
         candidate_options.moi_record_replay_workgroup_private_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                                  owners) ||
-            !apply_record_replay_entry_workgroup_assignment(
-                candidate_options, result.moi_operating_point, owners)) {
+            !apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                            result.moi_operating_point, owners)) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
@@ -1244,7 +1244,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
          options.automatic_moi_private_epoch) &&
         owners.empty())
       continue;
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              owners) ||
         !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
@@ -1270,8 +1270,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             candidate.container_name);
         continue;
       }
-      const auto resources = resolve_moi_scratch_plan(
-          *plan, candidate_options, result.moi_operating_point, scratch_count);
+      const auto resources = resolve_moi_scratch_plan(*plan, candidate_options,
+                                                      result.moi_operating_point, scratch_count);
       if (!resources) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
@@ -1358,7 +1358,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   const ConSanMoiReportBufferLayout record_layout = resolve_record_replay_report_layout(
       options, /*include_barriers=*/true, options.moi_track_atomics, options.moi_track_atomics);
   const auto build_engine_barrier_body =
-      [&](const PlannedInlineEpochBarrier &planned, ConSanOptions candidate_options,
+      [&](const PlannedInlineEpochBarrier &planned, MoiOptions candidate_options,
           uint32_t original_barrier_word, uint64_t body_offset, uint64_t return_offset,
           std::optional<uint16_t> call_return_sgpr,
           std::optional<uint16_t> gfx1250_vgpr_msb_mode) -> std::optional<std::vector<uint32_t>> {
@@ -1416,7 +1416,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                        candidate.container_entry_text_offset, site.file_offset)
             : std::nullopt;
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its transient scalar assignment");
@@ -1731,9 +1731,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!relay)
         return ReusedDenseRelayResult::Unavailable;
 
-      ConSanOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
-                                               owners)) {
+      MoiOptions group_options = options;
+      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point, owners)) {
         result.errors.emplace_back(
             "ConSan MOI reused barrier relay lost its transient scalar assignment");
         return ReusedDenseRelayResult::Failed;
@@ -1791,7 +1790,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                 ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
-        ConSanOptions candidate_options = options;
+        MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -1933,7 +1932,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       case ReusedDenseRelayResult::Unavailable:
         break;
       }
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                group_owner)) {
         result.errors.emplace_back(
@@ -2050,7 +2049,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                 ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
-        ConSanOptions candidate_options = options;
+        MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -2302,18 +2301,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const ConSanOptions &options, rj_code_arch_t arch,
+                                                  const MoiOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
                                                   ConSanTransformArtifacts &result);
 
-void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    const MoiRecordReplayAccessOutput &access_output,
                                    ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers || options.moi_engine == ConSanMoiEngine::Sampled)
     return;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    ConSanOptions barrier_options = options;
+    MoiOptions barrier_options = options;
     if (barrier_options.automatic_moi_inline_sgpr_spill)
       barrier_options.moi_exec_save_sgpr.reset();
     try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state,
@@ -2358,7 +2357,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const ConSanOptions &options, rj_code_arch_t arch,
+                                                  const MoiOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
                                                   ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
@@ -2598,7 +2597,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
   struct StagedBarrierRecord {
     const PlannedBarrierRecord *planned = nullptr;
-    ConSanOptions candidate_options;
+    MoiOptions candidate_options;
     uint32_t original_barrier_word = 0u;
     uint64_t cave_text_offset = 0u;
     uint64_t return_text_offset = 0u;
@@ -2623,9 +2622,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
     uint64_t return_text_offset = site.text_offset + site.size;
-    ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
-                                       planned)) {
+    MoiOptions candidate_options = options;
+    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
       result.errors.emplace_back("ConSan MOI barrier record patch lost a planned assignment");
       return;
     }
@@ -2649,9 +2647,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       return;
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;
     uint32_t displaced_original_size = site.size;
-    if (branch_only_scalar_spill && moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-                                        options, result.moi_operating_point,
-                                        planned.resources.owner_descriptor_file_offsets)) {
+    if (branch_only_scalar_spill &&
+        moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
+            options, result.moi_operating_point, planned.resources.owner_descriptor_file_offsets)) {
       std::vector<std::string> ignored_errors;
       std::vector<uint32_t> displaced_words;
       while (displaced_words.size() < kMoiRecordReplayBorrowedEntryIslandWords) {
@@ -2780,7 +2778,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const PlannedBarrierRecord &planned = *staged.planned;
     const BarrierRecordCandidate &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
-    ConSanOptions &candidate_options = staged.candidate_options;
+    MoiOptions &candidate_options = staged.candidate_options;
     const uint64_t cave_text_offset = staged.cave_text_offset;
     const uint64_t return_text_offset = staged.return_text_offset;
     const bool branch_only_scalar_spill = staged.branch_only_scalar_spill;

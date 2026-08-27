@@ -737,7 +737,7 @@ void append_inline_atomic_candidates(const ConSanFunctionInfo &function,
   return false;
 }
 
-[[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const ConSanOptions &options,
+[[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const MoiOptions &options,
                                                          std::vector<std::string> &errors) {
   if (!options.moi_exec_save_sgpr) {
     errors.emplace_back(
@@ -859,7 +859,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 
 [[nodiscard]] bool append_inline_workgroup_key(std::vector<uint32_t> &words,
                                                const ConSanMoiWorkgroupSources &sources,
-                                               const ConSanOptions &options, uint16_t key_vgpr,
+                                               const MoiOptions &options, uint16_t key_vgpr,
                                                uint16_t coordinate_vgpr, uint16_t value_vgpr,
                                                uint16_t original_exec_save_offset,
                                                rj_code_arch_t arch) {
@@ -1050,7 +1050,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 // rollback journal containing the prior even version; it is cleared before
 // commit and can never authorize a reader while the slot remains odd.
 [[nodiscard]] bool append_inline_acquired_token_transaction(
-    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t source_address_vgpr,
+    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t source_address_vgpr,
     uint16_t workgroup_key_vgpr, uint16_t direct_owner_vgpr, uint16_t direct_epoch_vgpr,
     uint16_t source_version_vgpr, uint16_t snapshot_count_vgpr, uint16_t snapshot_owners_vgpr,
     uint16_t snapshot_epochs_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
@@ -1650,7 +1650,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 }
 
 [[nodiscard]] bool append_inline_atomic_acquire_import(
-    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t address_vgpr,
+    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t address_vgpr,
     uint16_t workgroup_key_vgpr, uint16_t producer_owner_vgpr, uint16_t token_value_vgpr,
     uint16_t temporary_vgpr, uint64_t snapshot_table_base, uint32_t snapshot_table_capacity,
     uint64_t token_table_base, uint32_t token_table_capacity, bool source_slot_claimed,
@@ -2055,7 +2055,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 // mask. The generated loop scans every ABI-v6 token slot exactly once and
 // maintains four canonical (owner, epoch+1) pairs independently per lane.
 [[nodiscard]] bool append_inline_release_causal_snapshot_capture(
-    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t atomic_address_vgpr,
+    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t atomic_address_vgpr,
     uint16_t workgroup_key_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_table_capacity, rj_code_arch_t arch) {
   const bool has_dispatch_id = moi_has_runtime_hardware_dispatch_id(options) ||
@@ -2539,7 +2539,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 [[nodiscard]] bool append_inline_versioned_release_transaction(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
-    const ConSanMoiWorkgroupSources &workgroup_sources, const ConSanOptions &options,
+    const ConSanMoiWorkgroupSources &workgroup_sources, const MoiOptions &options,
     rj_code_arch_t arch, uint64_t release_table_base, uint32_t release_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_capacity, uint64_t token_table_base,
     uint32_t token_capacity, bool emit_guest_instruction, bool import_claimed_predecessor,
@@ -3211,7 +3211,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &input_options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &input_options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,
     size_t inline_atomic_release_slots_offset, uint32_t inline_atomic_release_capacity,
@@ -3219,7 +3219,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     size_t inline_acquired_token_slots_offset, uint32_t inline_acquired_token_capacity,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
-  ConSanOptions options = input_options;
+  MoiOptions options = input_options;
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;

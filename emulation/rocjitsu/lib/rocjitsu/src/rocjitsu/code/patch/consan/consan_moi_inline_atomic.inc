@@ -1,5 +1,5 @@
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
-                                            const ConSanOptions &options, rj_code_arch_t arch,
+                                            const MoiOptions &options, rj_code_arch_t arch,
                                             ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
     return;
@@ -182,7 +182,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
@@ -253,7 +253,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
@@ -389,7 +389,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         }
         std::ranges::sort(group_owners);
         group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-        ConSanOptions group_options = options;
+        MoiOptions group_options = options;
         if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                  group_owners)) {
           result.warnings.emplace_back(
@@ -515,7 +515,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         for (size_t index : group) {
           const PlannedInlineAtomic &planned = planned_candidates[index];
           const uint64_t cave_offset = placement_planner.appended_end();
-          ConSanOptions candidate_options = group_options;
+          MoiOptions candidate_options = group_options;
           candidate_options.scratch_vgpr = planned.resources.base;
           if (planned.private_layout && planned.private_layout->dispatch_id_offset)
             candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
@@ -717,7 +717,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
@@ -826,7 +826,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
     size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -1441,7 +1441,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
-    const ConSanOptions &options, const VgprSpillSequence *spill,
+    const MoiOptions &options, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
@@ -1551,7 +1551,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
@@ -1848,7 +1848,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,

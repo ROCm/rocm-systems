@@ -3,7 +3,7 @@ using InlineSgprSpillSequence = SgprSpillSequence;
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &result,
                                              const ResolvedMoiScratchPlan &resources,
-                                             const ConSanOptions &options) {
+                                             const MoiOptions &options) {
   if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
     return false;
   }
@@ -15,7 +15,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &res
 
 [[nodiscard]] std::optional<InlineSgprSpillSequence> build_inline_sgpr_spill_sequence(
     const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-    const ConSanOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
+    const MoiOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
     std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
     const VgprSpillSequence *vgpr_spill = nullptr) {
   if ((!options.automatic_moi_inline_sgpr_spill &&
@@ -68,7 +68,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &res
   return sequence;
 }
 
-void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    ConSanTransformArtifacts &result) {
@@ -159,7 +159,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (kernel.has_dynamic_lds)
       dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
   }
-  std::unordered_map<uint64_t, std::optional<ConSanOptions>> direct_options_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<MoiOptions>> direct_options_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupShadowLayout>>
       direct_workgroup_shadow_by_descriptor;
   std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>>
@@ -352,12 +352,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         resources->owner_descriptor_file_offsets.size() == 1u
             ? std::optional<uint64_t>(resources->owner_descriptor_file_offsets.front())
             : std::nullopt;
-    ConSanOptions candidate_options;
+    MoiOptions candidate_options;
     if (direct_descriptor) {
       auto [cached, inserted] =
           direct_options_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
       if (inserted) {
-        ConSanOptions resolved = options;
+        MoiOptions resolved = options;
         if (apply_moi_transient_sgpr_assignment(resolved, result.moi_operating_point,
                                                 resources->owner_descriptor_file_offsets) &&
             apply_moi_persistent_vgpr_assignment(resolved, result.moi_operating_point,
@@ -984,7 +984,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiDescriptorLdsRequirements lds_requirements;
   for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
@@ -1043,7 +1043,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     for (const auto &[dispatcher_offset, group] : dense_groups) {
       if (group.empty() || !group.front()->entry_island_offset)
         continue;
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               group_options, result.moi_operating_point,
               group.front()->resources.owner_descriptor_file_offsets))
@@ -1058,7 +1058,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      ConSanOptions candidate_options = options;
+      MoiOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets)) {
@@ -1452,7 +1452,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
       }
       const auto &group = dense_groups.at(dispatcher);
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (group.empty() || !apply_moi_transient_sgpr_assignment(
                                group_options, result.moi_operating_point,
                                group.front()->resources.owner_descriptor_file_offsets)) {
@@ -1499,7 +1499,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           bytes, planned_patches, descriptor_requirements, scalar_requirements,
           "inline-shadow probe", arch,
           [&](const PlannedInlineShadowPatch &planned_patch) {
-            ConSanOptions candidate_options = options;
+            MoiOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
                     candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets)) {
@@ -1575,7 +1575,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                  rj_code_arch_t arch);
 
 [[nodiscard]] bool append_direct_sampled_immediate_check(
-    std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
+    std::vector<uint32_t> &words, const MoiOptions &options, rj_code_arch_t arch,
     uint32_t prior_record_index, uint32_t window_bank_count, uint16_t bank_vgpr,
     size_t sampled_watchpoints_offset, uint16_t current_low_vgpr, uint16_t current_high_vgpr,
     std::vector<std::string> &errors) {
@@ -1717,7 +1717,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 }
 
 [[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptions &options,
+append_sampled_window_bank_index(std::vector<uint32_t> &words, const MoiOptions &options,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
                                  uint16_t owner_vgpr, rj_code_arch_t arch) {
@@ -1794,7 +1794,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
 }
 
 [[nodiscard]] bool
-append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptions &options,
+append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions &options,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint16_t residue_vgpr, uint16_t temporary_vgpr,
                                  uint16_t coordinate_vgpr, rj_code_arch_t arch) {
@@ -1898,7 +1898,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_range_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
+    const ConSanAccessRange &access_range, const MoiOptions &options, rj_code_arch_t arch,
     uint32_t record_index, std::span<const uint32_t> prior_record_indices,
     uint32_t window_bank_count, bool spill_overlaps_guest_operands,
     bool spill_backed_operand_recovery, bool relocate_instruction,
@@ -2634,8 +2634,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanOptions &options, rj_code_arch_t arch, uint32_t first_record_index,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
+    rj_code_arch_t arch, uint32_t first_record_index,
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
@@ -2927,8 +2927,8 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanOptions &options, const ConSanMoiWorkgroupSources &workgroup_sources,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
+    const ConSanMoiWorkgroupSources &workgroup_sources,
     [[maybe_unused]] uint32_t first_record_index, uint64_t island_text_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
@@ -3054,7 +3054,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
-    std::span<const uint8_t> guest_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> guest_bytes, const MoiOptions &options,
     const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,
     uint64_t return_text_offset, uint64_t reserved_word_count, rj_code_arch_t arch) {
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =

@@ -328,7 +328,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 } // namespace
 
 [[nodiscard]] ConSanTransformArtifacts try_patch_consan_impl(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     std::span<const CarriedPerturbationPlan> carried_plans = {},
     std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
@@ -338,7 +338,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
   result.moi_operating_point.owner_transient_sgprs.assign(initial_owner_transient_sgprs.begin(),
-                                                              initial_owner_transient_sgprs.end());
+                                                          initial_owner_transient_sgprs.end());
   ConSanPerturbationPlanningState local_perturbation;
   ConSanPerturbationPlanningState &perturbation =
       inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
@@ -370,7 +370,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return result;
   }
   if (has_fault && !options.fault_dry_run) {
-    ConSanOptions planning_options = options;
+    MoiOptions planning_options = options;
     planning_options.fault_dry_run = true;
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
@@ -404,7 +404,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // Apply corruption to a pristine image first, then inventory and instrument
     // that image. This is essential for address/order faults: probes must model
     // the instruction the GPU will actually execute.
-    ConSanOptions fault_options = options;
+    MoiOptions fault_options = options;
     fault_options.flavor = ConSanFlavor::SuperCollider;
     fault_options.probe_nop = false;
     fault_options.probe_trampoline_nop = false;
@@ -440,7 +440,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     const major_image_ownership::ScopedPhase composite_phase(
         major_image_ownership::Phase::CompositeIncrementalPatch);
 
-    ConSanOptions instrument_options = options;
+    MoiOptions instrument_options = options;
     ConSanPreappliedMutationLayout instrument_preapplied;
     instrument_options.fault_drop_barrier = false;
     instrument_options.fault_move_barrier = false;

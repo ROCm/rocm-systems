@@ -1,5 +1,5 @@
 void try_apply_first_light_access_record_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options, const ConSanTargetProfile &target,
+    std::span<const uint8_t> bytes, const MoiOptions &options, const ConSanTargetProfile &target,
     MoiResourcePlanningState &resource_state, MoiRecordReplayAccessOutput &access_output,
     std::span<const ConSanMoiCandidate> admitted, ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
@@ -547,7 +547,7 @@ void try_apply_first_light_access_record_patch(
       }
       continue;
     }
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
@@ -1154,7 +1154,7 @@ void try_apply_first_light_access_record_patch(
   MoiDescriptorPrivateRequirements private_requirements;
   for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     candidate_options.moi_record_replay_workgroup_private_offsets =
         planned_patch.private_workgroup_offsets;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
@@ -1214,7 +1214,7 @@ void try_apply_first_light_access_record_patch(
     for (const auto &[dispatcher_offset, group] : dense_groups) {
       if (group.empty() || !group.front()->entry_island_offset)
         continue;
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               group_options, result.moi_operating_point,
               group.front()->resources.owner_descriptor_file_offsets) ||
@@ -1230,7 +1230,7 @@ void try_apply_first_light_access_record_patch(
     }
     for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      ConSanOptions candidate_options = options;
+      MoiOptions candidate_options = options;
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
@@ -1552,7 +1552,7 @@ void try_apply_first_light_access_record_patch(
         continue;
       }
       const auto &group = dense_groups.at(dispatcher);
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (group.empty() ||
           !apply_moi_transient_sgpr_assignment(
               group_options, result.moi_operating_point,
@@ -1599,7 +1599,7 @@ void try_apply_first_light_access_record_patch(
           bytes, planned_patches, descriptor_requirements, scalar_requirements, "first-light probe",
           arch,
           [&](const PlannedAccessRecordPatch &planned_patch) {
-            ConSanOptions candidate_options = options;
+            MoiOptions candidate_options = options;
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;

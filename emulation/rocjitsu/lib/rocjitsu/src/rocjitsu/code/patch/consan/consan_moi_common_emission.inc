@@ -95,7 +95,7 @@ struct MoiPrivateRecordOwnerPlan {
   uint32_t private_state_end = 0;
 };
 
-[[nodiscard]] bool moi_record_uses_private_owner(const ConSanOptions &options) {
+[[nodiscard]] bool moi_record_uses_private_owner(const MoiOptions &options) {
   return options.moi_init_owner_epoch && options.automatic_moi_private_epoch &&
          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
          !options.moi_persistent_sgprs.owner;
@@ -208,9 +208,10 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return representative;
 }
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
-    std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-    const ConSanOptions &options, std::vector<std::string> &warnings) {
+[[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout>
+common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
+                                   const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+                                   const MoiOptions &options, std::vector<std::string> &warnings) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
   const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
@@ -363,7 +364,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
     const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-    const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
+    const MoiOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   return build_moi_private_epoch_layout(result, resources, arch, warnings,
                                         /*include_owner=*/options.moi_owner_source ==
                                             ConSanMoiOwnerSource::WorkitemId,
@@ -374,7 +375,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
-    const ConSanOptions &options, const MoiPrivateEpochLayout &layout, rj_code_arch_t arch,
+    const MoiOptions &options, const MoiPrivateEpochLayout &layout, rj_code_arch_t arch,
     std::vector<std::string> &errors) {
   if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !options.moi_epoch_vgpr ||
       !layout.owner_offset) {
@@ -405,7 +406,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<VgprSpillSequence>
 build_moi_spill_sequence(const ConSanTransformArtifacts &result,
-                         const ResolvedMoiScratchPlan &resources, const ConSanOptions &options,
+                         const ResolvedMoiScratchPlan &resources, const MoiOptions &options,
                          MoiSpillManagers &managers, rj_code_arch_t arch,
                          std::vector<std::string> &warnings,
                          std::optional<uint32_t> private_layout_base = std::nullopt) {
@@ -676,7 +677,7 @@ private:
 [[nodiscard]] bool apply_lds_descriptor_requirements(
     CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
     const AmdGpuCodeObject &code_object, const MoiDescriptorLdsRequirements &requirements,
-    const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    const MoiOptions &options, rj_code_arch_t arch, std::vector<std::string> &errors) {
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
@@ -765,7 +766,7 @@ private:
 
 [[nodiscard]] bool apply_lds_descriptor_requirements(
     std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
+    const MoiDescriptorLdsRequirements &requirements, const MoiOptions &options,
     rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     auto descriptor = read_kernel_descriptor(image, descriptor_offset);
@@ -885,13 +886,12 @@ private:
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
-    uint32_t logical_range_index, const ConSanMoiReportBufferLayout &layout,
-    bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
-    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
+    rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
+    const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
+    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
     errors.emplace_back(message);
@@ -2520,13 +2520,10 @@ private:
   return sequence.emit_all(mov_value, add_word);
 }
 
-[[nodiscard]] bool append_inline_shadow_owner_field(std::vector<uint32_t> &words,
-                                                    const ConSanOptions &options, uint16_t low_vgpr,
-                                                    uint16_t tmp_vgpr, uint16_t owner_backup_vgpr,
-                                                    rj_code_arch_t arch,
-                                                    std::optional<uint32_t> private_owner_offset,
-                                                    std::optional<uint16_t> private_owner_shift,
-                                                    std::vector<std::string> &errors) {
+[[nodiscard]] bool append_inline_shadow_owner_field(
+    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t low_vgpr, uint16_t tmp_vgpr,
+    uint16_t owner_backup_vgpr, rj_code_arch_t arch, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
@@ -2613,7 +2610,7 @@ private:
 }
 
 [[nodiscard]] bool append_inline_shadow_epoch_field(std::vector<uint32_t> &words,
-                                                    const ConSanOptions &options,
+                                                    const MoiOptions &options,
                                                     std::optional<uint32_t> private_epoch_offset,
                                                     uint16_t low_vgpr, uint16_t tmp_vgpr,
                                                     rj_code_arch_t arch,
@@ -2726,7 +2723,7 @@ append_add_exact_shadow_generation(std::vector<uint32_t> &words, uint16_t packed
 
 [[nodiscard]] bool append_inline_workgroup_key(std::vector<uint32_t> &words,
                                                const ConSanMoiWorkgroupSources &sources,
-                                               const ConSanOptions &options, uint16_t key_vgpr,
+                                               const MoiOptions &options, uint16_t key_vgpr,
                                                uint16_t coordinate_vgpr, uint16_t value_vgpr,
                                                uint16_t original_exec_save_offset,
                                                rj_code_arch_t arch);
@@ -2774,7 +2771,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 template <typename PlannedPatch>
 [[nodiscard]] bool emit_moi_dense_access_group(
     std::span<const PlannedPatch *const> group, uint64_t dispatcher_offset,
-    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const ConSanOptions &group_options,
+    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const MoiOptions &group_options,
     rj_code_arch_t arch, uint64_t dispatcher_words_per_site,
     bool collapse_spill_router_for_explicit_key, std::string_view diagnostic_subject,
     std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,

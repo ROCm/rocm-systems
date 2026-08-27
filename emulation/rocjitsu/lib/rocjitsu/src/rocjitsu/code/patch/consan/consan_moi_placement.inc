@@ -84,7 +84,7 @@ struct MoiRecordReplayAccessOutput {
 };
 
 [[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
-                                                         const ConSanOptions &options) {
+                                                         const MoiOptions &options) {
   const auto count_all = [](const auto &container) {
     return static_cast<uint64_t>(container.barrier_sites.size());
   };
@@ -116,7 +116,7 @@ struct MoiRecordReplayAccessOutput {
 
 [[nodiscard]] uint64_t
 moi_reserved_record_replay_sync_island_count(const ConSanTransformArtifacts &result,
-                                             const ConSanOptions &options) {
+                                             const MoiOptions &options) {
   const uint64_t barrier_count =
       options.moi_track_barriers ? moi_reserved_barrier_island_count(result, options) : 0u;
   const uint64_t fence_count =
@@ -722,7 +722,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
 /// complete workgroup tuple at entry instead of depending on descriptor SGPRs
 /// or RDNA launch TTMPs retaining their entry values.
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
-record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code_arch_t /*arch*/) {
+record_replay_persistent_workgroup_sources(const MoiOptions &options, rj_code_arch_t /*arch*/) {
   if (!record_replay_requires_entry_workgroup_capture(options) ||
       !record_replay_has_entry_workgroup_capture(options) ||
       !record_replay_entry_workgroup_capture_is_unambiguous(options)) {
@@ -783,7 +783,7 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
                                                uint64_t descriptor_file_offset,
-                                               const ConSanOptions &options, rj_code_arch_t arch,
+                                               const MoiOptions &options, rj_code_arch_t arch,
                                                std::vector<std::string> &errors,
                                                bool uses_cluster_workgroup_id = false) {
   if (const auto persistent = record_replay_persistent_workgroup_sources(options, arch))
@@ -838,7 +838,7 @@ struct MoiSgprRange {
 }
 
 [[nodiscard]] bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                                          const ConSanOptions &options,
+                                          const MoiOptions &options,
                                           std::vector<std::string> &errors,
                                           std::string_view context) {
   if (options.delay_nops == 0)
@@ -872,7 +872,7 @@ struct MoiSgprRange {
   return false;
 }
 
-[[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanOptions &options) {
+[[nodiscard]] uint16_t inline_shadow_scratch_count(const MoiOptions &options) {
   // Versioned exact publication retains the slot address, new packed access,
   // prior dispatch, ready version, and CAS operands through commit. The token
   // hash aliases the now-larger transaction window.
@@ -880,7 +880,7 @@ struct MoiSgprRange {
       options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics);
 }
 
-[[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const MoiOptions &options,
                                                         const ConSanMoiCandidate &candidate) {
   (void)options;
   // Wide local accesses retain an offset and iteration counter. Wide external
@@ -890,15 +890,15 @@ struct MoiSgprRange {
                                                          consan_moi_exact_shadow::granule_bytes);
 }
 
-[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
+[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const MoiOptions &options, rj_code_arch_t arch);
 
-[[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const ConSanOptions &options) {
+[[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const MoiOptions &options) {
   return options.moi_engine == ConSanMoiEngine::InlineShadow &&
          options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
          (!options.moi_owner_sgpr || options.automatic_moi_owner_sgpr);
 }
 
-[[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanOptions &options,
+[[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const MoiOptions &options,
                                                          rj_code_arch_t arch,
                                                          std::vector<std::string> &errors) {
   if (!options.moi_exec_save_sgpr)
@@ -1130,7 +1130,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
 // both write the scratch window before the guest, while loads produce a value
 // that the final restore would overwrite.
 [[nodiscard]] bool sampled_access_can_emit_spill_over_guest_operands(
-    const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
+    const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.operands.destination_vgpr &&
          candidate.origin != ConSanAccessOrigin::DirectToLds && options.moi_owner_vgpr &&
          !options.automatic_moi_private_epoch && !options.moi_persistent_sgprs.complete() &&
@@ -1138,7 +1138,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
 }
 
 [[nodiscard]] bool sampled_access_can_plan_spill_over_guest_operands(
-    const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
+    const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   if (sampled_access_can_emit_spill_over_guest_operands(options, candidate, arch))
     return true;
   if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.operands.destination_vgpr ||
@@ -1160,7 +1160,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
 }
 
 [[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
-    const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
+    const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled &&
          candidate.origin == ConSanAccessOrigin::NativeLds &&
          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
@@ -1168,7 +1168,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
 }
 
-[[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t inline_shadow_scratch_count(const MoiOptions &options,
                                                    const ConSanMoiCandidate &candidate,
                                                    rj_code_arch_t arch) {
   const uint16_t flat_offset_address_count =
@@ -1193,7 +1193,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
       flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
 }
 
-[[nodiscard]] uint16_t inline_shadow_spill_backed_scratch_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t inline_shadow_spill_backed_scratch_count(const MoiOptions &options,
                                                                 const ConSanMoiCandidate &candidate,
                                                                 rj_code_arch_t arch) {
   const uint16_t normal_count = inline_shadow_scratch_count(options, candidate, arch);
@@ -1208,7 +1208,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
 
-[[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t direct_sampled_scratch_count(const MoiOptions &options,
                                                     const ConSanMoiCandidate &candidate,
                                                     rj_code_arch_t arch) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
@@ -1236,7 +1236,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
       two_address_replay_count);
 }
 
-[[nodiscard]] uint16_t sampled_spill_backed_scratch_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t sampled_spill_backed_scratch_count(const MoiOptions &options,
                                                           const ConSanMoiCandidate &candidate,
                                                           rj_code_arch_t arch) {
   // The publication phases recover an overlapping address into an ordinary
@@ -1362,7 +1362,7 @@ find_moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
 /// The first pass is still useful: it avoids reserving the dynamic frame ABI
 /// for ordinary owners that can keep their transient state in registers.
 [[nodiscard]] bool
-automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &options,
+automatic_moi_scalar_spill_needs_dynamic_stack_planning(const MoiOptions &options,
                                                         const ConSanTransformArtifacts &result) {
   const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
     const ConSanKernelInfo *kernel =
@@ -1389,8 +1389,7 @@ automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &opt
 /// site. Owners connected through a shared helper must either all carry the
 /// same assignment or keep the code-object-wide fallback.
 [[nodiscard]] bool
-apply_moi_transient_sgpr_assignment(ConSanOptions &options,
-                                    const ConSanMoiOperatingPoint &allocation,
+apply_moi_transient_sgpr_assignment(MoiOptions &options, const ConSanMoiOperatingPoint &allocation,
                                     std::span<const uint64_t> owner_descriptor_offsets) {
   const ConSanMoiTransientSgprAssignment *selected = nullptr;
   bool saw_unassigned_owner = false;
@@ -1459,9 +1458,8 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
 /// Freeze the code-object-wide portion of the final register allocation before
 /// the transform leaves lowering. Per-owner assignments are already built in
 /// the typed allocation and must not be copied from mutable lowerer options.
-void freeze_moi_operating_point(const ConSanOptions &options,
-                                    ConSanTransformArtifacts &result) {
-  const auto transient_state = [](const ConSanOptions &resolved) {
+void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifacts &result) {
+  const auto transient_state = [](const MoiOptions &resolved) {
     return ConSanMoiTransientSgprState{
         .exec_save_sgpr = resolved.moi_exec_save_sgpr,
         .owner_sgpr = resolved.moi_owner_sgpr,
@@ -1497,7 +1495,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allo
 }
 
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanOptions &options, const ConSanMoiOperatingPoint &allocation,
+    const MoiOptions &options, const ConSanMoiOperatingPoint &allocation,
     std::span<const uint64_t> owner_descriptor_offsets) {
   return options.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
@@ -1510,8 +1508,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allo
 }
 
 [[nodiscard]] bool
-apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
-                                     const ConSanMoiOperatingPoint &allocation,
+apply_moi_persistent_vgpr_assignment(MoiOptions &options, const ConSanMoiOperatingPoint &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
   if (allocation.owner_persistent_vgprs.empty()) {
     return options.moi_owner_vgpr.has_value() || options.moi_persistent_sgprs.complete() ||
@@ -1570,7 +1567,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
 /// entry-captured workgroup source. A scalar tuple is already global and needs
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool
-apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
+apply_record_replay_entry_workgroup_assignment(MoiOptions &options,
                                                const ConSanMoiOperatingPoint &allocation,
                                                std::span<const uint64_t> owner_descriptor_offsets) {
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options))
@@ -1767,7 +1764,7 @@ struct MoiOwnerRegisterReferenceSummary {
   return it == block->instructions().end() ? nullptr : &*it;
 }
 
-[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const ConSanOptions &options,
+[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const MoiOptions &options,
                                                      const ConSanMoiCandidate &candidate,
                                                      rj_code_arch_t arch) {
   switch (options.moi_engine) {
@@ -2099,7 +2096,7 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
 }
 
 [[nodiscard]] bool moi_resource_plan_can_be_recovered_by_persistent_placement(
-    const ConSanCandidateResourcePlan &plan, const ConSanOptions &options, rj_code_arch_t arch) {
+    const ConSanCandidateResourcePlan &plan, const MoiOptions &options, rj_code_arch_t arch) {
   if (plan.source != ConSanRegisterAllocationSource::Unsupported)
     return false;
   if ((!consan_uses_gfx9_cdna_encoding(arch)) ||
@@ -2311,7 +2308,7 @@ struct MoiIndirectJumpSgprs {
 };
 
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const ConSanOptions &options);
+moi_indirect_jump_sgprs(const MoiOptions &options);
 
 struct MoiInlineDenseRouterScalarAbi {
   MoiIndirectJumpSgprs indirect_jump;
@@ -2320,7 +2317,7 @@ struct MoiInlineDenseRouterScalarAbi {
 };
 
 [[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
-moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t arch) {
+moi_inline_dense_router_scalar_abi(const MoiOptions &options, rj_code_arch_t arch) {
   if (options.moi_engine != ConSanMoiEngine::InlineShadow ||
       (!consan_uses_gfx9_cdna_encoding(arch) && !consan_uses_gfx12_encoding(arch))) {
     return std::nullopt;
@@ -2361,7 +2358,7 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
 }
 
 [[nodiscard]] std::vector<MoiSgprRange> moi_relocatable_host_scalar_ranges(
-    const ConSanOptions &options, MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch) {
+    const MoiOptions &options, MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch) {
   // These are the ConSan-owned scalar values that remain live across the
   // emitted router, not a guest register window assumed to be preserved.
   // Spill-backed layouts carry their allocated registers explicitly. The
@@ -2766,7 +2763,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
 /// atomic reservoir plan. No emitted storage or router capacity is committed
 /// when the underlying planner fails.
 [[nodiscard]] bool plan_moi_access_direct_reservoirs(
-    const ConSanTransformArtifacts &result, const ConSanOptions &options, rj_code_arch_t arch,
+    const ConSanTransformArtifacts &result, const MoiOptions &options, rj_code_arch_t arch,
     const MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
     std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
@@ -2815,7 +2812,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
 /// claimed pristine NOP islands are retired from the engine's independent
 /// branch-only router as part of the same ownership transaction.
 [[nodiscard]] MoiDenseAccessRoutePlan plan_moi_dense_access_routes(
-    const ConSanTransformArtifacts &result, const ConSanOptions &options, rj_code_arch_t arch,
+    const ConSanTransformArtifacts &result, const MoiOptions &options, rj_code_arch_t arch,
     MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
     uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
@@ -2853,7 +2850,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
     const ConSanCandidateResourcePlan *group_resource =
         group.candidates.empty() ? nullptr
                                  : resource_plan_for_candidate(result, *group.candidates.front());
-    ConSanOptions group_options = options;
+    MoiOptions group_options = options;
     if (group_resource != nullptr)
       (void)apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                 group_resource->owner_descriptor_file_offsets);
@@ -3047,7 +3044,7 @@ dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uin
 }
 
 [[nodiscard]] ConSanCandidateResourcePlan
-plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &options,
+plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &options,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
                        uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
@@ -3406,14 +3403,14 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   return plan;
 }
 
-void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
                                std::span<const ConSanMoiCandidate> candidates,
                                ConSanTransformArtifacts &result) {
   result.resource_plans.clear();
   result.resource_plans.reserve(candidates.size());
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const ConSanMoiCandidate &candidate = candidates[candidate_index];
-    ConSanOptions site_options = options;
+    MoiOptions site_options = options;
     uint16_t scratch_count = moi_access_scratch_vgpr_count(site_options, candidate, state.arch);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
         state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
@@ -3422,7 +3419,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
     // component-local VGPR tuples. The first plan discovers the physical
     // site's complete owner set; size and place its final scratch window for
     // that owner's actual ABI, rather than the code-object-wide fallback.
-    ConSanOptions owner_options = site_options;
+    MoiOptions owner_options = site_options;
     if (apply_moi_persistent_vgpr_assignment(owner_options, state.register_allocation,
                                              plan.owner_descriptor_file_offsets)) {
       const uint16_t owner_scratch_count =
@@ -3639,7 +3636,7 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
 [[nodiscard]] std::optional<uint16_t>
 find_moi_borrowed_entry_backup_vgpr(MoiResourcePlanningState &state,
                                     std::span<const uint64_t> owners, uint64_t text_offset,
-                                    uint16_t allocated_vgpr_count, const ConSanOptions &options) {
+                                    uint16_t allocated_vgpr_count, const MoiOptions &options) {
   if (owners.empty() || allocated_vgpr_count == 0u)
     return std::nullopt;
 
@@ -3817,7 +3814,7 @@ private:
 };
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOptions &options,
+resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const MoiOptions &options,
                          const ConSanMoiOperatingPoint &allocation, uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
@@ -3884,15 +3881,15 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandidate &candidate,
-                    const ConSanOptions &options, uint16_t expected_count) {
+                    const MoiOptions &options, uint16_t expected_count) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
-  return plan == nullptr ? std::nullopt
-                         : resolve_moi_scratch_plan(*plan, options, result.moi_operating_point,
-                                                    expected_count);
+  return plan == nullptr
+             ? std::nullopt
+             : resolve_moi_scratch_plan(*plan, options, result.moi_operating_point, expected_count);
 }
 
 void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidates,
-                              const ConSanOptions &options) {
+                              const MoiOptions &options) {
   if (options.test_kernel_name_filter.empty())
     return;
   std::erase_if(candidates, [&](const ConSanMoiCandidate *candidate) {
@@ -3902,7 +3899,7 @@ void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidate
 }
 
 template <typename Candidate>
-void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSanOptions &options) {
+void apply_test_container_filter(std::vector<Candidate> &candidates, const MoiOptions &options) {
   if (options.test_kernel_name_filter.empty())
     return;
   std::erase_if(candidates, [&](const Candidate &candidate) {
@@ -3933,7 +3930,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
   return static_cast<uint16_t>(*frame_save_offset + 1u);
 }
 
-[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch) {
+[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const MoiOptions &options, rj_code_arch_t arch) {
   if (options.moi_engine == ConSanMoiEngine::Sampled) {
     // Claim selection and optional wave sampling predicate on VCC. A winning
     // lane narrows EXEC while publishing, and every scalar predicate may
@@ -4008,7 +4005,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
 }
 
 [[nodiscard]] std::optional<uint16_t>
-inline_shadow_visible_evidence_sgpr(const ConSanOptions &options) {
+inline_shadow_visible_evidence_sgpr(const MoiOptions &options) {
   if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_exec_save_sgpr) {
     return std::nullopt;
   }
@@ -4044,15 +4041,15 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA3) == 102u);
 static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4) == 102u);
 static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
 
-[[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {
+[[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const MoiOptions &options) {
   (void)options;
   return 2u;
 }
 
 [[nodiscard]] bool
-moi_sgpr_range_overlaps_transient_state(const ConSanOptions &options,
-                                        const ConSanMoiOperatingPoint &allocation,
-                                        uint16_t base, uint16_t width, rj_code_arch_t arch) {
+moi_sgpr_range_overlaps_transient_state(const MoiOptions &options,
+                                        const ConSanMoiOperatingPoint &allocation, uint16_t base,
+                                        uint16_t width, rj_code_arch_t arch) {
   const auto overlaps = [&](std::optional<uint16_t> state_base, uint16_t state_width = 1u) {
     return state_base && range_overlaps(base, width, *state_base, state_width);
   };
@@ -4081,7 +4078,7 @@ moi_sgpr_range_overlaps_transient_state(const ConSanOptions &options,
 }
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSource>
-moi_runtime_workgroup_selection_source(const ConSanOptions &options, rj_code_arch_t arch) {
+moi_runtime_workgroup_selection_source(const MoiOptions &options, rj_code_arch_t arch) {
   // A cached Record/Replay selection needs storage distinct from the exact
   // workgroup tuple. In particular, replacing persistent X with the boolean
   // collapses every selected workgroup to X=1 and makes their private LDS
@@ -4093,7 +4090,7 @@ moi_runtime_workgroup_selection_source(const ConSanOptions &options, rj_code_arc
 }
 
 [[nodiscard]] bool
-moi_has_probe_entry_runtime_workgroup_gate(const ConSanOptions &options,
+moi_has_probe_entry_runtime_workgroup_gate(const MoiOptions &options,
                                            const ConSanMoiWorkgroupSources &workgroup_sources,
                                            rj_code_arch_t arch) {
   const auto register_backed = [](const ConSanMoiWorkgroupSource &source) {
@@ -4122,7 +4119,7 @@ struct MoiSampledPublicationStateSgprs {
 };
 
 [[nodiscard]] std::optional<MoiSampledPublicationStateSgprs>
-moi_sampled_publication_state_sgprs(const ConSanOptions &options) {
+moi_sampled_publication_state_sgprs(const MoiOptions &options) {
   if (options.moi_engine != ConSanMoiEngine::Sampled || !options.moi_exec_save_sgpr)
     return std::nullopt;
   const uint16_t base = *options.moi_exec_save_sgpr;
@@ -4135,7 +4132,7 @@ moi_sampled_publication_state_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] std::optional<MoiSpecialStateSgprs>
-moi_special_state_sgprs(const ConSanOptions &options) {
+moi_special_state_sgprs(const MoiOptions &options) {
   if (!options.moi_exec_save_sgpr)
     return std::nullopt;
   if (options.moi_engine == ConSanMoiEngine::Sampled) {
@@ -4167,7 +4164,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 /// restore the complete transient window before returning, so their separately
 /// allocated indirect-jump SCC register remains the stable snapshot.
 [[nodiscard]] std::optional<uint16_t>
-moi_sampled_access_return_scc_sgpr(const ConSanOptions &options) {
+moi_sampled_access_return_scc_sgpr(const MoiOptions &options) {
   if (options.moi_engine != ConSanMoiEngine::Sampled || !options.moi_exec_save_sgpr)
     return std::nullopt;
   if (options.automatic_moi_record_replay_sgpr_spill) {
@@ -4179,7 +4176,7 @@ moi_sampled_access_return_scc_sgpr(const ConSanOptions &options) {
 }
 
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const ConSanOptions &options) {
+moi_indirect_jump_sgprs(const MoiOptions &options) {
   if (options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill) {
     if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr)
       return std::nullopt;
@@ -4206,8 +4203,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool append_save_moi_special_state(std::vector<uint32_t> &words,
-                                                 const ConSanOptions &options,
-                                                 rj_code_arch_t arch) {
+                                                 const MoiOptions &options, rj_code_arch_t arch) {
   const auto registers = moi_special_state_sgprs(options);
   if (!registers)
     return false;
@@ -4224,7 +4220,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool append_restore_moi_special_state(std::vector<uint32_t> &words,
-                                                    const ConSanOptions &options,
+                                                    const MoiOptions &options,
                                                     rj_code_arch_t arch) {
   const auto registers = moi_special_state_sgprs(options);
   if (!registers)
@@ -4242,7 +4238,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(
-    ConSanOptions &options, ConSanTransformArtifacts &result,
+    MoiOptions &options, ConSanTransformArtifacts &result,
     const MoiResourcePlanningState &planning_state, bool dispatch_only = false) {
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
       result.moi_operating_point.owner_transient_sgprs;
@@ -4921,7 +4917,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool
-configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformArtifacts &result,
+configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArtifacts &result,
                                         const MoiResourcePlanningState &planning_state,
                                         std::span<const ConSanMoiCandidate> candidates) {
   const std::span<const uint8_t> bytes = planning_state.bytes;
@@ -5407,7 +5403,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
   return false;
 }
 
-[[nodiscard]] bool configure_automatic_moi_owner_sgpr(ConSanOptions &options,
+[[nodiscard]] bool configure_automatic_moi_owner_sgpr(MoiOptions &options,
                                                       ConSanTransformArtifacts &result,
                                                       const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
@@ -5455,7 +5451,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
   return false;
 }
 
-[[nodiscard]] bool configure_inline_moi_owner_sgpr(ConSanOptions &options,
+[[nodiscard]] bool configure_inline_moi_owner_sgpr(MoiOptions &options,
                                                    ConSanTransformArtifacts &result) {
   if (!moi_inline_uses_planned_owner_sgpr(options) || options.automatic_moi_owner_sgpr)
     return false;
@@ -5472,7 +5468,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
 }
 
 [[nodiscard]] bool
-configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransformArtifacts &result,
+configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformArtifacts &result,
                                           const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
   const bool has_inline_dispatch_consumer =
@@ -5730,7 +5726,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return false;
 }
 
-[[nodiscard]] bool configure_moi_dispatch_id_overrides(ConSanOptions &options,
+[[nodiscard]] bool configure_moi_dispatch_id_overrides(MoiOptions &options,
                                                        ConSanTransformArtifacts &result,
                                                        const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
@@ -5818,7 +5814,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return true;
 }
 
-[[nodiscard]] bool validate_moi_dispatch_id_sgprs(const ConSanOptions &options,
+[[nodiscard]] bool validate_moi_dispatch_id_sgprs(const MoiOptions &options,
                                                   ConSanTransformArtifacts &result,
                                                   rj_code_arch_t arch) {
   if (!options.moi_dispatch_id_sgpr)
@@ -5865,7 +5861,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return true;
 }
 
-[[nodiscard]] bool validate_moi_dispatch_id_vgprs(const ConSanOptions &options,
+[[nodiscard]] bool validate_moi_dispatch_id_vgprs(const MoiOptions &options,
                                                   ConSanTransformArtifacts &result) {
   if (options.moi_dispatch_id_sgpr && options.moi_dispatch_id_vgpr) {
     result.outcome = ConSanTransformOutcome::Unsupported;
@@ -5899,7 +5895,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return true;
 }
 
-[[nodiscard]] bool validate_moi_ordinary_scalar_state(const ConSanOptions &options,
+[[nodiscard]] bool validate_moi_ordinary_scalar_state(const MoiOptions &options,
                                                       ConSanTransformArtifacts &result,
                                                       rj_code_arch_t arch) {
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
@@ -6013,7 +6009,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
 }
 
 [[nodiscard]] bool configure_automatic_moi_persistent_vgprs(
-    ConSanOptions &options, ConSanTransformArtifacts &result,
+    MoiOptions &options, ConSanTransformArtifacts &result,
     const MoiResourcePlanningState &planning_state,
     std::vector<ConSanMoiPrologueScratchVgprAssignment> &prologue_scratch_assignments) {
   const std::span<const uint8_t> bytes = planning_state.bytes;
@@ -6339,7 +6335,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       // that the pair is absent from the complete owner scopes; site-local
       // liveness is insufficient because the values cross arbitrary guest
       // code between the entry prologue and every probe.
-      ConSanOptions scalar_options = options;
+      MoiOptions scalar_options = options;
       const bool scalar_state_valid =
           resolved_contexts.has_value() &&
           apply_moi_transient_sgpr_assignment(scalar_options, result.moi_operating_point,
@@ -6455,9 +6451,8 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
               return true;
             }
           }
-          if (moi_sgpr_range_overlaps_transient_state(scalar_options,
-                                                      result.moi_operating_point, base,
-                                                      kWorkgroupScalarCount, arch) ||
+          if (moi_sgpr_range_overlaps_transient_state(scalar_options, result.moi_operating_point,
+                                                      base, kWorkgroupScalarCount, arch) ||
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, kWorkgroupScalarCount,
                                                                      arch)) {
             return true;
@@ -6683,7 +6678,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       uint32_t component_limit = kMaxVgprs;
       uint32_t component_encoded_limit = kMaxVgprs;
       bool resolved_every_component_context = true;
-      ConSanOptions component_options = options;
+      MoiOptions component_options = options;
       const bool component_transient_state_resolved =
           result.moi_operating_point.owner_transient_sgprs.empty() ||
           apply_moi_transient_sgpr_assignment(component_options, result.moi_operating_point,
@@ -7124,7 +7119,7 @@ void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
 }
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
-                                const ResolvedMoiScratchPlan &plan, const ConSanOptions &options,
+                                const ResolvedMoiScratchPlan &plan, const MoiOptions &options,
                                 rj_code_arch_t arch) {
   uint16_t required_count = 0;
   if (options.moi_exec_save_sgpr) {

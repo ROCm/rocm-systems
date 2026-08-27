@@ -104,8 +104,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
 }
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
-[[nodiscard]] ConSanMoiReportBufferLayout
-resolve_inline_report_layout(const ConSanOptions &options) {
+[[nodiscard]] ConSanMoiReportBufferLayout resolve_inline_report_layout(const MoiOptions &options) {
   if (options.moi_report_layout) {
     return revalidate_consan_moi_report_layout(
         *options.moi_report_layout, ConSanMoiEngine::InlineShadow, options.moi_report_buffer_size);
@@ -113,8 +112,7 @@ resolve_inline_report_layout(const ConSanOptions &options) {
   return consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
 }
 
-[[nodiscard]] ConSanMoiReportBufferLayout
-resolve_sampled_report_layout(const ConSanOptions &options) {
+[[nodiscard]] ConSanMoiReportBufferLayout resolve_sampled_report_layout(const MoiOptions &options) {
   if (options.moi_report_layout) {
     return revalidate_consan_moi_report_layout(*options.moi_report_layout, ConSanMoiEngine::Sampled,
                                                options.moi_report_buffer_size);
@@ -123,7 +121,7 @@ resolve_sampled_report_layout(const ConSanOptions &options) {
 }
 
 [[nodiscard]] ConSanMoiReportBufferLayout
-resolve_record_replay_report_layout(const ConSanOptions &options, bool include_barriers,
+resolve_record_replay_report_layout(const MoiOptions &options, bool include_barriers,
                                     bool include_atomics, bool include_fences) {
   if (options.moi_report_layout) {
     return revalidate_consan_moi_report_layout(
@@ -137,13 +135,13 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
 /// wave identity. Placement, scratch sizing, and emission must use this single
 /// predicate so a probe can never require persistent identity that placement
 /// did not reserve.
-[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanOptions &options,
+[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const MoiOptions &options,
                                                                uint32_t dispatch_token_capacity) {
   return options.moi_engine == ConSanMoiEngine::RecordReplay &&
          !options.moi_dynamic_access_records && dispatch_token_capacity != 0u;
 }
 
-[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanOptions &options) {
+[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const MoiOptions &options) {
   return options.moi_report_layout &&
          record_replay_uses_automatic_banked_capture(
              options, options.moi_report_layout->record_replay_dispatch_token_capacity);
@@ -153,30 +151,29 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
 /// the guest access, so its workgroup identity must come from entry-captured
 /// persistent state. The report layout controls banking and scratch needs,
 /// not this lifetime requirement.
-[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(const ConSanOptions &options) {
+[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(const MoiOptions &options) {
   return options.moi_engine == ConSanMoiEngine::RecordReplay ||
          options.moi_engine == ConSanMoiEngine::Sampled;
 }
 
-[[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const ConSanOptions &options) {
+[[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const MoiOptions &options) {
   return static_cast<uint8_t>(options.moi_persistent_sgprs.record_replay_workgroup.complete()) +
          static_cast<uint8_t>(options.moi_record_replay_workgroup_vgprs.complete()) +
          static_cast<uint8_t>(options.moi_record_replay_workgroup_private_offsets.complete());
 }
 
-[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const ConSanOptions &options) {
+[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const MoiOptions &options) {
   return record_replay_entry_workgroup_capture_count(options) != 0u;
 }
 
-[[nodiscard]] bool
-record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &options) {
+[[nodiscard]] bool record_replay_entry_workgroup_capture_is_unambiguous(const MoiOptions &options) {
   return record_replay_entry_workgroup_capture_count(options) <= 1u;
 }
 
 /// Record vector-persistent state on the emitted mechanism that initializes
 /// or consumes it. The resolved scalar option fields describe the selected
 /// tuple; the typed allocation states whether that tuple is owner-local.
-void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanOptions &options,
+void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const MoiOptions &options,
                                     const ConSanMoiOperatingPoint &allocation) {
   patch.persistent_owner_vgpr = options.moi_owner_vgpr;
   patch.persistent_epoch_vgpr = options.moi_epoch_vgpr;
@@ -397,7 +394,7 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
 /// projection; policy decisions and final coverage retain the complete typed
 /// account of excluded and admitted sites.
 [[nodiscard]] bool initialize_moi_access_observation_plan(
-    const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const ConSanOptions &options,
+    const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const MoiOptions &options,
     const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
     ConSanTransformArtifacts &result) {
   std::vector<PhysicalSiteId> synchronization_sites;
@@ -665,7 +662,7 @@ struct ConSanMoiReportDispatchIdWordSource {
   uint32_t literal = 0;
 };
 
-[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanOptions &options) {
+[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const MoiOptions &options) {
   return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
 }
 
@@ -674,7 +671,7 @@ struct ConSanMoiReportDispatchIdWordSource {
 // so the stable reader-identity literal is sufficient when a CDNA owner has
 // no persistent SGPR pair. Record/Replay and Inline Shadow retain their
 // stronger hardware-dispatch identity contract.
-[[nodiscard]] bool moi_permits_literal_dispatch_identity(const ConSanOptions &options,
+[[nodiscard]] bool moi_permits_literal_dispatch_identity(const MoiOptions &options,
                                                          rj_code_arch_t arch) {
   return consan_arch_uses_literal_dispatch_identity(arch) ||
          options.moi_engine == ConSanMoiEngine::Sampled;
@@ -688,7 +685,7 @@ struct ConSanMoiReportDispatchIdWordSource {
 enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
 
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource
-moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word) {
+moi_report_dispatch_id_word_source(const MoiOptions &options, bool high_word) {
   if (options.moi_dispatch_id_sgpr) {
     return ConSanMoiReportDispatchIdWordSource{
         .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)),
@@ -716,7 +713,7 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
-                                                      const ConSanOptions &options,
+                                                      const MoiOptions &options,
                                                       uint16_t destination_vgpr, bool high_word,
                                                       rj_code_arch_t arch,
                                                       ConSanMoiLiteralDispatchIdPolicy policy) {
@@ -741,9 +738,8 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_pair(std::vector<uint32_t> &words,
-                                                      const ConSanOptions &options,
-                                                      uint16_t low_vgpr, uint16_t high_vgpr,
-                                                      rj_code_arch_t arch,
+                                                      const MoiOptions &options, uint16_t low_vgpr,
+                                                      uint16_t high_vgpr, rj_code_arch_t arch,
                                                       ConSanMoiLiteralDispatchIdPolicy policy) {
   return append_moi_report_dispatch_id_word(words, options, low_vgpr, /*high_word=*/false, arch,
                                             policy) &&
@@ -752,7 +748,7 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
 }
 
 [[nodiscard]] bool append_compare_moi_report_dispatch_id_word(
-    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t value_vgpr,
+    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t value_vgpr,
     uint16_t clobberable_literal_temporary_vgpr, bool high_word, rj_code_arch_t arch,
     ConSanMoiLiteralDispatchIdPolicy policy) {
   const ConSanMoiReportDispatchIdWordSource source =
@@ -782,9 +778,10 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   return true;
 }
 
-[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(
-    ConSanMoiRecordEmitter &record, const ConSanOptions &options, uint32_t low_offset,
-    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+[[nodiscard]] bool
+append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record, const MoiOptions &options,
+                                         uint32_t low_offset, rj_code_arch_t arch,
+                                         ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource source =
         moi_report_dispatch_id_word_source(options, high_word);
@@ -945,7 +942,7 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
 
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    const MoiOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
     ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource source =

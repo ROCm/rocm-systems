@@ -28,7 +28,7 @@ struct MoiPlannedProbeResources {
 /// policy, while InlineShadow uses a distinct policy.
 [[nodiscard]] std::optional<MoiPlannedProbeResources>
 plan_moi_probe_resources(ConSanTransformArtifacts &result, ResolvedMoiScratchPlan resources,
-                         const ConSanOptions &options, MoiSpillManagers &spill_managers,
+                         const MoiOptions &options, MoiSpillManagers &spill_managers,
                          rj_code_arch_t arch, std::optional<MoiPrivateEpochLayout> private_layout,
                          bool scalar_spill_required,
                          std::optional<uint32_t> active_private_segment_size = std::nullopt) {

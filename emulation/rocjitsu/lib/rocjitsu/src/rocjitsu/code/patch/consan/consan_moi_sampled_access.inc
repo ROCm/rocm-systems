@@ -1,5 +1,5 @@
 [[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
-                                                             const ConSanOptions &options) {
+                                                             const MoiOptions &options) {
   if (!options.moi_track_barriers)
     return 0u;
   uint64_t count = 0u;
@@ -12,7 +12,7 @@
 
 [[nodiscard]] uint32_t
 sampled_qualified_atomic_sequence_count(const ConSanTransformArtifacts &result,
-                                        const ConSanOptions &options) {
+                                        const MoiOptions &options) {
   if (!options.moi_track_atomics)
     return 0u;
   uint32_t count = 0u;
@@ -76,7 +76,7 @@ sampled_qualified_atomic_sequence_count(const ConSanTransformArtifacts &result,
 }
 
 [[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanTransformArtifacts &result,
-                                                            const ConSanOptions &options) {
+                                                            const MoiOptions &options) {
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
   const uint32_t patch_budget = options.max_patches_is_expert_limit
                                     ? options.max_patches
@@ -86,7 +86,7 @@ sampled_qualified_atomic_sequence_count(const ConSanTransformArtifacts &result,
 }
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
-                                               const ConSanOptions &options, rj_code_arch_t arch,
+                                               const MoiOptions &options, rj_code_arch_t arch,
                                                MoiResourcePlanningState &resource_state,
                                                std::span<const ConSanMoiCandidate> admitted,
                                                ConSanTransformArtifacts &result) {
@@ -359,7 +359,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         resource_plan_for_candidate(result, candidate);
     if (candidate_resource_plan == nullptr)
       continue;
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
             candidate_options, result.moi_operating_point,
             candidate_resource_plan->owner_descriptor_file_offsets) ||
@@ -769,7 +769,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   MoiDescriptorPrivateRequirements private_requirements;
   for (const PlannedSampledPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
             candidate_options, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets) ||
@@ -828,7 +828,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (group.empty() || !group.front()->transient_exec_save_sgpr ||
           !group.front()->entry_island_offset)
         continue;
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               group_options, result.moi_operating_point,
               group.front()->resources.owner_descriptor_file_offsets))
@@ -843,7 +843,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     for (const PlannedSampledPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      ConSanOptions candidate_options = options;
+      MoiOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
@@ -1184,7 +1184,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const PlannedSampledPatch *representative = dense_groups.at(dispatcher).front();
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
               group_options, result.moi_operating_point,
               representative->resources.owner_descriptor_file_offsets)) {
@@ -1219,7 +1219,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           bytes, planned_patches, descriptor_requirements, scalar_requirements, "sampled probe",
           arch,
           [&](const PlannedSampledPatch &planned_patch) {
-            ConSanOptions candidate_options = options;
+            MoiOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
                     candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets) ||

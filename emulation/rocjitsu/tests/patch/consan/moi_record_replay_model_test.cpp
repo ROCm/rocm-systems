@@ -862,7 +862,7 @@ TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "record_replay_barrier_pressure", kWave64Vgpr64Granulated);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_dynamic_access_records = true;
   options.moi_track_barriers = true;
   options.moi_init_owner_epoch = true;
@@ -886,7 +886,7 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
       kBarrierWait,
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = true;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
@@ -912,7 +912,7 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
 }
 
 TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;

@@ -14,13 +14,13 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
 /// by the native emitters.
 ///
 /// This is the single remaining compatibility boundary between the typed
-/// event plan and emitters that have not yet replaced `ConSanOptions` with a
+/// event plan and emitters that have not yet replaced `MoiOptions` with a
 /// narrow lowering input. It selects the event's scratch window, private
 /// workgroup representation, transient scalar assignment, and entry-captured
 /// workgroup tuple. A false result means a previously proved owner-local
 /// assignment disappeared and callers must abort rather than emit with a
 /// different register interpretation.
-[[nodiscard]] bool bind_moi_record_event_options(ConSanOptions &event_options,
+[[nodiscard]] bool bind_moi_record_event_options(MoiOptions &event_options,
                                                  const ConSanMoiOperatingPoint &allocation,
                                                  const MoiPlannedRecordEvent &event) {
   event_options.scratch_vgpr = event.resources.base;
@@ -45,11 +45,11 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
 /// event-specific planner.
 [[nodiscard]] std::optional<MoiPlannedRecordEvent>
 plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &result,
-                      const ResolvedMoiScratchPlan &resources, const ConSanOptions &options,
+                      const ResolvedMoiScratchPlan &resources, const MoiOptions &options,
                       MoiSpillManagers &spill_managers, rj_code_arch_t arch,
                       std::string_view warning_context,
                       std::optional<uint32_t> active_private_segment_size = std::nullopt) {
-  ConSanOptions event_options = options;
+  MoiOptions event_options = options;
   event_options.scratch_vgpr = resources.base;
   if (!apply_moi_transient_sgpr_assignment(event_options, result.moi_operating_point,
                                            resources.owner_descriptor_file_offsets)) {

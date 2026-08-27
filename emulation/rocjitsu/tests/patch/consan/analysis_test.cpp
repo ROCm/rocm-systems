@@ -40,7 +40,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
       unsupported_nonzero[2],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanTransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(words, "global_async_to_lds_inventory"), options);
@@ -98,7 +98,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
       unsupported_nonzero[2],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(words, "global_async_from_lds_inventory"), options);
@@ -147,7 +147,7 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
                                           ordinary_load[0],
                                           ordinary_load[1],
                                           build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanTransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(words, "direct_to_lds_inventory"), options);
@@ -182,7 +182,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
                                                                          .ioffset = 0xFFFFFC});
   const std::array<uint32_t, 4> text_words = {store[0], store[1], store[2],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -212,7 +212,7 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -244,7 +244,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -275,7 +275,7 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
       0x00000000u, // global_inv scope:device
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -296,7 +296,7 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
       cdna5::build_vds(cdna5::kDsBpermuteB32Vds, {.addr = 3, .data0 = 4, .vdst = 5});
   const std::array<uint32_t, 5> text_words = {load[0], load[1], bpermute[0], bpermute[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -329,7 +329,7 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
   for (const auto &instruction : instructions)
     text_words.insert(text_words.end(), instruction.begin(), instruction.end());
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3));
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -352,7 +352,7 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
 
 TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_memory_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -440,7 +440,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -481,7 +481,7 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -513,7 +513,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -543,7 +543,7 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
       0xDC500000u, 0x04000000u, // flat_load_dword v4, v[0:1]
       0xBF810000u,              // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -573,7 +573,7 @@ TEST(ConSan, CdnaDppLowHalfArithmeticRetainsExactSharedAperture) {
       0xDC500000u, 0x04000000u, // flat_load_dword v4, v[0:1]
       0xBF810000u,              // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -604,7 +604,7 @@ TEST(ConSan, PropagatesSharedPointerThroughExactScratchSlot) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -635,7 +635,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughExactScratchSlot) {
       0x00000003u, // flat_load_b32 v5, v[3:4]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -667,7 +667,7 @@ TEST(ConSan, PropagatesCdnaSharedPointerThroughExactScratchSlot) {
       0x08000006u, // flat_load_dword v8, v[6:7]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -703,7 +703,7 @@ TEST(ConSan, PropagatesGfx1250SharedHighHalfThroughVectorAddU64) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -734,7 +734,7 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128ScratchSequence) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -773,7 +773,7 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128AddressConstruction) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -801,7 +801,7 @@ TEST(ConSan, PropagatesSharedPointerThroughExactPrivateFrameSlot) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -830,7 +830,7 @@ TEST(ConSan, PropagatesSharedPointerThroughScalarLaneReservoir) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -860,7 +860,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -886,7 +886,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -951,7 +951,7 @@ TEST(ConSan, PropagatesCdna4LaneStateThroughAccVgpr) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -983,7 +983,7 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -1021,7 +1021,7 @@ TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -1065,7 +1065,7 @@ TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -1099,7 +1099,7 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorShift) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -1127,7 +1127,7 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorLeftShift) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -1169,7 +1169,7 @@ TEST(ConSan, PropagatesCdna4AccVgprPointerAcrossHelperCall) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_setpc_b64(/*ssrc0=*/30, ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -1241,7 +1241,7 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
   };
   const std::vector<uint8_t> bytes =
       make_cdna4_code_object_with_local_function(kernel_words, function_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -1263,7 +1263,7 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
 
 TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
@@ -1466,7 +1466,7 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
           .bytes = make_gfx1250_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)}),
       },
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (const TargetCase &target_case : cases) {
@@ -1497,7 +1497,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -1559,7 +1559,7 @@ TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
       cmpst[1],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -1607,7 +1607,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   };
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "gfx950_flat_inventory");
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::Moi;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -2031,7 +2031,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      ConSanOptions options;
+      MoiOptions options;
       options.flavor = ConSanFlavor::SuperCollider;
       options.probe_flat_check_trap = true;
       options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2081,7 +2081,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      ConSanOptions options;
+      MoiOptions options;
       options.flavor = ConSanFlavor::SuperCollider;
       options.probe_flat_check_trap = true;
       options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2145,7 +2145,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      ConSanOptions options;
+      MoiOptions options;
       options.flavor = ConSanFlavor::SuperCollider;
       options.probe_flat_check_trap = true;
       options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2230,7 +2230,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       for (ConSanMoiEngine engine : kEngines) {
         SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic) +
                      " engine=" + std::to_string(static_cast<uint32_t>(engine)));
-        ConSanOptions options = moi_options(engine);
+        MoiOptions options = moi_options(engine);
         options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
         options.scratch_vgpr = 8;
         options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
@@ -2273,7 +2273,7 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      ConSanOptions options;
+      MoiOptions options;
       options.flavor = ConSanFlavor::SuperCollider;
       options.probe_flat_check_trap = true;
       options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2369,7 +2369,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       for (ConSanMoiEngine engine : kEngines) {
         SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic) +
                      " engine=" + std::to_string(static_cast<uint32_t>(engine)));
-        ConSanOptions options = moi_options(engine);
+        MoiOptions options = moi_options(engine);
         options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
         options.scratch_vgpr = 8;
         options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
@@ -2416,7 +2416,7 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   const std::vector<uint8_t> bytes =
       make_group_flat_load_code_object(target, cdna4::kFlatLoadDwordx3Flat);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.max_patches = 1;
 
@@ -2438,7 +2438,7 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
 TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   const std::vector<uint8_t> bytes = make_cdna4_padded_group_flat_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_flat_check_trap = true;
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2506,7 +2506,7 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
     text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
     const std::vector<uint8_t> bytes =
         make_cdna4_lds_code_object(text_words, "gfx950_flat_short_supercollider");
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
     options.probe_flat_check_trap = true;
     options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2566,7 +2566,7 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
       kernel_words, function_words, {}, /*vgpr_granulated=*/0u);
   mutate_elf_header(bytes,
                     [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_flat_check_trap = true;
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2617,7 +2617,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
   ASSERT_FALSE(bytes.empty());
   for (ConSanMoiEngine engine : {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::InlineShadow}) {
     SCOPED_TRACE(static_cast<uint32_t>(engine));
-    ConSanOptions options = moi_options(engine);
+    MoiOptions options = moi_options(engine);
     options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
     options.scratch_vgpr = 8;
     options.moi_owner_vgpr = 24;
@@ -2678,7 +2678,7 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "gfx950_flat_short_emission");
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 24;
@@ -2735,7 +2735,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_flat_short_emission");
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 24;
@@ -2784,7 +2784,7 @@ TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
     text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
     const std::vector<uint8_t> bytes =
         make_gfx1250_code_object(text_words, "gfx1250_flat_short_supercollider");
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
     options.probe_flat_check_trap = true;
     options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -2811,7 +2811,7 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "flat_atomic_probe");
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -2869,7 +2869,7 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "atomic_acquire_release");
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_semantic_inventory(bytes, options);
@@ -2894,7 +2894,7 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
 
 TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   const std::vector<uint8_t> bytes = make_rdna4_global_atomic_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
@@ -2961,7 +2961,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
 
 TEST(ConSan, SyncInventoryRetainsUnsupportedFlatAtomicWithoutProvenance) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
@@ -2989,7 +2989,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3066,7 +3066,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
       make_rdna4_bounded_atomic_acquire_code_object(failed_cas, short_bookkeeping,
                                                     "failed_cas_acquire"),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   for (size_t index = 0; index < fixtures.size(); ++index) {
@@ -3086,7 +3086,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
 }
 
 TEST(ConSan, SyncSequencesAssociateBoundedAtomicAcquireAtFallthroughJoin) {
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -3109,7 +3109,7 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
   constexpr std::array<uint32_t, 3> atomic = {0xEE0D400Cu, 0x01980002u, 0x00000002u};
   constexpr std::array<uint32_t, 3> load = {0xEE050006u, 0x00080001u, 0x00000000u};
   const auto acquire_count = [](const std::vector<uint8_t> &bytes) {
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
@@ -3141,7 +3141,7 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
 }
 
 TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -3184,7 +3184,7 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
       0xBFC80000u, // s_wait_loadcnt_dscnt 0
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -3214,7 +3214,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
       *wait_store, 0xdcd64000u, 0x01080201u, // global_atomic_add_u32 v1, v1, v2, s[8:9] glc
       *wait_load,  gl1[0],      gl1[1],      gl0[0], gl0[1],
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -3250,7 +3250,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     const RdnaWorkgroupClauseReleaseFixture fixture =
         make_rdna_workgroup_clause_release_code_object(arch);
     ASSERT_FALSE(fixture.bytes.empty());
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
     const ConSanTransformArtifacts result = test_semantic_inventory(fixture.bytes, options);
@@ -3296,7 +3296,7 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
 
   const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words), options);
@@ -3340,7 +3340,7 @@ TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
       0x00000000u, // buffer_inv sc1
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
 
   const ConSanTransformArtifacts result =
@@ -3384,7 +3384,7 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
       0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.fault_dry_run = true;
 
@@ -3421,7 +3421,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
   const auto rdna3_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
   const auto gfx12_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(rdna3_wait && gfx12_wait);
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
 
   const std::array<uint32_t, 4> rdna3_words = {
@@ -3485,7 +3485,7 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
       store[2], // global_store_b32 scope:SCOPE_DEV
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
 
   const ConSanTransformArtifacts result =
@@ -3536,7 +3536,7 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
       0x027C0000u, // global_load_b32 v2, v[0:1], off offset:4 glc
       *wait,       gl1[0], gl1[1], gl0[0], gl0[1], build_s_endpgm(kArch),
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
   options.moi_track_atomics = true;
 
   const ConSanTransformArtifacts result = test_lower_consan(
@@ -3582,7 +3582,7 @@ TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options = moi_options();
+  MoiOptions options = moi_options();
 
   const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words), options);
@@ -3608,7 +3608,7 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5]
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3635,7 +3635,7 @@ TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3669,7 +3669,7 @@ TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                           // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3706,7 +3706,7 @@ TEST(ConSan, SyncSequencesRetainAtomicCacheAssociationBeforeBarrier) {
       0xBF94FFFFu,                                        // s_barrier_wait -1
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3736,7 +3736,7 @@ TEST(ConSan, SyncSequencesKeepCacheOperationsSeparateAroundBarrier) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -3772,7 +3772,7 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
@@ -3796,10 +3796,12 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
@@ -3833,7 +3835,7 @@ TEST(ConSan, SyncSequencesPreserveBasicBlockBoundaryBetweenAdjacentEvents) {
       0xBFB00000u,                                 // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
@@ -3859,7 +3861,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const auto paired = test_semantic_inventory(make_rdna4_lds_code_object(paired_words), options);
 
@@ -3942,7 +3944,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
       0xBF94FFFFu,              // s_barrier_wait -1
       0xBFB00000u,              // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts retained =
       test_semantic_inventory(make_rdna4_lds_code_object(retained_words), options);
@@ -4018,7 +4020,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
       ConSanMoiEngine::Sampled,
   };
   for (size_t profile = 0; profile != 4; ++profile) {
-    ConSanOptions options;
+    MoiOptions options;
     options.flavor = profile == 0 ? ConSanFlavor::SuperCollider : ConSanFlavor::Moi;
     if (profile != 0)
       options.moi_engine = engines[profile - 1];
@@ -4049,7 +4051,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions matched_options;
+  MoiOptions matched_options;
   matched_options.flavor = ConSanFlavor::SuperCollider;
   matched_options.abort_unmatched_barrier_wait = true;
   const ConSanTransformArtifacts matched =
@@ -4073,7 +4075,7 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
       0xBF94FFFEu, // s_barrier_wait -2
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -4107,7 +4109,7 @@ TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
       0xBF940001u, // s_barrier_wait 1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -4166,7 +4168,7 @@ TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
       0xBF94FFFDu, // s_barrier_wait -3
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result = test_semantic_inventory(
       make_gfx1250_code_object(text_words, "nontrivial_cluster_triangle"), options);
@@ -4189,7 +4191,7 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
@@ -4226,7 +4228,7 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
       0xBE84507Du, // s_get_barrier_state s4, m0
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_gfx1250_code_object(text_words), options);
@@ -4300,7 +4302,7 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
       0xBF951234u, // s_barrier_leave raw simm16 0x1234
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
       test_semantic_inventory(make_gfx1250_code_object(text_words), options);
@@ -4353,7 +4355,7 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
       0xBF950000u, // s_barrier_leave (fixed-zero encoding)
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
   const ConSanTransformArtifacts result =
@@ -4375,7 +4377,7 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
 }
 
 TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
 
@@ -4427,7 +4429,7 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
 }
 
 TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
 
@@ -4475,7 +4477,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
@@ -4483,7 +4485,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
-  ConSanOptions options = inventory_options;
+  MoiOptions options = inventory_options;
   options.fault_dry_run = false;
   options.fault_mutate_barrier_id_scope = true;
   options.fault_barrier_sequence_identity = barrier->identity;
@@ -4623,7 +4625,7 @@ TEST(ConSan, SyncSequencesInventoryUnmatchedBarrierComponentsWithoutPairing) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts signal =
       test_semantic_inventory(make_rdna4_lds_code_object(signal_words), options);
@@ -4668,14 +4670,14 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "validate_structured_divergent_move");
-  ConSanOptions inventory_options;
+  MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 12u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
 
-  ConSanOptions options = inventory_options;
+  MoiOptions options = inventory_options;
   options.fault_move_barrier = true;
   options.fault_allow_destructive_divergent_barrier_move = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
@@ -4741,7 +4743,7 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_move_barrier = true;
   const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
@@ -4763,7 +4765,7 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
 
 TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
@@ -4803,7 +4805,7 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "preflight_decode_blocker");
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -4821,7 +4823,7 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
 
 TEST(ConSan, PreflightAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
-  ConSanOptions options;
+  MoiOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);

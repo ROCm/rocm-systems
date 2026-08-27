@@ -228,7 +228,7 @@ bool consan_detail::scalar_owner_contexts_admit_reserved_window(
           !scalar_owner_contexts_conflict_with_physical_vcc(contexts, ranges));
 }
 
-bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,
+bool consan_detail::validate_scalar_state_temporaries(const MoiOptions &options,
                                                       std::string_view consumer,
                                                       std::vector<std::string> &errors) {
   if (!options.moi_persistent_sgprs.complete() ||
@@ -522,12 +522,12 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
 }
 
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
-                                              const ConSanOptions &options,
+                                              const MoiOptions &options,
                                               std::span<const uint8_t> code_object_bytes,
                                               rj_code_arch_t arch) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
-  ConSanOptions effective_options = options;
+  MoiOptions effective_options = options;
   if (effective_options.moi_owner_source == ConSanMoiOwnerSource::Automatic) {
     effective_options.moi_owner_source =
         effective_options.moi_engine == ConSanMoiEngine::InlineShadow
@@ -723,7 +723,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
-  const ConSanOptions exec_planning_base = effective_options;
+  const MoiOptions exec_planning_base = effective_options;
   const std::vector<ConSanMoiTransientSgprAssignment> exec_planning_base_assignments =
       result.moi_operating_point.owner_transient_sgprs;
   const size_t warnings_before_exec_planning = result.warnings.size();

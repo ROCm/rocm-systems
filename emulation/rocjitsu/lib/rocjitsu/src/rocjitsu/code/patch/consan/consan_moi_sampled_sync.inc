@@ -103,7 +103,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
-    const ConSanOptions &options, const VgprSpillSequence *spill,
+    const MoiOptions &options, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
@@ -667,8 +667,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   return words;
 }
 
-void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
-                                          const ConSanOptions &options, rj_code_arch_t arch,
+void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                          rj_code_arch_t arch,
                                           MoiResourcePlanningState &resource_state,
                                           std::span<const ConSanMoiCandidate> admitted,
                                           ConSanTransformArtifacts &result) {
@@ -809,7 +809,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
-      ConSanOptions owner_options = options;
+      MoiOptions owner_options = options;
       const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
       if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
                                                 owner_descriptor)) {
@@ -982,7 +982,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       resource_plan_index = result.resource_plans.size() - 1u;
       barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
     }
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              plan.owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
@@ -1047,7 +1047,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t island_offset =
         original_text_size + barrier_index * kIndirectIslandWords * sizeof(uint32_t);
     const uint64_t cave_offset = new_text.size();
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
     if (planned.private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
@@ -1241,7 +1241,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
@@ -1340,7 +1340,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       for (size_t index : indices) {
         const Planned &planned = selected[index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        ConSanOptions candidate_options = options;
+        MoiOptions candidate_options = options;
         candidate_options.scratch_vgpr = planned.resources.base;
         if (planned.private_layout) {
           candidate_options.moi_record_replay_workgroup_private_offsets =
@@ -1581,8 +1581,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   result.mark_modified();
 }
 
-void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
-                                         const ConSanOptions &options, rj_code_arch_t arch,
+void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                         rj_code_arch_t arch,
                                          MoiResourcePlanningState &resource_state,
                                          ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
@@ -2108,7 +2108,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                    candidate.atomic.container_name);
       continue;
     }
-    ConSanOptions candidate_options = options;
+    MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -2196,10 +2196,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   const auto build_atomic_cave =
       [&](const Planned &planned, uint64_t cave_offset, uint32_t &guest_instruction_offset,
-          const ConSanOptions *resolved_options = nullptr, bool preserve_guest_at_anchor = false,
+          const MoiOptions *resolved_options = nullptr, bool preserve_guest_at_anchor = false,
           std::span<const uint32_t> leading_guest_words = {})
       -> std::optional<std::vector<uint32_t>> {
-    ConSanOptions candidate_options = resolved_options ? *resolved_options : options;
+    MoiOptions candidate_options = resolved_options ? *resolved_options : options;
     candidate_options.scratch_vgpr = planned.resources.base;
     if (planned.private_layout) {
       // Sampled probes run after arbitrary guest code. Use the tuple captured
@@ -2355,7 +2355,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       }
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-      ConSanOptions group_options = options;
+      MoiOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
@@ -2808,7 +2808,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         }
       }
     }
-    ConSanOptions route_options = options;
+    MoiOptions route_options = options;
     if (!apply_moi_transient_sgpr_assignment(route_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -3026,7 +3026,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const FenceRecordCandidate &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
     size_t fence_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,

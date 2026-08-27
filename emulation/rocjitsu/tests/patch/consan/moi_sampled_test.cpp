@@ -133,7 +133,7 @@ void expect_sampled_barrier_exact_existing_metadata_path(
 
 TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -169,7 +169,7 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   text_words.back() = 0xBFB00000u; // s_endpgm
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 16;
   options.moi_epoch_vgpr = 17;
@@ -306,7 +306,7 @@ TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 80;
   options.moi_owner_vgpr = 90;
   options.moi_epoch_vgpr = 91;
@@ -348,7 +348,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_partitioned_dense_sampled");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -410,7 +410,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.test_force_private_epoch = true;
@@ -467,7 +467,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -528,7 +528,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -570,7 +570,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -631,7 +631,7 @@ TEST(ConSanMoi, Gfx1250SampledCapturesHighBankLdsAddressBeforeSelectingScratchBa
   text_words.resize(512u, build_s_nop(0u, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = kScratchVgpr;
   options.moi_exec_save_sgpr = 80u;
   options.moi_owner_vgpr = 40u;
@@ -684,7 +684,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 14;
   options.moi_epoch_vgpr = 15;
@@ -751,7 +751,7 @@ TEST(ConSanMoi, DirectSampledProbeAddsNativeLdsImmediateOffsets) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -808,7 +808,7 @@ TEST(ConSanMoi, DirectSampledProbeSnapshotsOverlappingLoadAddress) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -844,7 +844,7 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
   text_words[1] = 0x00000000u; // ds_store_2addr_b32 v0, v0, v0 offset0:1 offset1:2
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -897,7 +897,7 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
   text_words[0] = 0xD8380201u;
   text_words[1] = 0x00000000u; // ds_store_2addr_b32 v0, v0, v0 offset0:1 offset1:2
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -929,7 +929,7 @@ TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "large_two_address_sampled");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_exec_save_sgpr = 60;
   options.moi_owner_vgpr = 50;
@@ -972,7 +972,7 @@ TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
 TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   const std::vector<uint8_t> bytes = make_rdna4_sampled_lds_and_ordered_flat_atomic_code_object();
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 20;
@@ -1133,7 +1133,7 @@ TEST(ConSanMoi, SampledPatchesAliasedAtomicOnceForEveryOwner) {
   ASSERT_NE(first, original.kernels().end());
   ASSERT_NE(alias, original.kernels().end());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16u;
@@ -1171,7 +1171,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
       0xbfb00000u,              // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "sampled_ordered_lds_atomic");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 8, 0, 0, 0, 8, 1);
@@ -1222,7 +1222,7 @@ TEST(ConSanMoi, Gfx1250SampledPublishesIsolatedLdsReleaseOrdering) {
   const std::array<uint32_t, 6> words = {
       store[0],  store[1],  0xBFC90000u, // s_wait_storecnt_dscnt 0
       atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(3);
@@ -1271,7 +1271,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "sampled_atomic_acquire_release");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -1310,7 +1310,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
 TEST(ConSanMoi, Cdna4SampledRelocatesOrdinaryAtomicAcquireSequence) {
   const Cdna4CasOrdinaryAcquireFixture fixture =
       make_cdna4_cas_ordinary_acquire_fixture("sampled_cas_ordinary_acquire");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -1403,7 +1403,7 @@ TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
         target.arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "sampled_nearest_acquire")
             : make_cdna4_lds_code_object(text_words, "sampled_nearest_acquire");
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_track_barriers = false;
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
@@ -1458,7 +1458,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_exec_save_sgpr = 80;
   // Persistent values split the ordinary bank above v25. Atomic guest
@@ -1505,7 +1505,7 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
   text_words[400] = *barrier;
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -1633,7 +1633,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
                           2u);
         });
 
-        ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+        MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
         options.moi_runtime_sample_stride = 2u;
         options.moi_track_barriers = false;
         options.moi_track_atomics = true;
@@ -1986,7 +1986,7 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
                         2u);
       });
 
-      ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
       options.moi_runtime_sample_stride = 2u;
       options.moi_track_barriers = false;
       options.moi_track_atomics = true;
@@ -2091,7 +2091,7 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
       /*first_private_bytes=*/0u, /*second_private_bytes=*/20u);
   ASSERT_FALSE(bytes.empty());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   // This case isolates shared-owner private-state/spill separation. Runtime
   // gate coverage uses persistent register tuples in dedicated tests.
   options.moi_runtime_sample_stride = 1u;
@@ -2171,7 +2171,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
@@ -2241,7 +2241,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicRejectsFlatScratchScalarAlias) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "sampled_atomic_special_sgpr_alias");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 96;
@@ -2264,7 +2264,7 @@ TEST(ConSanMoi, SampledAtomicTrackingAdmitsWorkgroupScope) {
   const std::vector<uint8_t> bytes = make_rdna4_sampled_lds_and_ordered_flat_atomic_code_object(
       /*compare_exchange=*/false, /*scope=*/1u);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 20;
@@ -2286,7 +2286,7 @@ TEST(ConSanMoi, SampledAtomicCasPublishesOnlyEvidenceDerivedOutcomes) {
   const std::vector<uint8_t> bytes =
       make_rdna4_sampled_lds_and_ordered_flat_atomic_code_object(/*compare_exchange=*/true);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 20;
@@ -2332,7 +2332,7 @@ TEST(ConSanMoi, SampledAtomicCasPublishesOnlyEvidenceDerivedOutcomes) {
 
 TEST(ConSanMoi, SampledAtomicCasWithoutReturnedOldValueFailsClosed) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_cas_code_object(false);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(1);
@@ -2348,7 +2348,7 @@ TEST(ConSanMoi, SampledAtomicCasWithoutReturnedOldValueFailsClosed) {
 
 TEST(ConSanMoi, SampledAtomicForcedSpillPreservesElevenVgprWindow) {
   const std::vector<uint8_t> bytes = make_rdna4_sampled_lds_and_ordered_flat_atomic_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -2388,7 +2388,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledAtomicUsesSiteLocalSpillFrames) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       words, "sampled_dynamic_atomic_spill", kRdna4Wave64AllVgprsGranulated,
       /*wave32=*/false, /*uses_dynamic_stack=*/true);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -2416,7 +2416,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledAtomicUsesSiteLocalSpillFrames) {
 
 TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 24;
   options.moi_owner_vgpr = 20;
@@ -2495,7 +2495,7 @@ TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
 
 TEST(ConSanMoi, SampledAtomicWeakenedReleaseIsReinventoriedBeforeInstrumentation) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 24;
   options.moi_owner_vgpr = 20;
@@ -2547,7 +2547,7 @@ TEST(ConSanMoi, DirectSampledProbeAutomaticallyUsesDeadVgprs) {
   text_words.back() = 0xBFB00000u; // s_endpgm
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
 
@@ -2578,7 +2578,7 @@ TEST(ConSanMoi, DirectSampledProbeDoesNotTrustLivenessWithRelativeVgprAccess) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 0);
   });
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
 
@@ -2626,7 +2626,7 @@ TEST(ConSanMoi, Gfx1250SampledAutomaticExecSaveUsesOwnerLocalWindow) {
       first_words, second_words, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
@@ -2682,7 +2682,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsLivenessDeadGlobalExecWindow)
     });
   }
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
   options.moi_dispatch_id_sgpr = 96u;
@@ -2753,7 +2753,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
       std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
   ASSERT_NE(high_original, original.kernels().end());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
   options.moi_dispatch_id_sgpr = 96u;
@@ -2845,7 +2845,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
         make_gfx1250_code_object(words, "sampled_scalar_spill", kRdna4Wave64AllVgprsGranulated,
                                  /*wave32=*/true, uses_dynamic_stack);
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.scratch_vgpr = 8;
     options.moi_owner_vgpr = 40;
     options.moi_epoch_vgpr = 41;
@@ -2921,7 +2921,7 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
   words.resize(256u, build_s_nop(0u, kArch));
   words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
   options.moi_owner_vgpr = 40u;
@@ -3024,7 +3024,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true)
           : make_rdna4_lds_code_object(words, "sampled_scalar_spill_barriers_rdna4");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_owner_vgpr = 40u;
   options.moi_epoch_vgpr = 41u;
@@ -3188,7 +3188,7 @@ TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
   words.resize(33'000u, filler);
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
@@ -3242,7 +3242,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   words.resize(33'000u, filler);
   words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
@@ -3320,7 +3320,7 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -3416,7 +3416,7 @@ TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
                               /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
                               /*vgpr_count=*/127u);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 1u;
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;
@@ -3471,7 +3471,7 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
   ASSERT_NE(dynamic, original.kernels().end());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 1u;
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;
@@ -3552,7 +3552,7 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   ASSERT_NE(fixed, original.kernels().end());
   ASSERT_NE(dynamic, original.kernels().end());
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 1u;
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;
@@ -3662,7 +3662,7 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
       AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 0u);
     });
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.test_force_private_epoch = true;
     options.moi_runtime_sample_stride = 1u;
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -3735,7 +3735,7 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
     ASSERT_EQ(original.kernels().size(), 1u);
     const uint64_t original_entry = original.kernels().front().entry_text_offset;
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_runtime_sample_stride = 1u;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
@@ -3790,7 +3790,7 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -3848,7 +3848,7 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kAccessCount);
@@ -3895,7 +3895,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
   ASSERT_TRUE(guest);
   const std::vector<uint8_t> bytes =
       make_cdna4_full_pressure_sampled_access(*guest, "sampled_store_spill_recovery");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -3952,7 +3952,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledLoadKeepsResultOutsideRecoveredSpillWind
   constexpr auto guest = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 7u, .vdst = 8u});
   const std::vector<uint8_t> bytes =
       make_cdna4_full_pressure_sampled_access(guest, "sampled_load_spill_recovery");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -3988,7 +3988,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledRead2B64KeepsFourRegisterResult) {
       cdna4::build_ds(cdna4::kDsRead2B64Ds, {.offset1 = 4u, .addr = 7u, .vdst = 8u});
   const std::vector<uint8_t> bytes =
       make_cdna4_full_pressure_sampled_access(guest, "sampled_read2_b64_spill_recovery");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(64);
@@ -4025,7 +4025,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledLoadRejectsDestinationOverlap) {
   constexpr auto guest = cdna4::build_ds(cdna4::kDsReadB128Ds, {.addr = 5u, .vdst = 6u});
   const std::vector<uint8_t> bytes =
       make_cdna4_full_pressure_sampled_access(guest, "sampled_load_result_pressure");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_runtime_sample_stride = 2u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -4075,7 +4075,7 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
                         2u);
       });
 
-      ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
       options.moi_owner_source = ConSanMoiOwnerSource::Automatic;
       options.moi_runtime_sample_stride = sample_stride;
       options.moi_report_buffer_address = 0x123456780000ull;
@@ -4174,7 +4174,7 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
     });
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.test_force_vgpr_spill = true;
     options.moi_runtime_sample_stride = 2u;
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -4288,7 +4288,7 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
     text_words[400] = *barrier;
     text_words.back() = build_s_endpgm(target.arch);
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_runtime_sample_stride = 2u;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(4);
@@ -4433,7 +4433,7 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
     ASSERT_NE(probe_kernel, original.kernels().end());
     ASSERT_NE(helper_kernel, original.kernels().end());
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_runtime_sample_stride = 2u;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(4);
@@ -4493,7 +4493,7 @@ TEST(ConSanMoi, DirectSampledProbeSpillsIdentityAwareWindowInAppendedCave) {
     descriptor.private_segment_fixed_size = 32;
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
   });
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -4584,7 +4584,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
     descriptor.private_segment_fixed_size = 16u;
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
   });
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_init_owner_epoch = true;
   options.moi_runtime_sample_stride = 16384u;
   options.test_force_vgpr_spill = true;
@@ -4636,7 +4636,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledSpillPlansScalarStateBeforeVgprGrowth) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_init_owner_epoch = true;
   options.moi_runtime_sample_stride = 16384u;
   options.test_force_vgpr_spill = true;
@@ -4677,7 +4677,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadUsesDisjointSpillWindow) {
     descriptor.private_segment_fixed_size = 16u;
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
   });
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_init_owner_epoch = true;
   options.moi_runtime_sample_stride = 16384u;
   options.test_force_vgpr_spill = true;
@@ -4714,7 +4714,7 @@ TEST(ConSanMoi, DirectSampledProbeCanUseSleepDelay) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 16;
   options.moi_epoch_vgpr = 17;
@@ -4760,7 +4760,7 @@ TEST(ConSanMoi, DirectSampledProbeCanUseSleepVarDelay) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 16;
   options.moi_epoch_vgpr = 17;
@@ -4807,7 +4807,7 @@ TEST(ConSanMoi, DirectSampledProbeRejectsOversizedSleepVarSource) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 16;
   options.moi_epoch_vgpr = 17;
@@ -4839,7 +4839,7 @@ TEST(ConSanMoi, DirectSampledProbeCanStrideCandidateSelection) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -4881,7 +4881,7 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   ASSERT_EQ(AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
                             kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
             1u);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(16);
   options.max_patches = 16;
@@ -4999,7 +4999,7 @@ TEST(ConSanMoi, Rdna3HighTransientSampledStateUsesFixedSgprPool) {
       make_rdna3_lds_code_object(text_words, "rdna3_high_transient_sampled_state",
                                  kRdna4Wave64AllVgprsGranulated, /*wave32=*/true);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(80u);
   options.moi_runtime_sample_stride = 2u;
@@ -5039,7 +5039,7 @@ TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure)
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_generation = 7u;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
@@ -5125,7 +5125,7 @@ TEST(ConSanMoi, CdnaRuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
     });
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_generation = 7u;
     options.moi_report_dispatch_id = 0x1122334455667788ull;
@@ -5187,7 +5187,7 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_sampled_check = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -5246,7 +5246,7 @@ TEST(ConSanMoi, Gfx1250SampledFastGatesKeepThousandPackedSitesReachable) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -5282,7 +5282,7 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckCorrespondingPriorBank) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "lds_probe", kRdna4Wave64AllVgprsGranulated, false, false,
       /*workgroup_id_dimension_mask=*/7);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_sampled_check = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(16);
@@ -5334,7 +5334,7 @@ TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "lds_probe", kRdna4Wave64AllVgprsGranulated, false, false,
       /*workgroup_id_dimension_mask=*/7);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_sampled_check = true;
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
@@ -5453,7 +5453,7 @@ TEST(ConSanMoi, SampledMultiRangeReportSlotsDoNotConsumePatchBudgetAcrossTargets
       FAIL() << "unexpected target";
     }
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.scratch_vgpr = 20u;
     options.moi_owner_vgpr = 40u;
     options.moi_epoch_vgpr = 41u;
@@ -5493,7 +5493,7 @@ TEST(ConSanMoi, DirectSampledProbeWarnsWhenReportCapacityLimitsPatches) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
 
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
@@ -5531,7 +5531,7 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "lds_probe", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
       /*uses_dynamic_stack=*/false, /*workgroup_id_dimension_mask=*/1u);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_dispatch_id_sgpr = 70;
@@ -6219,7 +6219,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   words[kWait] = 0xBF94FFFFu;   // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(words, "sampled_barrier");
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -6321,7 +6321,7 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
   words[kSignal] = 0xBE804EC1u; // s_barrier_signal -1
   words[kWait] = 0xBF94FFFFu;   // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -6369,7 +6369,7 @@ TEST(ConSanMoi, SampledIncompleteAndDynamicBarriersCannotAdvanceEpoch) {
     words[1] = 0x00000000u;
     std::ranges::copy(barrier_words, words.begin() + 400);
     words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
     options.moi_track_barriers = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
@@ -6405,7 +6405,7 @@ TEST(ConSanMoi, SampledBarrierWithoutPrecedingSelectedWindowReportsLoweringGap) 
   words[200] = 0xD8340000u;
   words[201] = 0x00000000u;
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -6438,7 +6438,7 @@ TEST(ConSanMoi, SampledRejectedBarriersStillPreserveAccessOwnerAtEntry) {
   words[1] = 0x00000000u;   // ds_store_b32 v0, v0
   words[400] = 0xBE804EC1u; // unmatched s_barrier_signal
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_init_owner_epoch = true;
   options.moi_track_barriers = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -6473,7 +6473,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.moi_runtime_sample_stride = 64;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -6541,7 +6541,7 @@ TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
   std::vector<uint32_t> far_tail(40000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -6608,7 +6608,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(words, "sampled_atomic_reserved_barrier_island");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8u;
@@ -6699,7 +6699,7 @@ TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicRouteAvoidsLiveSpillBootstrap) {
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(8u);
@@ -6771,7 +6771,7 @@ TEST(ConSanMoi, SampledDoesNotRelocateAcrossReconvergenceEntry) {
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(words, "sampled_at_anchor_reconvergence");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_id_sgpr = 70u;
@@ -6827,7 +6827,7 @@ TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
   words.resize(33'000u, build_s_nop(1u, kArch));
   words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_id_sgpr = 70u;
@@ -6878,7 +6878,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
   text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -6940,7 +6940,7 @@ TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
   text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -7000,7 +7000,7 @@ TEST(ConSanMoi, Cdna4DenseSampledRouteRestoresGuestSccBeforeAccessBody) {
   }
   text_words.back() = build_s_endpgm(kArch);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
   options.moi_owner_vgpr = 40u;
@@ -7063,7 +7063,7 @@ TEST(ConSanMoi, Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes) {
   text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_id_sgpr = 70u;
@@ -7105,7 +7105,7 @@ TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
   text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_id_sgpr = 70u;
@@ -7188,7 +7188,7 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
@@ -7259,7 +7259,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(1u);
@@ -7336,7 +7336,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
@@ -7388,7 +7388,7 @@ TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchCl
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
   });
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_force_vgpr_spill = true;
   options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -7452,7 +7452,7 @@ TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
   words.resize(33'000u, build_s_nop(1u, kArch));
   words.push_back(build_s_endpgm(kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_id_sgpr = 70u;
@@ -7519,7 +7519,7 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
   ASSERT_EQ(original.kernels().size(), 1u);
   const uint64_t descriptor_offset = original.kernels().front().descriptor_file_offset;
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
   options.moi_dispatch_id_sgpr = 70u;
@@ -7600,7 +7600,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
   function_words.push_back(build_s_setpc_b64(kReturnSgpr, kArch));
   const std::vector<uint32_t> tail_words(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_owner_vgpr = 40u;
@@ -7645,7 +7645,7 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
   // per-site appended relays remain directly reachable.
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
@@ -7690,7 +7690,7 @@ TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   std::fill_n(far_tail.begin(), 8u * 8u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, far_tail);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -7735,7 +7735,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
   words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -7772,7 +7772,7 @@ TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
   words[19] = 0xBF94FFFFu; // s_barrier_wait -1
   words.back() = build_s_endpgm(kArch);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
@@ -7822,7 +7822,7 @@ TEST(ConSanMoi, Gfx1250SampledMixesDenseAndDirectBarrierRoutesAcrossKernels) {
       far_kernel, compact_kernel, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
@@ -7914,7 +7914,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   ASSERT_LE(body.size() * sizeof(uint32_t), bytes.size() - body_file_offset);
   std::memcpy(bytes.data() + body_file_offset, body.data(), body.size() * sizeof(uint32_t));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.test_kernel_name_filter = "shared_owner";
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
@@ -8060,7 +8060,7 @@ TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
   std::memcpy(bytes.data() + first_entry_file_offset, store->data(),
               store->size() * sizeof(uint32_t));
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(6u);
   options.moi_track_barriers = true;
@@ -8096,7 +8096,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   words[300] = 0xBE804EC1u; // s_barrier_signal -1
   words[380] = 0xBF94FFFFu; // s_barrier_wait -1, 320 bytes later
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
@@ -8123,7 +8123,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierForcedSpillPreservesCompleteVgprWindow) {
   words[401] = 0xBF94FFFFu;
   words[500] = build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_RDNA4);
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -8151,7 +8151,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledBarrierUsesSiteLocalSpillFrames) {
   words[401] = 0xBF94FFFFu;
   words[500] = build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_RDNA4);
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -8198,7 +8198,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledRejectsMissingEntryPrologueScratch) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       words, "sampled_dynamic_no_entry_scratch", kRdna4Wave64AllVgprsGranulated,
       /*wave32=*/false, /*uses_dynamic_stack=*/true);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -8225,7 +8225,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
   words[402] = 0xBF860001u; // next block selects a nonzero VGPR bank
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -8261,7 +8261,7 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -8334,7 +8334,7 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
   words[kSecondWait] = 0xBF94FFFFu;   // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -8370,7 +8370,7 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   words[403] = 0xBF048475u; // s_cmp_lt_i32 ttmp9, 4
   words[404] = 0xBF94FFFDu; // s_barrier_wait -3
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -8428,7 +8428,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(words, "gfx1250_sampled_cluster_drop_composition");
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -8482,7 +8482,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
   words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.test_force_private_epoch = true;
   options.scratch_vgpr = 56;
@@ -8525,7 +8525,7 @@ TEST(ConSanMoi, SampledConditionallyExecutedBarrierPublishesOnlyWhenExecuted) {
   words[401] = 0xBE804EC1u;
   words[402] = 0xBF94FFFFu;
   words[403] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
@@ -8556,7 +8556,7 @@ TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration)
   words[402] = *exit;
   words[403] = build_s_branch(-4, ROCJITSU_CODE_ARCH_RDNA4);
   words[404] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
