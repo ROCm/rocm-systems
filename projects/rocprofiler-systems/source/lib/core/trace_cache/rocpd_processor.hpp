@@ -14,6 +14,7 @@
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -74,6 +75,7 @@ private:
 
     // PMC keys that have already been warned about
     std::unordered_set<std::string> m_unregistered_pmcs_already_warned;
+    std::size_t m_dropped_pmc_events_count = 0;
 };
 
 }  // namespace trace_cache

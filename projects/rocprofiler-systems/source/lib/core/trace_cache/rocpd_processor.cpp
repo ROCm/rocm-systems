@@ -968,6 +968,8 @@ rocpd_processor_t::try_insert_pmc_event(
         m_writer->insert_pmc_event_data(event_event, unique_id);
     } catch(const std::runtime_error& e)
     {
+        ++m_dropped_pmc_events_count;
+
         auto key = std::string{ unique_id.name};
 
         // Build the key for the PMC info. Two agents missing the same PMC info will
@@ -1016,7 +1018,22 @@ rocpd_processor_t::finalize_processing()
 
     m_output_registry.register_file(m_db_output_path, output_format::rocpd);
 
-    LOG_INFO("Rocpd processor finalized successfully");
+    if(m_dropped_pmc_events_count > 0)
+    {
+        // Sorted so the message is reproducible across runs.
+        auto counters = std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
+                                                  m_unregistered_pmcs_already_warned.end() };
+        std::sort(counters.begin(), counters.end());
+
+        LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
+                    "unregistered counter(s); {} is incomplete. Counters: {}",
+                    m_dropped_pmc_events_count, counters.size(), m_db_output_path,
+                    fmt::join(counters, ", "));
+    }
+    else
+    {
+        LOG_INFO("Rocpd processor finalized successfully");
+    }
 }
 
 void
