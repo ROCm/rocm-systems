@@ -119,3 +119,40 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
+
+
+// ---------------------------------------------------------------------------
+
+// ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
+// Each && arm short-circuits, so each needs its own test.
+
+// Branch: win == nullptr.
+TEST(DevrWindowPredicates, IsMultiSegment_NullWindow_ReturnsFalse) {
+  struct ncclDevrWindow* win{};
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(win));
+}
+
+// Branch: win->memory == nullptr.
+TEST(DevrWindowPredicates, IsMultiSegment_NullMemory_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  win.memory = nullptr;
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
+}
+
+// Branch: maxGlobalNumSegments == 1, the boundary of `> 1`.
+TEST(DevrWindowPredicates, IsMultiSegment_SingleSegment_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.maxGlobalNumSegments = 1;
+  win.memory = &memory;
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
+}
+
+// All conditions pass.
+TEST(DevrWindowPredicates, IsMultiSegment_MultipleSegments_ReturnsTrue) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.maxGlobalNumSegments = 2;
+  win.memory = &memory;
+  EXPECT_TRUE(ncclDevrWindowIsMultiSegment(&win));
+}
