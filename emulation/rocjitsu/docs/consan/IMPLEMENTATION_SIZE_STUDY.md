@@ -626,6 +626,48 @@ inventory, flavor evidence, report intent, report layout, and host report
 interpretation have distinct owners and no engine privately reconstructs a
 shared semantic or ABI fact.
 
+#### Stage 5 exit evidence
+
+Stage 5 is complete. `ProgramInventory` and `SynchronizationInventoryView`
+remain the sole decoded program and synchronization authorities, while the
+flavor policies publish stable selected observations in
+`ConSanObservationPlan`. The new `ConSanEvidenceIntentPlan` is the explicit
+boundary between those policies and report sizing. It maps every admitted
+probe exactly once to a smaller address-free vocabulary—access, barrier,
+atomic, fence, address capture, or sticky marker—and retains stable source and
+semantic-site identities plus the evidence element count. `TransformResult`
+publishes that canonical plan before the ABI-bearing evidence requirements, so
+later stages do not recover policy meaning from report capacities, emitted
+patches, or mechanism telemetry.
+
+Record/Replay, Sampled, InlineShadow, and SuperCollider evidence planners now
+consume the typed intent plan. A shared accumulator owns access admission and
+the common synchronization counts; only InlineShadow joins retained access
+identities back to immutable `ProgramInventory` facts to derive its LDS
+aperture. The flavor planners add only their protocol-specific capacity rules.
+One automatic report planner owns record regions, fields, capacities, offsets,
+and canonical revalidation. Lowering resolves that geometry through one
+boundary, and host interpretation checks the resulting header against the
+same `ConSanMoiReportBufferLayout` ABI authority.
+
+The migration deleted the four engine-private probe-kind switch traversals,
+their copied domain and count validation, three engine-specific lowering-side
+layout resolvers, a duplicate report-capacity validator, and redundant test
+projections. Direct unit tests cover every intent kind and engine, malformed
+and cross-engine plans, typed-plan-to-capacity equivalence, deterministic
+pipeline publication, and the cross-type result invariants.
+
+Relative to the Stage 4 revision, production changes added 506 and deleted
+360 physical lines. The measured implementation is now 94,815 physical lines,
+90,419 nonblank lines, and 83,595 comment-excluded code lines in the same 79
+files: temporary increases of 146 physical, 121 nonblank, and 60 code lines to
+establish and document the retained typed boundary before later deletion.
+
+The full checked-in ConSan gate passed all 5,279 tests at revision
+`2dd3e217e9`, including 3,501 device tests and all 593 serialized
+physical-gfx950 tests. `ctest -j64` completed in 560.13 seconds wall time with
+no failures.
+
 ### Stage 6: simplify mutation and composition around typed plans
 
 Mutation, placement, and composition account for 4,094 core lines. Earlier
