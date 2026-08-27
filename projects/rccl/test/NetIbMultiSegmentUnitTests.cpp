@@ -56,6 +56,19 @@ constexpr size_t    kSeg  = 2u * 1024 * 1024;
 
 } // namespace
 
+TEST(NetIbMultiSeg, LegacyConnectMetadataHasNoCapabilities) {
+    const char devName[32] = "bnxt_re0";
+    EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)), 0u);
+}
+
+TEST(NetIbMultiSeg, ConnectCapabilitiesPreserveDeviceName) {
+    char devName[32] = "bnxt_re0";
+    ncclIbSetConnectCaps(devName, sizeof(devName), NCCL_IB_CAP_MULTISEG);
+    EXPECT_STREQ(devName, "bnxt_re0");
+    EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
+              NCCL_IB_CAP_MULTISEG);
+}
+
 // === Segment selection and uniformity helpers ===============================
 
 TEST(NetIbMultiSeg, StartOfEachSegmentMapsToThatSegment) {
