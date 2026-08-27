@@ -458,6 +458,14 @@ maintaining separate eleven-flag presence and cardinality enumerations.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 
+The final local-state audit found no further safe flag deletion at this
+boundary. The remaining low-reference fields carry root-image identity across
+staged transforms, caller-versus-automatic register provenance, allocation
+persistence proofs, or semantic inventory facts used across placement and
+emission. They should move into the planned typed transform and resource
+contexts as part of a component cutover; replacing them now with scattered
+parameters or recomputation would increase code and weaken invariants.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

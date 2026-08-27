@@ -5982,6 +5982,28 @@ analysis completed.
   26-case physical-gfx950 cross-engine smoke also pass. E2E validation remains
   outside this deletion work.
 
+### End audit of the local deletion tranche
+
+The remaining low-reference mutable fields are not duplicate switches:
+
+- `patched_image_growth_input_bytes` retains the pristine root-image size while
+  the second half of fault/instrumentation composition inventories an already
+  mutated and potentially grown intermediate image;
+- automatic-allocation markers distinguish a caller override from a placement
+  decision and therefore control whether later placement may relocate or
+  exclude that state;
+- persistent-state markers record liveness and spill proofs that cannot be
+  recovered from a selected register number; and
+- dense-router and Inline-access facts are code-object semantic inventory used
+  by resource sizing, placement, validation, and emission.
+
+Deleting these facts locally would either recompute them from an invalid
+intermediate view or scatter new parameters across the prototype lowerer. Their
+next deletion boundary is the typed transform/resource context and component
+cutover described above. This tranche therefore stops at the principled edge
+between low-hanging duplicate state and the deeper redesign, rather than
+contorting the retained code for a nominal line-count reduction.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
