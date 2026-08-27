@@ -287,8 +287,7 @@ TEST_F(HipFileCollectorTest, gpu_zero_carries_no_extra_tracks)
 TEST_F(HipFileCollectorTest, disabled_metrics_are_not_emitted)
 {
     stub_settings::set_visible_identity(1);
-    stub_settings::hipfile_metrics.value           = 0U;
-    stub_settings::hipfile_metrics.bits.read_bytes = 1;
+    stub_settings::hipfile_metrics.value = metric_bit_mask("Read Bytes");
 
     setup_and_config();
     m_collector->sample(static_cast<std::int64_t>(TS_1));
