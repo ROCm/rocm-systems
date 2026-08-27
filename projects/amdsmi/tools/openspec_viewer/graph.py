@@ -1290,9 +1290,11 @@ def svg_flow(
         if n.caption:
             # textLength pins the caption to the width the node was sized
             # for, so it cannot grow into the arrowhead if the stylesheet
-            # picks a bigger caption font than this module assumed
+            # picks a bigger caption font than this module assumed.  It also
+            # sits above the band the arrowhead occupies rather than merely
+            # beside it, clamped so a layer-0 node keeps it on the canvas.
             body.append(
-                f'<text class="fcaption" x="{x + gn.w - 2:.1f}" y="{y - 6:.1f}" '
+                f'<text class="fcaption" x="{x + gn.w - 2:.1f}" y="{max(y - 15, 10.0):.1f}" '
                 f'text-anchor="end" textLength="{len(n.caption) * CAPTION_CH:.1f}" '
                 f'lengthAdjust="spacingAndGlyphs">{E(n.caption)}</text>'
             )
