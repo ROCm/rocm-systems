@@ -22,10 +22,6 @@ namespace {
   return static_cast<uint8_t>(status) < static_cast<uint8_t>(ConSanPipelineStageStatus::Count);
 }
 
-[[nodiscard]] constexpr bool valid_issue_kind(ConSanTransformIssueKind kind) {
-  return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanTransformIssueKind::Count);
-}
-
 [[nodiscard]] constexpr bool valid_contract_issue(ConSanContractIssue issue) {
   return static_cast<uint8_t>(issue) < static_cast<uint8_t>(ConSanContractIssue::Count);
 }
@@ -201,9 +197,7 @@ bool ConSanPipelineStageRecord::well_formed() const {
          stage == ConSanPipelineStage::RuntimeBinding;
 }
 
-bool ConSanTransformIssue::well_formed() const {
-  return valid_issue_kind(kind) && valid_stage(stage) && !detail.empty();
-}
+bool ConSanTransformIssue::well_formed() const { return valid_stage(stage) && !detail.empty(); }
 
 const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage value) const {
   if (!valid_stage(value))
@@ -422,7 +416,6 @@ TransformResult TransformResult::publish_optional(
   }
   for (std::string &error : lowering.errors) {
     result.issues.push_back({
-        .kind = ConSanTransformIssueKind::LegacyLowering,
         .stage = ConSanPipelineStage::LegacyLowering,
         .detail = std::move(error),
     });

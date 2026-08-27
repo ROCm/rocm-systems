@@ -5152,6 +5152,27 @@ analysis completed.
   physical matrix remains reserved for the final gate. E2E validation remains
   outside this work.
 
+### Slice 5BQ: use the owning stage as the issue classifier
+
+- **Delete the parallel taxonomy:** `ConSanTransformIssueKind` and its naming
+  and iteration machinery are deleted. Only its `LegacyLowering` value had an
+  actual producer; the other five values were speculative scaffolding. Every
+  issue already carries a `ConSanPipelineStage`, so the second enum could only
+  disagree with the durable pipeline contract that owns the failure.
+- **Smaller invariant:** A contextual transform issue is now exactly an owning
+  stage plus nonempty diagnostic detail. Typed contract failures remain in the
+  stage record itself, as established by Slice 5BP. Runtime verdicts remain in
+  their separate runtime model; no semantic distinction is lost.
+- **Deletion accounting:** Implementation files add one and delete 63 physical
+  lines, a net deletion of 62. Tests delete nineteen lines. No replacement
+  abstraction or fallback is added.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in under 70
+  seconds. Slice 5BM's physical-gfx950 smoke remains the physical gate for this
+  control-plane-only tranche; the complete serialized physical matrix remains
+  reserved for the final gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

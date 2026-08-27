@@ -157,59 +157,6 @@ struct ConSanPipelineStageRecord {
   bool operator==(const ConSanPipelineStageRecord &) const = default;
 };
 
-/// Typed category for a static transform failure retained by `TransformResult`.
-///
-/// Typed configuration and runtime-capability failures are owned directly by
-/// their pipeline stage records. This separate enum classifies failures that
-/// retain diagnostic context from inventory, policy, evidence, lowering, or
-/// final validation. It is intentionally about code-object rewriting; runtime
-/// race verdicts and device-evidence loss belong to `RunVerdict`, not here.
-/// `Count` is an invalid iteration sentinel.
-enum class ConSanTransformIssueKind : uint8_t {
-  Inventory,
-  ObservationPlan,
-  EvidenceRequirements,
-  RuntimeBinding,
-  LegacyLowering,
-  FinalValidation,
-  Count,
-};
-
-/// Complete iterable set of static transform issue categories.
-inline constexpr std::array<ConSanTransformIssueKind, 6> kConSanTransformIssueKinds = {
-    ConSanTransformIssueKind::Inventory,
-    ConSanTransformIssueKind::ObservationPlan,
-    ConSanTransformIssueKind::EvidenceRequirements,
-    ConSanTransformIssueKind::RuntimeBinding,
-    ConSanTransformIssueKind::LegacyLowering,
-    ConSanTransformIssueKind::FinalValidation,
-};
-
-/// Return the stable diagnostic spelling of a transform issue category.
-[[nodiscard]] constexpr std::string_view
-consan_transform_issue_kind_name(ConSanTransformIssueKind kind) {
-  switch (kind) {
-  case ConSanTransformIssueKind::Inventory:
-    return "inventory";
-  case ConSanTransformIssueKind::ObservationPlan:
-    return "observation-plan";
-  case ConSanTransformIssueKind::EvidenceRequirements:
-    return "evidence-requirements";
-  case ConSanTransformIssueKind::RuntimeBinding:
-    return "runtime-binding";
-  case ConSanTransformIssueKind::LegacyLowering:
-    return "legacy-lowering";
-  case ConSanTransformIssueKind::FinalValidation:
-    return "final-validation";
-  case ConSanTransformIssueKind::Count:
-    break;
-  }
-  return "invalid-transform-issue-kind";
-}
-
-static_assert(kConSanTransformIssueKinds.size() ==
-              static_cast<size_t>(ConSanTransformIssueKind::Count));
-
 /// One machine-readable static-transform failure with optional prose context.
 ///
 /// `stage` identifies the contract that owns the failure and `detail` preserves
@@ -217,8 +164,6 @@ static_assert(kConSanTransformIssueKinds.size() ==
 /// this type because their stage record owns the corresponding typed
 /// `ConSanContractIssue` directly.
 struct ConSanTransformIssue {
-  /// Stable category consumed by control flow and tests.
-  ConSanTransformIssueKind kind = ConSanTransformIssueKind::Count;
   /// Pipeline contract that owns this failure.
   ConSanPipelineStage stage = ConSanPipelineStage::Count;
   /// Human-readable context that is never used to recover the category.

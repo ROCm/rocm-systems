@@ -62,8 +62,6 @@ TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues)
   ASSERT_EQ(kConSanPipelineStages.size(), static_cast<size_t>(ConSanPipelineStage::Count));
   ASSERT_EQ(kConSanPipelineStageStatuses.size(),
             static_cast<size_t>(ConSanPipelineStageStatus::Count));
-  ASSERT_EQ(kConSanTransformIssueKinds.size(),
-            static_cast<size_t>(ConSanTransformIssueKind::Count));
 
   std::unordered_set<std::string_view> names;
   for (size_t index = 0; index < kConSanPipelineStages.size(); ++index) {
@@ -80,15 +78,6 @@ TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues)
     EXPECT_FALSE(name.empty());
     EXPECT_TRUE(names.insert(name).second) << name;
   }
-  names.clear();
-  for (size_t index = 0; index < kConSanTransformIssueKinds.size(); ++index) {
-    EXPECT_EQ(static_cast<size_t>(kConSanTransformIssueKinds[index]), index);
-    const std::string_view name =
-        consan_transform_issue_kind_name(kConSanTransformIssueKinds[index]);
-    EXPECT_FALSE(name.empty());
-    EXPECT_TRUE(names.insert(name).second) << name;
-  }
-
   EXPECT_EQ(consan_pipeline_stage_name(ConSanPipelineStage::Count), "invalid-pipeline-stage");
   EXPECT_EQ(consan_pipeline_stage_name(static_cast<ConSanPipelineStage>(255)),
             "invalid-pipeline-stage");
@@ -96,10 +85,6 @@ TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues)
             "invalid-pipeline-stage-status");
   EXPECT_EQ(consan_pipeline_stage_status_name(static_cast<ConSanPipelineStageStatus>(255)),
             "invalid-pipeline-stage-status");
-  EXPECT_EQ(consan_transform_issue_kind_name(ConSanTransformIssueKind::Count),
-            "invalid-transform-issue-kind");
-  EXPECT_EQ(consan_transform_issue_kind_name(static_cast<ConSanTransformIssueKind>(255)),
-            "invalid-transform-issue-kind");
 }
 
 TEST(ConSanPipeline, StageRecordValidatesEnumsIdentityStatusAndContractPayload) {
@@ -134,7 +119,6 @@ TEST(ConSanPipeline, StageRecordValidatesEnumsIdentityStatusAndContractPayload) 
 
 TEST(ConSanPipeline, TransformIssueValidatesCategoryStageAndDiagnostic) {
   ConSanTransformIssue issue{
-      .kind = ConSanTransformIssueKind::LegacyLowering,
       .stage = ConSanPipelineStage::LegacyLowering,
       .detail = "lowering failed",
   };
@@ -145,9 +129,6 @@ TEST(ConSanPipeline, TransformIssueValidatesCategoryStageAndDiagnostic) {
   EXPECT_FALSE(malformed.well_formed());
   malformed = issue;
   malformed.stage = ConSanPipelineStage::Count;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = issue;
-  malformed.kind = ConSanTransformIssueKind::Count;
   EXPECT_FALSE(malformed.well_formed());
 }
 
