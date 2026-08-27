@@ -218,6 +218,67 @@ if(BUILD_TESTS)
     endif()
   endforeach()
 
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroRasClient: host-only microtests for src/ras/client.cc.
+  # client.cc is a standalone executable whose whole dependency surface is libc
+  # plus four macros from ras_internal.h, so unlike the init/p2p targets this one
+  # needs no nccl/HIP fakes -- ras-client-test.cc macro-renames the libc calls to
+  # trampolines in fakes/ras_client_fakes.cc. Its own binary because client.cc
+  # defines main() and file-scope statics that must stay isolated.
+  # ---------------------------------------------------------------------------
+  add_executable(rccl-UnitTestsMicroRasClient
+    ras-client-test.cc
+    fakes/ras_client_fakes.cc
+    ../common/main_altrsmi.cpp
+  )
+  target_include_directories(rccl-UnitTestsMicroRasClient PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS})
+  target_compile_definitions(rccl-UnitTestsMicroRasClient PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
+    RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc")
+  # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-UnitTestsMicroRasClient PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-UnitTestsMicroRasClient PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-UnitTestsMicroRasClient PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_link_libraries(rccl-UnitTestsMicroRasClient PRIVATE ${MICRO_TEST_LINK_LIBS})
+  add_dependencies(rccl-UnitTestsMicroRasClient hipify_all copy_nccl_device_headers)
+  target_compile_options(rccl-UnitTestsMicroRasClient PRIVATE
+    --offload-host-only -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroRasClient PRIVATE
+    -no-hip-rt
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-UnitTestsMicroRasClient PRIVATE -fsanitize=address)
+    target_link_options(rccl-UnitTestsMicroRasClient PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-UnitTestsMicroRasClient PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  rocm_install(TARGETS rccl-UnitTestsMicroRasClient COMPONENT tests)
+  if(COMMAND apply_test_category_labels)
+    set(_ras_client_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_ras_client.yaml")
+    if(EXISTS "${_ras_client_categories_yaml}")
+      message(STATUS "Applying test categories for rccl-UnitTestsMicroRasClient")
+      apply_test_category_labels(
+        rccl-UnitTestsMicroRasClient
+        "${_ras_client_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for rccl-UnitTestsMicroRasClient: missing ${_ras_client_categories_yaml}")
+    endif()
+  endif()
+
   return()
 endif()
 
@@ -603,6 +664,51 @@ foreach(_variant "" "-uncached")
     target_link_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
 endforeach()
+
+# --- Standalone RAS client micro-test binary ----------------------------
+# rccl-UnitTestsMicroRasClient: host-only microtests for src/ras/client.cc.
+# client.cc is a standalone executable whose whole dependency surface is libc
+# plus four macros from ras_internal.h, so unlike the init/p2p targets this one
+# needs no nccl/HIP fakes at all -- ras-client-test.cc macro-renames the libc
+# calls to trampolines in fakes/ras_client_fakes.cc.
+add_executable(rccl-UnitTestsMicroRasClient
+  ras-client-test.cc
+  fakes/ras_client_fakes.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+)
+
+target_compile_options(rccl-UnitTestsMicroRasClient PRIVATE
+  -Wno-unused-parameter -Wno-unused-variable)
+
+target_include_directories(rccl-UnitTestsMicroRasClient PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+
+# Overridable so a mutation-testing build can point at a private copy of the
+# unit instead of editing the shared hipified tree:
+#   cmake -B build-mut ... -DRAS_CLIENT_CC=/path/to/mutated/client.cc
+set(RAS_CLIENT_CC "${RCCL_HIPIFY_DIR}/src/ras/client.cc" CACHE FILEPATH
+    "Hipified src/ras/client.cc to compile into rccl-UnitTestsMicroRasClient")
+
+target_compile_definitions(rccl-UnitTestsMicroRasClient PRIVATE
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  RAS_CLIENT_CC_PATH="${RAS_CLIENT_CC}"
+)
+
+target_link_options(rccl-UnitTestsMicroRasClient PRIVATE -no-hip-rt -no-pie)
+target_link_libraries(rccl-UnitTestsMicroRasClient PRIVATE
+  GTest::GTest
+  Threads::Threads
+  fmt::fmt-header-only
+)
+
+if(MICRO_COVERAGE)
+  target_compile_options(rccl-UnitTestsMicroRasClient PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroRasClient PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
 
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly, e.g.

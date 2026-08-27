@@ -1,0 +1,236 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+#include "fakes/ras_client_fakes.h"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/time.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <new>
+
+// LogCapture.hpp declares these; nothing in this binary links RCCL's debug
+// layer, so define them here. client.cc reports via plain fprintf(stderr), so
+// CaptureLog works without raising the level.
+int ncclDebugLevel = 0;
+uint64_t ncclDebugMask = 0;
+
+std::string g_writtenData;
+std::string g_stdoutData;
+std::vector<int> g_closedFds;
+std::vector<RasReadStep> g_readScript;
+size_t g_readScriptPos = 0;
+int g_nextSocketFd = 42;
+int g_socketFailErrno = EAFNOSUPPORT;
+int g_lastSetsockoptOptname = -1;
+struct timeval g_lastSetsockoptTimeval = {-1, -1};
+int g_getaddrinfoResult = 0;
+int g_addrinfoCount = 1;
+int g_freeaddrinfoCalls = 0;
+int g_connectResult = 0;
+int g_connectErrno = ECONNREFUSED;
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+static ssize_t DefaultWrite(int, const void* buf, size_t count) {
+  g_writtenData.append(static_cast<const char*>(buf), count);
+  return static_cast<ssize_t>(count);
+}
+
+static ssize_t DefaultRead(int, void* buf, size_t count) {
+  if (g_readScriptPos >= g_readScript.size()) return 0;  // EOF past the end of the script
+  const RasReadStep& step = g_readScript[g_readScriptPos++];
+  if (step.ret < 0) {
+    errno = step.err;
+    return step.ret;
+  }
+  if (step.ret == 0) return 0;
+  const size_t n = std::min(step.data.size(), count);
+  std::memcpy(buf, step.data.data(), n);
+  return static_cast<ssize_t>(n);
+}
+
+static int DefaultClose(int fd) {
+  g_closedFds.push_back(fd);
+  return 0;
+}
+
+static int DefaultSocket(int, int, int) {
+  if (g_nextSocketFd == -1) errno = g_socketFailErrno;
+  return g_nextSocketFd;
+}
+
+static int DefaultConnect(int, const struct sockaddr*, socklen_t) {
+  if (g_connectResult != 0) errno = g_connectErrno;
+  return g_connectResult;
+}
+
+static int DefaultSetsockopt(int, int, int optname, const void* optval, socklen_t optlen) {
+  g_lastSetsockoptOptname = optname;
+  if (optval && optlen >= static_cast<socklen_t>(sizeof(struct timeval))) {
+    std::memcpy(&g_lastSetsockoptTimeval, optval, sizeof(struct timeval));
+  }
+  return 0;
+}
+
+// Builds g_addrinfoCount single-linked IPv4 entries. Paired with
+// DefaultFreeaddrinfo; a test that overrides one must override both.
+static int DefaultGetaddrinfo(const char*, const char*, const struct addrinfo*, struct addrinfo** res) {
+  if (g_getaddrinfoResult != 0) return g_getaddrinfoResult;
+  struct addrinfo* head = nullptr;
+  struct addrinfo** tail = &head;
+  for (int i = 0; i < g_addrinfoCount; ++i) {
+    auto* ai = static_cast<struct addrinfo*>(std::calloc(1, sizeof(struct addrinfo)));
+    auto* sa = static_cast<struct sockaddr_in*>(std::calloc(1, sizeof(struct sockaddr_in)));
+    sa->sin_family = AF_INET;
+    sa->sin_port = htons(static_cast<uint16_t>(28028 + i));
+    sa->sin_addr.s_addr = htonl(INADDR_LOOPBACK + i);
+    ai->ai_family = AF_INET;
+    ai->ai_socktype = SOCK_STREAM;
+    ai->ai_protocol = IPPROTO_TCP;
+    ai->ai_addr = reinterpret_cast<struct sockaddr*>(sa);
+    ai->ai_addrlen = sizeof(struct sockaddr_in);
+    *tail = ai;
+    tail = &ai->ai_next;
+  }
+  *res = head;
+  return 0;
+}
+
+static void DefaultFreeaddrinfo(struct addrinfo* ai) {
+  ++g_freeaddrinfoCalls;
+  while (ai) {
+    struct addrinfo* next = ai->ai_next;
+    std::free(ai->ai_addr);
+    std::free(ai);
+    ai = next;
+  }
+}
+
+static int DefaultGetnameinfo(const struct sockaddr* sa, socklen_t, char* host, socklen_t hostlen, char* serv,
+                              socklen_t servlen, int) {
+  const auto* in = reinterpret_cast<const struct sockaddr_in*>(sa);
+  if (host && hostlen > 0) {
+    if (!inet_ntop(AF_INET, &in->sin_addr, host, hostlen)) return EAI_OVERFLOW;
+  }
+  if (serv && servlen > 0) snprintf(serv, servlen, "%u", ntohs(in->sin_port));
+  return 0;
+}
+
+static const char* DefaultGaiStrerror(int code) { return gai_strerror(code); }
+
+static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE*) {
+  g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
+  return nmemb;
+}
+
+static int DefaultFflush(FILE*) { return 0; }
+
+static void DefaultExit(int status) { throw RasClientExit{status}; }
+
+// ---------------------------------------------------------------------------
+
+std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
+std::function<ssize_t(int, void*, size_t)> g_read = DefaultRead;
+std::function<int(int)> g_close = DefaultClose;
+std::function<int(int, int, int)> g_socket = DefaultSocket;
+std::function<int(int, const struct sockaddr*, socklen_t)> g_connect = DefaultConnect;
+std::function<int(int, int, int, const void*, socklen_t)> g_setsockopt = DefaultSetsockopt;
+std::function<int(const char*, const char*, const struct addrinfo*, struct addrinfo**)> g_getaddrinfo =
+    DefaultGetaddrinfo;
+std::function<void(struct addrinfo*)> g_freeaddrinfo = DefaultFreeaddrinfo;
+std::function<int(const struct sockaddr*, socklen_t, char*, socklen_t, char*, socklen_t, int)> g_getnameinfo =
+    DefaultGetnameinfo;
+std::function<const char*(int)> g_gaiStrerror = DefaultGaiStrerror;
+std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwrite;
+std::function<int(FILE*)> g_fflush = DefaultFflush;
+std::function<void(int)> g_exit = DefaultExit;
+
+void ScriptRead(ssize_t ret, int err, std::string data) {
+  g_readScript.push_back(RasReadStep{ret, err, std::move(data)});
+}
+
+void ScriptReadData(std::string data) {
+  const ssize_t n = static_cast<ssize_t>(data.size());
+  g_readScript.push_back(RasReadStep{n, 0, std::move(data)});
+}
+
+void ResetRasClientFakes() {
+  g_write = DefaultWrite;
+  g_read = DefaultRead;
+  g_close = DefaultClose;
+  g_socket = DefaultSocket;
+  g_connect = DefaultConnect;
+  g_setsockopt = DefaultSetsockopt;
+  g_getaddrinfo = DefaultGetaddrinfo;
+  g_freeaddrinfo = DefaultFreeaddrinfo;
+  g_getnameinfo = DefaultGetnameinfo;
+  g_gaiStrerror = DefaultGaiStrerror;
+  g_fwrite = DefaultFwrite;
+  g_fflush = DefaultFflush;
+  g_exit = DefaultExit;
+
+  g_writtenData.clear();
+  g_stdoutData.clear();
+  g_closedFds.clear();
+  g_readScript.clear();
+  g_readScriptPos = 0;
+  g_nextSocketFd = 42;
+  g_socketFailErrno = EAFNOSUPPORT;
+  g_lastSetsockoptOptname = -1;
+  g_lastSetsockoptTimeval = {-1, -1};
+  g_getaddrinfoResult = 0;
+  g_addrinfoCount = 1;
+  g_freeaddrinfoCalls = 0;
+  g_connectResult = 0;
+  g_connectErrno = ECONNREFUSED;
+  errno = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Trampolines. ras-client-test.cc macro-renames each libc call in client.cc to
+// the matching micro_* name; these dispatch through the slots above so the
+// seam is swappable per test rather than baked in at compile time.
+// ---------------------------------------------------------------------------
+extern "C" {
+
+ssize_t micro_write(int fd, const void* buf, size_t count) { return g_write(fd, buf, count); }
+ssize_t micro_read(int fd, void* buf, size_t count) { return g_read(fd, buf, count); }
+int micro_close(int fd) { return g_close(fd); }
+int micro_socket(int domain, int type, int protocol) { return g_socket(domain, type, protocol); }
+int micro_connect(int fd, const struct sockaddr* addr, socklen_t len) { return g_connect(fd, addr, len); }
+int micro_setsockopt(int fd, int level, int optname, const void* optval, socklen_t optlen) {
+  return g_setsockopt(fd, level, optname, optval, optlen);
+}
+int micro_getaddrinfo(const char* node, const char* service, const struct addrinfo* hints, struct addrinfo** res) {
+  return g_getaddrinfo(node, service, hints, res);
+}
+void micro_freeaddrinfo(struct addrinfo* ai) { g_freeaddrinfo(ai); }
+int micro_getnameinfo(const struct sockaddr* sa, socklen_t salen, char* host, socklen_t hostlen, char* serv,
+                      socklen_t servlen, int flags) {
+  return g_getnameinfo(sa, salen, host, hostlen, serv, servlen, flags);
+}
+const char* micro_gai_strerror(int code) { return g_gaiStrerror(code); }
+size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  return g_fwrite(ptr, size, nmemb, stream);
+}
+int micro_fflush(FILE* stream) { return g_fflush(stream); }
+
+// noreturn: the default throws RasClientExit. If a hook ever returns normally
+// the unit would fall through a path production treats as unreachable, so make
+// that a loud abort rather than silent corruption.
+void micro_exit(int status) {
+  g_exit(status);
+  std::abort();
+}
+
+}  // extern "C"
