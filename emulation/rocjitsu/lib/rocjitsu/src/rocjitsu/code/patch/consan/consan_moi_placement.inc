@@ -7108,11 +7108,8 @@ using MoiSpillManagers = std::unordered_map<uint64_t, SpillManager>;
 
 void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
                                   const ResolvedMoiScratchPlan &plan) {
-  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, plan.required_vgpr_count);
-    if (!inserted)
-      it->second = std::max(it->second, plan.required_vgpr_count);
-  }
+  note_maximum_descriptor_extents(requirements, plan.owner_descriptor_file_offsets,
+                                  plan.required_vgpr_count);
 }
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
@@ -7168,21 +7165,14 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
         required_count, static_cast<uint16_t>(*options.moi_record_replay_call_return_sgpr + 2u));
   if (required_count == 0)
     return;
-  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, required_count);
-    if (!inserted)
-      it->second = std::max(it->second, required_count);
-  }
+  note_maximum_descriptor_extents(requirements, plan.owner_descriptor_file_offsets, required_count);
 }
 
 void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requirements,
                                         const ResolvedMoiScratchPlan &plan,
                                         const VgprSpillSequence &spill) {
-  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, spill.total_private_bytes);
-    if (!inserted)
-      it->second = std::max(it->second, spill.total_private_bytes);
-  }
+  note_maximum_descriptor_extents(requirements, plan.owner_descriptor_file_offsets,
+                                  spill.total_private_bytes);
 }
 
 void note_dynamic_stack_private_requirement(ConSanPatchInfo &info, const VgprSpillSequence *spill) {
@@ -7203,11 +7193,8 @@ void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requ
                                           const MoiPlannedAccessPatch &patch) {
   if (patch.required_private_bytes == 0u)
     return;
-  for (uint64_t descriptor_offset : patch.resources.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, patch.required_private_bytes);
-    if (!inserted)
-      it->second = std::max(it->second, patch.required_private_bytes);
-  }
+  note_maximum_descriptor_extents(requirements, patch.resources.owner_descriptor_file_offsets,
+                                  patch.required_private_bytes);
 }
 
 /// Publish the mechanical resource and routing facts common to every emitted
@@ -7247,10 +7234,6 @@ void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
                                const ResolvedMoiScratchPlan &plan,
                                const ConSanMoiWorkgroupShadowLayout &layout) {
-  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    auto [it, inserted] =
-        requirements.emplace(descriptor_offset, layout.required_group_segment_size);
-    if (!inserted)
-      it->second = std::max(it->second, layout.required_group_segment_size);
-  }
+  note_maximum_descriptor_extents(requirements, plan.owner_descriptor_file_offsets,
+                                  layout.required_group_segment_size);
 }

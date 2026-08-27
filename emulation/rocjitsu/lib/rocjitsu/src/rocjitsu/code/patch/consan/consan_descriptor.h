@@ -13,8 +13,45 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
+#include <unordered_map>
 
 namespace rocjitsu {
+
+/// Accumulate one monotonic resource extent for a kernel descriptor.
+///
+/// Descriptor requirements use absolute one-past-the-end extents rather than
+/// additive deltas. Multiple sites or aliases owned by the same descriptor
+/// therefore combine by maximum, independent of discovery order. The extent's
+/// resource class and unit remain the caller's type-level responsibility.
+template <typename Extent>
+void note_maximum_descriptor_extent(std::unordered_map<uint64_t, Extent> &requirements,
+                                    uint64_t descriptor_file_offset, Extent required_extent) {
+  auto [it, inserted] = requirements.emplace(descriptor_file_offset, required_extent);
+  if (!inserted)
+    it->second = std::max(it->second, required_extent);
+}
+
+/// Apply one monotonic resource extent to every descriptor in an ownership
+/// set. Repeated descriptors are harmless because the single-owner operation
+/// is idempotent for an equal extent.
+template <typename Extent>
+void note_maximum_descriptor_extents(std::unordered_map<uint64_t, Extent> &requirements,
+                                     std::span<const uint64_t> descriptor_file_offsets,
+                                     Extent required_extent) {
+  for (uint64_t descriptor_file_offset : descriptor_file_offsets)
+    note_maximum_descriptor_extent(requirements, descriptor_file_offset, required_extent);
+}
+
+/// Join a second descriptor requirement map into @p destination by maximum.
+/// This is the union operation for independently planned monotonic resource
+/// extents; neither map's iteration order affects the result.
+template <typename Extent>
+void merge_maximum_descriptor_extents(std::unordered_map<uint64_t, Extent> &destination,
+                                      const std::unordered_map<uint64_t, Extent> &source) {
+  for (const auto &[descriptor_file_offset, required_extent] : source)
+    note_maximum_descriptor_extent(destination, descriptor_file_offset, required_extent);
+}
 
 /// Return the descriptor encoding granularity selected by the target's actual
 /// wave mode. This is an allocation-field fact, not an occupancy granule.

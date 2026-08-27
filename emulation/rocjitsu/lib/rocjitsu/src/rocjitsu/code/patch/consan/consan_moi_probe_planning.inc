@@ -77,11 +77,8 @@ void note_moi_probe_private_requirements(MoiDescriptorPrivateRequirements &requi
     note_spill_descriptor_requirements(requirements, probe.resources, *probe.spill);
   if (probe.required_private_bytes == 0u)
     return;
-  for (uint64_t descriptor_offset : probe.resources.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, probe.required_private_bytes);
-    if (!inserted)
-      it->second = std::max(it->second, probe.required_private_bytes);
-  }
+  note_maximum_descriptor_extents(requirements, probe.resources.owner_descriptor_file_offsets,
+                                  probe.required_private_bytes);
 }
 
 /// Publish the mechanical resource facts of one successfully emitted probe.

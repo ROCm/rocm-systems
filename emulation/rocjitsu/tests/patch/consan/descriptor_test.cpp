@@ -4,10 +4,32 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 
+#include <array>
+#include <unordered_map>
+
 namespace rocjitsu {
 namespace {
 
 namespace kd = rocr::llvm::amdhsa;
+
+TEST(ConSanDescriptor, MaximumExtentAggregationIsOrderIndependentAndOwnerComplete) {
+  std::unordered_map<uint64_t, uint16_t> requirements = {{64u, 8u}};
+  note_maximum_descriptor_extent(requirements, 64u, static_cast<uint16_t>(4u));
+  EXPECT_EQ(requirements.at(64u), 8u);
+  note_maximum_descriptor_extent(requirements, 64u, static_cast<uint16_t>(12u));
+  EXPECT_EQ(requirements.at(64u), 12u);
+
+  constexpr std::array<uint64_t, 2> kOwners = {64u, 128u};
+  note_maximum_descriptor_extents(requirements, kOwners, static_cast<uint16_t>(10u));
+  EXPECT_EQ(requirements.at(64u), 12u);
+  EXPECT_EQ(requirements.at(128u), 10u);
+
+  const std::unordered_map<uint64_t, uint16_t> independent = {{64u, 16u}, {192u, 6u}};
+  merge_maximum_descriptor_extents(requirements, independent);
+  EXPECT_EQ(requirements.at(64u), 16u);
+  EXPECT_EQ(requirements.at(128u), 10u);
+  EXPECT_EQ(requirements.at(192u), 6u);
+}
 
 TEST(ConSanDescriptor, ResourceFactsShareTargetWaveAndAccumulatorSemantics) {
   kd::kernel_descriptor_t descriptor{};

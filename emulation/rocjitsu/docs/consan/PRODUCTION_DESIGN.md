@@ -6614,6 +6614,34 @@ for nominal line-count reductions.
   deferred to the current deletion tranche. E2E validation remains outside
   this work.
 
+### Slice 5DP: aggregate every descriptor extent through one operation
+
+- **One monotonic algebra:** `note_maximum_descriptor_extent`, its owner-set
+  form, and `merge_maximum_descriptor_extents` now aggregate descriptor-indexed
+  requirements for shared SuperCollider growth plus MOI VGPR, SGPR, private
+  memory, and LDS planning. Absolute extents join by maximum, so duplicate
+  aliases, multiple sites, and independent planning branches are order
+  independent.
+- **Units and policy remain typed by the caller:** The shared operation does
+  not interpret a value or mutate a descriptor. Register and byte maps retain
+  their distinct aliases, and their VGPR, SGPR, private-segment, and LDS
+  application contracts remain separate. Nine copied insert-or-maximum loops,
+  including two local barrier lambdas, are deleted.
+- **Contract coverage:**
+  `MaximumExtentAggregationIsOrderIndependentAndOwnerComplete` directly covers
+  lower/equal/higher updates, multiple owners, and independent-map joins. All
+  seven descriptor component tests pass; existing multi-site and multi-owner
+  engine tests remain the behavioral gate for each resource class.
+- **Accounting:** Across the five affected implementation files, physical
+  lines fall from 13,349 to 13,347, nonblank lines from 12,755 to 12,750, and
+  estimated comment-excluded code lines from 11,671 to 11,654. The slice adds
+  58 and deletes 60 physical implementation lines, a net deletion of two and a
+  net deletion of 17 executable/declarative code lines after documenting the
+  shared contract.
+- **Batched gate:** The library and test binary compile and all seven focused
+  descriptor tests pass. Broader checked-in qualification is deferred to the
+  current deletion tranche. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

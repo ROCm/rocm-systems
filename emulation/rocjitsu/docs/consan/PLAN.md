@@ -599,6 +599,11 @@ register-class-neutral descriptor/extent record and maximum merge operation.
 The class-specific mutation rules and byte-versus-patcher transactions remain
 separate because those differences are real; only the copied batching
 representation and algorithm were removed.
+Descriptor-indexed requirements across SuperCollider and MOI now use one
+monotonic aggregation contract as well. VGPR, SGPR, private-byte, and LDS-byte
+extents retain their own units and mutation policies, but nine copies of
+insert-or-maximum bookkeeping have been replaced by shared single-owner,
+owner-set, and map-join operations.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object

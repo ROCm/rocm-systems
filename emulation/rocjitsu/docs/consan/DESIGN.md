@@ -809,6 +809,14 @@ about VGPR versus SGPR interpretation. After merging, the class-specific
 mutation contract applies the extent, and the active output transaction decides
 whether to write bytes directly or through `CodeObjectPatcher`.
 
+All descriptor-indexed resource maps aggregate through
+`note_maximum_descriptor_extent`, `note_maximum_descriptor_extents`, and
+`merge_maximum_descriptor_extents`. Their algebra is deliberately narrow:
+requirements are absolute monotonic extents, so aliases, sites, and independent
+plans join by maximum and discovery order is irrelevant. The map's value type
+still states whether that extent counts registers or bytes; aggregation does
+not interpret or mutate the descriptor.
+
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,

@@ -1061,15 +1061,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
   };
-  const auto note_private_requirements = [](MoiDescriptorPrivateRequirements &requirements,
-                                            std::span<const uint64_t> owners,
-                                            uint32_t required_bytes) {
-    for (uint64_t descriptor_offset : owners) {
-      auto [it, inserted] = requirements.emplace(descriptor_offset, required_bytes);
-      if (!inserted)
-        it->second = std::max(it->second, required_bytes);
-    }
-  };
   std::vector<PlannedInlineEpochBarrier> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
   MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
@@ -1159,7 +1150,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           required_private_bytes =
               std::max(required_private_bytes, scalar_spill->total_private_bytes);
         }
-        note_private_requirements(private_requirements, owners, required_private_bytes);
+        note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
         planned_candidates.push_back(PlannedInlineEpochBarrier{
             .candidate = candidate,
             .owner_descriptor_file_offsets = owners,
@@ -1194,7 +1185,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const uint32_t required_private_bytes =
           std::max(access_patch->required_private_segment_size, spill->total_private_bytes);
-      note_private_requirements(private_requirements, owners, required_private_bytes);
+      note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
       planned_candidates.push_back(PlannedInlineEpochBarrier{
           .candidate = candidate,
           .owner_descriptor_file_offsets = owners,
@@ -1302,9 +1293,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           continue;
         required_private_bytes =
             std::max(required_private_bytes, scalar_spill->total_private_bytes);
-        note_private_requirements(visible_evidence_private_requirements,
-                                  resources->owner_descriptor_file_offsets,
-                                  scalar_spill->total_private_bytes);
+        note_maximum_descriptor_extents(visible_evidence_private_requirements,
+                                        resources->owner_descriptor_file_offsets,
+                                        scalar_spill->total_private_bytes);
       }
       note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
@@ -2267,16 +2258,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     emitted_owner_descriptors.insert(patch.owner_descriptor_file_offsets.begin(),
                                      patch.owner_descriptor_file_offsets.end());
   }
-  const auto merge_maximum_requirements = [](auto &destination, const auto &source) {
-    for (const auto &[descriptor_offset, required] : source) {
-      auto [it, inserted] = destination.emplace(descriptor_offset, required);
-      if (!inserted)
-        it->second = std::max(it->second, required);
-    }
-  };
-  merge_maximum_requirements(visible_evidence_vgpr_requirements,
-                             persistent_epoch_vgpr_requirements);
-  merge_maximum_requirements(visible_evidence_private_requirements, private_requirements);
+  merge_maximum_descriptor_extents(visible_evidence_vgpr_requirements,
+                                   persistent_epoch_vgpr_requirements);
+  merge_maximum_descriptor_extents(visible_evidence_private_requirements, private_requirements);
   const auto retain_emitted_owners = [&](auto &requirements) {
     if (has_unscoped_emitted_patch)
       return;

@@ -45,11 +45,8 @@ struct DescriptorRegisterGrowth {
 [[nodiscard]] std::unordered_map<uint64_t, uint16_t>
 merge_descriptor_register_growths(std::span<const DescriptorRegisterGrowth> growths) {
   std::unordered_map<uint64_t, uint16_t> merged;
-  for (const DescriptorRegisterGrowth &growth : growths) {
-    auto [it, inserted] = merged.emplace(growth.descriptor_file_offset, growth.required_count);
-    if (!inserted)
-      it->second = std::max(it->second, growth.required_count);
-  }
+  for (const DescriptorRegisterGrowth &growth : growths)
+    note_maximum_descriptor_extent(merged, growth.descriptor_file_offset, growth.required_count);
   return merged;
 }
 
