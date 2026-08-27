@@ -1240,7 +1240,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     if (owners.empty() && candidate.kernel_descriptor_file_offset)
       owners.push_back(*candidate.kernel_descriptor_file_offset);
-    if (automatic_moi_persistent_state(options) && owners.empty())
+    if ((options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete() ||
+         options.automatic_moi_private_epoch) &&
+        owners.empty())
       continue;
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,

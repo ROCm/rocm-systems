@@ -7108,11 +7108,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return true;
 }
 
-[[nodiscard]] bool automatic_moi_persistent_state(const ConSanOptions &options) {
-  return options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete() ||
-         options.automatic_moi_private_epoch;
-}
-
 using MoiDescriptorVgprRequirements = std::unordered_map<uint64_t, uint16_t>;
 using MoiDescriptorSgprRequirements = std::unordered_map<uint64_t, uint16_t>;
 using MoiDescriptorPrivateRequirements = std::unordered_map<uint64_t, uint32_t>;
