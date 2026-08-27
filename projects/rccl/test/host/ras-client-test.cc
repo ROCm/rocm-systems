@@ -3537,3 +3537,43 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
   EXPECT_TRUE(LogHas(log, closeLine.c_str())) << log;
   EXPECT_EQ("peer 0 ok\n", g_stdoutData);
 }
+
+
+
+// ===========================================================================
+// parseArgs: the -p / --port arm's own missing-argument oracle.
+//
+// The port arm's arity lives in two places -- longOpts' required_argument and
+// the optstring's "p:" -- and relaxing either one turns a missing argument into
+// a case 'p' with a NULL optarg instead of the default: exit. The pair below
+// pins that inside the port block, so the arm keeps a guard of its own rather
+// than depending on a test in the default: block continuing to exist.
+// ===========================================================================
+
+// longOpts "port" as optional_argument makes this store NULL into port and fall
+// out of the loop with no diagnostic and no exit.
+TEST_F(RasClientMicrotest, ParseArgsPort_LongFormMissingArgument_ExitsOneWithUsage) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: option '--port' requires an argument\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "  -p, --port=PORT     TCP port of the RAS client socket of the NCCL job\n")) << out.log;
+  ASSERT_NE(nullptr, port);
+  EXPECT_STREQ(kDefaultPort, port);
+  EXPECT_STREQ(kDefaultHost, hostName);
+}
+
+// The optstring's "p:" carries the short spelling's arity; "p" alone would make
+// a trailing -p a valid no-argument option and skip the default: exit entirely.
+TEST_F(RasClientMicrotest, ParseArgsPort_ShortFormMissingArgument_ExitsOneWithUsage) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-v", "-p"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: option requires an argument -- 'p'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  ASSERT_NE(nullptr, port);
+  EXPECT_STREQ(kDefaultPort, port);
+  // The preceding -v was applied, so the exit above aborted a running loop.
+  EXPECT_TRUE(verbose);
+}
