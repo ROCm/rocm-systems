@@ -641,13 +641,12 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch,
     std::vector<std::string> &errors, bool uses_gfx1250_cluster_workgroup_id = false,
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt) {
-  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
+  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor) {
     errors.emplace_back("ConSan MOI workgroup-id descriptor exceeds ELF bytes");
     return std::nullopt;
   }
 
-  KD desc{};
-  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   if (profile &&
       profile->workgroup_identity == ConSanWorkgroupIdentitySource::CommandProcessorTtmps) {
@@ -680,7 +679,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
       errors.emplace_back("ConSan MOI full CDNA workgroup-ID payload exceeds scalar registers");
       return std::nullopt;
     }
-    const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
+    const uint32_t rsrc2 = descriptor->compute_pgm_rsrc2;
     uint8_t guest_mask = 0;
     guest_mask |= AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0
                       ? 1u << 0u
@@ -700,7 +699,8 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
         .z = ConSanMoiWorkgroupSource::scalar(static_cast<uint16_t>(full_base + 2u)),
         .cluster_workgroup_id = {},
         .cdna_full_payload_base = full_base,
-        .cdna_guest_payload_base = static_cast<uint16_t>(moi_descriptor_user_sgpr_count(desc)),
+        .cdna_guest_payload_base =
+            static_cast<uint16_t>(moi_descriptor_user_sgpr_count(*descriptor)),
         .cdna_guest_payload_mask = guest_mask,
     };
   }
@@ -708,9 +708,9 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     return sgpr ? ConSanMoiWorkgroupSource::scalar(*sgpr) : ConSanMoiWorkgroupSource{};
   };
   return ConSanMoiWorkgroupSources{
-      .x = sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 0)),
-      .y = sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 1)),
-      .z = sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 2)),
+      .x = sgpr_source(moi_descriptor_workgroup_id_sgpr(*descriptor, 0)),
+      .y = sgpr_source(moi_descriptor_workgroup_id_sgpr(*descriptor, 1)),
+      .z = sgpr_source(moi_descriptor_workgroup_id_sgpr(*descriptor, 2)),
       .cluster_workgroup_id = {},
       .cdna_full_payload_base = std::nullopt,
       .cdna_guest_payload_base = std::nullopt,
@@ -800,14 +800,12 @@ struct MoiSgprRange {
                                                                  uint64_t descriptor_file_offset,
                                                                  rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors) {
-  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
+  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor) {
     errors.emplace_back("ConSan MOI owner derivation descriptor exceeds ELF bytes");
     return std::nullopt;
   }
-
-  KD desc{};
-  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return kernel_wavefront_size(arch, desc) == 32 ? 5 : 6;
+  return kernel_wavefront_size(arch, *descriptor) == 32 ? 5 : 6;
 }
 
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
@@ -815,16 +813,14 @@ struct MoiSgprRange {
                                                     const ConSanKernelInfo &kernel,
                                                     uint32_t required_count, rj_code_arch_t arch,
                                                     std::vector<std::string> &errors) {
-  if (kernel.descriptor_file_offset > image.size() ||
-      sizeof(KD) > image.size() - kernel.descriptor_file_offset) {
+  auto descriptor = read_kernel_descriptor(image, kernel.descriptor_file_offset);
+  if (!descriptor) {
     errors.emplace_back("ConSan MOI descriptor VGPR growth exceeds ELF bytes");
     return false;
   }
 
-  KD desc{};
-  std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
   if (!grow_descriptor_vgpr_allocation(
-          desc,
+          *descriptor,
           {.required_ordinary_count = required_count,
            .maximum_ordinary_count = kMaxVgprs,
            .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
@@ -833,8 +829,9 @@ struct MoiSgprRange {
                         std::to_string(required_count) + " registers");
     return false;
   }
-  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset,
-                                       {reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)})) {
+  if (!patcher.patch_kernel_descriptor(
+          kernel.descriptor_file_offset,
+          {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
     errors.emplace_back("ConSan MOI could not patch descriptor VGPR allocation");
     return false;
   }
@@ -1953,24 +1950,22 @@ struct MoiResourcePlanningState {
       // inventory here.
       stored.has_indirect_vgpr_access = !stored.liveness->global_vgpr_usage_is_complete();
 
-      if (kernel.descriptor_file_offset > bytes.size() ||
-          sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
+      const auto descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
+      if (!descriptor) {
         continue;
       }
-      KD descriptor{};
-      std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
       stored.current_vgpr_count =
-          static_cast<uint16_t>(descriptor_vgpr_allocation_count(descriptor, arch));
+          static_cast<uint16_t>(descriptor_vgpr_allocation_count(*descriptor, arch));
       if (consan_uses_gfx9_cdna_encoding(arch)) {
         const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
-            descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+            descriptor->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
         // A nonzero ACCUM_OFFSET is the first physical AccVGPR and therefore
         // the hard upper bound for ordinary instrumentation VGPRs. Encoded
         // zero remains ambiguous for kernels without an accumulator bank.
         if (encoded_accum_offset != 0u) {
           const uint32_t accvgpr_base =
               std::min<uint32_t>(kMaxVgprs, (encoded_accum_offset + 1u) * 4u);
-          const uint32_t unified_vgpr_count = descriptor_vgpr_allocation_count(descriptor, arch);
+          const uint32_t unified_vgpr_count = descriptor_vgpr_allocation_count(*descriptor, arch);
           stored.ordinary_vgpr_limit = static_cast<uint16_t>(accvgpr_base);
           stored.cdna_accvgpr_boundary_is_allocation_tail = unified_vgpr_count <= accvgpr_base;
           stored.can_move_empty_cdna_accvgpr_boundary =
@@ -1978,8 +1973,8 @@ struct MoiResourcePlanningState {
         }
       }
       stored.current_sgpr_count =
-          static_cast<uint16_t>(descriptor_sgpr_allocation_count(descriptor, arch));
-      stored.original_private_segment_size = descriptor.private_segment_fixed_size;
+          static_cast<uint16_t>(descriptor_sgpr_allocation_count(*descriptor, arch));
+      stored.original_private_segment_size = descriptor->private_segment_fixed_size;
       stored.descriptor_valid = true;
     }
     context_by_descriptor.reserve(contexts.size());
@@ -4452,13 +4447,12 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
       };
       uint32_t initialized_end = 0u;
       for (uint64_t owner : owners) {
-        if (owner > bytes.size() || sizeof(KD) > bytes.size() - owner)
+        const auto descriptor = read_kernel_descriptor(bytes, owner);
+        if (!descriptor)
           continue;
-        KD descriptor{};
-        std::memcpy(&descriptor, bytes.data() + owner, sizeof(descriptor));
         initialized_end =
-            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(descriptor) +
-                                                    moi_descriptor_system_sgpr_count(descriptor));
+            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(*descriptor) +
+                                                    moi_descriptor_system_sgpr_count(*descriptor));
       }
       const auto architecturally_reserved = [&](uint16_t base, uint16_t width) {
         return reserved(base, width) ||
@@ -4581,17 +4575,14 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
           return std::nullopt;
         if (kernel->uses_dynamic_stack)
           return kernel->uses_dynamic_stack;
-        if (descriptor_offset > state.bytes.size() ||
-            sizeof(KD) > state.bytes.size() - descriptor_offset) {
+        const auto descriptor = read_kernel_descriptor(state.bytes, descriptor_offset);
+        if (!descriptor)
           return std::nullopt;
-        }
-        KD descriptor{};
-        std::memcpy(&descriptor, state.bytes.data() + descriptor_offset, sizeof(descriptor));
         // A runtime-sized frame requires the private-segment ABI. Its absence
         // is an architectural fixed-stack proof even when older metadata omits
         // the optional stack marker. A scratch-enabled owner without a marker
         // remains unknown and must fail closed.
-        if (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+        if (AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
                             kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u) {
           return false;
         }
@@ -4782,13 +4773,10 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
                 result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
             if (kernel != nullptr && kernel->uses_dynamic_stack)
               return !*kernel->uses_dynamic_stack;
-            if (descriptor_offset > state.bytes.size() ||
-                sizeof(KD) > state.bytes.size() - descriptor_offset) {
+            const auto descriptor = read_kernel_descriptor(state.bytes, descriptor_offset);
+            if (!descriptor)
               return false;
-            }
-            KD descriptor{};
-            std::memcpy(&descriptor, state.bytes.data() + descriptor_offset, sizeof(descriptor));
-            return AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+            return AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
                                    kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u;
           });
       uint16_t allocated_limit = limit;
@@ -5219,13 +5207,12 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
     uint32_t initialized_end = 0;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-        if (descriptor_offset > bytes.size() || sizeof(KD) > bytes.size() - descriptor_offset)
+        const auto descriptor = read_kernel_descriptor(bytes, descriptor_offset);
+        if (!descriptor)
           continue;
-        KD descriptor{};
-        std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
         initialized_end =
-            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(descriptor) +
-                                                    moi_descriptor_system_sgpr_count(descriptor));
+            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(*descriptor) +
+                                                    moi_descriptor_system_sgpr_count(*descriptor));
       }
     }
     const auto overlaps_reserved = [&](uint16_t base, uint16_t width) {
@@ -6352,14 +6339,13 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
           scalar_references.references.expand({RegClass::SGPR, kDynamicStackTopSgpr, 1u});
           scalar_references.references.expand({RegClass::SGPR, kDynamicFrameBaseSgpr, 1u});
         }
-        if (descriptor_offset > bytes.size() || sizeof(KD) > bytes.size() - descriptor_offset) {
+        const auto descriptor = read_kernel_descriptor(bytes, descriptor_offset);
+        if (!descriptor) {
           every_owner_resolved = false;
           break;
         }
-        KD descriptor{};
-        std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
-        const uint32_t initialized_count = moi_descriptor_user_sgpr_count(descriptor) +
-                                           moi_descriptor_system_sgpr_count(descriptor);
+        const uint32_t initialized_count = moi_descriptor_user_sgpr_count(*descriptor) +
+                                           moi_descriptor_system_sgpr_count(*descriptor);
         for (uint32_t sgpr = 0u;
              sgpr < std::min<uint32_t>(initialized_count, moi_ordinary_sgpr_limit(arch)); ++sgpr) {
           scalar_references.references.expand({RegClass::SGPR, static_cast<uint16_t>(sgpr), 1u});

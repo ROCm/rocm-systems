@@ -1,6 +1,5 @@
 namespace {
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
 [[nodiscard]] std::unique_ptr<Instruction>
@@ -14,21 +13,19 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
 
 [[nodiscard]] std::optional<uint16_t> read_descriptor_ordinary_vgpr_allocation_count(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch) {
-  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
+  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor)
     return std::nullopt;
-  KD desc{};
-  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return descriptor_ordinary_vgpr_allocation_count(desc, arch);
+  return descriptor_ordinary_vgpr_allocation_count(*descriptor, arch);
 }
 
 [[nodiscard]] std::optional<uint16_t>
 read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
                                       uint64_t descriptor_file_offset, rj_code_arch_t arch) {
-  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
+  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor)
     return std::nullopt;
-  KD desc{};
-  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return descriptor_vgpr_allocation_count(desc, arch);
+  return descriptor_vgpr_allocation_count(*descriptor, arch);
 }
 
 /// One kernel descriptor's merged register-file extent requirement.
@@ -57,16 +54,15 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   const std::span<const uint8_t> current_image = patcher.image_bytes();
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_register_growths(growths)) {
-    if (descriptor_file_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - descriptor_file_offset) {
+    auto descriptor = read_kernel_descriptor(current_image, descriptor_file_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan relay-reservoir descriptor SGPR growth exceeds ELF bytes");
       return false;
     }
-    KD desc{};
-    std::memcpy(&desc, current_image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_sgpr_allocation(desc, required_count, arch) ||
+    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count, arch) ||
         !patcher.patch_kernel_descriptor(
-            descriptor_file_offset, {reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)})) {
+            descriptor_file_offset,
+            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
       errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
       return false;
     }
@@ -80,18 +76,17 @@ apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_register_growths(growths)) {
-    if (descriptor_file_offset > image.size() ||
-        sizeof(KD) > image.size() - descriptor_file_offset) {
+    auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan relay-reservoir descriptor SGPR growth exceeds ELF bytes");
       return false;
     }
-    KD desc{};
-    std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_sgpr_allocation(desc, required_count, arch)) {
+    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count, arch)) {
       errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
       return false;
     }
-    std::memcpy(image.data() + descriptor_file_offset, &desc, sizeof(desc));
+    if (!write_kernel_descriptor(image, descriptor_file_offset, *descriptor))
+      return false;
   }
   return true;
 }
@@ -102,21 +97,20 @@ apply_descriptor_vgpr_growths_to_bytes(std::span<uint8_t> image,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_register_growths(growths)) {
-    if (descriptor_file_offset > image.size() ||
-        sizeof(KD) > image.size() - descriptor_file_offset) {
+    auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan LDS check/trap proof descriptor VGPR growth exceeds ELF bytes");
       return false;
     }
-    KD desc{};
-    std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_vgpr_allocation(desc,
+    if (!grow_descriptor_vgpr_allocation(*descriptor,
                                          {.required_ordinary_count = required_count,
                                           .maximum_ordinary_count = REGISTER_SET_MAX_VGPRS},
                                          arch)) {
       errors.emplace_back("ConSan LDS check/trap proof could not grow descriptor VGPR allocation");
       return false;
     }
-    std::memcpy(image.data() + descriptor_file_offset, &desc, sizeof(desc));
+    if (!write_kernel_descriptor(image, descriptor_file_offset, *descriptor))
+      return false;
   }
   return true;
 }
@@ -128,14 +122,12 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
                                          rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_register_growths(growths)) {
-    if (descriptor_file_offset > original_image.size() ||
-        sizeof(KD) > original_image.size() - descriptor_file_offset) {
+    auto descriptor = read_kernel_descriptor(original_image, descriptor_file_offset);
+    if (!descriptor) {
       errors.emplace_back("ConSan LDS check/trap proof descriptor VGPR growth exceeds ELF bytes");
       return false;
     }
-    KD desc{};
-    std::memcpy(&desc, original_image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_vgpr_allocation(desc,
+    if (!grow_descriptor_vgpr_allocation(*descriptor,
                                          {.required_ordinary_count = required_count,
                                           .maximum_ordinary_count = REGISTER_SET_MAX_VGPRS},
                                          arch)) {
@@ -143,7 +135,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
       return false;
     }
     if (!patcher.patch_kernel_descriptor(
-            descriptor_file_offset, {reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)})) {
+            descriptor_file_offset,
+            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
       errors.emplace_back("ConSan LDS check/trap proof could not patch descriptor VGPR allocation");
       return false;
     }
