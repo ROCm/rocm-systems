@@ -320,10 +320,12 @@ TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
     EXPECT_EQ(snapshots().pending(), 0u);
 }
 
-TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
+TEST_F(TorchTraceCollectorTest, EvictsOldestPastMaxEntriesPerShard)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
-    for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
+    const auto sequence_numbers = sequence_numbers_on_shard(0,
+                                                            kThreadA,
+                                                            SnapshotStore::kMaxEntriesPerShard + 1);
+    for (std::size_t i = 0; i < SnapshotStore::kMaxEntriesPerShard; ++i)
     {
         snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
@@ -339,9 +341,11 @@ TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
 
 TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto sequence_numbers = sequence_numbers_on_shard(0,
+                                                            kThreadA,
+                                                            SnapshotStore::kMaxEntriesPerShard + 1);
     const auto other_shard_sequence_numbers = sequence_numbers_on_shard(1, kThreadA, 1);
-    for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
+    for (std::size_t i = 0; i < SnapshotStore::kMaxEntriesPerShard; ++i)
     {
         snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
@@ -670,8 +674,7 @@ TEST_F(TorchTraceCollectorRealOpsTest, DetachedForwardBounded)
 
     EXPECT_GT(stats().snapshots_saved.load(), 0u);
     EXPECT_EQ(stats().callback_errors.load(), 0u);
-    // 50 forward-only iterations stay well below a single shard's soft cap.
-    EXPECT_LT(snapshots().pending(), SnapshotStore::kShardSoftCap);
+    EXPECT_LT(snapshots().pending(), SnapshotStore::kMaxEntriesPerShard);
     EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
 }
 

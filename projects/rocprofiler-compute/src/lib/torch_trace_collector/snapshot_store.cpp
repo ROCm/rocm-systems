@@ -58,7 +58,7 @@ void SnapshotStore::save(std::int64_t seq_nr, std::uint64_t thread_id, const std
                 stats_.snapshots_saved.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
-            while (shard.snapshots.size() >= kShardSoftCap)
+            while (shard.snapshots.size() >= kMaxEntriesPerShard)
             {
                 evict_oldest(shard);
             }

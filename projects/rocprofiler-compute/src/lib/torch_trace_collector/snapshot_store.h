@@ -64,8 +64,8 @@ using rocprofiler_compute_tool::common::synchronized_t;
 class SnapshotStore
 {
 public:
-    static constexpr std::size_t kNumShards    = 64;
-    static constexpr std::size_t kShardSoftCap = 10000;
+    static constexpr std::size_t kNumShards          = 64;
+    static constexpr std::size_t kMaxEntriesPerShard = 10000;
 
     explicit SnapshotStore(Stats& stats)
         : stats_(stats)
