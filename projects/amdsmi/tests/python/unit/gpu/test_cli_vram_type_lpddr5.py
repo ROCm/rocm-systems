@@ -23,9 +23,12 @@ import sys
 import types
 import unittest
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+from common.common import amdsmi_path, find_cli_dir
+
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 # Mirrors amdsmi_wrapper.amdsmi_vram_type_t__enumvalues: LPDDR5 and __MAX share
 # value 31, and the later duplicate key (__MAX) wins in the dict literal, so a
@@ -188,8 +191,10 @@ class TestCliVramTypeLpddr5(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI not found ({STATIC_PATH or _CLI_DIR}): static.py not present"
+            )
         # Snapshot any real amdsmi already loaded so the stub does not leak into
         # sibling suites sharing the interpreter; restored in tearDownClass.
         cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
@@ -238,7 +243,3 @@ class TestCliVramTypeLpddr5(unittest.TestCase):
 
     def test_non_max_type_unaffected(self):
         self.assertEqual(self._run_vram(22, "human"), "GDDR6")
-
-
-if __name__ == "__main__":
-    unittest.main()
