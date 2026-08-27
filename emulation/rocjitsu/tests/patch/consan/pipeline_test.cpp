@@ -888,7 +888,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.fault_plans.size(), direct.fault_plans.size());
 }
 
-TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutRetainedInventory) {
+TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutPristineProvenance) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   const RuntimePolicy runtime_policy = enabled_runtime_policy();
@@ -911,7 +911,7 @@ TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutRetainedInventory) {
   ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.issues);
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(std::ranges::any_of(retried.issues, [](const ConSanTransformIssue &issue) {
-    return issue.detail.find("no retained inventory") != std::string::npos;
+    return issue.detail.find("requires a pristine inventory result") != std::string::npos;
   })) << testing::PrintToString(retried.issues);
 }
 

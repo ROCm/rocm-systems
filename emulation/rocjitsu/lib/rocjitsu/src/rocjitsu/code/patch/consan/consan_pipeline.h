@@ -310,11 +310,7 @@ struct ConSanDispatchRequirements {
 ///
 /// This type separates caller-facing stage state, immutable semantic artifacts,
 /// address-free evidence requirements, validated replacement bytes, and typed
-/// failures from the prototype's large mutable `ConSanResult`. The private
-/// compatibility value retains only mechanism telemetry and fields not yet
-/// migrated. It is exposed read-only while those fields acquire narrower
-/// production owners; caller-visible outcome, installation, diagnostics, and
-/// replacement storage must not be reconstructed from it. A result never
+/// failures from the prototype's large mutable `ConSanResult`. A result never
 /// contains runtime conflict evidence and makes no race-free claim. Public
 /// fields allow precise construction and invariant testing during the
 /// migration, while production creates values only through `transform_consan`
@@ -414,13 +410,16 @@ private:
                    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
                    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-                   std::optional<ConSanResult> mechanism_result,
-                   bool retain_moi_retry_inventory = false);
+                   std::optional<ConSanResult> mechanism_result);
 
-  /// Unmodified MOI semantic inventory retained only between automatic report
-  /// sizing and its bound retry. Ordinary and completed transforms never keep
-  /// this private lowering state.
-  std::optional<ConSanResult> moi_retry_inventory_;
+  /// Provenance marker set only by the pristine MOI inventory entry point.
+  ///
+  /// It authorizes the bound retry to consume the typed artifacts already
+  /// published by this result. It carries no duplicate inventory, planning,
+  /// patch, diagnostic, or lowering state. An ordinary transform remains
+  /// ineligible even if its public fields happen to resemble an unbound
+  /// inventory result.
+  bool moi_retry_inventory_available_ = false;
   /// Whether the retained pristine inventory included the extended barrier
   /// pairs needed by a possible late-bound fault. This is the sole semantic
   /// shape choice that is not already recoverable from the typed retry inputs.

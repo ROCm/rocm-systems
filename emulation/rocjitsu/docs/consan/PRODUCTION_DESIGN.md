@@ -3065,11 +3065,11 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   typed fields directly instead of reaching through a second result object.
 - **Completed compatibility deletion:** The public `legacy_mechanism()` API is
   gone, as are all production and ordinary-test callers. Ordinary and completed
-  transforms no longer retain a hidden `ConSanResult` after publication. Only
-  the address-free MOI report-sizing result retains a private unmodified retry
-  inventory, which the named bound-retry operation consumes and then destroys.
-  Runtime demotion destroys that retry inventory and clears the one published
-  patch inventory rather than synchronizing two public representations.
+  transforms no longer retain a hidden `ConSanResult` after publication. At
+  this slice, the address-free MOI report-sizing result alone retained a
+  private unmodified retry inventory; Slice 5S later deletes that final broad
+  capsule. Runtime demotion clears the one published patch inventory rather
+  than synchronizing two public representations.
 - **Focused contract gate:** Pipeline tests independently cover publication of
   all five artifact families, direct/retry artifact parity, mutation-detail
   publication, patch removal during runtime demotion, and rejection when an
@@ -3707,6 +3707,34 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 64.97
   seconds. E2E validation remains outside this work.
 
+### Slice 5S: delete the hidden MOI retry result capsule
+
+- **Single artifact ownership:** The automatic-report retry now consumes the
+  `ProgramInventory`, observation plan, coverage ledger, mutation artifacts,
+  resource plans, and patch records already owned by `TransformResult`. It
+  constructs a fresh compatibility-lowerer input explicitly; it neither stores
+  a second broad result nor relies on the unspecified contents of moved-from
+  vectors and aggregates after publication.
+- **Completed compatibility deletion:** The private
+  `optional<ConSanResult>` and the publication flag that requested its retention
+  are gone. A single private provenance bit still distinguishes the named
+  pristine-inventory entry point from an ordinary unbound transform. It grants
+  the consumptive retry no data of its own, and runtime demotion clears it.
+- **Contract coverage:** The typed retry parity test requires the reconstructed
+  path to match direct lowering in observation plan, coverage, replacement
+  bytes, patches, resources, fault sites, barrier-move destinations, and fault
+  plans. A separate negative test proves that a superficially similar ordinary
+  result remains ineligible without pristine-inventory provenance.
+- **Deletion result:** Production source is two physical lines smaller, and
+  each retained report-sizing result loses an entire optional
+  `ConSanResult`—including all of its vectors and mutable mechanism state—in
+  exchange for one boolean marker. No alternate retry inventory type was
+  introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 64.44
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
@@ -3733,8 +3761,9 @@ analysis completed.
   staged-mutation mechanics still execute inside that named boundary. The
   pipeline republishes their already-produced inventory and observation values
   in logical dependency order; it does not claim that those internal calls are
-  yet physically separate. The private compatibility result retains mechanism
-  telemetry and unmigrated fields only.
+  yet physically separate. The temporary private retry capsule described here
+  is deleted by Slice 5S; current results retain only typed/public artifacts
+  and one provenance bit for the consumptive retry operation.
 - **Focused type/unit gate:** Fifteen direct pipeline tests cover exhaustive
   enum iteration and naming, stage-record and issue validation, malformed
   cross-type relationships, configuration/capability short-circuiting,

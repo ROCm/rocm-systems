@@ -25,9 +25,9 @@ struct TransformResultTestAccess {
           const ConSanDebugOverrides &debug, const MutationRequest &mutation,
           const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
           ConSanResult mechanism_result) {
-    return TransformResult::publish_optional(
-        code_object_bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
-        resources, std::move(mechanism_result), /*retain_moi_retry_inventory=*/false);
+    return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
+                                             runtime_policy, debug, mutation, capabilities,
+                                             resources, std::move(mechanism_result));
   }
 };
 

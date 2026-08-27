@@ -310,7 +310,7 @@ void TransformResult::discard_replacement(std::string warning) {
   patches.clear();
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
-  moi_retry_inventory_.reset();
+  moi_retry_inventory_available_ = false;
   moi_retry_preserves_extended_barrier_pairs_ = false;
   stage_record(*this, ConSanPipelineStage::LegacyLowering).status =
       ConSanPipelineStageStatus::Unsupported;
@@ -337,8 +337,8 @@ TransformResult transform_consan_pristine_moi_inventory(
   legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
   TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options),
-      /*retain_moi_retry_inventory=*/true);
+      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options));
+  result.moi_retry_inventory_available_ = true;
   result.moi_retry_preserves_extended_barrier_pairs_ = preserve_extended_barrier_pairs;
   return result;
 }
@@ -368,21 +368,22 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
       .fault = ConSanFaultMutationRetryConfig::from_options(options),
   };
   ConSanResult retry_inventory;
-  if (inventory.moi_retry_inventory_) {
-    retry_inventory = std::move(*inventory.moi_retry_inventory_);
-  } else {
-    retry_inventory.errors.emplace_back("ConSan MOI retry received no retained inventory");
-  }
+  retry_inventory.program_inventory = inventory.program_inventory;
+  retry_inventory.observation_plan = std::move(inventory.observation_plan);
+  retry_inventory.coverage_ledger = std::move(inventory.coverage_ledger);
+  retry_inventory.mutation = std::move(inventory.mutation);
   retry_inventory.fault_sites = std::move(inventory.fault_sites);
   retry_inventory.barrier_move_destinations = std::move(inventory.barrier_move_destinations);
   retry_inventory.fault_plans = std::move(inventory.fault_plans);
   retry_inventory.resource_plans = std::move(inventory.resource_plans);
   retry_inventory.patches = std::move(inventory.patches);
+  if (!inventory.moi_retry_inventory_available_)
+    retry_inventory.errors.emplace_back("ConSan MOI retry requires a pristine inventory result");
   ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(retry_inventory), std::move(inventory_options), retry, code_object_bytes);
-  return TransformResult::publish_optional(
-      code_object_bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
-      resources, std::move(retried), /*retain_moi_retry_inventory=*/false);
+  return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
+                                           runtime_policy, debug, mutation, capabilities, resources,
+                                           std::move(retried));
 }
 
 TransformResult
@@ -402,7 +403,7 @@ TransformResult transform_consan_with_mutation(
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,
-                                           std::nullopt, /*retain_moi_retry_inventory=*/false);
+                                           std::nullopt);
 }
 
 TransformResult TransformResult::publish_optional(
@@ -410,7 +411,7 @@ TransformResult TransformResult::publish_optional(
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    std::optional<ConSanResult> supplied_mechanism, bool retain_moi_retry_inventory) {
+    std::optional<ConSanResult> supplied_mechanism) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
   initialize_stage_records(result);
@@ -478,8 +479,6 @@ TransformResult TransformResult::publish_optional(
     });
   }
   legacy.errors.clear();
-  if (retain_moi_retry_inventory)
-    result.moi_retry_inventory_ = std::move(legacy);
 
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
   if (flavor == ConSanFlavor::None) {
