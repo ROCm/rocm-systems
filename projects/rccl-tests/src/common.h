@@ -255,6 +255,7 @@ struct testThread {
 
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
+extern testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms);
 // Inter-thread/process reduce: average 0=bcast(r0),1=avg,2=min,3=max,4=sum.
 // Serializes MPI to the last thread (MPI is MPI_THREAD_SINGLE) and writes the
 // combined value back to every thread. Instantiated for double / long long.

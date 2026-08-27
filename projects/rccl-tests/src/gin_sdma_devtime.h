@@ -79,7 +79,7 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   // Pass 2: synchronize each GPU, copy stamps back, reduce the grid busy window.
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));
-    CUDACHECK(hipStreamSynchronize(args->streams[i]));
+    TESTCHECK(testStreamSynchronize(1, &args->streams[i], &args->comms[i]));
 
     // Sample THIS GPU's wall-clock rate to convert its own cycle delta; on a
     // mixed-clock node a single reference rate would skew the non-reference GPUs.
