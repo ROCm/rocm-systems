@@ -545,7 +545,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
 
 void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                            const MoiOptions &options,
-                                           ConSanTransformArtifacts &result) {
+                                           ConSanTransformArtifacts &result,
+                                           std::vector<ConSanCandidateResourcePlan> &plans) {
   const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
@@ -594,7 +595,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                      candidate.kernel_descriptor_file_offset, owner_scratch_count);
         }
       }
-      result.resource_plans.push_back(std::move(plan));
+      plans.push_back(std::move(plan));
     }
   }
   if (options.moi_track_atomics) {
@@ -637,7 +638,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                      : options.moi_engine == ConSanMoiEngine::InlineShadow
                                          ? inline_shadow_atomic_scratch_count(state.arch)
                                          : atomic_record_scratch_count(candidate.site, state.arch);
-      result.resource_plans.push_back(plan_moi_resource_site(
+      plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site));
     }
@@ -661,7 +662,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           &candidate.communication_site);
       if (candidate.patch_text_offset != candidate.fence_event->text_offset)
         plan.semantic_text_offset = candidate.fence_event->text_offset;
-      result.resource_plans.push_back(std::move(plan));
+      plans.push_back(std::move(plan));
     }
   }
 }
@@ -847,14 +848,20 @@ void finalize_moi_site_lowering_outcomes(ConSanTransformArtifacts &result) {
   }
 }
 
-void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
-                                std::span<const ConSanMoiCandidate> candidates,
-                                ConSanTransformArtifacts &result) {
-  append_moi_resource_plans(state, options, candidates, result);
-  append_moi_operational_resource_plans(state, options, result);
+/// Derive one complete resource-plan set for the current MOI operating-point
+/// attempt. The returned vector is private until every access and operational
+/// site has been planned and refined, so a retry cannot expose a half-cleared
+/// or half-rebuilt plan set through the transform artifacts.
+[[nodiscard]] std::vector<ConSanCandidateResourcePlan>
+build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
+                         std::span<const ConSanMoiCandidate> candidates,
+                         ConSanTransformArtifacts &result) {
+  std::vector<ConSanCandidateResourcePlan> plans;
+  append_moi_resource_plans(state, options, candidates, plans);
+  append_moi_operational_resource_plans(state, options, result, plans);
   if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
-    for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    for (ConSanCandidateResourcePlan &plan : plans) {
       MoiOptions owner_options = options;
       if (!state.register_allocation.owner_transient_sgprs.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
@@ -898,7 +905,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOption
       options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);
-    for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    for (ConSanCandidateResourcePlan &plan : plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             return find_moi_transient_sgpr_assignment(state.register_allocation,
@@ -922,6 +929,13 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOption
       }
     }
   }
+  return plans;
+}
+
+void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
+                                std::span<const ConSanMoiCandidate> candidates,
+                                ConSanTransformArtifacts &result) {
+  result.resource_plans = build_moi_resource_plans(state, options, candidates, result);
 }
 
 } // namespace

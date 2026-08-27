@@ -3406,9 +3406,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
 
 void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,
                                std::span<const ConSanMoiCandidate> candidates,
-                               ConSanTransformArtifacts &result) {
-  result.resource_plans.clear();
-  result.resource_plans.reserve(candidates.size());
+                               std::vector<ConSanCandidateResourcePlan> &plans) {
+  plans.reserve(plans.size() + candidates.size());
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const ConSanMoiCandidate &candidate = candidates[candidate_index];
     MoiOptions site_options = options;
@@ -3550,7 +3549,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions
         plan = std::move(spill_plan);
       plan.alternatives = std::move(alternatives);
     }
-    result.resource_plans.push_back(std::move(plan));
+    plans.push_back(std::move(plan));
   }
 }
 
