@@ -772,12 +772,37 @@ TEST_F(CopyOldToNewV22902, InvokesCopyLsaDataExactlyOnce_DestinationFirst) {
       << "the shim wrote to the destination outside ncclDevCommCopyLsaData";
 }
 
-// Arm: the compat-table wiring that makes this callback reachable for both versions.
-// An unversioned devComm is routed to the v22902 table, which is how v22907 reuses it.
-TEST_F(CopyOldToNewV22902, CompatTableUsesThisCallback_AndV22907DefersToIt) {
+// Arm: the callback slots of both compat tables. This pins the wiring only; the actual "v22907
+// defers to v22902" fallback lives in ncclDevCommDestroy (src/dev_runtime.cc), which is not in
+// this binary, so a null devCommCopyOldToNew here is asserted but its consequence is not.
+TEST_F(CopyOldToNewV22902, CompatTables_WireTheV22902Callbacks_AndLeaveV22907CopyOldToNewNull) {
   EXPECT_EQ(&ncclDevCommCopyOldToNew_v22902, ncclDevCommCompat_v22902.devCommCopyOldToNew);
   EXPECT_EQ(nullptr, ncclDevCommCompat_v22907.devCommCopyOldToNew);
   EXPECT_EQ(ncclDevCommCompat_v22902.devCommCopyNewToOld, &ncclDevCommCopyNewToOld_v22902);
+  EXPECT_EQ(&ncclCommPropertiesFilter_v22902, ncclDevCommCompat_v22902.commPropertiesFilter);
+  EXPECT_EQ(&ncclDevCommRequirementsFilter_v22902, ncclDevCommCompat_v22902.devCommRequirementsFilter);
+  EXPECT_EQ(&ncclCommPropertiesFilter_v22907, ncclDevCommCompat_v22907.commPropertiesFilter);
+  EXPECT_EQ(&ncclDevCommRequirementsFilter_v22907, ncclDevCommCompat_v22907.devCommRequirementsFilter);
+  EXPECT_EQ(&ncclDevCommCopyNewToOld_v22907, ncclDevCommCompat_v22907.devCommCopyNewToOld);
+}
+
+// The version ranges select which shim set an old application gets. getNcclVersionCompat is
+// first-match-wins over devCommCompat[] (src/dev_runtime.cc), so widening v22902's range would
+// silently route 2.29.5-2.29.7 apps through the v22902 shims: memset of 200 bytes over a 224-byte
+// ncclDevComm_v22907, and abortFlag never copied. Nothing else in the suite pins these four fields.
+TEST_F(CopyOldToNewV22902, CompatTables_PinTheVersionRangesThatSelectEachShimSet) {
+  EXPECT_EQ(NCCL_VERSION(2, 29, 2), ncclDevCommCompat_v22902.minVersion);
+  EXPECT_EQ(NCCL_VERSION(2, 29, 3), ncclDevCommCompat_v22902.maxVersion);
+  EXPECT_EQ(NCCL_VERSION(2, 29, 5), ncclDevCommCompat_v22907.minVersion);
+  EXPECT_EQ(NCCL_VERSION(2, 29, 7), ncclDevCommCompat_v22907.maxVersion);
+
+  // Disjoint and ordered, so first-match-wins over devCommCompat[] is order-independent.
+  EXPECT_LT(ncclDevCommCompat_v22902.maxVersion, ncclDevCommCompat_v22907.minVersion);
+  EXPECT_LE(ncclDevCommCompat_v22902.minVersion, ncclDevCommCompat_v22902.maxVersion);
+  EXPECT_LE(ncclDevCommCompat_v22907.minVersion, ncclDevCommCompat_v22907.maxVersion);
+  // The gap is deliberate: 2.29.4 matches no table and falls through to ncclInvalidUsage. If a
+  // 2.29.4 shim set is ever added, this assertion is the one that must be revisited.
+  EXPECT_EQ(NCCL_VERSION(2, 29, 4), ncclDevCommCompat_v22902.maxVersion + 1);
 }
 
 // Pins a latent layout hazard, not desired behaviour: v22902's inlined resource window
