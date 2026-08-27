@@ -4150,6 +4150,36 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AH: lower SuperCollider from shared access admission
+
+- **One admission authority:** The shared observation plan now performs
+  physical-site alias validation, provenance filtering, and instruction-shape
+  support classification once. Both SuperCollider lowerers derive their
+  deterministic emission lists from the plan's admitted physical file offsets
+  instead of independently repeating those decisions over the legacy site
+  vectors.
+- **Preserved execution ownership:** Identical kernel/function views of one
+  physical instruction still merge their execution-owner descriptors before
+  lowering. Conflicting aliases fail closed while constructing the shared
+  inventory and plan, before either lowerer can observe an admitted offset.
+  The lowerers retain legacy site records only for emitter and resource
+  mechanics that have not yet moved to normalized accesses.
+- **Contract coverage:** Existing focused tests require conflicting physical
+  aliases to fail closed, identical aliases to patch only once for every
+  owner, incomplete owner context to remain unsupported, and non-group aliases
+  outside the selected FLAT provenance contract not to poison strict mode.
+  Those tests pass through the new single-admission path for both FLAT and LDS.
+- **Deletion result:** Production source is 85 physical lines smaller. The
+  second pair of physical-site canonicalizers, duplicate applicability and
+  support scans, semantic-equality helpers, and internal legacy-site support
+  forwarding overloads are deleted; no parallel compatibility path replaces
+  them.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 73.75
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

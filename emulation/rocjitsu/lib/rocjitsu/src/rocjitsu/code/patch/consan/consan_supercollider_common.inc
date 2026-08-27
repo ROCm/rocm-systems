@@ -3,35 +3,22 @@ struct ByteRange {
   uint64_t end = 0;
 };
 
-[[nodiscard]] bool sc_lds_site_semantics_equal(const ConSanLdsSite &lhs, const ConSanLdsSite &rhs) {
-  return std::tie(lhs.kind, lhs.supported_mvp, lhs.text_offset, lhs.file_offset, lhs.size,
-                  lhs.width_bits, lhs.dst_vgpr, lhs.dst_accvgpr, lhs.addr_vgpr, lhs.data_vgpr,
-                  lhs.second_data_vgpr, lhs.mnemonic) ==
-         std::tie(rhs.kind, rhs.supported_mvp, rhs.text_offset, rhs.file_offset, rhs.size,
-                  rhs.width_bits, rhs.dst_vgpr, rhs.dst_accvgpr, rhs.addr_vgpr, rhs.data_vgpr,
-                  rhs.second_data_vgpr, rhs.mnemonic);
-}
+[[nodiscard]] std::unordered_set<uint64_t>
+sc_admitted_access_file_offsets(const ConSanResult &result, ConSanAccessOrigin origin) {
+  std::unordered_set<uint64_t> admitted_text_offsets;
+  admitted_text_offsets.reserve(result.observation_plan.probe_intents.size());
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    if (intent.physical_site.code_object == result.program_inventory.code_object_id())
+      admitted_text_offsets.insert(intent.physical_site.original_text_offset);
+  }
 
-[[nodiscard]] bool sc_flat_site_semantics_equal(const ConSanFlatSite &lhs,
-                                                const ConSanFlatSite &rhs) {
-  return std::tie(lhs.kind, lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits,
-                  lhs.dst_vgpr, lhs.addr_vgpr, lhs.data_vgpr, lhs.raw_op, lhs.raw_saddr,
-                  lhs.raw_scale_offset, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
-                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.address_space_hint,
-                  lhs.mnemonic) ==
-         std::tie(rhs.kind, rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits,
-                  rhs.dst_vgpr, rhs.addr_vgpr, rhs.data_vgpr, rhs.raw_op, rhs.raw_saddr,
-                  rhs.raw_scale_offset, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
-                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.address_space_hint, rhs.mnemonic);
-}
-
-[[nodiscard]] bool sc_flat_site_is_applicable(const ConSanFlatSite &site,
-                                              ConSanFlatProvenanceMode provenance_mode) {
-  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
-    return false;
-  return site.address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-         (provenance_mode == ConSanFlatProvenanceMode::Likely &&
-          site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
+  std::unordered_set<uint64_t> offsets;
+  offsets.reserve(admitted_text_offsets.size());
+  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
+    if (access.origin == origin &&
+        admitted_text_offsets.contains(access.physical_id.original_text_offset))
+      offsets.insert(access.file_offset);
+  return offsets;
 }
 
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,

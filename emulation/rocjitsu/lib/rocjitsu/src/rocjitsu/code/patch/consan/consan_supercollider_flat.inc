@@ -211,66 +211,43 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint64_t container_entry_text_offset = 0;
     ConSanFlatSite site;
   };
-  size_t discovered_site_count = 0;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    discovered_site_count += kernel.flat_sites.size();
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    discovered_site_count += function.flat_sites.size();
-  auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalFlatSite>(
-      result.errors, "ConSan FLAT physical site",
-      [](const CanonicalFlatSite &candidate) { return candidate.site.file_offset; },
-      [](const CanonicalFlatSite &candidate) { return candidate.container_name; },
-      [&](const CanonicalFlatSite &lhs, const CanonicalFlatSite &rhs) {
-        return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-               sc_flat_site_semantics_equal(lhs.site, rhs.site);
-      },
-      [](CanonicalFlatSite &retained, const CanonicalFlatSite &alias) {
-        retained.site.owner_descriptor_file_offsets.insert(
-            retained.site.owner_descriptor_file_offsets.end(),
-            alias.site.owner_descriptor_file_offsets.begin(),
-            alias.site.owner_descriptor_file_offsets.end());
-      },
-      discovered_site_count);
+  const std::unordered_set<uint64_t> admitted_file_offsets =
+      sc_admitted_access_file_offsets(result, ConSanAccessOrigin::Flat);
+  std::map<uint64_t, CanonicalFlatSite> sites_by_file_offset;
+  const auto append_site = [&](std::string_view container_name,
+                               uint64_t container_entry_text_offset, ConSanFlatSite site) {
+    if (!admitted_file_offsets.contains(site.file_offset))
+      return;
+    auto [retained, inserted] = sites_by_file_offset.try_emplace(
+        site.file_offset, CanonicalFlatSite{container_name, container_entry_text_offset, site});
+    if (!inserted) {
+      retained->second.site.owner_descriptor_file_offsets.insert(
+          retained->second.site.owner_descriptor_file_offsets.end(),
+          site.owner_descriptor_file_offsets.begin(), site.owner_descriptor_file_offsets.end());
+    }
+  };
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     for (const ConSanFlatSite &site : kernel.flat_sites) {
-      if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
-        continue;
-      CanonicalFlatSite candidate{
-          .container_name = kernel.name,
-          .container_entry_text_offset = kernel.entry_text_offset,
-          .site = site,
-      };
-      candidate.site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
-      if (!canonicalizer.insert(std::move(candidate)))
-        return;
+      ConSanFlatSite owned_site = site;
+      owned_site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
+      append_site(kernel.name, kernel.entry_text_offset, std::move(owned_site));
     }
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-    for (const ConSanFlatSite &site : function.flat_sites) {
-      if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
-        continue;
-      if (!canonicalizer.insert({
-              .container_name = function.name,
-              .container_entry_text_offset = function.entry_text_offset,
-              .site = site,
-          }))
-        return;
-    }
-  }
-  std::optional<std::vector<CanonicalFlatSite>> canonical_sites_result =
-      std::move(canonicalizer).take();
-  if (!canonical_sites_result)
-    return;
-  std::vector<CanonicalFlatSite> canonical_sites = std::move(*canonical_sites_result);
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    for (const ConSanFlatSite &site : function.flat_sites)
+      append_site(function.name, function.entry_text_offset, site);
+
+  std::vector<CanonicalFlatSite> canonical_sites;
+  canonical_sites.reserve(sites_by_file_offset.size());
+  for (auto &entry : sites_by_file_offset)
+    canonical_sites.push_back(std::move(entry.second));
   for (CanonicalFlatSite &canonical : canonical_sites) {
     auto &owners = canonical.site.owner_descriptor_file_offsets;
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
   }
 
-  if (std::ranges::none_of(canonical_sites, [&](const CanonicalFlatSite &canonical) {
-        return is_supported_flat_check_trap_site(canonical.site, options.flat_provenance_mode);
-      })) {
+  if (canonical_sites.empty()) {
     publish_sc_access_coverage_support(result, ConSanAccessOrigin::Flat,
                                        [](uint64_t) { return false; });
     result.warnings.emplace_back(
@@ -453,8 +430,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                         uint32_t original_private_segment_size, FlatOwnerStackKind owner_stack_kind,
                         std::span<const LivenessAnalysis *const> owner_liveness,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
-    if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
-      return;
     ++supported_candidate_count;
     auto required_vgprs = flat_dword_count(site);
     if (!required_vgprs)
@@ -827,8 +802,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count)
       continue;
 
-    if (is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
-      supported_physical_sites.insert(site.file_offset);
+    supported_physical_sites.insert(site.file_offset);
 
     const bool selected_by_filter =
         options.test_kernel_name_filter.empty() ||

@@ -2174,12 +2174,6 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return false;
 }
 
-[[nodiscard]] bool is_supported_check_trap_site(const ConSanLdsSite &site, rj_code_arch_t arch) {
-  return is_supported_lds_check_trap_access(site.kind, site.size, site.width_bits, site.mnemonic,
-                                            site.dst_vgpr, site.dst_accvgpr, site.addr_vgpr,
-                                            site.data_vgpr, site.second_data_vgpr, arch);
-}
-
 [[nodiscard]] bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
                                                      ConSanFlatProvenanceMode mode) {
   return hint == ConSanFlatAddressSpaceHint::Group ||
@@ -2251,13 +2245,6 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
       return false;
   }
   return is_instrumentable_group_flat_hint(address_space_hint, mode);
-}
-
-[[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
-                                                     ConSanFlatProvenanceMode mode) {
-  return is_supported_flat_check_trap_access(site.kind, site.size, site.width_bits, site.mnemonic,
-                                             site.dst_vgpr, site.addr_vgpr, site.data_vgpr,
-                                             site.address_space_hint, mode);
 }
 
 [[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanFlatSite &site,

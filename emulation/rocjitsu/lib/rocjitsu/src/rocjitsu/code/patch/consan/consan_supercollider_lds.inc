@@ -15,55 +15,38 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     uint64_t container_entry_text_offset = 0;
     ConSanLdsSite site;
   };
-  size_t discovered_site_count = 0;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    discovered_site_count += kernel.lds_sites.size();
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    discovered_site_count += function.lds_sites.size();
-  auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalLdsSite>(
-      result.errors, "ConSan LDS physical site",
-      [](const CanonicalLdsSite &candidate) { return candidate.site.file_offset; },
-      [](const CanonicalLdsSite &candidate) { return candidate.container_name; },
-      [&](const CanonicalLdsSite &lhs, const CanonicalLdsSite &rhs) {
-        return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-               sc_lds_site_semantics_equal(lhs.site, rhs.site);
-      },
-      [](CanonicalLdsSite &retained, const CanonicalLdsSite &alias) {
-        // Plan and patch one physical instruction, but prove resource
-        // safety and descriptor growth for every aliasing dispatch.
-        retained.site.owner_descriptor_file_offsets.insert(
-            retained.site.owner_descriptor_file_offsets.end(),
-            alias.site.owner_descriptor_file_offsets.begin(),
-            alias.site.owner_descriptor_file_offsets.end());
-      },
-      discovered_site_count);
+  const std::unordered_set<uint64_t> admitted_lds_file_offsets =
+      sc_admitted_access_file_offsets(result, ConSanAccessOrigin::NativeLds);
+  const std::unordered_set<uint64_t> admitted_flat_file_offsets =
+      sc_admitted_access_file_offsets(result, ConSanAccessOrigin::Flat);
+  std::map<uint64_t, CanonicalLdsSite> sites_by_file_offset;
+  const auto append_site = [&](std::string_view container_name,
+                               uint64_t container_entry_text_offset, ConSanLdsSite site) {
+    if (!admitted_lds_file_offsets.contains(site.file_offset))
+      return;
+    auto [retained, inserted] = sites_by_file_offset.try_emplace(
+        site.file_offset, CanonicalLdsSite{container_name, container_entry_text_offset, site});
+    if (!inserted) {
+      retained->second.site.owner_descriptor_file_offsets.insert(
+          retained->second.site.owner_descriptor_file_offsets.end(),
+          site.owner_descriptor_file_offsets.begin(), site.owner_descriptor_file_offsets.end());
+    }
+  };
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     for (const ConSanLdsSite &site : kernel.lds_sites) {
-      CanonicalLdsSite candidate{
-          .container_name = kernel.name,
-          .container_entry_text_offset = kernel.entry_text_offset,
-          .site = site,
-      };
-      candidate.site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
-      if (!canonicalizer.insert(std::move(candidate)))
-        return;
+      ConSanLdsSite owned_site = site;
+      owned_site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
+      append_site(kernel.name, kernel.entry_text_offset, std::move(owned_site));
     }
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-    for (const ConSanLdsSite &site : function.lds_sites) {
-      if (!canonicalizer.insert({
-              .container_name = function.name,
-              .container_entry_text_offset = function.entry_text_offset,
-              .site = site,
-          }))
-        return;
-    }
-  }
-  std::optional<std::vector<CanonicalLdsSite>> canonical_sites_result =
-      std::move(canonicalizer).take();
-  if (!canonical_sites_result)
-    return;
-  std::vector<CanonicalLdsSite> canonical_sites = std::move(*canonical_sites_result);
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    for (const ConSanLdsSite &site : function.lds_sites)
+      append_site(function.name, function.entry_text_offset, site);
+
+  std::vector<CanonicalLdsSite> canonical_sites;
+  canonical_sites.reserve(sites_by_file_offset.size());
+  for (auto &entry : sites_by_file_offset)
+    canonical_sites.push_back(std::move(entry.second));
   for (CanonicalLdsSite &canonical : canonical_sites) {
     auto &owners = canonical.site.owner_descriptor_file_offsets;
     std::ranges::sort(owners);
@@ -71,32 +54,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  const bool has_plannable_supported_site = [&] {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      if (kernel.preflight_action == ConSanPreflightAction::Blocked)
-        continue;
-      if (std::ranges::any_of(kernel.lds_sites, [&](const auto &site) {
-            return is_supported_check_trap_site(site, arch);
-          }))
-        return true;
-    }
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-      for (const ConSanLdsSite &site : function.lds_sites) {
-        if (!is_supported_check_trap_site(site, arch) || site.owner_descriptor_file_offsets.empty())
-          continue;
-        const bool every_owner_is_plannable =
-            std::ranges::all_of(site.owner_descriptor_file_offsets, [&](uint64_t owner) {
-              const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner,
-                                                    &ConSanKernelInfo::descriptor_file_offset);
-              return kernel != result.program_inventory.kernels().end() &&
-                     kernel->preflight_action != ConSanPreflightAction::Blocked;
-            });
-        if (every_owner_is_plannable)
-          return true;
-      }
-    }
-    return false;
-  }();
+  const bool has_plannable_supported_site =
+      std::ranges::any_of(canonical_sites, [&](const CanonicalLdsSite &canonical) {
+        return !canonical.site.owner_descriptor_file_offsets.empty() &&
+               std::ranges::all_of(
+                   canonical.site.owner_descriptor_file_offsets, [&](uint64_t owner) {
+                     const auto kernel =
+                         std::ranges::find(result.program_inventory.kernels(), owner,
+                                           &ConSanKernelInfo::descriptor_file_offset);
+                     return kernel != result.program_inventory.kernels().end() &&
+                            kernel->preflight_action != ConSanPreflightAction::Blocked;
+                   });
+      });
   if (!has_plannable_supported_site) {
     publish_sc_access_coverage_support(result, ConSanAccessOrigin::NativeLds,
                                        [](uint64_t) { return false; });
@@ -432,12 +401,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       selected_container_ranges.add(container.entry_text_offset, container.code_size);
     if (options.probe_flat_check_trap) {
       for (const ConSanFlatSite &site : container.flat_sites) {
-        if (is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
+        if (admitted_flat_file_offsets.contains(site.file_offset))
           future_flat_probe_ranges.add(site.text_offset, site.size);
       }
     }
     for (const ConSanLdsSite &site : container.lds_sites) {
-      if (is_supported_check_trap_site(site, arch))
+      if (admitted_lds_file_offsets.contains(site.file_offset))
         supported_lds_probe_ranges.add(site.text_offset, site.size);
     }
   };
@@ -877,7 +846,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   supported_physical_sites.reserve(sites_with_complete_context.size());
   if (decoder != nullptr) {
     for (const ConSanLdsSite *site : sites_with_complete_context) {
-      if (site != nullptr && is_supported_check_trap_site(*site, arch))
+      if (site != nullptr)
         supported_physical_sites.insert(site->file_offset);
     }
   }
@@ -958,8 +927,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         site_context.owner_descriptor_file_offsets.front();
     {
       const ConSanLdsSite &site = *site_context.site;
-      if (!is_supported_check_trap_site(site, arch))
-        continue;
       ++supported_candidate_count;
       const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
           arch == ROCJITSU_CODE_ARCH_CDNA5 && site.file_offset >= site.text_offset
