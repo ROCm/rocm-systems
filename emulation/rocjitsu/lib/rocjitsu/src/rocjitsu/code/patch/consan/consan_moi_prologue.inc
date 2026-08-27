@@ -1764,8 +1764,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
 
 void rollback_moi_dispatch_id_as_unsupported(ConSanResult &result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
-  result.replacement.clear();
-  result.patches.clear();
+  result.discard_candidate_modification();
   result.warnings.emplace_back("ConSan MOI dispatch-ID capture is unsupported: " +
                                std::move(reason));
 }

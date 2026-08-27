@@ -271,8 +271,7 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 
 [[nodiscard]] ConSanResult rollback_composite_mutation(ConSanResult result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
-  result.replacement.clear();
-  result.patches.clear();
+  result.discard_candidate_modification();
   result.mutation.fault.applied = 0;
   result.mutation.perturbation.applied = 0;
   result.warnings.emplace_back("ConSan rolled back staged fault/perturbation composition: " +
@@ -564,8 +563,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         instrument_result.errors.emplace_back(
             "ConSan staged composition is missing an independently validated stage");
         instrument_result.outcome = ConSanTransformOutcome::Invalid;
-        instrument_result.replacement.clear();
-        instrument_result.patches.clear();
+        instrument_result.discard_candidate_modification();
         instrument_result.mutation.fault.applied = 0;
         instrument_result.mutation.applied_fault_logical_identity.reset();
         return instrument_result;
@@ -630,8 +628,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       instrument_result.mutation.applied_fault_logical_identity.reset();
       break;
     }
-    instrument_result.replacement.clear();
-    instrument_result.patches.clear();
+    instrument_result.discard_candidate_modification();
     return instrument_result;
   }
 
@@ -940,8 +937,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       if (result.outcome == ConSanTransformOutcome::ModifiedValid)
         result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
                                                : ConSanTransformOutcome::Invalid;
-      result.replacement.clear();
-      result.patches.clear();
+      result.discard_candidate_modification();
     }
   }
 

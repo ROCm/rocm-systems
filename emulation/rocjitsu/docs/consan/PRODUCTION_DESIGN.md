@@ -5287,6 +5287,29 @@ analysis completed.
   tranche; the complete serialized physical matrix remains reserved for the
   final gate. E2E validation remains outside this work.
 
+### Slice 5BV: give candidate rollback one artifact operation
+
+- **One owned rollback operation:** `ConSanTransformArtifacts` now owns
+  `discard_candidate_modification()`, the single operation that removes a
+  candidate replacement image together with the patch telemetry describing
+  it. The operation deliberately leaves outcome classification, diagnostics,
+  semantic inventory, and mutation facts to the caller that knows why the
+  candidate was rejected.
+- **Delete parallel clearing:** Composition, final validation, MOI dispatch-ID
+  fallback, SuperCollider proof failure, and both runtime-binding rejection
+  paths no longer independently clear the two vectors. A focused unit test
+  proves both the removal and the retained-state contract. No fallback clearing
+  path or second representation remains.
+- **Deletion accounting:** Implementation files add eighteen and delete
+  thirty-two physical lines, a net deletion of fourteen. The focused test adds
+  twelve lines.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in about 66
+  seconds. Slice 5BM's physical-gfx950 smoke remains the periodic physical gate;
+  the complete serialized physical matrix remains reserved for the final gate.
+  E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

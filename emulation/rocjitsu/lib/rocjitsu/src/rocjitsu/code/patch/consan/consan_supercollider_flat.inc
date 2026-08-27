@@ -1980,8 +1980,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
         access->instruction_size > result.replacement.size() - access->file_offset) {
       result.errors.emplace_back("ConSan flat trap proof exceeds ELF bytes");
       result.outcome = ConSanTransformOutcome::Invalid;
-      result.replacement.clear();
-      result.patches.clear();
+      result.discard_candidate_modification();
       return;
     }
     std::memcpy(result.replacement.data() + access->file_offset, replacement.data(),

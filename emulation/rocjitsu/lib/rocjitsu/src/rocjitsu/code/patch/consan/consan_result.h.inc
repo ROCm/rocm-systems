@@ -172,6 +172,12 @@ struct ConSanTransformArtifacts {
     if (outcome == ConSanTransformOutcome::Unchanged)
       outcome = ConSanTransformOutcome::ModifiedValid;
   }
+  /// Discard the candidate image and its patch telemetry without changing the
+  /// caller-owned outcome, diagnostics, semantic inventory, or mutation facts.
+  void discard_candidate_modification() {
+    replacement.clear();
+    patches.clear();
+  }
 };
 
 /// Mutable compatibility-lowering state that has not yet moved into focused

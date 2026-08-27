@@ -266,6 +266,18 @@ TEST(ConSan, StagedModificationStateCannotOverwriteFailureOutcome) {
 
   artifacts.patches.emplace_back();
   EXPECT_TRUE(artifacts.modified());
+
+  artifacts.replacement = {1u, 2u, 3u};
+  artifacts.warnings.emplace_back("retained diagnostic");
+  artifacts.outcome = ConSanTransformOutcome::Unsupported;
+  artifacts.mutation.fault.planned = 2u;
+  artifacts.discard_candidate_modification();
+  EXPECT_TRUE(artifacts.replacement.empty());
+  EXPECT_TRUE(artifacts.patches.empty());
+  EXPECT_EQ(artifacts.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(artifacts.warnings, std::vector<std::string>{"retained diagnostic"});
+  EXPECT_EQ(artifacts.mutation.fault.planned, 2u);
+  EXPECT_FALSE(artifacts.modified());
 }
 
 TEST(ConSan, ParsesFlavorNames) {

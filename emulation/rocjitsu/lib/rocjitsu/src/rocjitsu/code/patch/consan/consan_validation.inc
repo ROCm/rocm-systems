@@ -4557,15 +4557,13 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   }
   if (has_blocked_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
-    result.replacement.clear();
-    result.patches.clear();
+    result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   if (!result.errors.empty()) {
     result.outcome = ConSanTransformOutcome::Invalid;
-    result.replacement.clear();
-    result.patches.clear();
+    result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
@@ -4574,8 +4572,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   // already produced a replacement image. Never allow those partial probes
   // to turn an Unsupported result back into ModifiedValid.
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    result.replacement.clear();
-    result.patches.clear();
+    result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
@@ -4595,8 +4592,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       } else {
         result.outcome = ConSanTransformOutcome::Invalid;
         result.mutation.applied_fault_logical_identity.reset();
-        result.replacement.clear();
-        result.patches.clear();
+        result.discard_candidate_modification();
       }
     }
     return result;

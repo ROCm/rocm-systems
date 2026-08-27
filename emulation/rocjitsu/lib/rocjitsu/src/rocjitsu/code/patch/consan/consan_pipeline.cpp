@@ -277,8 +277,7 @@ void TransformResult::discard_replacement(std::string warning) {
                                                "runtime-owned report allocation failed");
   }
   outcome = ConSanTransformOutcome::Unsupported;
-  replacement.clear();
-  patches.clear();
+  discard_candidate_modification();
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   moi_retry_inventory_available_ = false;
@@ -517,9 +516,8 @@ TransformResult TransformResult::publish_optional(
       binding_stage.status = ConSanPipelineStageStatus::Unsupported;
       binding_stage.contract_issue = binding_issue;
       result.outcome = ConSanTransformOutcome::Unsupported;
-      result.replacement.clear();
+      result.discard_candidate_modification();
       result.dispatch_requirements = {};
-      result.patches.clear();
     }
   }
 
