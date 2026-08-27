@@ -625,6 +625,20 @@ TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
     RunCustomTestEpilog(&smt);
 }
 
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatch();
+    RunCustomTestEpilog(&smt);
+}
+
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Perf_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatchPerf();
+    RunCustomTestEpilog(&smt);
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
     VirtMemoryTestBasic vmt;
 

@@ -2201,6 +2201,35 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(ptrs);
+  IS_BAD_PTR(sizes);
+  IS_ZERO(count);
+  IS_BAD_PTR(dst_agents);
+  IS_ZERO(num_dst_agents);
+
+  if (!core::Runtime::runtime_singleton_->XnackEnabled())
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
+
+  // every memory range passed must have a prefetch dest agent
+  if (count != num_dst_agents) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if ((num_dep_signals == 0 && dep_signals != nullptr) ||
+      (num_dep_signals > 0 && dep_signals == nullptr))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->SvmDiscardAndPrefetchBatch(
+      ptrs, sizes, count, dst_agents, num_dst_agents,
+      num_dep_signals, dep_signals, completion_signal);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);
