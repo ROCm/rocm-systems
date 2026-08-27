@@ -8,6 +8,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.30.7.
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
 * Added multi-node multi-segment symmetric-window registration and transfers for the InfiniBand GIN proxy/RMA path. Contiguous virtual ranges backed by multiple GPU or mixed GPU/host physical allocations are exported and registered per segment for GIN `iput`, `iget`, `iputSignal`, and `iflush`.
+* Added multi-segment DMA-BUF registration and transfer splitting to the classic NET/IB P2P path while preserving compatibility with legacy single-segment peers.
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`).
 
 ### Changed
@@ -22,7 +23,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
-* Multi-segment InfiniBand registration is limited to the GIN proxy/RMA path; classic NET/IB P2P and CAST do not yet consume these per-segment handles.
+* Multi-segment InfiniBand registration is not yet supported by CAST.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 
