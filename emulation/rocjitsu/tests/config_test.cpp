@@ -58,6 +58,38 @@ std::vector<uint8_t> read_binary_file(const std::string &path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
+TEST(ConfigLoaderTest, LoadCdna2Config) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(loaded.device.gpu_id, 50149u);
+  EXPECT_EQ(loaded.device.device_id, 0x740fu);
+  EXPECT_EQ(loaded.device.family_id, 0x8du);
+  EXPECT_EQ(loaded.device.gfx_target_version, 90010u);
+  EXPECT_EQ(loaded.device.revision_id, 1u);
+  EXPECT_EQ(loaded.device.pci_revision_id, 2u);
+  EXPECT_EQ(loaded.device.wave_front_size, 64u);
+  EXPECT_EQ(loaded.device.max_waves_per_simd, 8u);
+  EXPECT_EQ(loaded.device.lds_size_kb, 64u);
+
+  // Aldebaran is a single-die part: one XCD of 8 SEs, 14 CUs per SE. MI210
+  // exposes 104 active CUs through simd_count but has capacity of 112
+  EXPECT_EQ(soc->num_xcds(), 1u);
+  EXPECT_EQ(loaded.device.num_shader_engines, 8u);
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine, 1u);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, 14u);
+  EXPECT_EQ(loaded.device.simd_per_cu, 4u);
+  EXPECT_EQ(loaded.device.simd_count, 416u);
+  EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 8u);
+  EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 14u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 104u);
+  EXPECT_LE(loaded.device.simd_count, loaded.device.num_shader_engines *
+                                          loaded.device.num_shader_arrays_per_engine *
+                                          loaded.device.num_cu_per_sh * loaded.device.simd_per_cu);
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
