@@ -16,6 +16,11 @@ To accommodate diverse analysis workflows, ``rocprofv3`` provides comprehensive 
 - **PFTrace** (Perfetto protocol buffers) - Binary trace format for high-performance visualization using Perfetto.
 - **OTF2** (Open Trace Format 2) - Standardized trace format for interoperability with third-party analysis tools.
 
+.. warning::
+
+   Direct CSV, PFTrace, and OTF2 output from ``rocprofv3`` is deprecated and might omit data for some tracing features, including hipFILE and rocSHMEM tracing.
+   Collect in the default rocpd format, then use ``rocpd convert`` to create CSV, PFTrace, or OTF2 output.
+
 The ``rocpd`` output format serves as the primary data repository for ``rocprofv3`` profiling sessions. This format leverages SQLite3's ACID-compliant database engine to provide robust, structured storage of comprehensive profiling datasets. The relational schema enables efficient querying and manipulation of profiling data through standard SQL interfaces, facilitating complex analytical operations and custom reporting workflows.
 
 Features

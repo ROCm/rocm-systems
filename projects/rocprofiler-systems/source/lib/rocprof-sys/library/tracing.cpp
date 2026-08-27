@@ -49,8 +49,6 @@ get_timemory_hash_aliases(std::int64_t _tid)
 bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
 bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
 bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
-bool debug_user =
-    rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
 
 void
 copy_timemory_hash_ids()
@@ -116,7 +114,7 @@ copy_timemory_hash_ids()
 
     // distribute the contents of that combined container to each thread-specific
     // container before finalizing
-    if(get_state() == State::Finalized)
+    if(state::process::get() == state::process::Finalized)
     {
         if(hash_storage)
         {
@@ -152,17 +150,18 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(comp::wall_clock::record(), get_mode() != Mode::Sampling);
+        thread_info::set_start(comp::wall_clock::record(),
+                               get_mode() != state::process::Mode::Sampling);
     });
 }
 
 void
 thread_init()
 {
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_dtor = scope::destructor{ []() {
-        if(get_state() != State::Finalized)
+        if(state::process::get() != state::process::Finalized)
         {
             if(get_use_causal())
                 causal::sampling::shutdown();
@@ -175,7 +174,7 @@ thread_init()
         }
     } };
 
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_setup = []() {
         const auto& _tinfo = thread_info::init();
@@ -215,7 +214,7 @@ thread_init()
         return true;
     }();
 
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _sample_setup = []() {
         auto _idx = utility::get_thread_index();

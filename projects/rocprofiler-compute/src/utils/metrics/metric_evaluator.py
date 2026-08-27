@@ -25,6 +25,7 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
+from utils.metrics.common import EVAL_BUILTINS
 from utils.metrics.noise_clamper import to_noise_clamp
 
 
@@ -70,7 +71,7 @@ class MetricEvaluator:
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(expr, "<string>", "eval"),
-                    {},
+                    {"__builtins__": EVAL_BUILTINS},
                     local_expr_context,
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose

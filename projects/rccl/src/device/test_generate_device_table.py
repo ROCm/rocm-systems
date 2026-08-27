@@ -18,6 +18,7 @@ generated text rather than compiling it.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,8 +29,17 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 
 # A small, fast slice of collectives. "AllReduce RING SIMPLE Sum f32" expands to
 # both an unguarded primary and an arch-guarded variant, which exercises the
-# guarded-out (trap) leaf below.
-ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|SendRecv"
+# guarded-out (trap) leaf below. The AllReduce LL128 entries are reg-variant
+# (see ll128_reg_variant_colls), so they carry a "_1"/"_2" reg suffix while every
+# other kernel omits the reg field -- the pure-RDC dispatcher must call each by
+# its exact declared name (regression: #ll128-reg-split).
+#
+# SendRecv is emitted as TWO latency-protocol kernel variants (reg_values_of):
+#   reg=0 -> legacy LL send/recv kernel, built unguarded on every arch (the default)
+#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950 + ENABLE_LL128
+#            and only for the base unrolls (the gfx1250-only unrolls 8/16/32 are
+#            excluded by func_validate). See tests_sendrecv_* below.
+ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
 def _generate(tmpdir, ifc="OFF"):
@@ -82,10 +92,113 @@ class DeviceTableGenerationTest(unittest.TestCase):
         self.assertIn("struct Caller1<0, 1>", self.header)
         self.assertRegex(self.header, r"Caller1<0, \d+>::call1")
 
+    def test_pure_rdc_dispatch_calls_only_declared_symbols(self):
+        # Every ncclDevFunc_* called by name in a pure-RDC Caller leaf must be
+        # one of the forward-declared symbols. The reg-variant split makes the
+        # symbol name conditional (reg suffix only when reg != 0), so a leaf that
+        # reconstructs the name from all fields (appending a stray "_0") would
+        # reference an undeclared symbol and fail the -fgpu-rdc / --no-device-linker
+        # link. This asserts the two symbol sets agree.
+        declared = set(re.findall(r"__device__ void (ncclDevFunc_\w+)\(\);", self.header))
+        self.assertTrue(declared, "no forward declarations found")
+        called = set(
+            re.findall(r"noexcept \{ (ncclDevFunc_\w+)\(\); \}", self.header)
+        )
+        self.assertTrue(called, "no pure-RDC dispatch leaves found")
+        undeclared = called - declared
+        self.assertEqual(
+            set(),
+            undeclared,
+            "pure-RDC dispatch calls symbols that were never declared: %s" % sorted(undeclared),
+        )
+        # Sanity: no kernel ever gets a bogus "_0" reg suffix.
+        self.assertFalse(any(re.search(r"_LL128_.*_0$", s) for s in called))
+        # Sanity: AllReduce LL128 must appear as a reg-variant PAIR -- a reg=1 and
+        # a reg=2 symbol. Match the reg field specifically: a bare endswith("_1"/"_2")
+        # is not enough because reg=0 kernels omit the reg field and end in the unroll
+        # value (which is also 1/2), so that check passes even if the split were removed.
+        self.assertTrue(
+            any(re.search(r"_AllReduce_RING_LL128_Sum_f32_\d+_\d+_\d+_1$", s) for s in called),
+            "registered (reg=1) AllReduce LL128 symbol missing",
+        )
+        self.assertTrue(
+            any(re.search(r"_AllReduce_RING_LL128_Sum_f32_\d+_\d+_\d+_2$", s) for s in called),
+            "non-registered (reg=2) AllReduce LL128 symbol missing",
+        )
+
     def test_guarded_out_leaf_traps_not_noop(self):
         # Arch-guarded-out slots must fail fast (matching the old nullptr table
         # entries), not silently no-op.
         self.assertIn("__builtin_trap();", self.header)
+
+    # ---- SendRecv LL / LL128 reg-variant codegen (ll128-p2p-send-recv) --------
+    # These pin the two-kernel split so a regression in reg_values_of /
+    # get_arch_guard / func_validate for SendRecv fails here instead of only at
+    # device link or at runtime.
+
+    def _sendrecv_decls(self):
+        # All forward-declared SendRecv device-function symbols.
+        return set(
+            re.findall(r"__device__ void (ncclDevFunc_SendRecv\w*)\(\);", self.header)
+        )
+
+    def test_sendrecv_emits_ll_and_ll128_reg_variants(self):
+        # Both kernels must be generated: the legacy LL kernel (reg=0, no reg
+        # suffix) and the LL128 kernel (reg=1, trailing "_1"). If reg_values_of
+        # regressed to ["0"] only the LL kernel would exist.
+        decls = self._sendrecv_decls()
+        self.assertTrue(decls, "no SendRecv forward declarations generated")
+        ll = [s for s in decls if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+", s)]
+        ll128 = [s for s in decls if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+_1", s)]
+        self.assertTrue(ll, "legacy LL SendRecv kernel (reg=0) missing")
+        self.assertTrue(ll128, "LL128 SendRecv kernel (reg=1, '_1' suffix) missing")
+
+    def test_sendrecv_ll128_is_arch_guarded_and_ll_is_not(self):
+        # Every reg=1 (LL128) SendRecv declaration must sit inside the
+        # gfx942/gfx950 + ENABLE_LL128 guard...
+        guarded = re.findall(
+            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\)\) && defined\(ENABLE_LL128\)\n"
+            r"__device__ void (ncclDevFunc_SendRecv\w*_1)\(\);\n#endif",
+            self.header,
+        )
+        self.assertTrue(guarded, "LL128 SendRecv (reg=1) declaration is not arch-guarded")
+        # ...and every emitted reg=1 SendRecv symbol is one of those guarded ones
+        # (none leaks out unguarded onto the default-built archs). A reg=1 symbol
+        # has FOUR trailing numeric fields (acc, pipeline, unroll, reg); a bare
+        # endswith("_1") would also catch the reg=0 unroll=1 kernel (..._0_0_1).
+        ll128 = {
+            s
+            for s in self._sendrecv_decls()
+            if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+_1", s)
+        }
+        self.assertEqual(
+            set(),
+            ll128 - set(guarded),
+            "LL128 SendRecv kernels emitted without the gfx942/gfx950 guard: %s"
+            % sorted(ll128 - set(guarded)),
+        )
+        # The legacy LL kernel must stay unguarded (built on every arch): its
+        # bare declaration line has no surrounding #if.
+        self.assertRegex(
+            self.header,
+            r"\n__device__ void ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+\(\);\n",
+            "legacy LL SendRecv (reg=0) declaration should be unguarded",
+        )
+
+    def test_sendrecv_ll128_excludes_gfx1250_only_unrolls(self):
+        # func_validate drops SendRecv reg=1 for the gfx1250-only unrolls
+        # (8/16/32) since LL128 send/recv targets gfx942/gfx950. Emitting them
+        # would reference symbols that are never compiled (undefined at link).
+        decls = self._sendrecv_decls()
+        bad = sorted(s for s in decls if re.search(r"_(?:8|16|32)_1$", s))
+        self.assertEqual(
+            [], bad, "LL128 SendRecv (reg=1) must not be generated for unrolls 8/16/32: %s" % bad
+        )
+        # The legacy LL kernel (reg=0) still covers those unrolls.
+        self.assertTrue(
+            any(re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_(?:8|16|32)", s) for s in decls),
+            "legacy LL SendRecv (reg=0) missing for unrolls 8/16/32",
+        )
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.
