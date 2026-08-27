@@ -2968,3 +2968,75 @@ TEST(GenericDataHazardEngineTest, LdsRaceIdentifiesTheWritingInstruction) {
   EXPECT_EQ(warning.source_pc, 0x300u);
   EXPECT_EQ(warning.source_raw_isa, write_isa);
 }
+
+namespace {
+
+/// Race one LDS address between two waves, then close the epoch with a
+/// workgroup barrier. Instruction ids are per-execution, PCs are the static
+/// identity of the pair, so the two vary independently here.
+void race_one_epoch(DataHazardEngine &engine, EntityId write_id, uint64_t write_pc,
+                    EntityId read_id, uint64_t read_pc) {
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+
+  auto access = [&](EntityId id, uint64_t pc, const ExecutionKey &wave, bool is_write) {
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(id, pc);
+    instruction.instruction.execution = wave;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent event;
+    event.instruction = instruction.instruction;
+    event.resource_kind = ResourceKind::LocalMemory;
+    event.address = 0x80;
+    event.size_bytes = 4;
+    event.is_read = !is_write;
+    event.is_write = is_write;
+    engine.on_resource_access(event);
+  };
+
+  access(write_id, write_pc, writer_wave, true);
+  access(read_id, read_pc, reader_wave, false);
+
+  BarrierEvent barrier;
+  barrier.wave = writer_wave;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, RepeatedExecutionsOfOneLdsRaceReportOnce) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 1});
+
+  race_one_epoch(engine, 1, 0x300, 2, 0x340);
+  race_one_epoch(engine, 3, 0x300, 4, 0x340);
+
+  EXPECT_EQ(engine.warning_snapshot().size(), 1u);
+}
+
+TEST(GenericDataHazardEngineTest, SecondLdsRaceBetweenTheSameWavesIsStillReported) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 1});
+
+  race_one_epoch(engine, 1, 0x300, 2, 0x340);
+  // A different pair of instructions racing the same address in a later epoch
+  // is a second defect, not a repeat of the first.
+  race_one_epoch(engine, 3, 0x400, 4, 0x440);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x300u);
+  EXPECT_EQ(warnings[0].finding.instruction.pc, 0x340u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.pc, 0x400u);
+  EXPECT_EQ(warnings[1].finding.instruction.pc, 0x440u);
+}
