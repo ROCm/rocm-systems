@@ -535,21 +535,6 @@ def test_membw_analysis_counter_selection(
 # =============================================================================
 
 
-def _make_roofline_soc(tmp_path: Path, filter_blocks: list[str]) -> OmniSoC_Base:
-    """Build a benchmark-capable SoC with the given effective filter blocks."""
-    args = SimpleNamespace(
-        device=0,
-        filter_blocks=filter_blocks,
-        no_roof=False,
-        output_directory=str(tmp_path),
-    )
-    mspec = SimpleNamespace(cache_sizes={}, rocminfo_lines=None)
-    with patch("rocprof_compute_soc.soc_base.console_debug"):
-        soc = OmniSoC_Base(args, mspec)
-    soc.set_arch("gfx942")
-    return soc
-
-
 @pytest.mark.parametrize(
     ("filter_blocks", "expect_benchmark"),
     [
@@ -561,10 +546,19 @@ def _make_roofline_soc(tmp_path: Path, filter_blocks: list[str]) -> OmniSoC_Base
     ],
 )
 def test_post_profiling_roofline_gating(
-    tmp_path: Path, monkeypatch, filter_blocks: list[str], expect_benchmark: bool
+    perfmon_config,
+    tmp_path: Path,
+    monkeypatch,
+    filter_blocks: list[str],
+    expect_benchmark: bool,
 ) -> None:
     """Roofline runs only when the effective filter blocks cover block 4."""
-    soc = _make_roofline_soc(tmp_path, filter_blocks)
+    soc = _make_soc(perfmon_config, arch="gfx942")
+    args = soc.get_args()
+    args.device = 0
+    args.filter_blocks = filter_blocks
+    args.no_roof = False
+    args.output_directory = str(tmp_path)
     mock_benchmark = MagicMock()
     monkeypatch.setattr(
         "rocprof_compute_soc.soc_base.run_roofline_benchmark", mock_benchmark
