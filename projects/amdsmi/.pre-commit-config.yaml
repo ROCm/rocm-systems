@@ -26,6 +26,7 @@ exclude: |
     | build-.*/
     | _build/
     | esmi_ib_library/
+    | ualoe_lib/
     | third_party/
 fail_fast: false
 

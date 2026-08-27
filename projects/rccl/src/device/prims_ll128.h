@@ -306,10 +306,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 0; g < WordPerThread / 2; g++) {
       int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
       if (!flagThread || g % 2 == 0) {
-        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN)
+        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
           storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
-        else
+        } else {
           storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+        }
       }
     }
     __syncwarp();

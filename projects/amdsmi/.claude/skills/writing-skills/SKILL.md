@@ -115,6 +115,11 @@ Run `wc -w SKILL.md` before committing.
 2. **GREEN:** Write the minimal skill addressing those specific failures. Re-run — agent should now comply.
 3. **REFACTOR:** Find new rationalizations, add explicit counters (rationalization table, red-flags list). Repeat until bulletproof.
 
+For a **technique/reference skill whose commands an agent must run** (not just a
+discipline rule), the single-pass RED-GREEN-REFACTOR above is not enough — iterate
+it as a loop against a known-answer fixture until a literal run is deterministic,
+then minimize. Use the `pressure-testing-skills` skill for that method.
+
 ## Discipline-Skill Hardening
 
 If the skill enforces a rule (TDD, verification, root-cause-first), add:

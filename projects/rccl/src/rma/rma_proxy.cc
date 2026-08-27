@@ -379,8 +379,8 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
       props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
     }
 #endif
-    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address,
-                                   size, NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
+    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address, size,
+                                   NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
     if (rmaHostWins[n] == NULL) {
       WARN("rank %d - RMA Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
       return ncclSystemError;
