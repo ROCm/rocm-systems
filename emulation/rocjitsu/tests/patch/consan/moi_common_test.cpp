@@ -3179,5 +3179,77 @@ TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
             ConSanAccessPolicyReason::FlatProvenancePolicyExcluded);
 }
 
+TEST(ConSanMoi, OccupiedTextRangesCanonicalizeAndUseHalfOpenOverlap) {
+  const consan_detail::MoiOccupiedTextRanges occupied({
+      {40u, 50u},
+      {10u, 20u},
+      {20u, 25u},
+      {22u, 30u},
+      {70u, 70u},
+      {90u, 80u},
+  });
+
+  ASSERT_EQ(occupied.ranges().size(), 2u);
+  EXPECT_EQ(occupied.ranges()[0], std::make_pair(10u, 30u));
+  EXPECT_EQ(occupied.ranges()[1], std::make_pair(40u, 50u));
+  EXPECT_FALSE(occupied.overlaps(0u, 10u));
+  EXPECT_TRUE(occupied.overlaps(9u, 11u));
+  EXPECT_TRUE(occupied.overlaps(29u, 40u));
+  EXPECT_FALSE(occupied.overlaps(30u, 40u));
+  EXPECT_FALSE(occupied.overlaps(50u, 60u));
+  EXPECT_FALSE(occupied.overlaps(20u, 20u));
+  EXPECT_FALSE(occupied.overlaps(30u, 20u));
+}
+
+TEST(ConSanMoi, DenseCandidatePartitionSeparatesOwnerCapacityAndBranchReach) {
+  const auto make_candidate = [](ConSanProgramContainerKind kind, std::string name,
+                                 uint64_t anchor) {
+    ConSanMoiCandidate candidate;
+    candidate.container.kind = kind;
+    candidate.container.name = std::move(name);
+    candidate.physical_id.original_text_offset = anchor;
+    candidate.instruction_size = sizeof(uint32_t);
+    return candidate;
+  };
+  std::array candidates = {
+      make_candidate(ConSanProgramContainerKind::Kernel, "owner", 100u),
+      make_candidate(ConSanProgramContainerKind::Function, "owner", 30u),
+      make_candidate(ConSanProgramContainerKind::Kernel, "owner", 300000u),
+      make_candidate(ConSanProgramContainerKind::Kernel, "owner", 20u),
+      make_candidate(ConSanProgramContainerKind::Kernel, "owner", 40u),
+  };
+  const std::array<const ConSanMoiCandidate *, candidates.size()> input = {
+      &candidates[0], &candidates[1], &candidates[2], &candidates[3], &candidates[4],
+  };
+
+  const auto capacity_two = consan_detail::partition_moi_dense_candidates(input, 2u);
+  ASSERT_EQ(capacity_two.groups.size(), 4u);
+  EXPECT_EQ(capacity_two.groups[0].owner.kind, ConSanProgramContainerKind::Kernel);
+  EXPECT_EQ(capacity_two.groups[0].candidates,
+            (std::vector<const ConSanMoiCandidate *>{&candidates[3], &candidates[4]}));
+  EXPECT_EQ(capacity_two.groups[0].first_candidate_index, 3u);
+  ASSERT_EQ(capacity_two.groups[1].candidates.size(), 1u);
+  EXPECT_EQ(capacity_two.groups[1].candidates.front(), &candidates[0]);
+  EXPECT_EQ(capacity_two.groups[1].first_candidate_index, 0u);
+  ASSERT_EQ(capacity_two.groups[2].candidates.size(), 1u);
+  EXPECT_EQ(capacity_two.groups[2].candidates.front(), &candidates[2]);
+  EXPECT_EQ(capacity_two.groups[2].first_candidate_index, 2u);
+  EXPECT_EQ(capacity_two.groups[3].owner.kind, ConSanProgramContainerKind::Function);
+  ASSERT_EQ(capacity_two.groups[3].candidates.size(), 1u);
+  EXPECT_EQ(capacity_two.groups[3].candidates.front(), &candidates[1]);
+  EXPECT_EQ(capacity_two.index_by_candidate.at(&candidates[4]), 4u);
+
+  const consan_detail::MoiDenseRouteOwner kernel_owner{ConSanProgramContainerKind::Kernel, "owner"};
+  ASSERT_EQ(capacity_two.candidates_by_owner.at(kernel_owner).size(), 4u);
+  EXPECT_EQ(capacity_two.candidates_by_owner.at(kernel_owner).front(), &candidates[3]);
+
+  const auto unlimited = consan_detail::partition_moi_dense_candidates(input, 0u);
+  ASSERT_EQ(unlimited.groups.size(), 3u);
+  EXPECT_EQ(unlimited.groups[0].candidates, (std::vector<const ConSanMoiCandidate *>{
+                                                &candidates[3], &candidates[4], &candidates[0]}));
+  ASSERT_EQ(unlimited.groups[1].candidates.size(), 1u);
+  EXPECT_EQ(unlimited.groups[1].candidates.front(), &candidates[2]);
+}
+
 } // namespace
 } // namespace rocjitsu

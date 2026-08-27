@@ -318,6 +318,18 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
+Dense access routing has one shared topology contract across Record/Replay,
+Sampled, and Inline Shadow. `MoiDenseCandidatePartition` groups sites by the
+typed kernel/function owner, orders their pristine-text anchors, preserves each
+site's appended-bank index, and splits groups only at a caller-supplied
+dispatcher capacity or the common SOPP branch-reach limit. Each engine still
+owns its evidence-specific relay width, scalar ABI, and decision to use a dense
+route. `MoiOccupiedTextRanges` gives access and barrier placement one canonical
+half-open range set, so every engine excludes access, barrier, fence, atomic,
+and previously patched guest instructions with the same overlap semantics.
+Target policy is therefore explicit at the caller while owner partitioning and
+relocation safety are target-independent shared mechanism.
+
 Most of this mechanism is currently reached through `lower_consan` inside
 `TransformResult` construction. That implementation is the sole place allowed
 to adapt typed inputs back to one fresh `ConSanOptions`, and it returns only
@@ -591,10 +603,10 @@ The next extraction order follows dependency direction:
 
 1. extract shared decode and inventory construction from the prototype
    translation units;
-3. separate shared resource planning from engine evidence semantics, beginning
+2. separate shared resource planning from engine evidence semantics, beginning
    with Record/Replay;
-4. move target lowering behind explicit intent/resource interfaces; and
-5. isolate transactional placement, final validation, evidence decoding, and
+3. move target lowering behind explicit intent/resource interfaces; and
+4. isolate transactional placement, final validation, evidence decoding, and
    verdict rendering as independently testable components.
 
 Each cutover is per component, never a big switch. Old and new implementations

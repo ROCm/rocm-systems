@@ -2582,6 +2582,27 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
   return !overlaps_window(relocated_references);
 }
 
+template <typename Container>
+[[nodiscard]] consan_detail::MoiOccupiedTextRanges collect_moi_dense_owner_occupied_ranges(
+    const Container &container, std::span<const ConSanMoiCandidate *const> owner_candidates) {
+  std::vector<std::pair<uint64_t, uint64_t>> ranges;
+  ranges.reserve(owner_candidates.size() + container.barrier_sites.size() +
+                 container.fence_sites.size() + container.atomic_sites.size());
+  const auto append = [&](uint64_t begin, uint64_t size) {
+    if (size != 0u && begin <= std::numeric_limits<uint64_t>::max() - size)
+      ranges.emplace_back(begin, begin + size);
+  };
+  for (const ConSanMoiCandidate *candidate : owner_candidates)
+    append(candidate->anchor(), candidate->size());
+  for (const ConSanBarrierSite &site : container.barrier_sites)
+    append(site.text_offset, site.size);
+  for (const ConSanFenceSite &site : container.fence_sites)
+    append(site.text_offset, site.size);
+  for (const ConSanAtomicSite &site : container.atomic_sites)
+    append(site.text_offset, site.size);
+  return consan_detail::MoiOccupiedTextRanges(std::move(ranges));
+}
+
 // A host discovered in existing text. Appended-body placement is deliberately
 // absent because the search has not reserved any emitted bytes.
 struct MoiDenseRelayHost {

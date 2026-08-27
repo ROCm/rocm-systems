@@ -216,35 +216,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
-  std::unordered_map<const ConSanMoiCandidate *, size_t> candidate_indices;
-  candidate_indices.reserve(candidates.size());
-  for (size_t index = 0; index < candidates.size(); ++index)
-    candidate_indices.emplace(candidates[index], index);
+  const auto dense_candidates = consan_detail::partition_moi_dense_candidates(
+      candidates, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : 64u);
+  const auto &candidate_indices = dense_candidates.index_by_candidate;
   std::map<uint64_t, MoiDenseEntryHost> dense_entry_hosts;
   // The retained planning state already owns the pristine CFG and liveness
   // facts needed by dense relay selection. Re-decoding the whole code object
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
   if (consan_is_capability_arch(arch) && use_indirect_appended && local_entry_islands) {
-    const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
-      std::ranges::sort(ranges);
-      size_t merged_range_count = 0u;
-      for (const auto &range : ranges) {
-        if (merged_range_count != 0u && ranges[merged_range_count - 1u].second >= range.first) {
-          ranges[merged_range_count - 1u].second =
-              std::max(ranges[merged_range_count - 1u].second, range.second);
-        } else {
-          ranges[merged_range_count++] = range;
-        }
-      }
-      ranges.resize(merged_range_count);
-    };
-    const auto overlaps_ranges = [](const std::vector<std::pair<uint64_t, uint64_t>> &ranges,
-                                    uint64_t begin, uint64_t end) {
-      const auto after =
-          std::ranges::lower_bound(ranges, end, {}, [](const auto &range) { return range.first; });
-      return after != ranges.begin() && std::prev(after)->second > begin;
-    };
     std::vector<std::pair<uint64_t, uint64_t>> global_access_ranges;
     global_access_ranges.reserve(candidates.size());
     for (const ConSanMoiCandidate *candidate : candidates) {
@@ -252,41 +232,14 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         global_access_ranges.emplace_back(candidate->anchor(),
                                           candidate->anchor() + candidate->size());
     }
-    merge_ranges(global_access_ranges);
-
-    struct DenseGroup {
-      std::vector<const ConSanMoiCandidate *> candidates;
-      size_t first_candidate_index = 0;
-    };
-    std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
-    for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-      const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      owner_groups[{candidate->container.is_kernel(), candidate->container.name}].push_back(
-          candidate);
-    }
-    constexpr uint64_t kMaxCommonRelayAnchorSpan =
-        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-        sizeof(uint32_t);
-    std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
-    for (const auto &[key, owner_candidates] : owner_groups) {
-      for (const ConSanMoiCandidate *candidate : owner_candidates) {
-        if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_CDNA5 && groups.back().second.candidates.size() == 64u) ||
-            candidate->anchor() - groups.back().second.candidates.front()->anchor() >
-                kMaxCommonRelayAnchorSpan) {
-          groups.push_back(
-              {key, {.candidates = {}, .first_candidate_index = candidate_indices.at(candidate)}});
-        }
-        groups.back().second.candidates.push_back(candidate);
-      }
-    }
+    const consan_detail::MoiOccupiedTextRanges occupied_accesses(std::move(global_access_ranges));
     using DenseHostCandidateCacheKey =
-        std::tuple<bool, std::string, uint64_t, std::vector<uint64_t>,
+        std::tuple<ConSanProgramContainerKind, std::string, uint64_t, std::vector<uint64_t>,
                    std::vector<std::pair<uint16_t, uint16_t>>>;
     std::map<DenseHostCandidateCacheKey, std::vector<uint64_t>> dense_host_candidate_cache;
     std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
-    for (const auto &[key, group] : groups) {
+    for (const auto &group : dense_candidates.groups) {
+      const bool owner_is_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
                                    : resource_plan_for_candidate(result, *group.candidates.front());
@@ -351,9 +304,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
       if (!island && group_resource != nullptr) {
         const ConSanKernelInfo *kernel =
-            key.first ? result.program_inventory.find_kernel_by_name(key.second) : nullptr;
+            owner_is_kernel ? result.program_inventory.find_kernel_by_name(group.owner.name)
+                            : nullptr;
         const ConSanFunctionInfo *function =
-            !key.first ? result.program_inventory.find_function_by_name(key.second) : nullptr;
+            !owner_is_kernel ? result.program_inventory.find_function_by_name(group.owner.name)
+                             : nullptr;
         const bool has_owner_range =
             (kernel != nullptr && kernel->has_text_range && kernel->code_size != 0u) ||
             (function != nullptr && function->code_size != 0u);
@@ -363,14 +318,14 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                  MoiRelocatableHostScalarState::AccessRouter, arch);
           const uint64_t host_words_count = group_entry_island_words + 1u;
           const uint64_t owner_begin =
-              key.first ? kernel->entry_text_offset : function->entry_text_offset;
+              owner_is_kernel ? kernel->entry_text_offset : function->entry_text_offset;
           const uint64_t owner_end =
-              owner_begin + (key.first ? kernel->code_size : function->code_size);
+              owner_begin + (owner_is_kernel ? kernel->code_size : function->code_size);
           std::vector<std::pair<uint16_t, uint16_t>> bootstrap_key;
           bootstrap_key.reserve(host_bootstrap_ranges.size());
           for (const MoiSgprRange &range : host_bootstrap_ranges)
             bootstrap_key.emplace_back(range.base, range.width);
-          DenseHostCandidateCacheKey cache_key{key.first, key.second, host_words_count,
+          DenseHostCandidateCacheKey cache_key{group.owner.kind, group.owner.name, host_words_count,
                                                group_resource->owner_descriptor_file_offsets,
                                                std::move(bootstrap_key)};
           auto cached_candidates = dense_host_candidate_cache.find(cache_key);
@@ -378,31 +333,17 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             MoiDenseOwnerLivenessProof host_owner_proof =
                 resource_state.prepare_dense_liveness_for_owners(
                     group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+            const auto &owner_candidates = dense_candidates.candidates_by_owner.at(group.owner);
+            const consan_detail::MoiOccupiedTextRanges occupied_owner_sites =
+                owner_is_kernel
+                    ? collect_moi_dense_owner_occupied_ranges(*kernel, owner_candidates)
+                    : collect_moi_dense_owner_occupied_ranges(*function, owner_candidates);
             std::vector<std::pair<uint64_t, uint64_t>> owner_sync_ranges;
-            const size_t owner_barrier_count =
-                key.first ? kernel->barrier_sites.size() : function->barrier_sites.size();
-            const size_t owner_fence_count =
-                key.first ? kernel->fence_sites.size() : function->fence_sites.size();
-            const size_t owner_atomic_count =
-                key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
-            owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count +
-                                      result.program_inventory.sync().sync_sequences.size());
+            owner_sync_ranges.reserve(result.program_inventory.sync().sync_sequences.size());
             const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
               if (size != 0u)
                 owner_sync_ranges.emplace_back(begin, begin + size);
             };
-            const auto append_owner_sites = [&](const auto &owner) {
-              for (const ConSanBarrierSite &site : owner.barrier_sites)
-                append_occupied_range(site.text_offset, site.size);
-              for (const ConSanFenceSite &site : owner.fence_sites)
-                append_occupied_range(site.text_offset, site.size);
-              for (const ConSanAtomicSite &site : owner.atomic_sites)
-                append_occupied_range(site.text_offset, site.size);
-            };
-            if (key.first)
-              append_owner_sites(*kernel);
-            else
-              append_owner_sites(*function);
             // Compiler atomics can be expressed as ordinary loads/stores plus
             // exact wait/cache clauses. They are downstream synchronization
             // sites even though they do not appear in atomic_sites or
@@ -412,7 +353,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             for (const ConSanSyncSequence &sequence :
                  result.program_inventory.sync().sync_sequences) {
               if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
-                  sequence.in_kernel != key.first || sequence.container_name != key.second ||
+                  sequence.in_kernel != owner_is_kernel ||
+                  sequence.container_name != group.owner.name ||
                   !consan_sync_confidence_meets(sequence.confidence,
                                                 ConSanSemanticConfidence::Conservative) ||
                   !consan_sync_confidence_meets(sequence.memory_role_confidence,
@@ -425,10 +367,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               append_occupied_range(sequence.begin_text_offset,
                                     sequence.end_text_offset - sequence.begin_text_offset);
             }
-            merge_ranges(owner_sync_ranges);
+            const consan_detail::MoiOccupiedTextRanges occupied_ordering_sequences(
+                std::move(owner_sync_ranges));
             const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
-              return overlaps_ranges(global_access_ranges, begin, end) ||
-                     overlaps_ranges(owner_sync_ranges, begin, end);
+              return occupied_accesses.overlaps(begin, end) ||
+                     occupied_owner_sites.overlaps(begin, end) ||
+                     occupied_ordering_sequences.overlaps(begin, end);
             };
             std::vector<uint64_t> host_candidates = collect_moi_dense_relay_host_candidates(
                 resource_state,

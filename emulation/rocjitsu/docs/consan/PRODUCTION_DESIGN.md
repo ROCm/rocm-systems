@@ -5399,6 +5399,37 @@ analysis completed.
   seconds. Slice 5BM's physical-gfx950 smoke remains the periodic physical
   gate; E2E validation remains outside this work.
 
+### Slice 5BZ: share dense access topology and occupied text
+
+- **One topology contract:** `MoiDenseCandidatePartition` now owns the
+  target-independent facts used by Record/Replay, Sampled, and Inline Shadow:
+  typed kernel/function owner identity, original candidate index, anchor
+  ordering, dispatcher-capacity splitting, and common SOPP branch span. Engine
+  callers still supply their real dispatcher capacity and retain their own
+  relay width, scalar ABI, eligibility, and emitted evidence semantics.
+- **One relocation-exclusion contract:** `MoiOccupiedTextRanges` canonicalizes
+  unsorted, adjacent, and overlapping half-open pristine-text ranges and owns
+  overlap queries. Access-engine relay-host searches and barrier dense fallback
+  now use it instead of four local merge/search implementations. The shared
+  owner collector protects every access anchor in a container plus its native
+  barrier, fence, and atomic sites; Record/Replay additionally protects its
+  qualified ordinary-memory ordering sequences.
+- **Focused contract coverage:** Unit tests cover empty/reversed range removal,
+  adjacency coalescing, half-open boundaries, owner-kind separation, anchor
+  sorting, preservation of the caller's candidate index, explicit dispatcher
+  capacity, unlimited capacity, and mandatory branch-span splitting. Existing
+  cross-target engine and device tests continue to exercise the resulting
+  physical routes.
+- **Deletion accounting:** Implementation files add 212 and delete 248 physical
+  lines, a net deletion of thirty-six. Tests add seventy-two lines. The three
+  engine-local owner/group implementations and four local occupied-range
+  normalizers are deleted without a compatibility wrapper.
+- **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in approximately 65 seconds. Slice 5BM's
+  physical-gfx950 smoke remains the periodic physical gate; E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

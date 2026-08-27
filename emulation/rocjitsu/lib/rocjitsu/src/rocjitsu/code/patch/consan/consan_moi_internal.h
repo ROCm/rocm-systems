@@ -12,13 +12,20 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include <algorithm>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <limits>
+#include <map>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -75,6 +82,134 @@ struct ConSanMoiWorkgroupSource {
 };
 
 namespace consan_detail {
+
+/// Canonical set of occupied half-open ranges in pristine executable text.
+///
+/// Dense relay placement must reject original instructions already owned by
+/// an access or synchronization site. Callers may supply overlapping,
+/// adjacent, empty, and unsorted ranges; construction removes empty ranges and
+/// coalesces the rest. Keeping normalization and overlap queries in this type
+/// prevents each instrumentation engine from implementing subtly different
+/// interval arithmetic around the same original code.
+class MoiOccupiedTextRanges {
+public:
+  /// Build a canonical occupied-range set from half-open `[begin, end)` pairs.
+  explicit MoiOccupiedTextRanges(std::vector<std::pair<uint64_t, uint64_t>> ranges) {
+    std::erase_if(ranges, [](const auto &range) { return range.first >= range.second; });
+    std::ranges::sort(ranges);
+    for (const auto &range : ranges) {
+      if (!ranges_.empty() && ranges_.back().second >= range.first) {
+        ranges_.back().second = std::max(ranges_.back().second, range.second);
+      } else {
+        ranges_.push_back(range);
+      }
+    }
+  }
+
+  /// Return whether `[begin, end)` intersects any nonempty occupied range.
+  /// Empty or reversed queries do not overlap.
+  [[nodiscard]] bool overlaps(uint64_t begin, uint64_t end) const {
+    if (begin >= end)
+      return false;
+    const auto after =
+        std::ranges::lower_bound(ranges_, end, {}, [](const auto &range) { return range.first; });
+    return after != ranges_.begin() && std::prev(after)->second > begin;
+  }
+
+  /// Return the sorted, disjoint ranges retained by this set. This observation
+  /// API exists for precise unit tests and diagnostics; placement needs only
+  /// `overlaps`.
+  [[nodiscard]] std::span<const std::pair<uint64_t, uint64_t>> ranges() const { return ranges_; }
+
+private:
+  /// Sorted, nonempty, pairwise-disjoint half-open ranges.
+  std::vector<std::pair<uint64_t, uint64_t>> ranges_;
+};
+
+/// Stable identity of one kernel or helper function during dense access-route
+/// planning.
+///
+/// The kind is retained explicitly because a kernel and helper may share a
+/// symbol name without sharing an execution owner or legal relocation range.
+/// Descriptor identity is deliberately absent: one helper group may execute
+/// for several descriptors while still needing one physical entry relay.
+struct MoiDenseRouteOwner {
+  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
+  std::string name;
+
+  auto operator<=>(const MoiDenseRouteOwner &) const = default;
+};
+
+/// One bounded, branch-reachable group of access candidates that may share a
+/// dense entry relay and dispatcher.
+///
+/// All candidates belong to `owner`, are ordered by original-text anchor, and
+/// fit within the common SOPP branch span. `first_candidate_index` refers to
+/// the caller's unmodified candidate sequence and therefore identifies the
+/// appended relay-bank slot owned by this group.
+struct MoiDenseCandidateGroup {
+  MoiDenseRouteOwner owner;
+  std::vector<const ConSanMoiCandidate *> candidates;
+  size_t first_candidate_index = 0;
+};
+
+/// Shared, immutable partition of access candidates used by dense route
+/// planners in Record/Replay, Sampled, and InlineShadow.
+///
+/// `candidates_by_owner` protects every access anchor in an owner even when
+/// that owner is split across several relay groups. `index_by_candidate`
+/// preserves the caller's relay-bank assignment. `groups` is the only place
+/// where owner boundaries, anchor ordering, maximum group size, and common
+/// branch reach are combined.
+struct MoiDenseCandidatePartition {
+  std::map<MoiDenseRouteOwner, std::vector<const ConSanMoiCandidate *>> candidates_by_owner;
+  std::unordered_map<const ConSanMoiCandidate *, size_t> index_by_candidate;
+  std::vector<MoiDenseCandidateGroup> groups;
+};
+
+/// Partition candidates for shared dense entry routing.
+///
+/// A zero `max_candidates_per_group` means that capacity does not split an
+/// owner; SOPP reach still does. Nonzero limits encode engine/target dispatcher
+/// capacity and are policy supplied by the caller rather than hidden in the
+/// shared mechanism.
+[[nodiscard]] inline MoiDenseCandidatePartition
+partition_moi_dense_candidates(std::span<const ConSanMoiCandidate *const> candidates,
+                               size_t max_candidates_per_group) {
+  MoiDenseCandidatePartition partition;
+  partition.index_by_candidate.reserve(candidates.size());
+  for (size_t index = 0; index < candidates.size(); ++index) {
+    const ConSanMoiCandidate *candidate = candidates[index];
+    partition.index_by_candidate.emplace(candidate, index);
+    partition.candidates_by_owner[{candidate->container.kind, candidate->container.name}].push_back(
+        candidate);
+  }
+
+  constexpr uint64_t kMaxCommonRelayAnchorSpan =
+      static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                            static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+      sizeof(uint32_t);
+  for (auto &[owner, owner_candidates] : partition.candidates_by_owner) {
+    std::ranges::sort(owner_candidates, {},
+                      [](const ConSanMoiCandidate *candidate) { return candidate->anchor(); });
+    for (const ConSanMoiCandidate *candidate : owner_candidates) {
+      const bool capacity_reached =
+          max_candidates_per_group != 0u && !partition.groups.empty() &&
+          partition.groups.back().candidates.size() == max_candidates_per_group;
+      if (partition.groups.empty() || partition.groups.back().owner != owner || capacity_reached ||
+          candidate->anchor() - partition.groups.back().candidates.front()->anchor() >
+              kMaxCommonRelayAnchorSpan) {
+        partition.groups.push_back({
+            .owner = owner,
+            .candidates = {},
+            .first_candidate_index = partition.index_by_candidate.at(candidate),
+        });
+      }
+      partition.groups.back().candidates.push_back(candidate);
+    }
+  }
+  return partition;
+}
 
 /// Return whether one emitted MOI patch makes its owning kernel consume all
 /// three launch workgroup coordinates. This shared descriptor-mutation and

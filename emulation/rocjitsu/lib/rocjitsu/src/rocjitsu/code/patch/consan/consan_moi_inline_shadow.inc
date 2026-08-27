@@ -270,10 +270,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
-  std::unordered_map<const ConSanMoiCandidate *, size_t> candidate_indices;
-  candidate_indices.reserve(candidates.size());
-  for (size_t index = 0; index < candidates.size(); ++index)
-    candidate_indices.emplace(candidates[index], index);
+  const size_t dense_group_capacity =
+      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : (consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u);
+  const auto dense_candidates =
+      consan_detail::partition_moi_dense_candidates(candidates, dense_group_capacity);
+  const auto &candidate_indices = dense_candidates.index_by_candidate;
   std::map<uint64_t, MoiDenseEntryHost> dense_entry_hosts;
   // Dense routing is partitioned by owning container, SOPP reach, and a
   // bounded number of candidates per dispatcher below. Its safety therefore
@@ -283,41 +284,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const auto &dense_host_blocks = resource_state.blocks;
   if ((consan_uses_gfx9_cdna_encoding(arch) || is_rdna4_family_arch(arch)) &&
       use_indirect_appended && local_entry_islands) {
-    struct DenseGroup {
-      std::vector<const ConSanMoiCandidate *> candidates;
-      size_t first_candidate_index = 0;
-    };
-    std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
-    for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-      const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      owner_groups[{candidate->container.is_kernel(), candidate->container.name}].push_back(
-          candidate);
-    }
-    constexpr uint64_t kMaxCommonRelayAnchorSpan =
-        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-        sizeof(uint32_t);
-    std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
-    for (const auto &[key, owner_candidates] : owner_groups) {
-      for (const ConSanMoiCandidate *candidate : owner_candidates) {
-        // A full-pressure CDNA owner can have only one dead scalar beyond the
-        // indirect-PC pair.  Its dense route encodes both the route ordinal
-        // and the incoming SCC in that scalar, using one inline-constant bit
-        // for each.  Keep every such group within the 0..63 inline range.
-        const size_t max_group_size = consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u;
-        if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
-             groups.back().second.candidates.size() == max_group_size) ||
-            candidate->anchor() - groups.back().second.candidates.front()->anchor() >
-                kMaxCommonRelayAnchorSpan) {
-          groups.push_back(
-              {key, {.candidates = {}, .first_candidate_index = candidate_indices.at(candidate)}});
-        }
-        groups.back().second.candidates.push_back(candidate);
-      }
-    }
     std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
-    for (const auto &[key, group] : groups) {
+    for (const auto &group : dense_candidates.groups) {
+      const bool owner_is_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
                                    : resource_plan_for_candidate(result, *group.candidates.front());
@@ -372,43 +341,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
         constexpr size_t kHostWords = kIndirectIslandWords + 1u;
         const auto find_container_host = [&](const auto &container) {
-          std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(candidates.size() + container.barrier_sites.size() +
-                                  container.fence_sites.size() + container.atomic_sites.size());
-          const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
-            if (size != 0u)
-              occupied_ranges.emplace_back(begin, begin + size);
-          };
           // A container can be split into several relay groups. A host for one
           // group must not consume an access anchor owned by another group.
-          const auto owner_candidates = owner_groups.find(key);
-          if (owner_candidates != owner_groups.end()) {
-            for (const ConSanMoiCandidate *candidate : owner_candidates->second)
-              append_occupied_range(candidate->anchor(), candidate->size());
-          }
-          for (const ConSanBarrierSite &site : container.barrier_sites)
-            append_occupied_range(site.text_offset, site.size);
-          for (const ConSanFenceSite &site : container.fence_sites)
-            append_occupied_range(site.text_offset, site.size);
-          for (const ConSanAtomicSite &site : container.atomic_sites)
-            append_occupied_range(site.text_offset, site.size);
-          std::ranges::sort(occupied_ranges);
-          size_t merged_range_count = 0u;
-          for (const auto &range : occupied_ranges) {
-            if (merged_range_count != 0u &&
-                occupied_ranges[merged_range_count - 1u].second >= range.first) {
-              occupied_ranges[merged_range_count - 1u].second =
-                  std::max(occupied_ranges[merged_range_count - 1u].second, range.second);
-            } else {
-              occupied_ranges[merged_range_count++] = range;
-            }
-          }
-          occupied_ranges.resize(merged_range_count);
-          const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
-            const auto after = std::ranges::lower_bound(
-                occupied_ranges, end, {}, [](const auto &range) { return range.first; });
-            return after != occupied_ranges.begin() && std::prev(after)->second > begin;
-          };
+          const auto occupied = collect_moi_dense_owner_occupied_ranges(
+              container, dense_candidates.candidates_by_owner.at(group.owner));
 
           return find_moi_dense_relay_host(
               resource_state, original_text,
@@ -421,16 +357,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   .owner_proof = host_owner_proof,
                   .bootstrap_ranges = host_bootstrap_ranges,
               },
-              overlaps_instrumented_site, claimed_dense_host_ranges);
+              [&](uint64_t begin, uint64_t end) { return occupied.overlaps(begin, end); },
+              claimed_dense_host_ranges);
         };
         std::optional<MoiDenseRelayHost> best_host;
-        if (key.first) {
-          const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(key.second);
+        if (owner_is_kernel) {
+          const ConSanKernelInfo *kernel =
+              result.program_inventory.find_kernel_by_name(group.owner.name);
           if (kernel != nullptr)
             best_host = find_container_host(*kernel);
         } else {
           const ConSanFunctionInfo *function =
-              result.program_inventory.find_function_by_name(key.second);
+              result.program_inventory.find_function_by_name(group.owner.name);
           if (function != nullptr)
             best_host = find_container_host(*function);
         }

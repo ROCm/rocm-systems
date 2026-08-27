@@ -1661,23 +1661,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       append_occupied_range(patch.anchor_offset, patch.original_size);
     for (const BarrierRecordCandidate &candidate : selected_candidates)
       append_occupied_range(candidate.site.text_offset, candidate.site.size);
-    std::ranges::sort(occupied_ranges);
-    size_t merged_range_count = 0u;
-    for (const auto &range : occupied_ranges) {
-      if (merged_range_count != 0u &&
-          occupied_ranges[merged_range_count - 1u].second >= range.first) {
-        occupied_ranges[merged_range_count - 1u].second =
-            std::max(occupied_ranges[merged_range_count - 1u].second, range.second);
-      } else {
-        occupied_ranges[merged_range_count++] = range;
-      }
-    }
-    occupied_ranges.resize(merged_range_count);
+    const consan_detail::MoiOccupiedTextRanges occupied(std::move(occupied_ranges));
     std::map<uint64_t, uint64_t> claimed_hosts;
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      const auto occupied_after =
-          std::ranges::lower_bound(occupied_ranges, end, {}, &std::pair<uint64_t, uint64_t>::first);
-      if (occupied_after != occupied_ranges.begin() && std::prev(occupied_after)->second > begin)
+      if (occupied.overlaps(begin, end))
         return true;
       const auto claimed_after = claimed_hosts.lower_bound(end);
       return claimed_after != claimed_hosts.begin() && std::prev(claimed_after)->second > begin;
