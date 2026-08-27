@@ -3,6 +3,8 @@
 
 #include "cdna5_sim_test_common.h"
 
+#include <limits>
+
 namespace {
 
 using namespace rocjitsu;
@@ -20,7 +22,9 @@ constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
 class HostSdmaQueueForTest {
 public:
-  explicit HostSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim) {
+  explicit HostSdmaQueueForTest(Gfx1250Sim &sim, uint64_t initial_doorbell = 0,
+                                uint64_t last_doorbell = 0)
+      : sim_(sim), doorbells_{initial_doorbell} {
     sim_.memory->set_passthrough(true);
 
     amdgpu::HwQueue queue{};
@@ -32,6 +36,7 @@ public:
     queue.write_ptr_va = reinterpret_cast<uint64_t>(&write_idx_);
     queue.doorbell_base = doorbells_.data();
     queue.doorbell_offset = 0;
+    queue.last_doorbell = last_doorbell;
     queue.host_accessible = true;
     queue.is_sdma = true;
     sim_.cp()->register_queue(std::move(queue));
@@ -169,6 +174,20 @@ void write_sdma_qword_va(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, uint6
 void write_sdma_qword_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void *addr) {
   write_sdma_qword_va(packet, lo_dw, hi_dw, reinterpret_cast<uintptr_t>(addr));
 }
+
+TEST(Gfx1250SdmaTest, UnrungDoorbellSentinelDoesNotAdvanceAnEmptyQueue) {
+  Gfx1250Sim sim;
+  constexpr uint64_t kUnrungDoorbell = std::numeric_limits<uint64_t>::max();
+  HostSdmaQueueForTest queue(sim, kUnrungDoorbell, kUnrungDoorbell);
+  // Make accidental packet consumption terminate quickly instead of scanning
+  // the all-ones producer range indefinitely.
+  queue.ring()[0] = 0xFFu;
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+}
+
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   Gfx1250Sim sim;
   HostSdmaQueueForTest queue(sim);

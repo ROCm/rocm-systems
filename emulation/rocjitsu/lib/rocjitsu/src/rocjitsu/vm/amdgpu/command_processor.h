@@ -177,6 +177,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
+  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
+    scratch_xcc_id_ = xcc_id;
+    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
 
@@ -215,6 +221,10 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    scratch_shader_engine_count_ =
+        std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
   }
@@ -681,6 +691,10 @@ private:
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
+  uint32_t scratch_shader_engine_count_ = 1;
+  uint32_t scratch_waves_per_se_ = 1;
+  uint32_t scratch_xcc_id_ = 0;
+  uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};

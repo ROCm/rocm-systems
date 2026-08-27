@@ -327,8 +327,19 @@ void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
-  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  constexpr uint64_t kPcAddressMask = 0x01FFFFFFFFFFFFFFULL;
   wf.pc = (saved_pc & kPcAddressMask) - size_;
+
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
 
   // Returning from the handler puts the interrupted EXEC back. The handler runs
   // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
@@ -344,8 +355,7 @@ void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
   // The handler sets STATUS.HALT when it wants the wave to stay
   // stopped for the debugger; honour that on the way out.
-  constexpr uint32_t kStatusHalt = 1u << 13;
-  if ((wf.status_raw() & kStatusHalt) != 0) {
+  if (keep_halted) {
     wf.set_debug_single_step(false);
     wf.set_debug_halted(true);
   } else {

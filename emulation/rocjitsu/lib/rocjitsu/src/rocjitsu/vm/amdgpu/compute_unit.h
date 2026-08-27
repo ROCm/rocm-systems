@@ -339,6 +339,20 @@ public:
   /// @returns Total hardware wavefront slot count.
   uint32_t num_wf_slots() const { return config_.num_wf_slots; }
 
+  /// @brief Record this CU's physical location within its XCC.
+  /// @param shader_engine_id Zero-based shader-engine index within the XCC.
+  /// @param cu_index Zero-based CU index within the shader engine.
+  void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
+    shader_engine_id_ = shader_engine_id;
+    scratch_scoreboard_base_ = cu_index * config_.num_wf_slots;
+  }
+
+  /// @brief Return this CU's physical shader-engine index.
+  uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the first scratch scoreboard slot owned by this CU.
+  uint32_t scratch_scoreboard_base() const { return scratch_scoreboard_base_; }
+
   /// @brief Access a wavefront slot by index (always non-null).
   /// @param idx Zero-based wavefront slot index.
   /// @returns Pointer to the wavefront slot.
@@ -800,6 +814,8 @@ protected:
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  uint32_t shader_engine_id_ = 0;
+  uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};

@@ -219,6 +219,14 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class WaveStateLayout(Enum):
+    """Architectural layout of wave status, exception, and trap-control state."""
+
+    LEGACY = 'Legacy'
+    GFX12 = 'Gfx12'
+    GFX12_5 = 'Gfx12_5'
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -1204,6 +1212,21 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        """Layout of shader-visible wave state and the first-level trap ABI."""
+        return WaveStateLayout.LEGACY
+
+    @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        """Bytes represented by one COMPUTE_TMPRING_SIZE.WAVESIZE unit."""
+        return 1024
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        """Width of the COMPUTE_TMPRING_SIZE.WAVESIZE field."""
+        return 13
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         """Maximum VGPR index space addressable by one wavefront."""
         return 256
@@ -1963,6 +1986,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        return 256
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        return 15
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
 
@@ -2177,6 +2208,18 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        return WaveStateLayout.GFX12
+
+    @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        return 256
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        return 18
 
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
@@ -2506,6 +2549,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        return WaveStateLayout.GFX12_5
 
     @property
     def max_addressable_vgprs_per_wf(self) -> int:
