@@ -352,15 +352,8 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
       .fault = mutation,
   };
   ConSanResult retry_inventory;
-  retry_inventory.program_inventory = inventory.program_inventory;
-  retry_inventory.observation_plan = std::move(inventory.observation_plan);
-  retry_inventory.coverage_ledger = std::move(inventory.coverage_ledger);
-  retry_inventory.mutation = std::move(inventory.mutation);
-  retry_inventory.fault_sites = std::move(inventory.fault_sites);
-  retry_inventory.barrier_move_destinations = std::move(inventory.barrier_move_destinations);
-  retry_inventory.fault_plans = std::move(inventory.fault_plans);
-  retry_inventory.resource_plans = std::move(inventory.resource_plans);
-  retry_inventory.patches = std::move(inventory.patches);
+  static_cast<ConSanTransformArtifacts &>(retry_inventory) =
+      std::move(static_cast<ConSanTransformArtifacts &>(inventory));
   if (!inventory.moi_retry_inventory_available_)
     retry_inventory.errors.emplace_back("ConSan MOI retry requires a pristine inventory result");
   ConSanResult retried = retry_patch_consan_moi_from_inventory(
@@ -439,18 +432,9 @@ TransformResult TransformResult::publish_optional(
                                        resources);
     legacy = try_patch_consan(code_object_bytes, legacy_options);
   }
-  result.program_inventory = legacy.program_inventory;
-  result.observation_plan = std::move(legacy.observation_plan);
-  result.coverage_ledger = std::move(legacy.coverage_ledger);
+  static_cast<ConSanTransformArtifacts &>(result) =
+      std::move(static_cast<ConSanTransformArtifacts &>(legacy));
   result.replacement_bytes = std::move(legacy.elf_bytes);
-  result.outcome = legacy.outcome;
-  result.mutation = std::exchange(legacy.mutation, {});
-  result.fault_sites = std::move(legacy.fault_sites);
-  result.barrier_move_destinations = std::move(legacy.barrier_move_destinations);
-  result.fault_plans = std::move(legacy.fault_plans);
-  result.resource_plans = std::move(legacy.resource_plans);
-  result.patches = std::move(legacy.patches);
-  result.warnings = std::move(legacy.warnings);
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
     result.dispatch_requirements = build_dispatch_requirements(
         result.program_inventory, result.coverage_ledger, result.patches);

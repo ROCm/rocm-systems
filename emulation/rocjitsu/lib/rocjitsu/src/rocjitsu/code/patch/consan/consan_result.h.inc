@@ -121,9 +121,52 @@ struct ConSanMutationOutcome {
   bool operator==(const ConSanMutationOutcome &) const = default;
 };
 
-struct ConSanResult {
-  bool modified = false;
+/// Semantic and lowering artifacts owned by one static ConSan transformation.
+///
+/// The compatibility lowerer builds this value incrementally, but ownership
+/// crosses into `TransformResult` as one subobject after lowering finishes.
+/// Keeping these artifacts together prevents the production pipeline from
+/// redeclaring and individually projecting inventory, policy, coverage,
+/// mutation, resource, patch, outcome, and diagnostic state. Runtime evidence,
+/// installation state, replacement-image storage, and private working
+/// candidates deliberately live elsewhere.
+struct ConSanTransformArtifacts {
+  /// Immutable ownership of original code-object/container/access facts.
+  ProgramInventory program_inventory;
+  /// Target-neutral policy output retained independently of current lowering
+  /// candidates and patch telemetry.
+  ConSanObservationPlan observation_plan;
+  /// Joined static policy and lowering state initialized from the observation
+  /// plan rather than inferred from emitted patch kinds.
+  ConSanCoverageLedger coverage_ledger;
+  /// Stable semantic sites eligible for validation-only fault selection.
+  std::vector<ConSanFaultSite> fault_sites;
+  /// Candidate destinations for a barrier-move validation mutation.
+  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
+  /// Concrete validation-only fault plans selected from semantic sites.
+  std::vector<ConSanFaultMutationPlan> fault_plans;
+  /// Validation-only mutation facts produced by this static transform.
+  ConSanMutationOutcome mutation;
+  /// Resource alternatives considered by lowering.
+  std::vector<ConSanCandidateResourcePlan> resource_plans;
+  /// Validated byte-level changes emitted by lowering.
+  std::vector<ConSanPatchInfo> patches;
+  /// Final static classification of the transformation attempt.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  /// Non-fatal diagnostics retained from analysis and lowering.
+  std::vector<std::string> warnings;
+};
+
+/// Mutable compatibility-lowering state that has not yet moved into focused
+/// planning and emission components.
+///
+/// The inherited transform artifacts are the sole semantic output consumed by
+/// the production pipeline. Members declared here exist only while current
+/// lowering selects registers, builds engine-private candidates, owns a
+/// replacement image, and accumulates failures. They must not be projected to
+/// a second public representation.
+struct ConSanResult : ConSanTransformArtifacts {
+  bool modified = false;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;
@@ -138,34 +181,15 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
   uint64_t moi_report_dispatch_id = 0;
-  /// Immutable ownership of original code-object/container/access facts.
-  ProgramInventory program_inventory;
-  /// Target-neutral policy output retained independently of current lowering
-  /// candidates and patch telemetry. Slice 4A initially populates access
-  /// decisions and intents; later slices extend the same plan with sync forms.
-  ConSanObservationPlan observation_plan;
-  /// Joined static policy and lowering state. This is initialized from
-  /// `observation_plan` before resource planning and never infers policy from
-  /// an emitted patch kind.
-  ConSanCoverageLedger coverage_ledger;
-  std::vector<ConSanFaultSite> fault_sites;
-  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
-  std::vector<ConSanFaultMutationPlan> fault_plans;
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;
   std::vector<ConSanPerturbationPlan> perturbation_plans;
-  /// Validation-only mutation facts. The transform pipeline moves this value
-  /// into its public immutable result before exposing legacy mechanism detail.
-  ConSanMutationOutcome mutation;
   std::vector<ConSanMoiCandidate> moi_candidates;
   /// Warning boundary immediately before MOI planning. A validated retry with
   /// a runtime-allocated report buffer trims only the prior MOI-stage
   /// diagnostics while retaining parser and semantic-analysis warnings.
   size_t moi_stage_warning_begin = 0;
-  std::vector<ConSanCandidateResourcePlan> resource_plans;
-  std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
-  std::vector<std::string> warnings;
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

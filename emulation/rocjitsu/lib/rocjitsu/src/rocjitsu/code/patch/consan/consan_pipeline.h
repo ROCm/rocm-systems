@@ -315,54 +315,22 @@ struct ConSanDispatchRequirements {
 /// fields allow precise construction and invariant testing during the
 /// migration, while production creates values only through `transform_consan`
 /// or `transform_consan_with_mutation`.
-class TransformResult {
+class TransformResult : public ConSanTransformArtifacts {
 public:
-  TransformResult() = default;
+  TransformResult() { outcome = ConSanTransformOutcome::Invalid; }
 
   /// Collision-aware identity of the pristine input image.
   ConSanCodeObjectId code_object;
   /// Every pipeline contract exactly once in dependency order.
   std::vector<ConSanPipelineStageRecord> stages;
-  /// Valid immutable original-program facts when inventory succeeded.
-  ProgramInventory program_inventory;
-  /// Valid target-neutral policy output when policy was applicable.
-  ConSanObservationPlan observation_plan;
-  /// Static semantic/lowering coverage corresponding to `observation_plan`.
-  ConSanCoverageLedger coverage_ledger;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
   /// Validated replacement image only for `ModifiedValid`.
   std::vector<uint8_t> replacement_bytes;
-  /// Final static transform classification.
-  ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
   /// First typed configuration failure, or `None` after valid configuration.
   ConSanContractIssue configuration_issue = ConSanContractIssue::None;
   /// Machine-readable failures owned by static pipeline stages.
   std::vector<ConSanTransformIssue> issues;
-  /// Non-fatal diagnostics retained from analysis and lowering.
-  std::vector<std::string> warnings;
-  /// Validation-only mutation facts produced by this static transform. These
-  /// counts do not imply that the runtime installed the replacement image.
-  ConSanMutationOutcome mutation;
-  /// Stable semantic sites eligible for validation-only fault selection.
-  /// These records support user-facing dry-run and qualification diagnostics;
-  /// they do not describe which mutation was ultimately installed.
-  std::vector<ConSanFaultSite> fault_sites;
-  /// Stable candidate destinations for a barrier-move mutation, including the
-  /// semantic and control-flow reason that each destination was accepted or
-  /// rejected.
-  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
-  /// Concrete validation-only mutation plans selected from `fault_sites` and
-  /// `barrier_move_destinations`.
-  std::vector<ConSanFaultMutationPlan> fault_plans;
-  /// Resource alternatives considered by lowering. This is retained for
-  /// aggregate support diagnostics and explicit alternative chronology, not
-  /// as a second source of coverage or installation policy.
-  std::vector<ConSanCandidateResourcePlan> resource_plans;
-  /// Validated byte-level changes emitted by lowering. Final validation,
-  /// runtime metadata registration, and supported patch-proof diagnostics
-  /// consume this one inventory.
-  std::vector<ConSanPatchInfo> patches;
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
   ConSanDispatchRequirements dispatch_requirements;

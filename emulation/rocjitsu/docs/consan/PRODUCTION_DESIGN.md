@@ -5034,6 +5034,37 @@ analysis completed.
   physical-gfx950 gate, with all 593 tests passing; E2E validation remains
   outside this work.
 
+### Slice 5BM: give static transform artifacts one owner
+
+- **One artifact subobject:** `ConSanTransformArtifacts` owns the immutable
+  inventory, observation plan, coverage ledger, mutation sites and outcome,
+  resource alternatives, patches, transform outcome, and warnings produced by
+  one static transform. Compatibility lowering builds that subobject in place;
+  `TransformResult` receives the same value by move rather than redeclaring
+  every field and projecting them individually.
+- **Retry consumes the same value:** The pristine-inventory retry now moves the
+  complete typed artifact subobject back into lowering in one operation. It no
+  longer reconstructs a hand-selected subset whose membership could drift
+  from ordinary publication. Replacement bytes, runtime evidence, install
+  state, engine-private candidates, and lowering failures remain outside the
+  artifact contract because they have different owners.
+- **Contract coverage:** The publication test now also fills and verifies
+  mutation and warning state, in addition to its existing inventory, policy,
+  coverage, fault, resource, patch, and dispatch-requirement checks. The full
+  focused pipeline/retry set passes all 33 tests.
+- **Deletion accounting:** Production adds 51 and deletes 75 physical lines, a
+  net deletion of 24. The added lines are the documented common type; the
+  deletion removes the second field inventory and both field-by-field transfer
+  sequences. Tests add five lines.
+- **Checked-in gate:** The host gate passes all 1,512 runnable tests with the
+  two expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle
+  tests pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 73.68 seconds. A 26-case physical-
+  gfx950 cross-engine smoke matrix covering repeated dispatch identity, dense
+  SuperCollider, full-bank Stream-K, and the large-LDS pipeline passes in
+  23.06 seconds; the complete serialized physical matrix remains reserved for
+  the final tranche gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

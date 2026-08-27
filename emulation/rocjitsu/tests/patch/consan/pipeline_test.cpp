@@ -358,7 +358,9 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.fault_sites.emplace_back().identity = "published-fault-site";
   mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
   mechanism.fault_plans.emplace_back().primary_identity = "published-fault-plan";
+  mechanism.mutation.fault = {.requested = 1u, .planned = 1u, .applied = 1u};
   mechanism.resource_plans.emplace_back().candidate_index = 7u;
+  mechanism.warnings.emplace_back("published-warning");
   ConSanPatchInfo shared_segments;
   shared_segments.kind = ConSanPatchKind::InlineNopRewrite;
   shared_segments.required_private_segment_size = 40u;
@@ -394,6 +396,9 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   EXPECT_EQ(published.fault_plans.front().primary_identity, "published-fault-plan");
   ASSERT_EQ(published.resource_plans.size(), 1u);
   EXPECT_EQ(published.resource_plans.front().candidate_index, 7u);
+  EXPECT_EQ(published.mutation.fault,
+            (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
+  EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
   ASSERT_EQ(published.patches.size(), 3u);
   ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
   EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
