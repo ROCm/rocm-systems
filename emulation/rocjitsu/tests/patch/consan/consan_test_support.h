@@ -60,6 +60,27 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOption
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
 }
+
+/// Request the complete dry-run synchronization and fault-site inventory used
+/// by analysis-focused tests. This exercises the public mutation dry-run
+/// contract while leaving the caller's options unchanged.
+[[nodiscard]] inline ConSanTransformArtifacts
+test_semantic_inventory(std::span<const uint8_t> code_object_bytes, ConSanOptions options,
+                        ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
+  options.fault_dry_run = true;
+  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+}
+
+/// Build the dry-run semantic inventory required to select a barrier-move
+/// destination through the real mutation request, rather than through a
+/// lowerer-only inventory switch.
+[[nodiscard]] inline ConSanTransformArtifacts
+test_barrier_move_inventory(std::span<const uint8_t> code_object_bytes, ConSanOptions options,
+                            ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
+  options.fault_move_barrier = true;
+  options.fault_dry_run = true;
+  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+}
 namespace {
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;

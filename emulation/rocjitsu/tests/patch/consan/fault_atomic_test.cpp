@@ -185,7 +185,7 @@ TEST(ConSan, FaultInventoryIncludesAtomicOperandsAndRoles) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_semantic_inventory(bytes, options);
 
   ASSERT_EQ(result.fault_sites.size(), 2u);
   EXPECT_EQ(result.fault_sites[0].kind, ConSanFaultSiteKind::Atomic);
@@ -207,7 +207,7 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
@@ -251,7 +251,7 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   const std::vector<uint8_t> original = bytes;
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
@@ -342,7 +342,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_TRUE(consan_patch_succeeded(inventory));
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
 
@@ -422,7 +422,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_TRUE(consan_patch_succeeded(inventory));
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
   EXPECT_EQ(inventory.fault_sites.front().kind, ConSanFaultSiteKind::Atomic);
@@ -474,7 +474,7 @@ TEST(ConSan, FaultAtomicWeakenScopeDryRunPreservesBytesAndIdentity) {
   const std::vector<uint8_t> original = bytes;
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
@@ -778,7 +778,7 @@ TEST(ConSan, FaultInventoryIncludesBufferAndDsAtomicEncodings) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts buffer =
-      test_lower_consan(make_rdna4_buffer_atomic_code_object(), options);
+      test_semantic_inventory(make_rdna4_buffer_atomic_code_object(), options);
   ASSERT_TRUE(buffer.errors.empty()) << testing::PrintToString(buffer.errors);
   ASSERT_EQ(buffer.fault_sites.size(), 1u);
   EXPECT_EQ(buffer.fault_sites.front().mnemonic, "buffer_atomic_add_u32");
@@ -789,7 +789,7 @@ TEST(ConSan, FaultInventoryIncludesBufferAndDsAtomicEncodings) {
   EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("returns_old=1"), std::string::npos);
 
   const ConSanTransformArtifacts ds =
-      test_lower_consan(make_rdna4_ds_atomic_code_object(), options);
+      test_semantic_inventory(make_rdna4_ds_atomic_code_object(), options);
   ASSERT_TRUE(ds.errors.empty()) << testing::PrintToString(ds.errors);
   ASSERT_EQ(ds.fault_sites.size(), 1u);
   EXPECT_EQ(ds.fault_sites.front().mnemonic, "ds_add_u32");

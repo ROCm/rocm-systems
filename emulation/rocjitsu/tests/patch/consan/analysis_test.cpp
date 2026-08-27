@@ -1266,9 +1266,11 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(bytes, options);
+  const auto result = test_semantic_inventory(bytes, options);
+  const auto preflight = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(consan_patch_succeeded(preflight));
   ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
@@ -1363,10 +1365,12 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
-  EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
-    return reason == "atomic LDS accesses excluded: 1";
-  }));
+  const ConSanKernelInfo &preflight_kernel = preflight.program_inventory.kernels().front();
+  EXPECT_EQ(preflight_kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_TRUE(
+      std::ranges::any_of(preflight_kernel.preflight_reasons, [](const std::string &reason) {
+        return reason == "atomic LDS accesses excluded: 1";
+      }));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   const ConSanSyncEvent &atomic_event = result.program_inventory.sync().sync_events[0];
   EXPECT_EQ(atomic_event.kind, ConSanSyncEventKind::Atomic);
@@ -2866,7 +2870,7 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_semantic_inventory(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
@@ -2891,7 +2895,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(bytes, options);
+  const auto result = test_semantic_inventory(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2958,7 +2962,7 @@ TEST(ConSan, SyncInventoryRetainsUnsupportedFlatAtomicWithoutProvenance) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(bytes, options);
+  const auto result = test_semantic_inventory(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2986,7 +2990,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+  const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
@@ -3015,7 +3019,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5]
       0xBFB00000u, // s_endpgm
   };
-  const auto release = test_lower_consan(make_rdna4_lds_code_object(release_words), options);
+  const auto release = test_semantic_inventory(make_rdna4_lds_code_object(release_words), options);
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(release.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3027,7 +3031,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                           // s_endpgm
   };
-  const auto acquire = test_lower_consan(make_rdna4_lds_code_object(acquire_words), options);
+  const auto acquire = test_semantic_inventory(make_rdna4_lds_code_object(acquire_words), options);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(acquire.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3065,7 +3069,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
 
   for (size_t index = 0; index < fixtures.size(); ++index) {
     SCOPED_TRACE(index);
-    const ConSanTransformArtifacts result = test_lower_consan(fixtures[index], options);
+    const ConSanTransformArtifacts result = test_semantic_inventory(fixtures[index], options);
     ASSERT_TRUE(consan_patch_succeeded(result));
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
@@ -3084,7 +3088,7 @@ TEST(ConSan, SyncSequencesAssociateBoundedAtomicAcquireAtFallthroughJoin) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_atomic_acquire_fallthrough_join_code_object(), options);
+      test_semantic_inventory(make_rdna4_atomic_acquire_fallthrough_join_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   const auto sequence =
@@ -3139,7 +3143,7 @@ TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_release_wait_no_return_bitwise_code_object(), options);
+      test_semantic_inventory(make_rdna4_release_wait_no_return_bitwise_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
@@ -3159,7 +3163,7 @@ TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
             result.program_inventory.sync().sync_events.front().identity);
   EXPECT_NE(sequence.identity.find("|release-wait=pc=0x"), std::string::npos);
 
-  const ConSanTransformArtifacts nonzero = test_lower_consan(
+  const ConSanTransformArtifacts nonzero = test_semantic_inventory(
       make_rdna4_release_wait_no_return_bitwise_code_object(0xbfc90001u), options);
   ASSERT_TRUE(nonzero.errors.empty()) << testing::PrintToString(nonzero.errors);
   ASSERT_EQ(nonzero.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3182,7 +3186,7 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3212,7 +3216,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna3_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna3_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3230,7 +3234,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   std::array<uint32_t, 8> nonzero = text_words;
   nonzero[0] |= 1u;
   const ConSanTransformArtifacts rejected =
-      test_lower_consan(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
+      test_semantic_inventory(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
   ASSERT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
   ASSERT_EQ(rejected.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(rejected.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3247,7 +3251,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
-    const ConSanTransformArtifacts result = test_lower_consan(fixture.bytes, options);
+    const ConSanTransformArtifacts result = test_semantic_inventory(fixture.bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     const auto sequence =
@@ -3267,7 +3271,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     const RdnaWorkgroupClauseReleaseFixture interrupted =
         make_rdna_workgroup_clause_release_code_object(arch, /*contiguous_wait_prefix=*/false);
     ASSERT_FALSE(interrupted.bytes.empty());
-    const ConSanTransformArtifacts rejected = test_lower_consan(interrupted.bytes, options);
+    const ConSanTransformArtifacts rejected = test_semantic_inventory(interrupted.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
     const auto rejected_sequence = std::ranges::find_if(
         rejected.program_inventory.sync().sync_sequences, [&](const auto &item) {
@@ -3605,7 +3609,7 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+  const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -3632,7 +3636,7 @@ TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3666,7 +3670,7 @@ TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3703,7 +3707,7 @@ TEST(ConSan, SyncSequencesRetainAtomicCacheAssociationBeforeBarrier) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
@@ -3733,7 +3737,7 @@ TEST(ConSan, SyncSequencesKeepCacheOperationsSeparateAroundBarrier) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3769,7 +3773,7 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(bytes, options);
+  const auto result = test_semantic_inventory(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3790,9 +3794,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;
@@ -3832,7 +3834,7 @@ TEST(ConSan, SyncSequencesPreserveBasicBlockBoundaryBetweenAdjacentEvents) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = test_lower_consan(bytes, options);
+  const auto result = test_semantic_inventory(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -3857,7 +3859,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const auto paired = test_lower_consan(make_rdna4_lds_code_object(paired_words), options);
+  const auto paired = test_semantic_inventory(make_rdna4_lds_code_object(paired_words), options);
 
   ASSERT_TRUE(paired.errors.empty()) << (paired.errors.empty() ? "" : paired.errors.front());
   ASSERT_EQ(paired.program_inventory.sync().sync_events.size(), 2u);
@@ -3885,7 +3887,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("operand_source=immediate"),
             std::string::npos);
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("scope=workgroup"), std::string::npos);
-  const auto repeated = test_lower_consan(make_rdna4_lds_code_object(paired_words), options);
+  const auto repeated = test_semantic_inventory(make_rdna4_lds_code_object(paired_words), options);
   ASSERT_EQ(repeated.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(repeated.program_inventory.sync().sync_sequences.front().identity, barrier.identity);
 
@@ -3895,7 +3897,8 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  const auto intervened = test_lower_consan(make_rdna4_lds_code_object(intervened_words), options);
+  const auto intervened =
+      test_semantic_inventory(make_rdna4_lds_code_object(intervened_words), options);
   ASSERT_TRUE(intervened.errors.empty())
       << (intervened.errors.empty() ? "" : intervened.errors.front());
   ASSERT_EQ(intervened.program_inventory.sync().sync_sequences.size(), 2u);
@@ -3913,7 +3916,8 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBE804EC1u, // s_barrier_signal -1
       0xBFB00000u, // s_endpgm
   };
-  const auto reversed = test_lower_consan(make_rdna4_lds_code_object(reversed_words), options);
+  const auto reversed =
+      test_semantic_inventory(make_rdna4_lds_code_object(reversed_words), options);
   ASSERT_TRUE(reversed.errors.empty()) << (reversed.errors.empty() ? "" : reversed.errors.front());
   ASSERT_EQ(reversed.program_inventory.sync().sync_sequences.size(), 2u);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[0].operation,
@@ -3939,7 +3943,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts retained =
-      test_lower_consan(make_rdna4_lds_code_object(retained_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(retained_words), options);
 
   ASSERT_TRUE(retained.errors.empty()) << testing::PrintToString(retained.errors);
   ASSERT_EQ(retained.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3954,7 +3958,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
 
   const auto full_pair_count = [&](std::span<const uint32_t> words) {
     const ConSanTransformArtifacts result =
-        test_lower_consan(make_rdna4_lds_code_object(words), options);
+        test_semantic_inventory(make_rdna4_lds_code_object(words), options);
     return std::ranges::count(result.program_inventory.sync().sync_sequences,
                               ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   };
@@ -4070,7 +4074,7 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -4104,7 +4108,7 @@ TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
@@ -4162,7 +4166,7 @@ TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_semantic_inventory(
       make_gfx1250_code_object(text_words, "nontrivial_cluster_triangle"), options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
@@ -4186,7 +4190,7 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -4223,7 +4227,7 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_gfx1250_code_object(text_words), options);
+      test_semantic_inventory(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -4297,7 +4301,7 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts result =
-      test_lower_consan(make_gfx1250_code_object(text_words), options);
+      test_semantic_inventory(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -4620,9 +4624,9 @@ TEST(ConSan, SyncSequencesInventoryUnmatchedBarrierComponentsWithoutPairing) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanTransformArtifacts signal =
-      test_lower_consan(make_rdna4_lds_code_object(signal_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(signal_words), options);
   const ConSanTransformArtifacts wait =
-      test_lower_consan(make_rdna4_lds_code_object(wait_words), options);
+      test_semantic_inventory(make_rdna4_lds_code_object(wait_words), options);
 
   ASSERT_EQ(signal.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(signal.program_inventory.sync().sync_sequences.front().operation,
@@ -4664,7 +4668,7 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
       make_rdna4_lds_code_object(text_words, "validate_structured_divergent_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 12u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());

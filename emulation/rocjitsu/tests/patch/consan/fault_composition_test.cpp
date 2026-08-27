@@ -406,7 +406,7 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   ConSanPerturbationPlanningState perturbation;
   const ConSanTransformArtifacts inventory =
-      test_lower_consan(bytes, inventory_options, &perturbation);
+      test_semantic_inventory(bytes, inventory_options, &perturbation);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
   const auto perturb = std::ranges::find_if(
       perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
@@ -451,7 +451,7 @@ TEST(ConSan, FinalValidationRejectsCorruptedBarrierCompositeIdentityOwnershipAnd
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   ConSanPerturbationPlanningState perturbation;
   const ConSanTransformArtifacts inventory =
-      test_lower_consan(bytes, inventory_options, &perturbation);
+      test_barrier_move_inventory(bytes, inventory_options, &perturbation);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   const auto perturb = std::ranges::find_if(

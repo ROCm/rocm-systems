@@ -495,7 +495,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions selection_options;
   selection_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts selection = test_lower_consan(bytes, selection_options);
+  const ConSanTransformArtifacts selection = test_barrier_move_inventory(bytes, selection_options);
   ASSERT_EQ(std::ranges::count(selection.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -674,7 +674,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.test_kernel_name_filter = "lds_probe";
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -828,7 +828,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto sequence =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -925,7 +925,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto sequence =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);

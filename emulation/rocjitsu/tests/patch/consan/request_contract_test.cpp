@@ -856,7 +856,6 @@ TEST(ConSanOptionsConstructionTest, PreservesEveryMutationAndBoundResourceFamily
                               resources);
   EXPECT_EQ(static_cast<const MutationRequest &>(options), mutation);
   EXPECT_EQ(static_cast<const BoundRuntimeResources &>(options), resources);
-  EXPECT_TRUE(options.collect_barrier_move_destinations);
 }
 
 TEST(ConSanOptionsConstructionTest, ProducesFreshValues) {

@@ -770,8 +770,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                     inventory_builder.access_sites());
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
                                         options.fault_dry_run || has_fault || has_perturbation ||
-                                        options.abort_unmatched_barrier_wait ||
-                                        options.collect_barrier_move_destinations;
+                                        options.abort_unmatched_barrier_wait;
   SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
   if (needs_semantic_inventory) {
     build_fault_site_inventory(code_object_bytes, arch, result);
@@ -794,7 +793,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
                                     result);
     build_barrier_lifecycle_group_inventory(synchronization_inventory);
-    if (options.collect_barrier_move_destinations)
+    if (options.fault_move_barrier)
       build_barrier_move_destination_inventory(*code_object, sync_blocks, sync_events, arch,
                                                synchronization_inventory.sync_sequences, result);
     annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks,

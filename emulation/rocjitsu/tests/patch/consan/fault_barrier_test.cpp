@@ -13,7 +13,7 @@ TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto source = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &item) {
     return item.kind == ConSanFaultSiteKind::Barrier && item.container_name == "shared_lds_helper";
   });
@@ -54,7 +54,7 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   ConSanPerturbationPlanningState perturbation;
   const ConSanTransformArtifacts inventory =
-      test_lower_consan(bytes, inventory_options, &perturbation);
+      test_semantic_inventory(bytes, inventory_options, &perturbation);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             4u);
@@ -111,7 +111,7 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   ConSanPerturbationPlanningState perturbation;
   const ConSanTransformArtifacts inventory =
-      test_lower_consan(bytes, inventory_options, &perturbation);
+      test_barrier_move_inventory(bytes, inventory_options, &perturbation);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -194,7 +194,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   const auto barrier =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -249,7 +249,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   EXPECT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.empty());
   EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
   EXPECT_FALSE(inventory.modified());
@@ -272,7 +272,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   ASSERT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.front().admissible);
   const auto init =
@@ -393,7 +393,7 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const auto barrier =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
@@ -476,7 +476,7 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   const auto barrier =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -553,26 +553,6 @@ TEST(ConSan, FaultDropBarrierModeRewritesSelectedBarrier) {
   EXPECT_EQ(rewritten_barrier, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
-TEST(ConSan, FaultDropInventoryCanSkipUnneededMoveDestinations) {
-  const std::array<uint32_t, 5> text_words = {
-      0xD8340000u, 0x00000000u, // ds_store_b32
-      0xBE804EC1u,              // s_barrier_signal -1
-      0xBF94FFFFu,              // s_barrier_wait -1
-      0xBFB00000u,              // s_endpgm
-  };
-  const std::vector<uint8_t> bytes =
-      make_rdna4_lds_code_object(text_words, "drop_inventory_without_move_destinations");
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_drop_barrier = true;
-  options.fault_dry_run = true;
-  options.collect_barrier_move_destinations = false;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, options);
-  EXPECT_FALSE(inventory.fault_sites.empty());
-  EXPECT_FALSE(inventory.program_inventory.sync().sync_sequences.empty());
-  EXPECT_TRUE(inventory.barrier_move_destinations.empty());
-}
-
 TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
   const std::array<uint32_t, 3> text_words = {
       0xBE804EC1u, // s_barrier_signal -1
@@ -582,7 +562,7 @@ TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "guarded_pair_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -619,7 +599,7 @@ TEST(ConSan, FaultDropBarrierDryRunRequiresDestructiveOptInForQualifiedPairHalf)
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "dry_guarded_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -650,7 +630,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
       make_rdna4_lds_code_object(text_words, "exact_whole_barrier_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -733,7 +713,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
       make_rdna4_lds_code_object(pair_words, "stale_whole_barrier_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(pair_bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(pair_bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -771,7 +751,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   const std::vector<uint8_t> partial_bytes =
       make_rdna4_lds_code_object(partial_words, "partial_whole_barrier_drop");
   const ConSanTransformArtifacts partial_inventory =
-      test_lower_consan(partial_bytes, inventory_options);
+      test_semantic_inventory(partial_bytes, inventory_options);
   ASSERT_EQ(partial_inventory.fault_sites.size(), 1u);
   ASSERT_EQ(partial_inventory.program_inventory.sync().sync_sequences.size(), 1u);
   options.fault_site_identity = partial_inventory.fault_sites.front().identity;
@@ -804,7 +784,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   ConSanOptions inventory_options = ordinary_options;
   inventory_options.fault_drop_barrier = true;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   const auto sequence =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -893,7 +873,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
       make_rdna4_lds_code_object(text_words, "exact_grouped_barrier_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   std::vector<const ConSanSyncSequence *> sequences;
   for (const ConSanSyncSequence &sequence : inventory.program_inventory.sync().sync_sequences)
     if (sequence.operation == ConSanSyncOperation::BarrierFull)
@@ -961,7 +941,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
       make_rdna4_lds_code_object(text_words, "rejected_grouped_barrier_drop");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   std::vector<const ConSanSyncSequence *> sequences;
   for (const ConSanSyncSequence &sequence : inventory.program_inventory.sync().sync_sequences)
     if (sequence.operation == ConSanSyncOperation::BarrierFull)
@@ -1025,8 +1005,8 @@ TEST(ConSan, FaultInventoryAssignsStableBarrierIdentities) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanTransformArtifacts first = test_lower_consan(bytes, options);
-  const ConSanTransformArtifacts second = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts first = test_semantic_inventory(bytes, options);
+  const ConSanTransformArtifacts second = test_semantic_inventory(bytes, options);
 
   ASSERT_EQ(first.fault_sites.size(), 2u);
   ASSERT_EQ(second.fault_sites.size(), first.fault_sites.size());
@@ -1058,7 +1038,7 @@ TEST(ConSan, FaultDropBarrierExactIdentitySupersedesGlobalIndex) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "exact_barriers");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1084,7 +1064,7 @@ TEST(ConSan, FaultBarrierMoveDryRunReportsCompletingPairWithoutChangingBytes) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "dry_run_pair");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1120,7 +1100,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty())
       << (inventory.errors.empty() ? "" : inventory.errors.front());
   ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
@@ -1208,7 +1188,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
 
   ConSanOptions options = inventory_options;
@@ -1249,7 +1229,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
 
   ConSanOptions options = inventory_options;
@@ -1290,7 +1270,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralSignalMarkerAtDecode) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
   EXPECT_FALSE(inventory.modified());
 }
@@ -1325,8 +1305,8 @@ TEST(ConSan, FaultBarrierMoveDryRunPlansStableRealEarlierAndLaterDestinations) {
       make_rdna4_lds_code_object(text_words, "markerless_destinations");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-  const ConSanTransformArtifacts repeated = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
+  const ConSanTransformArtifacts repeated = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1393,7 +1373,7 @@ TEST(ConSan, FaultBarrierMoveDryRunRejectsOverlapBoundaryUnsuitableAndNoTarget) 
       make_rdna4_lds_code_object(text_words, "rejected_destinations");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1449,7 +1429,7 @@ TEST(ConSan, FaultBarrierMoveDryRunRejectsDestinationInsideScalarClause) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "clause_destination");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 4u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -1480,7 +1460,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionRelocatesExactPairEarlierAndLater) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   for (const auto &[direction, destination_offset] :
        {std::pair{ConSanBarrierMoveDirection::Earlier, 0u},
         std::pair{ConSanBarrierMoveDirection::Later, 16u}}) {
@@ -1538,7 +1518,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionPreservesTwelveByteDestination) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "wide_destination");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -1584,7 +1564,7 @@ TEST(ConSan, FaultBarrierConditionalMoveAdmitsProvenCompletingStructuredDiamond)
       make_rdna4_lds_code_object(text_words, "completing_conditional_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1642,7 +1622,7 @@ TEST(ConSan, FaultBarrierConditionalMoveAdmitsProvenCompletingStructuredDiamond)
 
   auto cyclic_words = text_words;
   cyclic_words[6] = pack_sopp(/*s_branch=*/32, /*simm16=*/-1);
-  const ConSanTransformArtifacts cyclic_inventory = test_lower_consan(
+  const ConSanTransformArtifacts cyclic_inventory = test_barrier_move_inventory(
       make_rdna4_lds_code_object(cyclic_words, "cyclic_conditional_move"), inventory_options);
   const auto cyclic_destination = std::ranges::find(cyclic_inventory.barrier_move_destinations, 0u,
                                                     &ConSanBarrierMoveDestination::text_offset);
@@ -1668,7 +1648,7 @@ TEST(ConSan, FaultBarrierDivergentMoveAdmitsOnlyProvenStructuredExecDiamond) {
       make_rdna4_lds_code_object(text_words, "structured_divergent_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1744,7 +1724,7 @@ TEST(ConSan, FaultBarrierDivergentMoveRejectsLaterAndBrokenExecRestore) {
       make_rdna4_lds_code_object(text_words, "broken_structured_divergent_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 8u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -1779,7 +1759,7 @@ TEST(ConSan, FaultBarrierDivergentMoveAdmitsWave32CmpxExecDiamond) {
       make_rdna4_lds_code_object(text_words, "wave32_cmpx_divergent_move");
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 12u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -1808,7 +1788,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionPrefersReachableUncoveredLocalCave) 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.test_kernel_name_filter = "lds_probe";
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1843,7 +1823,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionReportsUnreachableCaveAsUnsupported)
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "unreachable_cave");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -1876,7 +1856,7 @@ TEST(ConSan, FinalValidationRejectsCorruptedMarkerlessBarrierMoveComponents) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "corrupt_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 16u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -2020,7 +2000,7 @@ TEST(ConSan, FaultMoveBarrierRelocatesBarrierToMarker) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_GE(inventory.fault_sites.size(), 2u);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;

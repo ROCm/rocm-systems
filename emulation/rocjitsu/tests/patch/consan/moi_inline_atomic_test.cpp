@@ -201,8 +201,7 @@ inline_ordinary_acquire_load(const InlineReleaseSequenceTarget &target) {
     };
   }
   return {
-      0xEE050004u,
-      4u | (2u << 18u),
+      0xEE050004u, 4u | (2u << 18u),
       2u, // global_load_b32 v4, v2, s[4:5], scope:device
   };
 }
@@ -641,7 +640,7 @@ TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
     const ConSanTransformArtifacts result =
-        test_lower_consan(fixture(cache_words, kernel_name), options);
+        test_semantic_inventory(fixture(cache_words, kernel_name), options);
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
@@ -3455,8 +3454,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
   for (const InlineReleaseSequenceTarget &target : targets) {
     SCOPED_TRACE(target.label);
     const std::array<uint32_t, 3> load = {
-        0xEE050004u,
-        2u | (2u << 18u),
+        0xEE050004u, 2u | (2u << 18u),
         2u, // global_load_b32 v2, v2, s[4:5], scope:device
     };
     std::vector<uint32_t> guest_words;

@@ -646,7 +646,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   const std::vector<uint8_t> bytes = make_rdna4_ordinary_acquire_code_object();
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   const auto load = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &site) {
     return site.semantic_role == "ordinary-acquire-load";
   });

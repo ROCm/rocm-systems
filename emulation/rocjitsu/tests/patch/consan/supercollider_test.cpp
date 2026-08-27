@@ -5161,10 +5161,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 4;
   options.delay_nops = 1;
-  // Match an ordinary runtime clean transform: fault discovery is a separate
-  // validation phase and barrier-move destinations were not requested.
-  options.collect_barrier_move_destinations = false;
-
   const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
