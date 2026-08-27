@@ -55,7 +55,7 @@ TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
       std::move(inventory), inventory_options, moi_inventory_retry_config(dry_run), bytes);
 
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(retried.modified);
+  EXPECT_FALSE(retried.modified());
   EXPECT_EQ(retried.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(retried.errors, [](const std::string &error) {
     return error.find("only a live late-bound fault selection") != std::string::npos;
@@ -72,7 +72,7 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
   inventory_options.fault_require_exactly_one = false;
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-  ASSERT_FALSE(inventory.modified);
+  ASSERT_FALSE(inventory.modified());
 
   // A sizing outcome is not fault-planning state. Exercise the reset contract
   // explicitly instead of relying only on the ordinary Unchanged case.
@@ -83,7 +83,7 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
 
   ASSERT_EQ(retried.outcome, fresh.outcome)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
-  EXPECT_EQ(retried.modified, fresh.modified);
+  EXPECT_EQ(retried.modified(), fresh.modified());
   EXPECT_EQ(retried.mutation.fault.applied, fresh.mutation.fault.applied);
   EXPECT_EQ(retried.mutation.applied_fault_logical_identity,
             fresh.mutation.applied_fault_logical_identity);
@@ -133,7 +133,7 @@ TEST(ConSanMoi, DisabledTypedFaultUsesReportOnlyRetryPath) {
       inventory, inventory_options, moi_inventory_retry_config(live), bytes);
 
   EXPECT_EQ(disabled.outcome, absent.outcome);
-  EXPECT_EQ(disabled.modified, absent.modified);
+  EXPECT_EQ(disabled.modified(), absent.modified());
   EXPECT_EQ(disabled.replacement, absent.replacement);
   EXPECT_EQ(disabled.errors, absent.errors);
   EXPECT_EQ(disabled.warnings, absent.warnings);
@@ -178,7 +178,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   const auto [inventory, inventory_ms] =
       timed([&] { return try_patch_consan(bytes, inventory_options); });
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-  ASSERT_FALSE(inventory.modified);
+  ASSERT_FALSE(inventory.modified());
   const ConSanMoiAutoReportInventory capacity =
       plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
@@ -245,7 +245,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   const auto [inventory, inventory_ms] =
       timed([&] { return try_patch_consan(bytes, inventory_options); });
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-  ASSERT_FALSE(inventory.modified);
+  ASSERT_FALSE(inventory.modified());
   const ConSanMoiAutoReportInventory capacity =
       plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
@@ -737,7 +737,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << (result.errors.empty() ? "" : result.errors.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {

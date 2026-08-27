@@ -212,7 +212,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   const ConSanResult execution = try_patch_consan(bytes, options);
   ASSERT_TRUE(execution.errors.empty())
       << (execution.errors.empty() ? "" : execution.errors.front());
-  EXPECT_TRUE(execution.modified);
+  EXPECT_TRUE(execution.modified());
   EXPECT_EQ(execution.mutation.fault.applied, 1u);
   EXPECT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(execution.patches.size(), 4u);
@@ -248,7 +248,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   EXPECT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.empty());
   EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
-  EXPECT_FALSE(inventory.modified);
+  EXPECT_FALSE(inventory.modified());
 }
 
 TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) {
@@ -493,7 +493,7 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -529,7 +529,7 @@ TEST(ConSan, FaultDropBarrierModeRewritesSelectedBarrier) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().phase, ConSanPatchPhase::Mutation);
@@ -587,7 +587,7 @@ TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
   options.fault_site_identity = inventory.fault_sites.front().identity;
   const ConSanResult rejected = try_patch_consan(bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_FALSE(rejected.modified);
+  EXPECT_FALSE(rejected.modified());
   EXPECT_TRUE(rejected.patches.empty());
   EXPECT_EQ(rejected.mutation.fault.requested, 1u);
   EXPECT_EQ(rejected.mutation.fault.applied, 0u);
@@ -744,7 +744,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   options.fault_barrier_sequence_identity = "missing-sequence";
   const ConSanResult stale_sequence = try_patch_consan(pair_bytes, options);
   EXPECT_EQ(stale_sequence.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(stale_sequence.modified);
+  EXPECT_FALSE(stale_sequence.modified());
   EXPECT_TRUE(stale_sequence.patches.empty());
   EXPECT_EQ(stale_sequence.mutation.fault.requested, 1u);
   EXPECT_EQ(stale_sequence.mutation.fault.planned, 0u);
@@ -755,7 +755,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   options.fault_site_identity = "missing-site";
   const ConSanResult stale_site = try_patch_consan(pair_bytes, options);
   EXPECT_EQ(stale_site.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(stale_site.modified);
+  EXPECT_FALSE(stale_site.modified());
   EXPECT_TRUE(stale_site.patches.empty());
   EXPECT_EQ(stale_site.mutation.fault.applied, 0u);
 
@@ -773,7 +773,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
       partial_inventory.program_inventory.sync().sync_sequences.front().identity;
   const ConSanResult partial = try_patch_consan(partial_bytes, options);
   EXPECT_EQ(partial.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(partial.modified);
+  EXPECT_FALSE(partial.modified());
   EXPECT_TRUE(partial.patches.empty());
   EXPECT_EQ(partial.mutation.fault.applied, 0u);
 }
@@ -978,7 +978,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   options.fault_barrier_companion_site_identity = first_site->identity;
   options.fault_barrier_companion_sequence_identity = sequences[0]->identity;
   const ConSanResult duplicate = try_patch_consan(bytes, options);
-  EXPECT_FALSE(duplicate.modified);
+  EXPECT_FALSE(duplicate.modified());
   EXPECT_TRUE(duplicate.patches.empty());
   EXPECT_EQ(duplicate.mutation.fault.applied, 0u);
 
@@ -987,7 +987,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   options.fault_barrier_companion_site_identity = first_site->identity;
   options.fault_barrier_companion_sequence_identity = sequences[0]->identity;
   const ConSanResult reversed = try_patch_consan(bytes, options);
-  EXPECT_FALSE(reversed.modified);
+  EXPECT_FALSE(reversed.modified());
   EXPECT_TRUE(reversed.patches.empty());
 
   options.fault_site_identity = first_site->identity;
@@ -995,7 +995,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   options.fault_barrier_companion_site_identity = "missing-site";
   options.fault_barrier_companion_sequence_identity = sequences[1]->identity;
   const ConSanResult partial = try_patch_consan(bytes, options);
-  EXPECT_FALSE(partial.modified);
+  EXPECT_FALSE(partial.modified());
   EXPECT_TRUE(partial.patches.empty());
 
   options.fault_site_identity.clear();
@@ -1003,7 +1003,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   options.fault_barrier_companion_site_identity = second_site->identity;
   options.fault_barrier_companion_sequence_identity = sequences[1]->identity;
   const ConSanResult missing_primary = try_patch_consan(bytes, options);
-  EXPECT_FALSE(missing_primary.modified);
+  EXPECT_FALSE(missing_primary.modified());
   EXPECT_TRUE(missing_primary.patches.empty());
   EXPECT_EQ(missing_primary.mutation.fault.applied, 0u);
 }
@@ -1088,7 +1088,7 @@ TEST(ConSan, FaultBarrierMoveDryRunReportsCompletingPairWithoutChangingBytes) {
   options.fault_site_identity = inventory.fault_sites[0].identity;
   const ConSanResult result = try_patch_consan(bytes, options);
 
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
@@ -1132,7 +1132,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
   const ConSanFaultMutationPlan &plan = result.fault_plans.front();
@@ -1186,7 +1186,7 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
   const ConSanResult applied = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(applied)) << testing::PrintToString(applied.errors);
-  EXPECT_TRUE(applied.modified);
+  EXPECT_TRUE(applied.modified());
   EXPECT_EQ(applied.mutation.fault.applied, 1u);
   EXPECT_EQ(applied.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -1255,7 +1255,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   EXPECT_FALSE(result.replacement.empty());
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
@@ -1285,7 +1285,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralSignalMarkerAtDecode) {
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
-  EXPECT_FALSE(inventory.modified);
+  EXPECT_FALSE(inventory.modified());
 }
 
 TEST(ConSan, FaultBarrierIdScopeExecutionRejectsUnsupportedForms) {
@@ -1301,7 +1301,7 @@ TEST(ConSan, FaultBarrierIdScopeExecutionRejectsUnsupportedForms) {
   options.fault_barrier_sequence_identity = "not-a-qualified-sequence";
   const ConSanResult dynamic = try_patch_consan(make_rdna4_lds_code_object(dynamic_words), options);
   EXPECT_FALSE(dynamic.errors.empty());
-  EXPECT_FALSE(dynamic.modified);
+  EXPECT_FALSE(dynamic.modified());
   EXPECT_EQ(dynamic.mutation.fault.applied, 0u);
 }
 
@@ -1850,7 +1850,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionReportsUnreachableCaveAsUnsupported)
   options.fault_barrier_destination_identity = destination->identity;
   const ConSanResult result = try_patch_consan(bytes, options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable local or appended cave") != std::string::npos;
@@ -1942,7 +1942,7 @@ TEST(ConSan, FaultDropBarrierModeSkipsRocclrRuntimeHelpers) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
@@ -1970,7 +1970,7 @@ TEST(ConSan, FaultDropBarrierModeComposesWithLdsCheckTrapPatch) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].phase, ConSanPatchPhase::Mutation);
   EXPECT_EQ(result.patches[1].phase, ConSanPatchPhase::Instrumentation);
@@ -2023,7 +2023,7 @@ TEST(ConSan, FaultMoveBarrierRelocatesBarrierToMarker) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 4u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierMoveSourceRewrite);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineBarrierMoveSourceRewrite);

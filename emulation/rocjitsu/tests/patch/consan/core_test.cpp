@@ -238,7 +238,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
@@ -246,6 +246,26 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   EXPECT_TRUE(result.warnings.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.program_inventory.kernels().empty());
+}
+
+TEST(ConSan, StagedModificationStateCannotOverwriteFailureOutcome) {
+  ConSanTransformArtifacts artifacts;
+  EXPECT_FALSE(artifacts.modified());
+
+  artifacts.mark_modified();
+  EXPECT_TRUE(artifacts.modified());
+  EXPECT_EQ(artifacts.outcome, ConSanTransformOutcome::ModifiedValid);
+
+  for (const ConSanTransformOutcome failure :
+       {ConSanTransformOutcome::Unsupported, ConSanTransformOutcome::Invalid}) {
+    artifacts.outcome = failure;
+    artifacts.mark_modified();
+    EXPECT_FALSE(artifacts.modified());
+    EXPECT_EQ(artifacts.outcome, failure);
+  }
+
+  artifacts.patches.emplace_back();
+  EXPECT_TRUE(artifacts.modified());
 }
 
 TEST(ConSan, ParsesFlavorNames) {
@@ -403,7 +423,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
@@ -441,7 +461,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
-    EXPECT_FALSE(result.modified);
+    EXPECT_FALSE(result.modified());
     EXPECT_TRUE(result.errors.empty());
     EXPECT_FALSE(result.program_inventory.semantic_arch_required());
     EXPECT_TRUE(result.program_inventory.has_resolved_semantic_arch());
@@ -483,7 +503,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
@@ -565,7 +585,7 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
       const ConSanResult result = try_patch_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_FALSE(result.modified);
+      EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
@@ -648,7 +668,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       SCOPED_TRACE(::testing::Message() << damage.description << ": " << profile.name);
       const ConSanResult result = try_patch_consan(damage.bytes, profile.options);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-      EXPECT_FALSE(result.modified);
+      EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
@@ -842,7 +862,7 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
       const ConSanResult result = try_patch_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_FALSE(result.modified);
+      EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
@@ -862,14 +882,14 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
                                          const ConSanTransformProfile &profile) {
     const ConSanResult result = try_patch_consan(input, profile.options);
     EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
-    if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
-      EXPECT_TRUE(result.modified);
+    if (result.modified()) {
+      EXPECT_TRUE(result.modified());
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.replacement.empty());
       EXPECT_FALSE(result.patches.empty());
       EXPECT_TRUE(validate_consan_modified_elf(input, result).empty());
     } else {
-      EXPECT_FALSE(result.modified);
+      EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
@@ -966,7 +986,7 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
       make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
 
   ConSanResult result;
-  result.modified = true;
+  result.mark_modified();
   result.replacement = bytes;
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);

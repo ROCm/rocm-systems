@@ -43,7 +43,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
 
   for (const PlannedPatch &planned_patch : planned_patches)
     result.patches.push_back(make_patch_info(planned_patch));
-  result.modified = true;
+  result.mark_modified();
   return true;
 }
 

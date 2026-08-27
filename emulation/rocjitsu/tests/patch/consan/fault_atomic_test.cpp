@@ -146,7 +146,7 @@ TEST(ConSan, AtomicFaultRollsBackWhenCarriedPerturbationIsUnreachable) {
   const ConSanResult result =
       try_patch_consan(make_rdna4_lds_code_object(words, "atomic_composite_far"), options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.mutation.fault.applied, 0u);
@@ -260,7 +260,7 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(bytes, original);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -289,7 +289,7 @@ TEST(ConSan, FaultAtomicWeakenOrderDryRunRejectsThAsOrderingField) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   ASSERT_EQ(result.fault_plans.size(), 1u);
   EXPECT_EQ(result.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenOrder);
   EXPECT_TRUE(result.fault_plans.front().companion_identity);
@@ -385,7 +385,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   scope_options.fault_dry_run = false;
   const ConSanResult live_scope = try_patch_consan(bytes, scope_options);
   EXPECT_EQ(live_scope.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(live_scope.modified);
+  EXPECT_FALSE(live_scope.modified());
   EXPECT_TRUE(std::ranges::any_of(live_scope.errors, [](const std::string &error) {
     return error.find("scope fault is unsupported") != std::string::npos;
   }));
@@ -396,7 +396,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   address_options.fault_site_identity = inventory.fault_sites.front().identity;
   const ConSanResult address = try_patch_consan(bytes, address_options);
   EXPECT_EQ(address.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(address.modified);
+  EXPECT_FALSE(address.modified());
   EXPECT_TRUE(std::ranges::any_of(address.errors, [](const std::string &error) {
     return error.find("address fault is unsupported") != std::string::npos;
   }));
@@ -483,7 +483,7 @@ TEST(ConSan, FaultAtomicWeakenScopeDryRunPreservesBytesAndIdentity) {
 
   EXPECT_EQ(bytes, original);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
@@ -527,7 +527,7 @@ TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -763,7 +763,7 @@ TEST(ConSan, FaultGlobalAtomicExactIdentityNoTargetFailsCardinalityWithoutMutati
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -909,7 +909,7 @@ TEST(ConSan, FaultDsAtomicScopeAndOrderFailClosedBeforeStagingBytes) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-    EXPECT_FALSE(result.modified);
+    EXPECT_FALSE(result.modified());
     EXPECT_TRUE(result.replacement.empty());
     EXPECT_TRUE(result.patches.empty());
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {

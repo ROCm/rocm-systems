@@ -304,7 +304,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object bytes");
     }
-    if (inventory.modified || !inventory.replacement.empty() || !inventory.patches.empty() ||
+    if (inventory.modified() || !inventory.replacement.empty() ||
         inventory.mutation.fault.applied != 0u || inventory.mutation.perturbation.applied != 0u ||
         !inventory.fault_plans.empty() || !inventory.perturbation_plans.empty()) {
       inventory.errors.emplace_back(

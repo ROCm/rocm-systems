@@ -22,7 +22,6 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
   const rocjitsu::ConSanResult result = rocjitsu::try_patch_consan(input, options);
   require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
   if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
-    require(result.modified);
     require(!result.replacement.empty());
     require(!result.patches.empty());
     require(rocjitsu::validate_consan_modified_elf(input, result).empty());
@@ -52,7 +51,6 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
       require(replacement_word == 0xBFB00000u); // s_endpgm
     }
   } else {
-    require(!result.modified);
     require(result.replacement.empty());
     require(result.patches.empty());
   }

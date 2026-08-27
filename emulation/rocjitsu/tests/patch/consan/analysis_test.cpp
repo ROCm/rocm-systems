@@ -425,7 +425,7 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.raw_saddr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.raw_vsrc, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.raw_ioffset, 0);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -466,7 +466,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   EXPECT_EQ(*result.program_inventory.access_sites().front().operands.address_vgpr, 0u);
   ASSERT_TRUE(result.program_inventory.access_sites().front().operands.destination_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites().front().operands.destination_vgpr, 2u);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -496,7 +496,7 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -528,7 +528,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -908,7 +908,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
             ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(result.program_inventory.access_sites().front().physical_id.original_text_offset, 24u);
   EXPECT_EQ(result.program_inventory.access_sites().front().file_offset, 0x118u);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -1420,7 +1420,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
             ConSanSemanticConfidence::Unsupported);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].confidence,
             ConSanSemanticConfidence::Conservative);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -1523,7 +1523,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 4u);
   EXPECT_TRUE(result.program_inventory.access_sites()[1].supported_mvp);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
 }
 
 TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
@@ -2033,7 +2033,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       const ConSanResult result = try_patch_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
@@ -2083,7 +2083,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       const ConSanResult result = try_patch_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
@@ -2161,7 +2161,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       EXPECT_TRUE(consan_supercollider_supports_access(
           result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
           result.program_inventory.arch()));
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
                                            &ConSanPatchInfo::kind);
@@ -2250,7 +2250,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
         ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
                   1u);
-        ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+        ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
         EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       }
     }
@@ -2291,7 +2291,7 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       EXPECT_TRUE(consan_supercollider_supports_access(
           result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
           result.program_inventory.arch()));
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(
           result.patches, ConSanPatchKind::InlineFlatStoreCheckTrap, &ConSanPatchInfo::kind);
@@ -2392,7 +2392,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
         ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
                   1u);
-        ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+        ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
         EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       }
     }
@@ -2414,7 +2414,7 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.moi_candidates.empty());
   EXPECT_FALSE(consan_moi_supports_flat_access_mnemonic("flat_load_dwordx3"));
   ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
@@ -2440,7 +2440,7 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
@@ -2507,7 +2507,7 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
     AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
@@ -2573,7 +2573,7 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto body = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatLoadCheckTrap,
                                       &ConSanPatchInfo::kind);
@@ -2633,7 +2633,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
     ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
     EXPECT_EQ(*result.moi_candidates.front().operands.address_vgpr, 0u);
     EXPECT_EQ(result.moi_candidates.front().operands.raw_ioffset, 0);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     if (engine == ConSanMoiEngine::InlineShadow) {
       EXPECT_TRUE(result.resolved_moi_workgroup_key_vgpr);
@@ -2694,7 +2694,7 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
       2)
       << "patches=" << testing::PrintToString(result.patches)
       << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -2751,7 +2751,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
       2)
       << "patches=" << testing::PrintToString(result.patches)
       << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -2783,7 +2783,7 @@ TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
   }
@@ -4758,7 +4758,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 32u);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_GE(kernel.preflight_reasons.size(), 2u);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 

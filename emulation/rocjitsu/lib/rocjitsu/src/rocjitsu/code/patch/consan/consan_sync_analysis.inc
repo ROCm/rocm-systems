@@ -3230,7 +3230,8 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     result.patches.push_back(std::move(info));
   }
   result.mutation.perturbation.applied = planned.size();
-  result.modified = !result.patches.empty();
+  if (!result.patches.empty())
+    result.mark_modified();
 }
 
 void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {

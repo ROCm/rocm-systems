@@ -2104,7 +2104,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     result.replacement = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.modified = true;
+    result.mark_modified();
     return;
   }
 

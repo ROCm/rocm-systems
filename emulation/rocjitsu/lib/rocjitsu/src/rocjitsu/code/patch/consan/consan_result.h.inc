@@ -161,6 +161,17 @@ struct ConSanTransformArtifacts {
   /// validation. Typed request, capability, and binding failures live in their
   /// pipeline stage record instead of being duplicated here.
   std::vector<std::string> errors;
+
+  /// Whether lowering has staged changes that finalization must validate or
+  /// discard, derived from its outcome and emitted patch telemetry.
+  [[nodiscard]] bool modified() const {
+    return outcome == ConSanTransformOutcome::ModifiedValid || !patches.empty();
+  }
+  /// Mark a candidate image without overwriting a prior failure outcome.
+  void mark_modified() {
+    if (outcome == ConSanTransformOutcome::Unchanged)
+      outcome = ConSanTransformOutcome::ModifiedValid;
+  }
 };
 
 /// Mutable compatibility-lowering state that has not yet moved into focused
@@ -172,7 +183,6 @@ struct ConSanTransformArtifacts {
 /// replacement-image construction state, and accumulates failures. They must
 /// not be projected to a second public representation.
 struct ConSanResult : ConSanTransformArtifacts {
-  bool modified = false;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;

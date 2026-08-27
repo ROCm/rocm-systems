@@ -5230,6 +5230,37 @@ analysis completed.
   physical matrix remains reserved for the final gate. E2E validation remains
   outside this work.
 
+### Slice 5BT: derive modification state from owned artifacts
+
+- **Delete the parallel mutable bit:** `ConSanResult::modified` is gone.
+  Candidate modification state is derived from the typed outcome and emitted
+  patch inventory, so a finalized result cannot publish a boolean that
+  disagrees with its replacement contract. `mark_modified()` moves only an
+  unchanged candidate to `ModifiedValid`; it cannot erase an `Unsupported` or
+  `Invalid` decision made by a more authoritative analysis step.
+- **Keep construction and publication semantics distinct:** While the
+  compatibility lowerer is assembling a result, patch telemetry still reveals
+  byte changes that must be validated or rolled back even if a later stage has
+  already classified the attempt as unsupported. Finalization clears those
+  bytes and patches on every non-installable result. A focused unit test covers
+  unchanged, modified, unsupported, invalid, and staged-patch cases.
+- **Share active-image selection:** Eight MOI access, barrier, atomic,
+  prologue, sampled, and pipeline paths now use one `active_moi_bytes` helper
+  instead of independently selecting between pristine and staged bytes. This
+  both pays for the derived-state API and gives incremental lowering one
+  definition of its current image.
+- **Deletion accounting:** Implementation files add 71 and delete 79 physical
+  lines, a net deletion of eight. Tests add 821 and delete 802 lines, a net
+  addition of nineteen; almost every changed test line is the mechanical
+  field-to-query cutover, with the focused state-invariant test providing the
+  new coverage. No compatibility field or fallback remains.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in about 71
+  seconds. Slice 5BM's physical-gfx950 smoke remains the physical gate for
+  this artifact-state tranche; the complete serialized physical matrix remains
+  reserved for the final gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -841,7 +841,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
       info.trampoline_offset = nop_site->text_offset;
       info.original_size = sizeof(replacement_nop);
       result.patches.push_back(info);
-      result.modified = true;
+      result.mark_modified();
       return;
     }
   }
@@ -866,7 +866,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   }
 
   result.replacement = std::move(patched.elf_bytes);
-  result.modified = true;
+  result.mark_modified();
   result.patches.reserve(patched.patches.size());
   for (const InstrumentationPatch &patch : patched.patches) {
     ConSanPatchInfo info;
@@ -940,7 +940,7 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
       info.fault_sequence_identity = owning_pair.sequence->identity;
       result.patches.push_back(std::move(info));
     }
-    result.modified = true;
+    result.mark_modified();
     result.mutation.applied_fault_logical_identity =
         group ? exact_barrier_drop_group_identity(*group) : pair->sequence->identity;
     result.warnings.emplace_back(group ? "ConSan exact grouped-barrier fault transactionally "
@@ -981,7 +981,7 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   if (site->file_offset > result.replacement.size() ||
       sizeof(replacement_nop) > result.replacement.size() - site->file_offset) {
     result.errors.emplace_back("ConSan barrier fault offset is outside ELF bytes");
-    if (!result.modified)
+    if (!result.modified())
       result.replacement.clear();
     return;
   }
@@ -996,7 +996,7 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   info.trampoline_offset = site->text_offset;
   info.original_size = site->size;
   result.patches.push_back(info);
-  result.modified = true;
+  result.mark_modified();
   result.warnings.emplace_back("ConSan barrier fault rewrote " + site->mnemonic + " in " +
                                site->range_name);
 }
@@ -1155,7 +1155,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     patch.original_size = member->size;
     result.patches.push_back(std::move(patch));
   }
-  result.modified = true;
+  result.mark_modified();
   result.mutation.applied_fault_logical_identity =
       lifecycle_group != nullptr ? lifecycle_group->identity : selected->identity;
   result.warnings.emplace_back(
@@ -1222,7 +1222,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   patch.original_participant_count = init->participant_count;
   patch.target_participant_count = options.fault_barrier_target_participant_count;
   result.patches.push_back(std::move(patch));
-  result.modified = true;
+  result.mark_modified();
   result.mutation.applied_fault_logical_identity = group->identity;
   result.warnings.emplace_back("ConSan barrier participant mutation rewrote one proven static "
                                "lifecycle count from " +
@@ -1479,7 +1479,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       target_info.structured_source_offset = destination->structured_source_offset;
     }
     result.patches.push_back(target_info);
-    result.modified = true;
+    result.mark_modified();
     result.warnings.emplace_back(
         "ConSan barrier move fault relocated an adjacent logical pair " +
         std::string(options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier
@@ -1568,7 +1568,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   target_info.anchor_offset = *second_marker_text_offset;
   target_info.trampoline_offset = *second_marker_text_offset;
   result.patches.push_back(target_info);
-  result.modified = true;
+  result.mark_modified();
   result.warnings.emplace_back("ConSan barrier move fault moved " + site->mnemonic + " in " +
                                site->range_name);
 }
@@ -1827,7 +1827,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
                                  " scope from " + std::to_string(original_scope) + " to wave");
   }
   std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
-  result.modified = true;
+  result.mark_modified();
   if (options.fault_atomic_wrong_address) {
     result.warnings.emplace_back("ConSan atomic fault rewrote " + selected->mnemonic +
                                  " with validated address delta " +
@@ -1927,7 +1927,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     info.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
   result.patches.push_back(std::move(info));
   result.mutation.applied_fault_logical_identity = selected->identity;
-  result.modified = true;
+  result.mark_modified();
   result.warnings.emplace_back("ConSan LDS fault rewrote " + selected->mnemonic +
                                " address from v" + std::to_string(*selected->address_vgpr) +
                                " to v" + std::to_string(target_address_vgpr));
@@ -2040,7 +2040,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
   result.mutation.applied_fault_logical_identity = target->sequence->identity;
-  result.modified = true;
+  result.mark_modified();
   if (options.fault_ordinary_wrong_address) {
     result.warnings.emplace_back("ConSan ordinary fault shifted global_load_b32 by validated " +
                                  std::to_string(options.fault_ordinary_address_delta) + " byte(s)");

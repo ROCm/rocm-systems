@@ -1764,7 +1764,6 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
 
 void rollback_moi_dispatch_id_as_unsupported(ConSanResult &result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
-  result.modified = false;
   result.replacement.clear();
   result.patches.clear();
   result.warnings.emplace_back("ConSan MOI dispatch-ID capture is unsupported: " +
@@ -1809,7 +1808,7 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
 
 void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_code_arch_t arch,
                                             ConSanResult &result) {
-  if (!result.modified || result.replacement.empty()) {
+  if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI private-epoch prologue skipped because no private-epoch access probe was "
         "emitted");
@@ -2258,7 +2257,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   }
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.modified = true;
+  result.mark_modified();
 }
 
 [[nodiscard]] uint32_t moi_owner_epoch_prologue_required_vgpr_count(
@@ -2376,9 +2375,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  std::span<const uint8_t> active_bytes = bytes;
-  if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
+  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3207,5 +3204,5 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
 
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.modified = true;
+  result.mark_modified();
 }

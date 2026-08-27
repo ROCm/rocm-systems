@@ -34,7 +34,7 @@ TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   EXPECT_EQ(release.perturbation_plans[0].candidate_identity, release_candidate.identity);
   EXPECT_EQ(release.perturbation_plans[0].anchor_text_offset, 0u);
   EXPECT_EQ(release.perturbation_plans[0].sleep_imm, 7u);
-  EXPECT_FALSE(release.modified);
+  EXPECT_FALSE(release.modified());
   EXPECT_TRUE(release.replacement.empty());
 
   ConSanOptions acquire_options = release_options;
@@ -113,7 +113,7 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
   const ConSanResult release = try_patch_consan(bytes, options);
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(release.modified);
+  EXPECT_TRUE(release.modified());
   EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(release.mutation.perturbation.planned, 1u);
   EXPECT_EQ(release.mutation.perturbation.applied, 1u);
@@ -361,7 +361,7 @@ TEST(ConSan, PerturbationEmissionFailsClosedWithoutReachableCaveAndRollsBackComp
   options.sc_perturb_required_count = 1;
   const ConSanResult unreachable = try_patch_consan(bytes, options);
   EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(unreachable.modified);
+  EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.errors.empty());
   EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
@@ -373,7 +373,7 @@ TEST(ConSan, PerturbationEmissionFailsClosedWithoutReachableCaveAndRollsBackComp
   options.fault_drop_barrier = true;
   const ConSanResult composed = try_patch_consan(bytes, options);
   EXPECT_EQ(composed.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(composed.modified);
+  EXPECT_FALSE(composed.modified());
   EXPECT_TRUE(composed.replacement.empty());
   EXPECT_TRUE(std::ranges::any_of(composed.warnings, [](const std::string &warning) {
     return warning.find("composite planning did not select exact fault and perturbation plans") !=
@@ -411,7 +411,7 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -719,7 +719,7 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   const ConSanResult unreachable =
       try_patch_consan(make_rdna4_lds_code_object(far_words, "composed_far"), options);
   EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(unreachable.modified);
+  EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.patches.empty());
   EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
@@ -847,7 +847,7 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   ASSERT_TRUE(disabled_first.errors.empty()) << testing::PrintToString(disabled_first.errors);
   ASSERT_TRUE(disabled_second.errors.empty()) << testing::PrintToString(disabled_second.errors);
   EXPECT_EQ(disabled_first.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_FALSE(disabled_first.modified);
+  EXPECT_FALSE(disabled_first.modified());
   EXPECT_TRUE(disabled_first.replacement.empty());
   EXPECT_TRUE(disabled_first.patches.empty());
   EXPECT_EQ(disabled_first.mutation.perturbation.planned, 0u);
@@ -895,7 +895,7 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
       make_rdna4_lds_code_object(far_words, "sc2b1_unreachable"), unreachable_options);
   EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(unreachable.errors.empty());
-  EXPECT_FALSE(unreachable.modified);
+  EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.patches.empty());
   EXPECT_NE(unreachable.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -935,7 +935,7 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
   const ConSanResult stale = try_patch_consan(bytes, options);
   ASSERT_FALSE(stale.errors.empty());
   EXPECT_TRUE(stale.perturbation_plans.empty());
-  EXPECT_FALSE(stale.modified);
+  EXPECT_FALSE(stale.modified());
 
   const std::array<uint32_t, 5> two_pair_words = {
       0xBE804EC2u, 0xBF94FFFEu, // trap barrier -2
@@ -1093,7 +1093,7 @@ TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_FALSE(result.errors.empty());
@@ -1137,7 +1137,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesWideCompositeRelayDonor) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   std::vector<const ConSanPatchInfo *> donors;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor)

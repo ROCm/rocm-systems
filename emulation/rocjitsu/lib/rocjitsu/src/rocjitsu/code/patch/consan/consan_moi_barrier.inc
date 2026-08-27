@@ -979,9 +979,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  std::span<const uint8_t> active_bytes = bytes;
-  if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
+  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2345,7 +2343,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.modified = true;
+  result.mark_modified();
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
@@ -2462,9 +2460,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
 
-  std::span<const uint8_t> active_bytes = bytes;
-  if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
+  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3061,7 +3057,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         return;
       }
       result.replacement = std::move(patcher).emit();
-      result.modified = true;
+      result.mark_modified();
     }
     return;
   }
@@ -3079,5 +3075,5 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.modified = true;
+  result.mark_modified();
 }

@@ -265,7 +265,6 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 
 [[nodiscard]] ConSanResult rollback_composite_mutation(ConSanResult result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
-  result.modified = false;
   result.replacement.clear();
   result.patches.clear();
   result.mutation.fault.applied = 0;
@@ -559,7 +558,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         instrument_result.errors.emplace_back(
             "ConSan staged composition is missing an independently validated stage");
         instrument_result.outcome = ConSanTransformOutcome::Invalid;
-        instrument_result.modified = false;
         instrument_result.replacement.clear();
         instrument_result.patches.clear();
         instrument_result.mutation.fault.applied = 0;
@@ -592,7 +590,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       }
       instrument_result.replacement = std::move(mutation_stage.image);
       instrument_result.patches = std::move(mutation_stage.patches);
-      instrument_result.modified = true;
+      instrument_result.mark_modified();
       return instrument_result;
     case ConSanTransformOutcome::Unsupported:
       if (instrument_options.flavor == ConSanFlavor::SuperCollider &&
@@ -611,7 +609,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         }
         instrument_result.replacement = std::move(mutation_stage.image);
         instrument_result.patches = std::move(mutation_stage.patches);
-        instrument_result.modified = true;
+        instrument_result.mark_modified();
         return instrument_result;
       }
       instrument_result.warnings.emplace_back(
@@ -628,7 +626,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     }
     instrument_result.replacement.clear();
     instrument_result.patches.clear();
-    instrument_result.modified = false;
     return instrument_result;
   }
 
@@ -880,7 +877,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     if (options.probe_lds_check_trap)
       try_apply_lds_load_check_trap_patch(*code_object, arch, redundant_options, result);
     if (options.probe_flat_check_trap && result.errors.empty()) {
-      if (!result.modified) {
+      if (!result.modified()) {
         try_apply_flat_check_trap_patch(*code_object, arch, redundant_options, result);
       } else {
         const uint32_t max_patches = redundant_options.max_patches;
@@ -934,7 +931,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (has_perturbation && result.errors.empty()) {
     try_apply_perturbation_patches(*code_object, arch, options, result);
     if (result.mutation.perturbation.applied != result.perturbation_plans.size()) {
-      result.modified = false;
+      if (result.outcome == ConSanTransformOutcome::ModifiedValid)
+        result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
+                                               : ConSanTransformOutcome::Invalid;
       result.replacement.clear();
       result.patches.clear();
     }

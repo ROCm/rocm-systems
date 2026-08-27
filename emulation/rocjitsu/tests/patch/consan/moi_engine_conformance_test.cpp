@@ -58,7 +58,7 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
                                        conformance_options(test_case, kAccessCount));
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
@@ -89,7 +89,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
                          conformance_options(test_case, /*access_count=*/1u));
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors);
     EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
@@ -125,7 +125,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
                          options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors);
     EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
@@ -161,7 +161,7 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
         try_patch_consan(bytes, conformance_options(test_case, /*access_count=*/1u));
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
@@ -247,7 +247,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
   const auto result = try_patch_consan(bytes, conformance_options(test_case, 1));
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   const auto patch =
@@ -327,7 +327,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
       make_gfx1250_code_object(text_words, "gfx1250_sparse_stranded_accesses"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),

@@ -342,6 +342,14 @@ sites and plans, resource plans, emitted patch inventory, typed stage failures,
 contextual lowering errors, warnings, and validated replacement bytes. Runtime
 conflicts do not belong in this static result.
 
+The outcome and patch inventory are also the only modification state. There is
+no independent `modified` field that can disagree with them. During lowering,
+`modified()` reports either a candidate modified outcome or emitted patch
+telemetry; `mark_modified()` records a candidate only while the outcome is
+still unchanged, so it cannot overwrite an earlier unsupported or invalid
+classification. Finalization either validates that candidate as
+`ModifiedValid` or clears its replacement and patch inventory.
+
 `TransformResult::install_action` derives loader behavior from the static
 outcome and fail-closed policy. The HSA coordinator consumes the result
 directly for outcome, diagnostics, patch geometry, resource diagnostics,

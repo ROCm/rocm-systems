@@ -1923,7 +1923,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     result.replacement = std::move(patched_bytes);
   }
   result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());
-  result.modified = true;
+  result.mark_modified();
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
@@ -1979,9 +1979,9 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     if (access->file_offset > result.replacement.size() ||
         access->instruction_size > result.replacement.size() - access->file_offset) {
       result.errors.emplace_back("ConSan flat trap proof exceeds ELF bytes");
+      result.outcome = ConSanTransformOutcome::Invalid;
       result.replacement.clear();
       result.patches.clear();
-      result.modified = false;
       return;
     }
     std::memcpy(result.replacement.data() + access->file_offset, replacement.data(),
@@ -1994,7 +1994,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     info.original_size = access->instruction_size;
     result.patches.push_back(info);
   }
-  result.modified = true;
+  result.mark_modified();
 }
 
 } // namespace

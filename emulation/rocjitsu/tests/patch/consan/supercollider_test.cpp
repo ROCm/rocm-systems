@@ -79,7 +79,7 @@ TEST(ConSan, FlatTrapProofRewritesLikelyGroupLocalFunctionSite) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatTrapRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
@@ -116,7 +116,7 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableAppendedCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 12u);
@@ -155,7 +155,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
@@ -197,7 +197,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto body =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
@@ -265,7 +265,7 @@ TEST(ConSan, FlatDirectReservoirLosingRetryRollsBackTransaction) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.patches.empty());
 }
 
@@ -304,7 +304,7 @@ TEST(ConSan, FlatDirectReservoirRetryRoutesBothCandidates) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             2u)
@@ -338,7 +338,7 @@ TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   std::vector<const ConSanPatchInfo *> bodies;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -395,7 +395,7 @@ TEST(ConSan, FlatCheckTrapReportsPartialSelectionReason) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
@@ -427,7 +427,7 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
       std::to_string(required_growth) + " bytes, limit " + std::to_string(rejecting_limit) +
       " bytes (policy input-percent=" + std::to_string(admitting_percent - 1u) +
       ", original-input-image-bytes=" + std::to_string(fixture.bytes.size()) + ")";
-  EXPECT_FALSE(rejected.modified);
+  EXPECT_FALSE(rejected.modified());
   EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
       << testing::PrintToString(rejected.errors);
 
@@ -620,7 +620,7 @@ TEST(ConSan, FlatCheckTrapProofUsesIndirectIslandForFarAppendedCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   const auto island = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland, &ConSanPatchInfo::kind);
   const auto body = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatLoadCheckTrap,
@@ -664,7 +664,7 @@ TEST(ConSan, FlatCheckTrapProofRelocatesPrefixForFarAppendedCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             0u);
@@ -704,7 +704,7 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableUncoveredNopCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
@@ -748,7 +748,7 @@ TEST(ConSan, FlatB128CheckTrapSharesOneMismatchActionInLocalCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
   ASSERT_EQ(result.patches.front().trampoline_size % sizeof(uint32_t), 0u);
@@ -789,7 +789,7 @@ TEST(ConSan, FlatCheckTrapProofDoesNotClobberLiveThroughVgpr) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
@@ -820,7 +820,7 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedSecondKernelSite) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
@@ -878,7 +878,7 @@ TEST(ConSan, CombinedCheckTrapFallsBackToFlatWhenNoNativeLdsPatchApplies) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
@@ -917,7 +917,7 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(std::ranges::count(result.program_inventory.access_sites(),
                                ConSanAccessOrigin::NativeLds, &ConSanAccessInventorySite::origin),
@@ -999,7 +999,7 @@ TEST(ConSan, CombinedCheckTrapIgnoresMetadataOnlyIslandAnchor) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             1u)
@@ -1047,7 +1047,7 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 24u);
@@ -1088,7 +1088,7 @@ TEST(ConSan, FlatCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
@@ -1127,7 +1127,7 @@ TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
@@ -1156,7 +1156,7 @@ TEST(ConSan, FlatCheckTrapKernelFilterMatchesSharedFunctionOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
@@ -1195,7 +1195,7 @@ TEST(ConSan, FlatCoverageLedgerFailsClosedOnInconsistentPhysicalSiteAliases) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
     return error.find("ConSan SuperCollider FLAT access") != std::string::npos &&
@@ -1231,7 +1231,7 @@ TEST(ConSan, FlatCoverageLedgerIgnoresInconsistentNonGroupAliasesInStrictMode) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(consan_applicable_access_decision_count(result), 0u);
 }
@@ -1265,7 +1265,7 @@ TEST(ConSan, FlatCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
@@ -1324,7 +1324,7 @@ TEST(ConSan, FlatCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const uint64_t access_file_offset = body_file_offset + 5u * sizeof(uint32_t);
   const ConSanSiteDecision *access_decision =
       consan_access_decision_at_file_offset(result, access_file_offset);
@@ -1370,7 +1370,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedSecondKernelSite) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
@@ -1428,7 +1428,7 @@ TEST(ConSan, FlatStoreB16CheckTrapProofEncodesRdna4Readback) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -1479,7 +1479,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -1525,7 +1525,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
@@ -1605,7 +1605,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWav
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
@@ -1740,7 +1740,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
@@ -1812,7 +1812,7 @@ TEST(ConSan, Rdna4FullRegisterFlatDynamicStackSpillBorrowsAllocatedScalarState) 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -1855,7 +1855,7 @@ TEST(ConSan, Rdna4FullVgprFlatDynamicStackSpillPreservesDeadScalarState) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -1898,7 +1898,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWave
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
@@ -1965,7 +1965,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatPrivateCapacityFailureIsAccounted) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("private_spill_encoding_failures=1") != std::string::npos;
@@ -1995,7 +1995,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackCapacityFailureIsAccounted) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("dynamic_stack_spill_encoding_failures=1") != std::string::npos;
@@ -2048,7 +2048,7 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::LocalCaveFlatLoadCheckTrap, &ConSanPatchInfo::kind);
@@ -2107,14 +2107,14 @@ TEST(ConSan, Gfx1250FlatB64CheckTrapRejectsOddAndAcceptsEvenTupleScratch) {
   const ConSanResult odd_result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(odd_result)) << testing::PrintToString(odd_result.errors);
-  EXPECT_FALSE(odd_result.modified);
+  EXPECT_FALSE(odd_result.modified());
   EXPECT_TRUE(odd_result.patches.empty());
 
   options.scratch_vgpr = 6u;
   const ConSanResult even_result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(even_result)) << testing::PrintToString(even_result.errors);
-  ASSERT_TRUE(even_result.modified) << testing::PrintToString(even_result.warnings);
+  ASSERT_TRUE(even_result.modified()) << testing::PrintToString(even_result.warnings);
   ASSERT_EQ(even_result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch =
       std::ranges::find_if(even_result.patches, [](const ConSanPatchInfo &candidate) {
@@ -2154,7 +2154,7 @@ TEST(ConSan, Gfx950FlatCheckTrapFailsClosedWithoutDeadVccSavePair) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
 }
 
@@ -2211,7 +2211,7 @@ TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -2272,7 +2272,7 @@ TEST(ConSan, Gfx1250SharedFlatDeadVccSaveSatisfiesEveryOwnerContinuation) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -2322,7 +2322,7 @@ TEST(ConSan, Gfx1250SharedFlatRegisterSpillUsesOneLayoutForEveryOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -2388,7 +2388,7 @@ TEST(ConSan, Gfx1250SharedDynamicStackFlatSpillUsesOneRuntimeFrameRecipe) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -2449,7 +2449,7 @@ TEST(ConSan, Gfx1250SharedMixedStackFlatSpillReportsTypedRejection) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("mixed_stack_owner_spill_rejections=1") != std::string::npos;
@@ -2481,7 +2481,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
@@ -2535,7 +2535,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
@@ -2584,7 +2584,7 @@ TEST(ConSan, ProbeNopModeEmitsPatchedElfForCandidate) {
   ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().preflight_action,
             ConSanPreflightAction::Candidate);
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.replacement.empty());
   EXPECT_NE(result.replacement, bytes);
@@ -2615,7 +2615,7 @@ TEST(ConSan, ProbeNopModeRewritesExistingNopInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineNopRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
@@ -2645,7 +2645,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsExistingNopRewrite) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 12u);
@@ -2675,7 +2675,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsSClauseRun) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 32u);
@@ -2709,7 +2709,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsRocclrRuntimeHelpers) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
@@ -2728,7 +2728,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsCodeObjectWithoutCandidateSites) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
@@ -2753,7 +2753,7 @@ TEST(ConSan, ProbeNopModePrefersVectorAluAnchorOverMemoryAnchor) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
@@ -2776,7 +2776,7 @@ TEST(ConSan, ProbeEndpgmModeRewritesVectorAluInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineEndpgmRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
@@ -2800,7 +2800,7 @@ TEST(ConSan, ProbeLdsEndpgmModeRewritesFirstSupportedReadInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsEndpgmRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
@@ -2833,7 +2833,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedLoadInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -2878,7 +2878,7 @@ TEST(ConSan, Gfx1100LdsCheckTrapUsesRdna3CompletionWait) {
   const ConSanResult result = try_patch_consan(make_rdna3_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
@@ -2919,7 +2919,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -2952,7 +2952,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeEvenAlignsAutomaticGfx1250B64Scratch) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 6u);
@@ -2982,7 +2982,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -3022,7 +3022,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -3064,7 +3064,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -3095,7 +3095,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250TransposeLoadWithSymbolPadding)
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3117,7 +3117,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U16VdsLoadInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -3150,7 +3150,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I16VdsLoadInPlace) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3176,7 +3176,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U8VdsLoadInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3204,7 +3204,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I8VdsLoadInPlace) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3229,7 +3229,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3264,7 +3264,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.spilled_vgpr_count != 0;
   });
@@ -3317,7 +3317,7 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
@@ -3368,7 +3368,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsStoreInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3396,7 +3396,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3422,7 +3422,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3448,7 +3448,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback)
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3482,7 +3482,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3516,12 +3516,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_TRUE(result.program_inventory.access_sites().front().supported_mvp);
-    if (!result.modified)
+    if (!result.modified())
       return;
     const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
     const auto readback = cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
@@ -3564,9 +3564,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    if (!result.modified)
+    if (!result.modified())
       return;
     const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
       return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
@@ -3639,7 +3639,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddress
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
            candidate.kind == ConSanPatchKind::InlineLdsStoreCheckTrap;
@@ -3701,7 +3701,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.spilled_vgpr_count != 0;
   });
@@ -3749,7 +3749,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4ReadInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3798,7 +3798,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3864,7 +3864,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsCdna4AccvgprB128ScratchWithoutMovingBoun
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.spilled_vgpr_count != 0u;
@@ -3911,7 +3911,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeAlignsCdna4B32AutoReportTuple) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3944,7 +3944,7 @@ TEST(ConSan, Gfx950B128AutoReportReusesReadbackAtAccvgprBoundary) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap;
@@ -3981,7 +3981,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4U16ReadInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -4007,7 +4007,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4TransposeRead) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
@@ -4038,7 +4038,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4Read2B64) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
@@ -4069,7 +4069,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4Write2st64) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
@@ -4111,7 +4111,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4WriteInPlace) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -4142,7 +4142,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_TRUE(result.program_inventory.access_sites().front().supported_mvp);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -4176,14 +4176,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeHonorsExactKernelFilter) {
 
   const auto selected = try_patch_consan(bytes, options);
   ASSERT_TRUE(selected.errors.empty());
-  EXPECT_TRUE(selected.modified);
+  EXPECT_TRUE(selected.modified());
   ASSERT_EQ(selected.patches.size(), 1u);
   EXPECT_EQ(selected.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
 
   options.test_kernel_name_filter = "different_kernel";
   const auto excluded = try_patch_consan(bytes, options);
   ASSERT_TRUE(excluded.errors.empty());
-  EXPECT_FALSE(excluded.modified);
+  EXPECT_FALSE(excluded.modified());
   EXPECT_TRUE(excluded.patches.empty());
 }
 
@@ -4211,7 +4211,7 @@ TEST(ConSan, ProbeLdsCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
@@ -4270,7 +4270,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16LoadInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4317,7 +4317,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16HiLoadInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
@@ -4370,7 +4370,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedByteD16LoadsInPlace) {
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(result.modified);
+    ASSERT_TRUE(result.modified());
     ASSERT_EQ(result.patches.size(), 1u);
     EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
     EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4440,7 +4440,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSupportsByteD16LoadsAcrossTargets) {
       const ConSanResult result = try_patch_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
       EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
@@ -4473,7 +4473,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepDelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 44u);
@@ -4518,7 +4518,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepVarDelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 44u);
@@ -4558,7 +4558,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsOversizedSleepDelay) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
@@ -4584,7 +4584,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedStoreInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4634,7 +4634,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanReportMismatchToMarkerBuffer) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4702,7 +4702,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB64LoadInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4754,7 +4754,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB128StoreInPlace) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4810,7 +4810,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeAutoScratchUsesLiveness) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
@@ -4858,7 +4858,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanGrowDescriptorForAutoScratch) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
@@ -4892,7 +4892,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanGrowDescriptorForB64ScratchHeadroom) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -4931,7 +4931,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesOverwrittenTwoAddressLoadAddress) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
@@ -4972,7 +4972,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackTwoAddressStore) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
@@ -5024,7 +5024,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePrefersDescriptorCoveredCandidate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
@@ -5065,7 +5065,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsLocalCaveOwnedByAnotherFunction) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5129,7 +5129,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeDoesNotDecodeNonSymbolTextPadding) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5167,7 +5167,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5216,7 +5216,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsMultipleLocalCavesOwnedByKernel) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 4u);
@@ -5251,7 +5251,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsCrossKernelLocalCave) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   // The padding at 16 belongs to the second kernel. The first kernel must use
@@ -5286,7 +5286,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveFor2addrB64Load) 
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5360,7 +5360,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveForB128Store) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5424,7 +5424,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesAppendedTextCaveWhenNoLocalCaveFits) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -5488,7 +5488,7 @@ TEST(ConSan, ProbeLdsCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   // Retargeting the second symbol leaves its old function body in the image.
   // The coverage ledger retains that now-unowned physical site as unsupported,
@@ -5539,7 +5539,7 @@ TEST(ConSan, ProbeLdsCoverageLedgerFailsClosedOnInconsistentPhysicalSiteAliases)
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
     return error.find("ConSan SuperCollider native-LDS access") != std::string::npos &&
@@ -5561,7 +5561,7 @@ TEST(ConSan, ProbeLdsCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   EXPECT_EQ(
@@ -5594,7 +5594,7 @@ TEST(ConSan, ProbeLdsCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
@@ -5623,7 +5623,7 @@ TEST(ConSan, ProbeLdsCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
@@ -5656,7 +5656,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   const auto island = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland, &ConSanPatchInfo::kind);
   const auto body = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
@@ -5734,7 +5734,7 @@ TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto body = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                         &ConSanPatchInfo::kind);
@@ -5786,7 +5786,7 @@ TEST(ConSan, Cdna3LdsVccSaveSkipsPartiallyLiveScalarPair) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveLdsStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
@@ -5837,7 +5837,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePartitionsLongLocalCaveIntoEntryIslands) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             2u);
@@ -5876,7 +5876,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -5913,7 +5913,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
 
   ASSERT_TRUE(consan_patch_succeeded(boundary_partial_result))
       << testing::PrintToString(boundary_partial_result.errors);
-  ASSERT_TRUE(boundary_partial_result.modified)
+  ASSERT_TRUE(boundary_partial_result.modified())
       << testing::PrintToString(boundary_partial_result.warnings);
   const auto boundary_replacement_host =
       std::ranges::find(boundary_partial_result.patches,
@@ -5942,7 +5942,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
 
   ASSERT_TRUE(consan_patch_succeeded(block_exit_partial_result))
       << testing::PrintToString(block_exit_partial_result.errors);
-  ASSERT_TRUE(block_exit_partial_result.modified)
+  ASSERT_TRUE(block_exit_partial_result.modified())
       << testing::PrintToString(block_exit_partial_result.warnings);
   const auto block_exit_replacement_host =
       std::ranges::find(block_exit_partial_result.patches,
@@ -5989,7 +5989,7 @@ TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kSiteCount);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
@@ -6042,7 +6042,7 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kSiteCount);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
@@ -6095,7 +6095,7 @@ TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -6128,7 +6128,7 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
@@ -6178,7 +6178,7 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
@@ -6223,7 +6223,7 @@ TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
@@ -6286,7 +6286,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -6369,7 +6369,7 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -6440,7 +6440,7 @@ TEST(ConSan, Rdna4InlineLdsDeadVccSaveUsesFixedSgprPoolWithoutGrowth) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.replacement.size(), bytes.size());
   ASSERT_EQ(result.patches.size(), 1u);
@@ -6490,7 +6490,7 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -6578,7 +6578,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -6659,7 +6659,7 @@ TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   std::vector<const ConSanPatchInfo *> spill_patches;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -6738,7 +6738,7 @@ TEST(ConSan, Gfx1250SelectedLdsSpillsStackWithinOneOwnerLayout) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   std::vector<const ConSanPatchInfo *> spill_patches;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -6820,7 +6820,7 @@ TEST(ConSan, Gfx1250SelectedLdsSpillCapacityFailureRollsBackCandidate) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   std::vector<const ConSanPatchInfo *> spill_patches;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -6875,7 +6875,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillRejectsAnyDynamicStackOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("dynamic_stack_private_spill_rejections=1") != std::string::npos;
@@ -6909,7 +6909,7 @@ TEST(ConSan, Cdna3NativeLdsDynamicStackSpillUsesBracketLocalFrame) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.spilled_vgpr_count != 0u;
@@ -6938,7 +6938,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillCapacityFailureIsAccounted) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("private_spill_encoding_failures=1") != std::string::npos;
@@ -6969,7 +6969,7 @@ TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -7035,7 +7035,7 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return (info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
@@ -7104,7 +7104,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_only =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
@@ -7159,7 +7159,7 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_only =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
@@ -7191,7 +7191,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_only =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
@@ -7231,7 +7231,7 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             1u);
@@ -7295,7 +7295,7 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("branch-only continuation could not route all spill-backed sites") !=
                std::string::npos &&
@@ -7329,7 +7329,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             2u);
@@ -7390,7 +7390,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -7423,7 +7423,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   exhausted_options.lds_relay_layout_planning_work_limit = {1u, 0u};
   const ConSanResult exhausted = try_patch_consan(bytes, exhausted_options);
   EXPECT_FALSE(consan_patch_succeeded(exhausted));
-  EXPECT_FALSE(exhausted.modified);
+  EXPECT_FALSE(exhausted.modified());
   EXPECT_TRUE(exhausted.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(exhausted.errors, [](const std::string &error) {
     return error.find("LDS relay-layout replay exhausted its work allowance") != std::string::npos;
@@ -7507,7 +7507,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -7554,7 +7554,7 @@ TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -7588,7 +7588,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOf
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             kSiteCount);
@@ -7637,7 +7637,7 @@ TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
@@ -7665,7 +7665,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReservesMultipleAppendedTextCaves) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
@@ -7700,7 +7700,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComposesInlineAndAppendedTextCaves) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
@@ -7732,7 +7732,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsExcessiveDelay) {
   ASSERT_FALSE(result.warnings.empty());
   EXPECT_NE(result.warnings.back().find("requested delay needs too much padding"),
             std::string::npos);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
 
@@ -7753,7 +7753,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingVccSaveSite) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("supported_candidates=1") != std::string::npos &&
@@ -7777,7 +7777,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingScratchSite) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("supported_candidates=1") != std::string::npos &&
@@ -7798,7 +7798,7 @@ TEST(ConSan, ProbeLdsEndpgmModeCanRewriteCandidateWithExcludedAtomic) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().preflight_action,
             ConSanPreflightAction::Candidate);
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsEndpgmRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);

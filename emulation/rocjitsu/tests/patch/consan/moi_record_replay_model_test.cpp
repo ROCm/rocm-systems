@@ -872,7 +872,7 @@ TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
@@ -896,7 +896,7 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
   const auto result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1);
@@ -923,7 +923,7 @@ TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
       try_patch_consan(make_rdna4_ordered_flat_atomic_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1);

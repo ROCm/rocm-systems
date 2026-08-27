@@ -4261,7 +4261,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
     }
     result.replacement = std::move(patcher).emit();
-    result.modified = true;
+    result.mark_modified();
     return;
   }
 
@@ -4302,5 +4302,5 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     result.patches.push_back(planned.info);
   }
-  result.modified = true;
+  result.mark_modified();
 }

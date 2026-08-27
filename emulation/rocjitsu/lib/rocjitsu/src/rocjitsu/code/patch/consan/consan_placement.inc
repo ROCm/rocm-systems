@@ -243,7 +243,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     return false;
   }
   std::memcpy(result.replacement.data() + file_offset, &replacement, sizeof(replacement));
-  result.modified = true;
+  result.mark_modified();
   return true;
 }
 

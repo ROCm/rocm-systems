@@ -674,7 +674,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   ASSERT_TRUE(result.fault_plans[1].companion_identity);
   EXPECT_FALSE(result.fault_plans[2].companion_identity);
   EXPECT_EQ(result.mutation.fault.planned, 3u);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
 }
 
 TEST(ConSan, OrdinaryAcquireWeakenOrderRemovesOnlyGlobalInvAndPreservesLoadWait) {
@@ -740,7 +740,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressRejectsInvalidDeltaAndIoffsetOverflow) {
     options.fault_ordinary_address_delta = delta;
     const ConSanResult result =
         try_patch_consan(make_rdna4_ordinary_acquire_code_object(), options);
-    EXPECT_FALSE(result.modified);
+    EXPECT_FALSE(result.modified());
     EXPECT_FALSE(result.errors.empty());
   }
 
@@ -750,7 +750,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressRejectsInvalidDeltaAndIoffsetOverflow) {
   overflow.fault_ordinary_address_delta = 4u;
   const ConSanResult result = try_patch_consan(
       make_rdna4_ordinary_acquire_code_object(2u, true, false, 0x7ffffc), overflow);
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -814,12 +814,12 @@ TEST(ConSan, OrdinaryAcquireFaultRejectsStoreNoBoundaryAlreadyWaveAndWrongIdenti
         make_rdna4_ordinary_acquire_code_object(2u, false, false),
         make_rdna4_ordinary_acquire_code_object(0u, true, false)}) {
     const ConSanResult result = rejected(bytes);
-    EXPECT_FALSE(result.modified);
+    EXPECT_FALSE(result.modified());
     EXPECT_EQ(result.mutation.fault.applied, 0u);
   }
   const ConSanResult wrong =
       rejected(make_rdna4_ordinary_acquire_code_object(), "not-an-exact-site");
-  EXPECT_FALSE(wrong.modified);
+  EXPECT_FALSE(wrong.modified());
   EXPECT_EQ(wrong.mutation.fault.applied, 0u);
 }
 

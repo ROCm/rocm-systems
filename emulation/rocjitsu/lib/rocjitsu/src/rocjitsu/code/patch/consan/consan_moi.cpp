@@ -437,6 +437,11 @@ private:
   std::unordered_map<std::string_view, const ConSanSyncSequence *> sequences_by_event_identity_;
 };
 
+[[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
+                                                        const ConSanResult &result) {
+  return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
+}
+
 #include "rocjitsu/code/patch/consan/consan_moi_candidates.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
@@ -505,7 +510,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_transient_sgpr_assignments.clear();
   result.resolved_moi_dispatch_id_sgpr.reset();
   result.resolved_moi_dispatch_id_vgpr.reset();
-  result.modified = false;
   result.replacement.clear();
   result.moi_candidates.clear();
   result.resource_plans.clear();
@@ -901,7 +905,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
       automatic_record_replay_inventory;
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
-      (!prologue_needs_consumer || result.modified))
+      (!prologue_needs_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     finalize_moi_site_lowering_outcomes(result);
@@ -910,7 +914,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
   finalize_moi_site_lowering_outcomes(result);
-  if (result.modified) {
+  if (result.modified()) {
     const auto patch_count = [&result](ConSanPatchKind kind) {
       return static_cast<uint32_t>(
           std::count_if(result.patches.begin(), result.patches.end(),

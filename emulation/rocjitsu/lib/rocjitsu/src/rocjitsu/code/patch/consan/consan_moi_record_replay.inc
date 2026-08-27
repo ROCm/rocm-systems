@@ -2210,7 +2210,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       };
     }
     access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
-    result.modified = true;
+    result.mark_modified();
     return;
   }
 

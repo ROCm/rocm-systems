@@ -141,7 +141,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
-  result.modified = true;
+  result.mark_modified();
   result.warnings.emplace_back("ConSan diagnosed and aborted " + std::to_string(waits.size()) +
                                " statically unmatched barrier wait(s)");
 }
@@ -4557,7 +4557,6 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   }
   if (has_blocked_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
-    result.modified = false;
     result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
@@ -4565,7 +4564,6 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   }
   if (!result.errors.empty()) {
     result.outcome = ConSanTransformOutcome::Invalid;
-    result.modified = false;
     result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
@@ -4576,17 +4574,15 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   // already produced a replacement image. Never allow those partial probes
   // to turn an Unsupported result back into ModifiedValid.
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    result.modified = false;
     result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
-  if (result.modified) {
+  if (result.modified()) {
     if (result.replacement.empty()) {
       result.errors.emplace_back("ConSan modified result has no replacement ELF bytes");
       result.outcome = ConSanTransformOutcome::Invalid;
-      result.modified = false;
       result.mutation.applied_fault_logical_identity.reset();
     } else {
       std::vector<std::string> validation_errors =
@@ -4598,7 +4594,6 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
         result.outcome = ConSanTransformOutcome::ModifiedValid;
       } else {
         result.outcome = ConSanTransformOutcome::Invalid;
-        result.modified = false;
         result.mutation.applied_fault_logical_identity.reset();
         result.replacement.clear();
         result.patches.clear();

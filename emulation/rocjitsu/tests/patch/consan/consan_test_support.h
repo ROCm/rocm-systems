@@ -2831,7 +2831,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
   EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);

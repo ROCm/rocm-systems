@@ -240,9 +240,9 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
       << " raw_scope=" << testing::PrintToString(site.raw_scope)
       << " raw_th=" << testing::PrintToString(site.raw_th)
       << " returns=" << testing::PrintToString(site.returns_old_value);
-  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                               << " kernels="
-                               << testing::PrintToString(result.program_inventory.kernels());
+  ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
+                                 << " kernels="
+                                 << testing::PrintToString(result.program_inventory.kernels());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
@@ -287,7 +287,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified)
+    ASSERT_TRUE(result.modified())
         << "warnings=" << testing::PrintToString(result.warnings)
         << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
         << " events=" << testing::PrintToString(result.program_inventory.sync().sync_events)
@@ -346,7 +346,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified)
+    ASSERT_TRUE(result.modified())
         << "warnings=" << testing::PrintToString(result.warnings)
         << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
         << " events=" << testing::PrintToString(result.program_inventory.sync().sync_events)
@@ -488,7 +488,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
             ConSanSyncMemoryRole::AcquireRelease);
@@ -560,7 +560,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
     EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, ConSanMoiAtomicEventKind::Acquire,
                                                         ROCJITSU_CODE_ARCH_RDNA3),
               ConSanMoiInlineAtomicSupport::Supported);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
@@ -675,7 +675,7 @@ TEST(ConSanMoi, InlineShadowSkipsUnusedAtomicTransactionScratch) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_FALSE(result.resource_plans.empty());
   EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind != ConSanResourceSiteKind::Access || plan.scratch_vgpr_count <= 17u;
@@ -718,9 +718,9 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                               << " errors=" << testing::PrintToString(result.errors)
-                               << " resources=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
+                                 << " errors=" << testing::PrintToString(result.errors)
+                                 << " resources=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
@@ -777,7 +777,7 @@ TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
   const ConSanResult result = try_patch_consan(fixture.bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto acquire = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
@@ -846,7 +846,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto release = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
@@ -949,7 +949,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto atomic_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
@@ -1012,9 +1012,10 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
-    ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " errors=" << testing::PrintToString(result.errors)
-                                 << " resources=" << testing::PrintToString(result.resource_plans);
+    ASSERT_TRUE(result.modified())
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " errors=" << testing::PrintToString(result.errors)
+        << " resources=" << testing::PrintToString(result.resource_plans);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
@@ -1248,14 +1249,14 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
                 test_case.expected_support);
       EXPECT_EQ(site->raw_th, test_case.semantics);
       if (test_case.expected_support != ConSanMoiInlineAtomicSupport::Supported) {
-        EXPECT_FALSE(result.modified);
+        EXPECT_FALSE(result.modified());
         EXPECT_EQ(std::ranges::count(result.patches,
                                      ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                      &ConSanPatchInfo::kind),
                   0u);
         continue;
       }
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch =
@@ -1316,7 +1317,7 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
@@ -1398,7 +1399,7 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto load_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
            patch.anchor_offset == 14u * sizeof(uint32_t);
@@ -2117,7 +2118,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedCausalReleaseTransaction) {
   const ConSanResult valid = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(valid.errors.empty()) << testing::PrintToString(valid.errors);
-  ASSERT_TRUE(valid.modified) << testing::PrintToString(valid.warnings);
+  ASSERT_TRUE(valid.modified()) << testing::PrintToString(valid.warnings);
   ASSERT_FALSE(valid.program_inventory.text_sections().empty());
   const auto patch = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
@@ -3273,7 +3274,7 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.patches.empty());
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.atomic_event_count, 0u);
@@ -3322,7 +3323,7 @@ TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto sampled_access =
       std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -3360,7 +3361,7 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.program_inventory.sync().moi_fence_candidates,
@@ -3508,7 +3509,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
             ConSanOrdinaryMemorySupportReason::Supported ||
         result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason ==
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
-    ASSERT_TRUE(result.modified)
+    ASSERT_TRUE(result.modified())
         << "warnings=" << testing::PrintToString(result.warnings)
         << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
         << " fences="
@@ -3592,7 +3593,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
       return item.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
     });
@@ -3630,7 +3631,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified);
+  EXPECT_TRUE(result.modified());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
@@ -3939,7 +3940,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
@@ -4212,7 +4213,7 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors)
       << " resources=" << testing::PrintToString(result.resource_plans);
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified());
   const auto acquire_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
            patch.anchor_offset == 6u * sizeof(uint32_t);
@@ -4278,7 +4279,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("pruned isolated no-return release metadata") != std::string::npos;
   }));
@@ -4361,7 +4362,7 @@ TEST(ConSanMoi, InlineAtomicRetainsIsolatedNoReturnReleaseAndExactShadowAccess) 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             1);
@@ -4395,7 +4396,7 @@ TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
   });
@@ -4442,7 +4443,7 @@ TEST(ConSanMoi, InlineAtomicReturningCasClaimsBeforeGuestAndRollsBackFailedLanes
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
             ConSanSyncOperation::AtomicCompareExchange);
@@ -4536,7 +4537,7 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
     EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
               ConSanSyncOperation::AtomicCompareExchange);
@@ -4657,7 +4658,7 @@ TEST(ConSanMoi, InlineVglobalNoReturnCasFailsClosedWithoutOutcome) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
-    EXPECT_FALSE(result.modified);
+    EXPECT_FALSE(result.modified());
     EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
       return warning.find("compare-exchange-outcome-unavailable") != std::string::npos;
     })) << testing::PrintToString(result.warnings);
@@ -4681,7 +4682,7 @@ TEST(ConSanMoi, InlineAtomicNoReturnCasFailsClosedWithoutOutcome) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("compare-exchange-outcome-unavailable") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
@@ -4699,7 +4700,7 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::ranges::count_if(result.patches,
@@ -4762,7 +4763,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
@@ -4801,7 +4802,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
       atomic_only_options);
 
   ASSERT_TRUE(consan_patch_succeeded(atomic_only)) << testing::PrintToString(atomic_only.errors);
-  ASSERT_TRUE(atomic_only.modified) << testing::PrintToString(atomic_only.warnings);
+  ASSERT_TRUE(atomic_only.modified()) << testing::PrintToString(atomic_only.warnings);
   EXPECT_EQ(atomic_only.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(std::ranges::count(atomic_only.patches,
                                ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
@@ -4879,7 +4880,7 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
       try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_inline_atomic"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
@@ -4910,7 +4911,7 @@ TEST(ConSanMoi, InlineAtomicOnlyObjectOmitsUnusedWorkgroupFilterSgprs) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 82u);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
@@ -4946,7 +4947,7 @@ TEST(ConSanMoi, InlineAtomicFitsAboveMetadataOwnedOddSgprCount) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 82u);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
@@ -5040,7 +5041,7 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
@@ -5075,7 +5076,7 @@ TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseCompari
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("proven-unused rdna4 SGPR pair") != std::string::npos;
@@ -5167,7 +5168,7 @@ TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -5256,7 +5257,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, options.moi_dispatch_id_sgpr);
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
@@ -5325,7 +5326,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlo
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
-  EXPECT_FALSE(result.modified);
+  EXPECT_FALSE(result.modified());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("aliases an architectural special SGPR") != std::string::npos;
