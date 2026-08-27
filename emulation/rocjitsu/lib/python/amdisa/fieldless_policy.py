@@ -40,7 +40,9 @@ class FieldlessCategory(enum.Enum):
       SPECIAL_REGISTER: a real architectural register that has no encoding
         field -- VCC/EXEC/SCC/M0/PC and FLAT_SCRATCH (per-wave scratch-base
         register state held in SGPRs). The concrete operand_type -> C++
-        RegClass mapping is not modeled here.
+        RegClass mapping is carried by ``FieldlessEffect.special_reg`` (a
+        :class:`SpecialRegClass`) for VCC/EXEC/SCC/M0/PC; FLAT_SCRATCH is
+        classified here but supplies no special_reg yet.
       MEMORY_PSEUDO: a memory-resource pseudo-operand (global/LDS) that carries
         memory-effect meaning but never a register value.
       LITERAL: a value-bearing fieldless literal (``OPR_SIMM32``).
@@ -73,10 +75,12 @@ class SpecialRegClass(enum.Enum):
 
     Mirrors the special (non-indexed) members of the C++ ``RegClass`` enum
     (``register_set.h``): each value's name is the C++ enumerator (so generator
-    lowers ``SpecialRegClass.VCC`` to ``RegClass::VCC``). Only the
-    classes a fieldless operand can currently denote are listed; FLAT_SCRATCH
-    and TTMP are C++ RegClass values but are not produced here yet (FLAT_SCRATCH
-    is bucketed as a memory pseudo-operand; see the policy table).
+    lowers ``SpecialRegClass.VCC`` to ``RegClass::VCC``). Only the classes a
+    fieldless operand currently denotes are listed. FLAT_SCRATCH is the one
+    remaining special ``RegClass`` value not produced here yet: its operand
+    (``OPR_FLAT_SCRATCH``) classifies as ``SPECIAL_REGISTER`` in the policy
+    table but supplies no ``FieldlessEffect.special_reg``, so no fieldless
+    operand lowers to it.
     """
 
     EXEC = 'EXEC'
