@@ -288,8 +288,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    ConSanTransformArtifacts inventory;
-    static_cast<ConSanTransformArtifacts &>(inventory) = std::move(inventory_artifacts);
+    ConSanTransformArtifacts inventory = std::move(inventory_artifacts);
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
@@ -345,31 +344,19 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
-    const bool inventory_has_extended_barrier_pairs =
-        consan_qualifies_extended_barrier_pairs(options);
-    const bool inventory_has_barrier_move_destinations = options.collect_barrier_move_destinations;
     if (has_late_fault) {
       static_cast<MutationRequest &>(options) = *retry.fault;
       options.faults_preapplied = false;
-    }
-    const bool inventory_shape_mismatch =
-        has_late_fault &&
-        (inventory_has_extended_barrier_pairs != consan_qualifies_extended_barrier_pairs(options) ||
-         (options.fault_move_barrier && !inventory_has_barrier_move_destinations));
-    // Correctness takes precedence over the inventory shortcut. A caller that
-    // did not preserve all fault-shaped semantics, or that composes a fault
-    // with perturbation planning, receives the ordinary fresh transform.
-    if (has_late_fault &&
-        (inventory_shape_mismatch || options.sc_perturb_kind != ConSanPerturbationKind::None)) {
+      // A pristine report-sizing inventory deliberately excludes the live
+      // mutation. Rebuild for the rare late-fault path instead of coupling
+      // the retained inventory to every mutation-specific analysis choice.
       ConSanTransformArtifacts result = try_patch_consan_impl(code_object_bytes, options);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id);
     }
     ConSanTransformArtifacts result =
-        has_late_fault
-            ? try_patch_consan_impl(code_object_bytes, options, {}, std::move(inventory))
-            : try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
+        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id);

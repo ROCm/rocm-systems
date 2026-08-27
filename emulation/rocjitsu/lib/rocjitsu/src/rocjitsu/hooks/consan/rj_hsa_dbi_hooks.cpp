@@ -115,16 +115,15 @@ rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
     const rocjitsu::MutationRequest &disabled_mutation,
     const rocjitsu::RuntimeCapabilities &capabilities,
-    const rocjitsu::BoundRuntimeResources &unbound_resources,
-    bool preserve_extended_barrier_pairs) {
+    const rocjitsu::BoundRuntimeResources &unbound_resources) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     return override(bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
                     capabilities, unbound_resources);
   }
-  return rocjitsu::transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
-      unbound_resources, preserve_extended_barrier_pairs);
+  return rocjitsu::transform_consan_pristine_moi_inventory(bytes, request, transform_policy,
+                                                           runtime_policy, debug, disabled_mutation,
+                                                           capabilities, unbound_resources);
 }
 
 rocjitsu::TransformResult retry_consan_moi_transform(
@@ -3896,8 +3895,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (request.flavor == rocjitsu::ConSanFlavor::Moi &&
         !runtime_resources.moi_report_buffer_address && request.moi_auto_report_buffer_size != 0) {
       rocjitsu::MutationRequest inventory_mutation = mutation_request;
-      const bool preserve_extended_barrier_pairs = rocjitsu::consan_requires_extended_barrier_pairs(
-          request, debug_overrides, inventory_mutation);
       const bool live_fault_transform =
           fault_mutations_enabled(mutation_request) && !mutation_request.fault_dry_run;
       // A report-sizing pass is pristine MOI inventory, never the live
@@ -3912,8 +3909,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const auto inventory_begin = std::chrono::steady_clock::now();
       rocjitsu::TransformResult inventory = run_consan_pristine_moi_inventory(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
-          debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources,
-          preserve_extended_barrier_pairs);
+          debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources);
       log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -

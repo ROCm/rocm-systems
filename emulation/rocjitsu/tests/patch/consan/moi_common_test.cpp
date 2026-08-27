@@ -117,6 +117,10 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+  patch.persistent_sgpr_state.record_replay_workgroup = {.x = 20u, .y = 21u, .z = 22u};
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+  patch.persistent_sgpr_state = {};
   patch.persistent_record_replay_workgroup_vgprs = {.x = 20u, .y = 21u, .z = 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));

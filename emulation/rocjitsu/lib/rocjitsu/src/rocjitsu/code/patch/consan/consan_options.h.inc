@@ -245,13 +245,11 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
-/// Exact probe-local scalar ABI consumed by one emitted MOI mechanism.
+/// Code-object-wide transient scalar ABI selected by MOI register placement.
 ///
-/// Unlike an assignment candidate, this value has no descriptor identity: a
-/// shared helper has one instruction stream and therefore one ABI across all
-/// of its owners. `owner_local` records whether placement selected this state
-/// through an owner-component override rather than the code-object-wide
-/// fallback. Empty optionals mean the corresponding mechanism is absent.
+/// Owner-component overrides use `ConSanMoiTransientSgprAssignment`; this
+/// descriptor-free value is the fallback consumed by every other owner. Empty
+/// optionals mean the corresponding mechanism is absent.
 struct ConSanMoiTransientSgprState {
   /// First SGPR in the EXEC/VCC/SCC save window used while the probe runs.
   std::optional<uint16_t> exec_save_sgpr;
@@ -275,9 +273,6 @@ struct ConSanMoiTransientSgprState {
   bool branch_only_scalar_spill = false;
   /// Live pair borrowed while a dynamic-stack spill frame is active.
   std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
-  /// Whether the state came from a per-owner-component assignment.
-  bool owner_local = false;
-
   bool operator==(const ConSanMoiTransientSgprState &) const = default;
 };
 
@@ -311,6 +306,25 @@ struct ConSanMoiTransientSgprAssignment {
   std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
+};
+
+/// Final scalar/vector register allocation selected for one MOI transform.
+///
+/// Lowering may select one code-object-wide transient scalar ABI and override
+/// it for independent owner components. Those selections are input to several
+/// emitted patches, not properties that can be reconstructed from any single
+/// patch record. This value freezes that completed allocation once, after
+/// planning and before final validation. It contains no search candidates or
+/// mutable placement controls.
+struct ConSanMoiRegisterAllocation {
+  /// Code-object-wide transient scalar ABI used by owners without an override.
+  ConSanMoiTransientSgprState default_transient_sgprs;
+  /// Per-owner-component transient scalar overrides selected by placement.
+  std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
+  /// Code-object-wide persistent hardware dispatch-ID pair held in VGPRs.
+  std::optional<uint16_t> dispatch_id_vgpr;
+
+  bool operator==(const ConSanMoiRegisterAllocation &) const = default;
 };
 
 /// User-visible sanitizer choices that determine which semantic observations
@@ -730,11 +744,6 @@ struct ConSanOptions : ConSanRequest,
   /// the complete analysis by default; production hooks may disable it when
   /// no move fault is requested.
   bool collect_barrier_move_destinations = true;
-  /// Preserve the extended same-block barrier-pair inventory required by a
-  /// late-bound fault after the mutation flags themselves are cleared for an
-  /// immutable MOI sizing pass. Retry checks this inventory-shaping predicate
-  /// before reusing the result.
-  bool qualify_extended_barrier_pairs = false;
   /// Internal rollout marker for the collision-free per-workgroup Inline
   /// shadow. The hook enables this for InlineShadow; direct patcher tests may
   /// leave it disabled while exercising the legacy global layout.
@@ -844,9 +853,9 @@ struct ConSanOptions : ConSanRequest,
 };
 
 [[nodiscard]] inline bool consan_qualifies_extended_barrier_pairs(const ConSanOptions &options) {
-  return options.qualify_extended_barrier_pairs || options.fault_drop_barrier ||
-         options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
-         options.fault_mutate_barrier_participants || options.abort_unmatched_barrier_wait ||
+  return options.fault_drop_barrier || options.fault_move_barrier ||
+         options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
+         options.abort_unmatched_barrier_wait ||
          (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
 }
 

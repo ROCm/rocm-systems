@@ -308,7 +308,8 @@ partition_moi_dense_candidates(std::span<const ConSanMoiCandidate *const> candid
   if (consan_uses_gfx9_cdna_encoding(arch)) {
     const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-    return entry_capture && (patch.persistent_record_replay_workgroup_vgprs.complete() ||
+    return entry_capture && (patch.persistent_sgpr_state.record_replay_workgroup.complete() ||
+                             patch.persistent_record_replay_workgroup_vgprs.complete() ||
                              patch.persistent_record_replay_workgroup_private_offsets.complete());
   }
   return (patch.kind >= ConSanPatchKind::InlineMoiAccessRecordStore &&

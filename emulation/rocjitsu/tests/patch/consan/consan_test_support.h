@@ -200,79 +200,36 @@ test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
                           : patch->persistent_record_replay_workgroup_vgprs;
 }
 
-/// Return the code-object-wide transient EXEC-save base recorded by an
-/// emitted patch. Owner-local overrides are exposed separately through the
-/// reconstructed assignment matrix below.
+/// Return the code-object-wide transient EXEC-save base frozen after register
+/// allocation. Owner-local overrides are exposed separately below.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_exec_save_sgpr(const ConSanTransformArtifacts &result) {
-  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
-    return !candidate.transient_sgpr_state.owner_local &&
-           candidate.transient_sgpr_state.exec_save_sgpr;
-  });
-  return patch == result.patches.end() ? std::nullopt : patch->transient_sgpr_state.exec_save_sgpr;
+  return result.moi_register_allocation.default_transient_sgprs.exec_save_sgpr;
 }
 
-/// Return the code-object-wide scalar dispatch-ID pair recorded by an emitted
-/// patch, excluding owner-local scalar overrides.
+/// Return the code-object-wide scalar dispatch-ID pair selected by allocation,
+/// excluding owner-local scalar overrides.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
-  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
-    return !candidate.transient_sgpr_state.owner_local &&
-           candidate.transient_sgpr_state.dispatch_id_sgpr;
-  });
-  return patch == result.patches.end() ? std::nullopt
-                                       : patch->transient_sgpr_state.dispatch_id_sgpr;
+  return result.moi_register_allocation.default_transient_sgprs.dispatch_id_sgpr;
 }
 
-/// Return the code-object-wide vector dispatch-ID pair recorded by an emitted
-/// patch, excluding per-owner persistent VGPR tuples.
+/// Return the code-object-wide vector dispatch-ID pair selected by allocation,
+/// excluding per-owner persistent VGPR tuples.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_vgpr(const ConSanTransformArtifacts &result) {
-  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
-    return !candidate.persistent_vgpr_state_owner_local && candidate.moi_dispatch_id_vgpr;
-  });
-  return patch == result.patches.end() ? std::nullopt : patch->moi_dispatch_id_vgpr;
+  return result.moi_register_allocation.dispatch_id_vgpr;
 }
 
-/// Reconstruct owner-component scalar overrides from the exact ABI stamped on
-/// emitted patches. Duplicate consumers of the same owner collapse to one
-/// assignment and must agree because lowering rejected any shared site whose
-/// owners lacked one common ABI.
+/// Return the owner-component scalar overrides frozen after placement.
 [[nodiscard]] std::vector<ConSanMoiTransientSgprAssignment>
 test_moi_transient_sgpr_assignments(const ConSanTransformArtifacts &result) {
-  std::vector<ConSanMoiTransientSgprAssignment> assignments;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    const ConSanMoiTransientSgprState &state = patch.transient_sgpr_state;
-    if (!state.owner_local || !state.exec_save_sgpr)
-      continue;
-    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-      if (std::ranges::find(assignments, owner,
-                            &ConSanMoiTransientSgprAssignment::descriptor_file_offset) !=
-          assignments.end()) {
-        continue;
-      }
-      assignments.push_back({.descriptor_file_offset = owner,
-                             .exec_save_sgpr = *state.exec_save_sgpr,
-                             .owner_sgpr = state.owner_sgpr,
-                             .dispatch_id_sgpr = state.dispatch_id_sgpr,
-                             .spill_backed = state.spill_backed,
-                             .indirect_pc_sgpr = state.indirect_pc_sgpr,
-                             .indirect_scc_sgpr = state.indirect_scc_sgpr,
-                             .dispatch_key_sgpr = state.dispatch_key_sgpr,
-                             .call_return_sgpr = state.call_return_sgpr,
-                             .visible_evidence_sgpr = state.visible_evidence_sgpr,
-                             .branch_only_scalar_spill = state.branch_only_scalar_spill,
-                             .dynamic_stack_borrowed_sgpr = state.dynamic_stack_borrowed_sgpr});
-    }
-  }
-  std::ranges::sort(assignments, {}, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  return assignments;
+  return result.moi_register_allocation.owner_transient_sgprs;
 }
 
-/// Return the scalar contract reconstructed for one owner component, or no
-/// value when no emitted patch belonging to that owner uses a local override.
-/// Returning the assignment by value keeps test inspection independent of the
-/// lifetime of the reconstructed assignment matrix.
+/// Return the scalar contract selected for one owner component, or no value
+/// when that owner uses the code-object-wide allocation. Returning by value
+/// keeps test inspection independent of the artifact's lifetime.
 [[nodiscard]] std::optional<ConSanMoiTransientSgprAssignment>
 test_moi_transient_sgpr_assignment(const ConSanTransformArtifacts &result,
                                    uint64_t descriptor_file_offset) {
@@ -1892,8 +1849,7 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u,
-        7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -2173,8 +2129,7 @@ std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() 
       0x00000000u, // ds_store_b32 v0, v0
   };
   const std::array<uint32_t, 3> release = {
-      0xEE0B0000u,
-      0x00000000u,
+      0xEE0B0000u, 0x00000000u,
       0x00000000u, // global_wb
   };
   const size_t minimum_word_count =
@@ -2467,8 +2422,7 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u,
-      0x00980000u,
+      0xEE158004u, 0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -2528,9 +2482,7 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u,
-      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
-      2u,
+      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -2561,9 +2513,7 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);

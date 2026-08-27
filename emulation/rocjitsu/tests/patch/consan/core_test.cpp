@@ -36,7 +36,7 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
-TEST(ConSan, MoiTransientSgprStateEqualityCoversCompletePatchContract) {
+TEST(ConSan, MoiTransientSgprStateEqualityCoversCompleteAllocationContract) {
   const ConSanMoiTransientSgprState empty;
   const ConSanMoiTransientSgprState state{
       .exec_save_sgpr = 2u,
@@ -50,7 +50,6 @@ TEST(ConSan, MoiTransientSgprStateEqualityCoversCompletePatchContract) {
       .visible_evidence_sgpr = 10u,
       .branch_only_scalar_spill = true,
       .dynamic_stack_borrowed_sgpr = 11u,
-      .owner_local = true,
   };
 
   EXPECT_EQ(empty, ConSanMoiTransientSgprState{});
@@ -73,7 +72,34 @@ TEST(ConSan, MoiTransientSgprStateEqualityCoversCompletePatchContract) {
   expect_field_participates([](auto &value) { value.visible_evidence_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.branch_only_scalar_spill = false; });
   expect_field_participates([](auto &value) { value.dynamic_stack_borrowed_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.owner_local = false; });
+}
+
+TEST(ConSan, MoiRegisterAllocationEqualityCoversEveryFrozenSelection) {
+  ConSanMoiTransientSgprState default_state;
+  default_state.exec_save_sgpr = 2u;
+  default_state.dispatch_id_sgpr = 4u;
+  ConSanMoiTransientSgprAssignment owner_state;
+  owner_state.descriptor_file_offset = 64u;
+  owner_state.exec_save_sgpr = 8u;
+  owner_state.dispatch_id_sgpr = 10u;
+  const ConSanMoiRegisterAllocation allocation{
+      .default_transient_sgprs = default_state,
+      .owner_transient_sgprs = {owner_state},
+      .dispatch_id_vgpr = 12u,
+  };
+
+  EXPECT_EQ(ConSanMoiRegisterAllocation{}, ConSanMoiRegisterAllocation{});
+  EXPECT_EQ(allocation, ConSanMoiRegisterAllocation(allocation));
+
+  ConSanMoiRegisterAllocation changed = allocation;
+  changed.default_transient_sgprs.exec_save_sgpr.reset();
+  EXPECT_NE(changed, allocation);
+  changed = allocation;
+  changed.owner_transient_sgprs.clear();
+  EXPECT_NE(changed, allocation);
+  changed = allocation;
+  changed.dispatch_id_vgpr.reset();
+  EXPECT_NE(changed, allocation);
 }
 
 TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {

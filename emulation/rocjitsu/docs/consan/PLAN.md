@@ -341,10 +341,12 @@ for the DBI discussion.
 ## Complete the internal reimplementation and delete the prototype
 
 The production contracts and migration boundary now exist. The named
-`LegacyConSanLowering` type has been deleted, but most mechanism fields and
-engine bodies still remain behind `TransformResult`'s compatibility record.
-The next internal phase is therefore not another round of additive architecture
-work. It is a
+`LegacyConSanLowering` type, `ConSanResult` wrapper, raw result projection, and
+inventory-shape retry protocol have been deleted. Production and retry callers
+consume `TransformResult` directly. Most mechanism fields and engine bodies,
+however, still live in the internal mutable `ConSanOptions` lowerer and its
+include-assembled implementation. The next internal phase is therefore not
+another round of additive architecture work. It is a
 deletion-driven completion of the reimplementation: move one coherent
 responsibility at a time behind the production interfaces, switch all of its
 consumers, and remove the superseded prototype implementation immediately.
@@ -426,6 +428,13 @@ than the additive current starting point. Do not set an artificial line-count
 floor: continue deleting while the retained behavioral contracts and clear
 component ownership permit it.
 
+Current deletion progress has closed the public/control-plane result seam:
+`ConSanResult` has no remaining declaration or use, completed MOI register
+allocation has one typed artifact, and late-bound validation faults rebuild
+from pristine bytes instead of requiring a specially shaped retained
+inventory. The next high-payoff seam is the raw mutable-options lowerer and its
+duplicated per-engine planning state, not another result adapter.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named
@@ -471,12 +480,12 @@ second implementation from growing beside the first. Before each slice, use
 call-site and test evidence to refine its exact deletion set. Split a slice if
 it cannot be switched and deleted under one proportional test gate.
 
-1. **Close the control-plane seam.** Make the HSA coordinator and all ordinary
-   callers consume `TransformResult` directly. Remove legacy result projection,
-   mutable-option entry points, test-only bypasses that no longer test a live
-   contract, and the corresponding hook-side branching. Keep the hook itself
-   for now, but reduce it to lifecycle coordination rather than transformation
-   policy.
+1. **Close the control-plane seam.** The HSA coordinator and all ordinary and
+   retry callers now consume `TransformResult` directly; the legacy result
+   projection and retry-only inventory-shape state are gone. Remove the
+   remaining mutable-option entry points and test-only bypasses that no longer
+   test a live mechanism contract. Keep the hook itself for now, but reduce it
+   to lifecycle coordination rather than transformation policy.
 2. **Establish one shared inventory.** Move decode, code-object identity,
    execution ownership, access, synchronization, and physical-site alias facts
    into `ProgramInventory`. Migrate consumers one fact family at a time and
@@ -518,9 +527,9 @@ it cannot be switched and deleted under one proportional test gate.
    coordinator by moving retained behavior to those components, then delete
    duplicated buffer, replay, sampling, teardown, and error-presentation paths.
 9. **Remove the prototype boundary.** The `LegacyConSanLowering` wrapper is
-   already deleted. Delete the remaining compatibility result projection, old
-   include-assembled entry points, unreachable option/result compatibility
-   fields, and every temporary comparison or fallback seam. Re-audit all
+   already deleted, as are `ConSanResult` and its compatibility projection.
+   Delete the old include-assembled entry points, unreachable option/result
+   compatibility fields, and every temporary comparison or fallback seam. Re-audit all
    remaining `.inc` files and large translation units: retain a large component
    only when its conceptual cohesion is stronger than the benefit of further
    separation.

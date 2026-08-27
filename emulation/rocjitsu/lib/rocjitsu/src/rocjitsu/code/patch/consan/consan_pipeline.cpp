@@ -257,7 +257,6 @@ void TransformResult::discard_replacement(std::string warning) {
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   moi_retry_inventory_available_ = false;
-  moi_retry_preserves_extended_barrier_pairs_ = false;
   stage_record(*this, ConSanPipelineStage::RuntimeBinding).status =
       ConSanPipelineStageStatus::Unsupported;
 }
@@ -266,8 +265,7 @@ TransformResult transform_consan_pristine_moi_inventory(
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
-    bool preserve_extended_barrier_pairs) {
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources) {
   ConSanOptions legacy_options(request, transform_policy, debug, disabled_mutation, capabilities,
                                unbound_resources);
   legacy_options.moi_report_buffer_address.reset();
@@ -275,12 +273,10 @@ TransformResult transform_consan_pristine_moi_inventory(
   legacy_options.moi_report_layout.reset();
   legacy_options.moi_report_generation = 0;
   legacy_options.moi_report_dispatch_id = 0;
-  legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
   TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
       capabilities, unbound_resources, lower_consan(code_object_bytes, legacy_options));
   result.moi_retry_inventory_available_ = true;
-  result.moi_retry_preserves_extended_barrier_pairs_ = preserve_extended_barrier_pairs;
   return result;
 }
 
@@ -292,8 +288,6 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
     TransformResult inventory) {
   ConSanOptions inventory_options(request, transform_policy, debug, MutationRequest{}, capabilities,
                                   BoundRuntimeResources{});
-  inventory_options.qualify_extended_barrier_pairs =
-      inventory.moi_retry_preserves_extended_barrier_pairs_;
   const ConSanMoiInventoryRetryConfig retry{
       .resources = resources,
       .fault = mutation,

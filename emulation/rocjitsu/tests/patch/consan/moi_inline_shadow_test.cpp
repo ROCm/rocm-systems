@@ -4625,7 +4625,9 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   ASSERT_TRUE(original.is_valid());
   const auto fixed = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
   ASSERT_NE(fixed, original.kernels().end());
+  ASSERT_NE(dynamic, original.kernels().end());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_barriers = true;
@@ -4657,14 +4659,44 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
       });
   ASSERT_NE(private_reload, with_component_assignment.patches.end());
   private_reload->persistent_dispatch_id_private_offset = 0u;
-  // Validation consumes the exact register contract stamped on this patch;
-  // another owner's scalar placement cannot redirect the lookup.
-  ASSERT_TRUE(private_reload->transient_sgpr_state.dispatch_id_sgpr);
+  // Reinterpret the already-emitted capture pair as the fixed +12:+13 reload
+  // window used by a private-dispatch body, without changing the instruction
+  // semantics under test.
+  auto &allocation = with_component_assignment.moi_register_allocation;
+  allocation.default_transient_sgprs.exec_save_sgpr =
+      static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) - 12u);
+  const auto fixed_assignment =
+      std::ranges::find(allocation.owner_transient_sgprs, fixed->descriptor_file_offset,
+                        &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(fixed_assignment, allocation.owner_transient_sgprs.end());
+  fixed_assignment->exec_save_sgpr = *allocation.default_transient_sgprs.exec_save_sgpr;
+  fixed_assignment->spill_backed = false;
+  fixed_assignment->indirect_pc_sgpr.reset();
   const std::vector<std::string> component_validation_errors =
       validate_consan_modified_elf(bytes, with_component_assignment);
   EXPECT_TRUE(std::ranges::none_of(component_validation_errors, [](const std::string &error) {
     return error.find("versioned exact-shadow publication semantics") != std::string::npos;
   })) << testing::PrintToString(component_validation_errors);
+
+  // An unrelated component-local allocation must not hide this owner's
+  // code-object-wide private-dispatch reload from final validation.
+  ConSanTransformArtifacts with_unrelated_assignment = with_component_assignment;
+  auto &unrelated_assignments =
+      with_unrelated_assignment.moi_register_allocation.owner_transient_sgprs;
+  std::erase_if(unrelated_assignments, [&](const ConSanMoiTransientSgprAssignment &assignment) {
+    return assignment.descriptor_file_offset == fixed->descriptor_file_offset;
+  });
+  if (unrelated_assignments.empty()) {
+    ConSanMoiTransientSgprAssignment unrelated;
+    unrelated.descriptor_file_offset = dynamic->descriptor_file_offset;
+    unrelated.exec_save_sgpr = *test_moi_exec_save_sgpr(result);
+    unrelated_assignments.push_back(unrelated);
+  }
+  const std::vector<std::string> unrelated_validation_errors =
+      validate_consan_modified_elf(bytes, with_unrelated_assignment);
+  EXPECT_TRUE(std::ranges::none_of(unrelated_validation_errors, [](const std::string &error) {
+    return error.find("versioned exact-shadow publication semantics") != std::string::npos;
+  })) << testing::PrintToString(unrelated_validation_errors);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgprs) {

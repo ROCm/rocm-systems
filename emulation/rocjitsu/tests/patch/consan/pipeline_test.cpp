@@ -761,7 +761,7 @@ TEST(ConSanPipeline, ExtendedBarrierInventoryShapeUsesOnlyTypedSemanticInputs) {
   EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
 }
 
-TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrierPairs) {
+TEST(ConSanPipeline, PristineMoiInventoryClearsBindingAndUsesTypedRequestShape) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
   std::fill(text_words.begin() + 1, text_words.begin() + 15,
@@ -776,39 +776,21 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   TransformPolicy transform_policy;
   transform_policy.max_patches = 16;
 
-  const TransformResult ordinary = transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
-      MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
-      /*preserve_extended_barrier_pairs=*/false);
-  const TransformResult preserved = transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
-      MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
-      /*preserve_extended_barrier_pairs=*/true);
   BoundRuntimeResources supplied_binding;
   supplied_binding.scope = ConSanRuntimeResourceScope::Executable;
   supplied_binding.moi_report_buffer_address = 0x123456780000ull;
   supplied_binding.moi_report_buffer_size = 64u * 1024u * 1024u;
   const TransformResult cleared_binding = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
-      MutationRequest{}, complete_runtime_capabilities(), supplied_binding,
-      /*preserve_extended_barrier_pairs=*/true);
+      MutationRequest{}, complete_runtime_capabilities(), supplied_binding);
 
-  const auto ordinary_sync = ordinary.program_inventory.sync().sync_sequences;
-  const auto preserved_sync = preserved.program_inventory.sync().sync_sequences;
   const auto cleared_sync = cleared_binding.program_inventory.sync().sync_sequences;
-  EXPECT_EQ(std::ranges::count(ordinary_sync, ConSanSyncOperation::BarrierFull,
+  EXPECT_EQ(std::ranges::count(cleared_sync, ConSanSyncOperation::BarrierFull,
                                &ConSanSyncSequence::operation),
             0u);
-  EXPECT_EQ(std::ranges::count(preserved_sync, ConSanSyncOperation::BarrierFull,
-                               &ConSanSyncSequence::operation),
-            1u);
-  EXPECT_TRUE(ordinary.replacement.empty());
-  EXPECT_TRUE(preserved.replacement.empty());
   EXPECT_TRUE(cleared_binding.replacement.empty());
-  ASSERT_EQ(cleared_sync.size(), preserved_sync.size());
   ASSERT_FALSE(cleared_sync.empty());
-  EXPECT_EQ(cleared_sync.front().identity, preserved_sync.front().identity);
-  EXPECT_EQ(cleared_sync.front().operation, preserved_sync.front().operation);
+  EXPECT_TRUE(cleared_binding.evidence_requirements);
 }
 
 TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
@@ -821,8 +803,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
 
   TransformResult inventory = transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {},
-      /*preserve_extended_barrier_pairs=*/false);
+      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {});
   ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.errors);
   ASSERT_TRUE(inventory.evidence_requirements);
   const auto &requirements =

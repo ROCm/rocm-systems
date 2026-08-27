@@ -1580,46 +1580,36 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
   return true;
 }
 
-/// Freeze the final owner-resolved scalar and dispatch ABI onto every emitted
-/// patch before the transform leaves lowering. Final validation and derived
-/// reporting consume these contracts rather than the mutable option search or
-/// its owner-indexed assignment vector.
-void note_moi_patch_register_contracts(const ConSanOptions &options,
-                                       ConSanTransformArtifacts &result) {
-  for (ConSanPatchInfo &patch : result.patches) {
-    ConSanOptions patch_options = options;
-    const bool owner_local =
-        std::ranges::any_of(patch.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-          return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
-        });
-    if (!apply_moi_transient_sgpr_assignment(patch_options, patch.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI emitted patch has no common transient scalar ABI for all owners");
-      return;
-    }
-    if (patch.persistent_dispatch_id_private_offset)
-      patch_options.moi_dispatch_id_sgpr = patch_options.moi_inline_indirect_pc_sgpr;
-    patch.transient_sgpr_state = {
-        .exec_save_sgpr = patch_options.moi_exec_save_sgpr,
-        .owner_sgpr = patch_options.moi_owner_sgpr,
-        .dispatch_id_sgpr = patch_options.moi_dispatch_id_sgpr,
-        .spill_backed = patch_options.automatic_moi_inline_sgpr_spill ||
-                        patch_options.automatic_moi_record_replay_sgpr_spill,
-        .indirect_pc_sgpr = patch_options.moi_inline_indirect_pc_sgpr,
-        .indirect_scc_sgpr = patch_options.moi_inline_indirect_scc_sgpr,
-        .dispatch_key_sgpr = patch_options.moi_engine == ConSanMoiEngine::RecordReplay
-                                 ? patch_options.moi_record_replay_dispatch_key_sgpr
-                                 : patch_options.moi_inline_dispatch_key_sgpr,
-        .call_return_sgpr = patch_options.moi_engine == ConSanMoiEngine::RecordReplay
-                                ? patch_options.moi_record_replay_call_return_sgpr
-                                : patch_options.moi_inline_call_return_sgpr,
-        .visible_evidence_sgpr = patch_options.moi_inline_visible_evidence_sgpr,
-        .branch_only_scalar_spill = patch_options.moi_inline_branch_only_scalar_spill,
-        .dynamic_stack_borrowed_sgpr = patch_options.moi_inline_dynamic_stack_borrowed_sgpr,
-        .owner_local = owner_local,
+/// Freeze the final register allocation before the transform leaves lowering.
+/// Final validation and derived reporting consume this completed plan rather
+/// than mutable search options or lossy reconstruction from patch telemetry.
+void freeze_moi_register_allocation(const ConSanOptions &options,
+                                    ConSanTransformArtifacts &result) {
+  const auto transient_state = [](const ConSanOptions &resolved) {
+    return ConSanMoiTransientSgprState{
+        .exec_save_sgpr = resolved.moi_exec_save_sgpr,
+        .owner_sgpr = resolved.moi_owner_sgpr,
+        .dispatch_id_sgpr = resolved.moi_dispatch_id_sgpr,
+        .spill_backed = resolved.automatic_moi_inline_sgpr_spill ||
+                        resolved.automatic_moi_record_replay_sgpr_spill,
+        .indirect_pc_sgpr = resolved.moi_inline_indirect_pc_sgpr,
+        .indirect_scc_sgpr = resolved.moi_inline_indirect_scc_sgpr,
+        .dispatch_key_sgpr = resolved.moi_engine == ConSanMoiEngine::RecordReplay
+                                 ? resolved.moi_record_replay_dispatch_key_sgpr
+                                 : resolved.moi_inline_dispatch_key_sgpr,
+        .call_return_sgpr = resolved.moi_engine == ConSanMoiEngine::RecordReplay
+                                ? resolved.moi_record_replay_call_return_sgpr
+                                : resolved.moi_inline_call_return_sgpr,
+        .visible_evidence_sgpr = resolved.moi_inline_visible_evidence_sgpr,
+        .branch_only_scalar_spill = resolved.moi_inline_branch_only_scalar_spill,
+        .dynamic_stack_borrowed_sgpr = resolved.moi_inline_dynamic_stack_borrowed_sgpr,
     };
-    patch.moi_dispatch_id_vgpr = patch_options.moi_dispatch_id_vgpr;
-  }
+  };
+  result.moi_register_allocation = {
+      .default_transient_sgprs = transient_state(options),
+      .owner_transient_sgprs = options.moi_transient_sgpr_assignments,
+      .dispatch_id_vgpr = options.moi_dispatch_id_vgpr,
+  };
 }
 
 [[nodiscard]] bool

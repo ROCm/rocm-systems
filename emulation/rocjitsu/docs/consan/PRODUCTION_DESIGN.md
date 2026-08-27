@@ -5780,24 +5780,58 @@ analysis completed.
   Production lowering, validation, composition, fuzzing, and mechanism tests
   now pass `ConSanTransformArtifacts` directly; no wrapper can acquire another
   parallel result field later.
-- **Patch-local scalar contract:** Every emitted patch records the complete
-  transient SGPR state and dispatch VGPR that its generated instructions use.
-  Final validation reads that exact record rather than reconstructing a
-  code-object-wide or owner-indexed choice from mutable result mirrors.
+- **Typed allocation contract:** `ConSanTransformArtifacts` owns one immutable
+  `ConSanMoiRegisterAllocation`: the code-object-wide transient scalar ABI,
+  owner-component overrides, and the code-object-wide persistent dispatch
+  VGPR pair. These are placement results shared by multiple emitted patches,
+  so they are not reconstructed from patch telemetry or copied onto every
+  patch. Patch-local persistent state remains on the patch that emits or
+  consumes it.
 - **Planning state remains temporary:** Global and owner-local register
   selections still live in the mutable internal options only while placement
-  and emission need them. Tests that examine placement policy reconstruct a
-  reporting view from emitted patches; ordinary transform consumers see only
-  the durable artifact contract.
+  and emission need them. Lowering freezes them into the typed allocation;
+  tests and final validation consume that durable value directly.
 - **Deletion accounting:** Implementation files add 220 and delete 257
   physical lines after formatting, a net deletion of 37. The change deletes the final four
   register mirrors, their reset/snapshot/publication plumbing, and all
   production references to the compatibility type. Test declarations move to
   the real artifact type and retain focused placement coverage.
-- **Checked-in gate:** All 1,531 ConSan host tests, all 172 HSA-hook tests, and
+- **Checked-in gate:** All 1,532 ConSan host tests, all 172 HSA-hook tests, and
   all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
   `gfx1201`, and `gfx1250` pass. The 26-case physical-gfx950 cross-engine
   smoke also passes; E2E validation remains outside this deletion work.
+
+### Slice 5CO: delete retained-inventory shape coupling
+
+- **Fresh late-fault transform:** The address-free MOI sizing inventory has one
+  shape determined solely by its typed request. A fault supplied only after
+  runtime allocation now takes the ordinary fresh transform path from the
+  pristine bytes. The rare validation-only path no longer forces every normal
+  inventory to retain extended barrier pairs or move destinations.
+- **Deleted compatibility state:** `qualify_extended_barrier_pairs`,
+  `moi_retry_preserves_extended_barrier_pairs_`, their hook argument, and the
+  inventory-shape comparison/fallback protocol are gone. The pass-through
+  composite-result wrapper is gone as well.
+- **Allocation and validation repair:** The completed transient allocation is
+  frozen once as `ConSanMoiRegisterAllocation`, not copied onto every patch.
+  Dispatch-prologue validation recognizes the complete ordered capture/ABI-
+  repair sequence and the shared workgroup-payload predicate now covers
+  persistent SGPR, persistent VGPR, and private-memory coordinate tuples.
+- **Regression contracts:** Focused host tests prove fresh late-fault retry
+  equivalence for exact and incomplete extended-barrier pairs, typed allocation
+  equality and owner override resolution, and all three persistent workgroup
+  representations. The existing paired dynamic-private-stack device workload
+  guards the corrected dispatch-prologue validation on gfx942 and gfx950.
+- **Accounting:** Relative to Slice 5CN, implementation files add 216 and
+  delete 162 physical lines (net +54). The retry deletion is net-negative; the
+  tranche as a whole is temporarily positive because restoring strict semantic
+  validation required replacing lossy patch reconstruction and adding the
+  complete ordered-sequence proof. This is correctness repair, not a new
+  compatibility layer.
+- **Checked-in gate:** All 1,532 ConSan host tests, all 172 HSA-hook tests, all
+  2,908 simulator-device tests across the five targets, and the 26-case
+  physical-gfx950 cross-engine smoke pass. E2E validation remains outside this
+  deletion work.
 
 ### Slice 6: explicit pipeline and result cutover
 

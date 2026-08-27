@@ -125,13 +125,6 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
           result.mutation.fault, std::move(result.mutation.applied_fault_logical_identity)};
 }
 
-[[nodiscard]] ConSanTransformArtifacts
-resume_composite_lowering(ConSanTransformArtifacts artifacts) {
-  ConSanTransformArtifacts result;
-  static_cast<ConSanTransformArtifacts &>(result) = std::move(artifacts);
-  return result;
-}
-
 void prepend_stage_diagnostics(ConSanTransformArtifacts &result, ConSanFaultTransformStage &stage) {
   result.warnings.insert(result.warnings.begin(), std::make_move_iterator(stage.warnings.begin()),
                          std::make_move_iterator(stage.warnings.end()));
@@ -431,7 +424,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     fault_options.faults_preapplied = true;
     ConSanTransformArtifacts fault_result;
     if (has_perturbation) {
-      fault_result = resume_composite_lowering(lower_consan(code_object_bytes, fault_options));
+      fault_result = lower_consan(code_object_bytes, fault_options);
     } else {
       // Planning already built the complete pristine semantic inventory.
       // Reuse it to apply the selected mutation instead of decoding and
@@ -443,8 +436,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
       const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
       apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
-      fault_result = resume_composite_lowering(finalize_consan_result(
-          std::move(fault_result), code_object_bytes, fault_options.moi_report_dispatch_id));
+      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
+                                            fault_options.moi_report_dispatch_id);
     }
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;

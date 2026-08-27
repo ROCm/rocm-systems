@@ -728,8 +728,15 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (configure_inline_moi_owner_sgpr(effective_options, result))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  // Preserve the last complete scalar-placement proof even if a subsequent
+  // dispatch override rejects the transform. Unsupported results use this
+  // typed partial plan to explain which safe registers had already been
+  // established without exposing mutable search options.
+  freeze_moi_register_allocation(effective_options, result);
   if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  if (result.outcome != ConSanTransformOutcome::Unsupported)
+    freeze_moi_register_allocation(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -742,6 +749,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // access-only instrumentation.
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  freeze_moi_register_allocation(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_vgprs(effective_options, result)) {
     finalize_moi_site_lowering_outcomes(result);
@@ -863,7 +871,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       (!prologue_needs_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
-    note_moi_patch_register_contracts(effective_options, result);
+    freeze_moi_register_allocation(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     finalize_moi_site_lowering_outcomes(result);
     return result;

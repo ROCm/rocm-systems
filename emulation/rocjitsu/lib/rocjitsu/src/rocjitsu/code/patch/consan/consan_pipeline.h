@@ -258,7 +258,7 @@ private:
   friend TransformResult transform_consan_pristine_moi_inventory(
       std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
       const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
-      const RuntimeCapabilities &, const BoundRuntimeResources &, bool);
+      const RuntimeCapabilities &, const BoundRuntimeResources &);
   friend TransformResult retry_transform_consan_pristine_moi_inventory(
       std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
       const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
@@ -288,10 +288,6 @@ private:
   /// ineligible even if its public fields happen to resemble an unbound
   /// inventory result.
   bool moi_retry_inventory_available_ = false;
-  /// Whether the retained pristine inventory included the extended barrier
-  /// pairs needed by a possible late-bound fault. This is the sole semantic
-  /// shape choice that is not already recoverable from the typed retry inputs.
-  bool moi_retry_preserves_extended_barrier_pairs_ = false;
 };
 
 /// Run the non-installable MOI inventory pass before runtime resources exist.
@@ -299,8 +295,7 @@ private:
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
-    bool preserve_extended_barrier_pairs);
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources);
 
 /// Bind runtime resources and lower a previously typed pristine MOI inventory.
 [[nodiscard]] TransformResult retry_transform_consan_pristine_moi_inventory(

@@ -368,6 +368,14 @@ The runtime-bound MOI retry likewise accepts and returns only
 inside the lowerer and cannot cross the production pipeline or retry-test
 boundary.
 
+MOI placement publishes one `ConSanMoiRegisterAllocation` in the transform
+artifacts. It contains the code-object-wide transient scalar ABI, any
+owner-component scalar overrides, and the code-object-wide persistent dispatch
+VGPR pair. These choices are shared inputs to several emitted mechanisms, not
+properties of one patch, so final validation and tests consume the allocation
+directly. A patch retains only state that is truly local to its emitted body,
+such as a persistent owner/epoch tuple or private-memory state offsets.
+
 ### Transformation result
 
 `transform_consan` is the ordinary entry point.
@@ -413,9 +421,12 @@ diagnostic truth.
 
 Automatic MOI report sizing also stays inside this boundary. The pristine
 inventory pass returns `TransformResult`, and the retry accepts that typed
-result plus the bound runtime resources. Only this address-free sizing result
-retains private lowering state, and only the named typed retry operation can
-consume it. Ordinary and completed transforms retain no hidden raw result.
+result plus the bound runtime resources. A private provenance bit prevents any
+ordinary result from masquerading as a retry inventory. A late-bound
+validation fault rebuilds a fresh transform from the pristine bytes; normal
+runtime binding reuses the immutable inventory without carrying a parallel
+mutation-specific inventory shape. Ordinary and completed transforms retain
+no hidden raw result.
 
 ## Runtime component and lifecycle
 
@@ -627,8 +638,9 @@ fully dismantled. The current state is:
 - the HSA hook enters the typed pipeline for ordinary and mutation transforms;
   but
 - the compatibility `ConSanResult` wrapper is gone; the lowerer returns
-  `ConSanTransformArtifacts` directly, with every emitted patch carrying its
-  exact persistent and transient register contract; but
+  `ConSanTransformArtifacts` directly, with shared register placement in one
+  typed allocation and only genuinely patch-local state on emitted patches;
+  but
 - shared decode/inventory construction, resource planning, per-engine native
   lowering, placement, and some lifecycle presentation remain monolithic
   implementation responsibilities behind that artifact boundary.

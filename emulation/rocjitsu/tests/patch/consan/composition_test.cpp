@@ -583,7 +583,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   EXPECT_GE(pristine_inventory.fence_event_count, live_inventory.fence_event_count);
 }
 
-TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
+TEST(ConSanMoi, LateIncompleteBarrierDropRetryMatchesFreshSafety) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
   std::fill(text_words.begin() + 1, text_words.begin() + 15,
@@ -618,11 +618,10 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   inventory_options.moi_report_buffer_address.reset();
   inventory_options.moi_report_buffer_size = 0;
   inventory_options.fault_drop_barrier = false;
-  inventory_options.qualify_extended_barrier_pairs = true;
   ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.program_inventory.sync().sync_sequences,
                                ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
-            1u);
+            0u);
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, live);
   const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
@@ -635,7 +634,7 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   EXPECT_EQ(retried.warnings, fresh.warnings);
 }
 
-TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
+TEST(ConSanMoi, LateExactBarrierDropRetryMatchesFreshTransform) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
   std::fill(text_words.begin() + 1, text_words.begin() + 15,
