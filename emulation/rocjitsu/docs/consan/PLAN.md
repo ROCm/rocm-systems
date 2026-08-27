@@ -358,6 +358,28 @@ This phase optimizes jointly for three outcomes:
 3. maximize genuine sharing across all five targets while confining necessary
    ISA and ABI differences to narrow target adapters.
 
+### Optimization order
+
+Choose each remaining slice by the improvement it leaves in the final tree,
+not by how attractive its new code looks in isolation. Prefer, in order:
+
+1. deleting the largest reachable body of superseded prototype code and its
+   compatibility surface;
+2. collapsing duplicate representations, policies, or mechanisms into an
+   already-established production contract;
+3. replacing architecture-specific implementations with genuinely shared
+   semantics behind the narrowest justified target adapter; and
+4. separating a still-mixed responsibility when doing so makes the next
+   deletion safe, locally testable, and immediate.
+
+An added abstraction is worthwhile only when it enables deletion in the same
+small tranche or names a durable component required by the production design.
+Do not count code moved to a new file, hidden behind a wrapper, or retained as a
+fallback as deleted. At each tranche boundary, compare implementation lines
+added and removed, enumerate the legacy entry points that remain reachable,
+and select the next slice with the greatest credible deletion and conceptual-
+cleanliness payoff under the checked-in test gate.
+
 The work is constrained by the checked-in tests. Host unit tests and checked-in
 device tests, including correct/incorrect pairs on every supported emulated
 target and the applicable physical-gfx950 tests, remain green throughout the
