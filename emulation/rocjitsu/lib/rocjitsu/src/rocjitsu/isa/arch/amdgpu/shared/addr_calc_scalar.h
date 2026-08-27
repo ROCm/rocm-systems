@@ -12,11 +12,11 @@
 /// These functions are templated on the machine instruction type so they work
 /// with any ISA family whose encoding struct exposes the required field names.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/log.h"
 
 #include <array>
 #include <cstdint>
@@ -24,6 +24,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
+
+constexpr int kCdnaM0EncodingValue = 124;
 
 /// @brief Compute scalar address for SMEM encoding.
 ///
@@ -35,19 +37,14 @@ uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
   uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
                   amdgpu::RegisterAccess(cu).read_sgpr(sbase);
   uint64_t off = 0;
+  if (!inst.imm)
+    off +=
+        amdgpu::resolve_src_scalar(wf, static_cast<int>(inst.offset & 0x7f), kCdnaM0EncodingValue);
   if (inst.soffset_en)
-    off += amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+    off += amdgpu::resolve_src_scalar(wf, static_cast<int>(inst.soffset), kCdnaM0EncodingValue);
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  uint64_t addr = base + off;
-  util::Logger::vm([&](auto &os) {
-    static thread_local uint64_t smem_count = 0;
-    if (++smem_count <= 12 || (smem_count % 240) == 0)
-      os << std::format("SMEM #{} base={:#x} off={} imm={} soff_en={} addr={:#x} raw_off={}",
-                        smem_count, base, static_cast<int64_t>(off), inst.imm, inst.soffset_en,
-                        addr, inst.offset);
-  });
-  return addr;
+  return base + off;
 }
 
 /// @brief Compute per-lane addresses for DS encoding.
@@ -74,19 +71,6 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
       continue;
     d.per_lane_addr[lane] = addr_region.lane(0, lane) + offset + wf.lds_base();
   }
-  util::Logger::vm([&](auto &os) {
-    static uint64_t ds_addr_count = 0;
-    if (++ds_addr_count > 100)
-      return;
-    os << std::format("DS addr: {} wg[{}] wf[{}] v{}+{:#x} lds_base={} is_load={}",
-                      wf.cu().full_path(), wf.wg_id(), wf.wf_id(), inst.addr, offset, wf.lds_base(),
-                      d.is_load);
-    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
-      if (!(d.lane_mask & (1ULL << ln)))
-        continue;
-      os << std::format(" L{}:{:#x}", ln, d.per_lane_addr[ln]);
-    }
-  });
 }
 
 } // namespace addr_calc

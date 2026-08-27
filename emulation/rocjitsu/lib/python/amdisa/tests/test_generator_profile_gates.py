@@ -4261,6 +4261,50 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
+def test_cdna_smem_atomic_inc_uses_scalar_memory_state():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=CdnaProfile(),
+    )
+
+    body = codegen._gen_smem_atomic(
+        [],
+        [],
+        InstructionSemantics(
+            'S_ATOMIC_INC',
+            'smem_atomic',
+            operation='inc',
+            elem_size=4,
+            num_elems=1,
+        ),
+    )
+
+    assert 'auto d = std::make_unique<amdgpu::ScalarMemState>();' in body
+    assert 'd->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;' in body
+    assert 'd->atomic_op = amdgpu::AtomicOp::INC;' in body
+    assert 'd->atomic_returns = inst_.glc;' in body
+    assert 'd->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;' in body
+    assert 'd->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);' in body
+    assert 'amdgpu::RegisterAccess(cu).read_sgpr(sdata_base)' in body
+    assert 'd->addr = smem_calculate_address(inst_, wf);' in body
+
+
+def test_cdna_generated_smem_offsets_use_offset_selector_when_not_immediate(
+    amdgpu_generated_root: Path,
+):
+    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+        source = (amdgpu_generated_root / arch / 'smem.cpp').read_text()
+        body = source[
+            source.index('Operand make_smem_offset') : source.index('} // namespace')
+        ]
+        assert 'if (!enc->imm)' in body, f'{arch}: missing offset selector path'
+        assert (
+            'Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->offset & 0x7f))'
+            in body
+        ), f'{arch}: offset selector does not use low offset bits'
+
+
 def test_ev124_125_arch_gating_in_generated_operand(
     amdgpu_root: Path, amdgpu_generated_root: Path
 ):

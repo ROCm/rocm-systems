@@ -5542,6 +5542,9 @@ class CodeGenerator:
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
 
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(dst_ops, src_ops, sem)
+
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
@@ -5864,6 +5867,38 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _gen_smem_atomic(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
+            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled smem_atomic variant ({sem.name})'
+
+        op_enum = self._ATOMIC_OP_ENUM[sem.operation]
+        elem_size = sem.elem_size or 4
+        nd = sem.num_elems or 1
+        L = []
+        L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+        L.append('  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(f'  d->num_dwords = {nd};')
+        L.append(f'  d->elem_size = {elem_size};')
+        L.append('  d->is_load = false;')
+        L.append(f'  d->atomic_op = {op_enum};')
+        L.append('  d->atomic_returns = inst_.glc;')
+        self._append_wait_counter_type(L, 'smem_atomic')
+        L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(
+            '  d->store_data[0] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base);'
+        )
+        if self.isa_spec.profile.smem_address_uses_access_size:
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+        else:
+            addr_args = 'inst_, wf'
+        L.append(f'  d->addr = smem_calculate_address({addr_args});')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
         """Return ``(op_sel_expr, op_sel_hi_expr)`` for VOP3P execute() bodies."""
         opsel, opsel_hi = self.isa_spec.profile.vop3p_opsel_fields
@@ -5974,6 +6009,11 @@ class CodeGenerator:
                 else 'amdgpu::WaitCounterType::LGKMCNT'
             ),
             'smem_store': (
+                'amdgpu::WaitCounterType::KMCNT'
+                if is_gfx11_plus
+                else 'amdgpu::WaitCounterType::LGKMCNT'
+            ),
+            'smem_atomic': (
                 'amdgpu::WaitCounterType::KMCNT'
                 if is_gfx11_plus
                 else 'amdgpu::WaitCounterType::LGKMCNT'
@@ -7267,6 +7307,7 @@ class CodeGenerator:
             # Profile-dependent (ISA-specific coherency/mtype calls):
             'smem_load',
             'smem_store',
+            'smem_atomic',
             'flat_load',
             'flat_store',
             'flat_atomic',
@@ -8339,6 +8380,7 @@ class CodeGenerator:
                         {
                             'smem_load',
                             'smem_store',
+                            'smem_atomic',
                             'flat_load',
                             'flat_store',
                             'flat_atomic',
@@ -9982,22 +10024,20 @@ class CodeGenerator:
                 if is_smem:
                     direct_field = self.isa_spec.profile.smem_direct_offset_field
                     if direct_field is None:
-                        # CDNA model: soffset_en / imm / soffset three-field logic.
+                        # CDNA model: imm=0 encodes the scalar offset selector in the
+                        # low bits of offset. soffset_en can add the separate soffset
+                        # selector for encodings that use both fields.
                         smem_body = (
                             'namespace {\n'
                             'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'
-                            '  // SOFFSET_EN and IMM are independent: SOFFSET_EN gates the\n'
-                            '  // SGPR field, IMM gates the 21-bit immediate field.\n'
-                            '  // When both are set the hardware adds SGPR + immediate;\n'
-                            '  // we show the SGPR as the operand and the immediate as\n'
-                            '  // an offset modifier.\n'
                             '  if (enc->soffset_en)\n'
                             '    return Operand(32, OperandType::OPR_SMEM_OFFSET, '
                             'static_cast<int>(enc->soffset));\n'
-                            '  if (enc->imm)\n'
-                            '    return Operand(32, OperandType::OPR_SIMM32, '
+                            '  if (!enc->imm)\n'
+                            '    return Operand(32, OperandType::OPR_SMEM_OFFSET, '
+                            'static_cast<int>(enc->offset & 0x7f));\n'
+                            '  return Operand(32, OperandType::OPR_SIMM32, '
                             'static_cast<int>(enc->offset));\n'
-                            '  return Operand(32, OperandType::OPR_SIMM32, 0);\n'
                             '}\n'
                             '} // namespace'
                         )

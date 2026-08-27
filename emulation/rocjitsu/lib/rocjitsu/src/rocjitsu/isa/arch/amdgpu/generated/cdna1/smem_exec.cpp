@@ -546,8 +546,20 @@ void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->atomic_returns = inst_.glc;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  auto &cu = wf.cu();
+  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->store_data[0] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {

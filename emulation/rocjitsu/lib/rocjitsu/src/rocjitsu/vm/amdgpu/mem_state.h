@@ -76,6 +76,8 @@ struct ScalarMemState : DynamicInstState {
   uint32_t elem_size = 4;
   bool sign_extend = false;
   bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
+  bool atomic_returns = false;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint32_t response_data[16] = {};

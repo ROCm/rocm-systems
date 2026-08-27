@@ -14,16 +14,11 @@ namespace cdna2 {
 
 namespace {
 Operand make_smem_offset(const Smem::OpEncoding *enc) {
-  // SOFFSET_EN and IMM are independent: SOFFSET_EN gates the
-  // SGPR field, IMM gates the 21-bit immediate field.
-  // When both are set the hardware adds SGPR + immediate;
-  // we show the SGPR as the operand and the immediate as
-  // an offset modifier.
   if (enc->soffset_en)
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
-  if (enc->imm)
-    return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
-  return Operand(32, OperandType::OPR_SIMM32, 0);
+  if (!enc->imm)
+    return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->offset & 0x7f));
+  return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
 }
 } // namespace
 
@@ -1708,6 +1703,7 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 namespace detail {

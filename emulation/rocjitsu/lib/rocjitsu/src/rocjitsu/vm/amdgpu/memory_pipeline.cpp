@@ -204,51 +204,6 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
-} // namespace
-
-void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
-  auto &d = *inst.data_as<ScalarMemState>();
-  if (d.is_load) {
-    if (d.elem_size < 4) {
-      uint8_t bytes[4] = {};
-      l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
-      d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
-    } else {
-      l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
-    }
-  } else {
-    l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
-  }
-}
-
-MemoryAccessCompletion
-ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
-                                   MemoryAccessDeferredCompletion /*complete*/) {
-  auto &d = *inst.data_as<ScalarMemState>();
-  if (!d.is_load)
-    return MemoryAccessCompletion::Complete;
-  auto &cu = wf.raw_cu();
-  for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
-  }
-  // Trace: log SMEM load values for debugging.
-  util::Logger::vm([&](auto &os) {
-    if (wf.wg_id() == 0) {
-      static thread_local uint32_t slw_count = 0;
-      if (++slw_count <= 100) {
-        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
-                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
-        for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
-          os << std::format(",{:#x}", d.response_data[i]);
-        os << std::format("] wg={}", wf.wg_id());
-      }
-    }
-  });
-  return MemoryAccessCompletion::Complete;
-}
-
-namespace {
-
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
 template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
   using S = std::make_signed_t<T>;
@@ -287,6 +242,75 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val;
   }
 }
+
+void execute_scalar_atomic_rmw(ScalarMemState &d, L1ScalarCache *l1, uint32_t vmid) {
+  if (d.elem_size != sizeof(uint32_t))
+    throw std::runtime_error("scalar atomics currently support only 32-bit operands");
+
+  l1->atomic_rmw(
+      d.addr, d.elem_size,
+      [&](uint8_t *line_data, uint32_t offset) {
+        uint32_t old_val = 0;
+        std::memcpy(&old_val, line_data + offset, sizeof(old_val));
+
+        const uint32_t new_val = apply_int_atomic(d.atomic_op, old_val, d.store_data[0]);
+        std::memcpy(line_data + offset, &new_val, sizeof(new_val));
+        d.response_data[0] = old_val;
+      },
+      vmid);
+}
+
+} // namespace
+
+void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
+  auto &d = *inst.data_as<ScalarMemState>();
+  if (d.atomic_op != AtomicOp::NONE) {
+    execute_scalar_atomic_rmw(d, l1_, wf.process_id());
+    return;
+  }
+
+  if (d.is_load) {
+    if (d.elem_size < 4) {
+      uint8_t bytes[4] = {};
+      l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
+      d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
+    } else {
+      l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+    }
+  } else {
+    l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
+  }
+}
+
+MemoryAccessCompletion
+ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                   MemoryAccessDeferredCompletion /*complete*/) {
+  auto &d = *inst.data_as<ScalarMemState>();
+  if (d.atomic_op != AtomicOp::NONE && !d.atomic_returns)
+    return MemoryAccessCompletion::Complete;
+  if (!d.is_load && d.atomic_op == AtomicOp::NONE)
+    return MemoryAccessCompletion::Complete;
+  auto &cu = wf.raw_cu();
+  for (uint32_t i = 0; i < d.num_dwords; ++i) {
+    cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+  }
+  // Trace: log SMEM load values for debugging.
+  util::Logger::vm([&](auto &os) {
+    if (wf.wg_id() == 0) {
+      static thread_local uint32_t slw_count = 0;
+      if (++slw_count <= 100) {
+        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
+                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+        for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
+          os << std::format(",{:#x}", d.response_data[i]);
+        os << std::format("] wg={}", wf.wg_id());
+      }
+    }
+  });
+  return MemoryAccessCompletion::Complete;
+}
+
+namespace {
 
 /// @brief Apply a floating-point atomic RMW operation.
 template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {

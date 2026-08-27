@@ -2219,6 +2219,20 @@ class TestDeriveFlatLoad:
         assert sem.elem_size == 8
         assert sem.num_elems == 2
 
+    def test_scalar_atomic_inc_derives_smem_atomic(self):
+        sem = derive_semantics('S_ATOMIC_INC', 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'smem_atomic'
+        assert sem.operation == 'inc'
+        assert sem.elem_size == 4
+        assert sem.num_elems == 1
+
+    def test_other_scalar_atomics_remain_unimplemented(self):
+        for name in ('S_ATOMIC_ADD', 'S_ATOMIC_INC_X2', 'S_BUFFER_ATOMIC_INC'):
+            sem = derive_semantics(name, 'ENC_SMEM')
+            assert sem is not None
+            assert sem.semantic_class == 'nop'
+
 
 class TestDeriveDsRead:
     def test_ds_read(self):

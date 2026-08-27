@@ -1553,6 +1553,77 @@ TEST(DeviceCacheCoherenceTest, RemoteAtomicInvalidatesVectorCachedRead) {
   EXPECT_EQ(load_value(), 11u);
 }
 
+TEST(DeviceCacheCoherenceTest, RemoteVectorStoreInvalidatesScalarCachedRead) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache scalar_l2("scalar_l2");
+  amdgpu::L2Cache vector_l2("vector_l2");
+  amdgpu::L1ScalarCache scalar_l1(&scalar_l2);
+  amdgpu::L1VectorCache vector_l1(&vector_l2);
+  scalar_l2.set_backing_memory(&mem);
+  vector_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0xA280;
+  constexpr uint32_t kOldValue = 10;
+  constexpr uint32_t kNewValue = 11;
+  mem.write32(kAddr, kOldValue);
+
+  uint32_t scalar_value = 0;
+  scalar_l1.load(kAddr, /*num_dwords=*/1, &scalar_value);
+  ASSERT_EQ(scalar_value, kOldValue);
+
+  uint64_t addrs[cdna3::Isa::WF_SIZE] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, cdna3::Isa::WF_SIZE * sizeof(uint32_t)> bytes{};
+  std::memcpy(bytes.data(), &kNewValue, sizeof(kNewValue));
+  vector_l1.store(addrs, /*lane_mask=*/1, /*elem_size=*/sizeof(uint32_t), /*num_elems=*/1,
+                  bytes.data(), amdgpu::Mtype::RW, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
+
+  scalar_value = 0;
+  scalar_l1.load(kAddr, /*num_dwords=*/1, &scalar_value);
+  EXPECT_EQ(scalar_value, kNewValue);
+}
+
+TEST(DeviceCacheCoherenceTest, VectorStoreInvalidatesVectorCachedRead) {
+  for (const bool share_l2 : {false, true}) {
+    SCOPED_TRACE(share_l2 ? "shared_l2" : "remote_l2");
+
+    amdgpu::GpuMemory mem("test_mem");
+    amdgpu::L2Cache load_l2("load_l2");
+    amdgpu::L2Cache store_l2("store_l2");
+    amdgpu::L1VectorCache load_l1(&load_l2);
+    amdgpu::L1VectorCache store_l1(share_l2 ? &load_l2 : &store_l2);
+    load_l2.set_backing_memory(&mem);
+    store_l2.set_backing_memory(&mem);
+
+    constexpr uint64_t kAddr = 0xA2C0;
+    constexpr uint32_t kOldValue = 10;
+    constexpr uint32_t kNewValue = 11;
+    mem.write32(kAddr, kOldValue);
+
+    uint64_t addrs[cdna3::Isa::WF_SIZE] = {};
+    addrs[0] = kAddr;
+    std::array<uint8_t, cdna3::Isa::WF_SIZE * sizeof(uint32_t)> bytes{};
+    auto load_value = [&] {
+      bytes.fill(0);
+      load_l1.load(addrs, /*lane_mask=*/1, /*elem_size=*/sizeof(uint32_t), /*num_elems=*/1,
+                   bytes.data(), amdgpu::Mtype::RW, /*non_temporal=*/false,
+                   /*request_l1_bypass=*/false, cdna3::Isa::WF_SIZE);
+      uint32_t value = 0;
+      std::memcpy(&value, bytes.data(), sizeof(value));
+      return value;
+    };
+
+    ASSERT_EQ(load_value(), kOldValue);
+
+    bytes.fill(0);
+    std::memcpy(bytes.data(), &kNewValue, sizeof(kNewValue));
+    store_l1.store(addrs, /*lane_mask=*/1, /*elem_size=*/sizeof(uint32_t), /*num_elems=*/1,
+                   bytes.data(), amdgpu::Mtype::RW, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
+
+    EXPECT_EQ(load_value(), kNewValue);
+  }
+}
+
 TEST(DeviceCacheCoherenceTest, AtomicConsumesScalarWriteThroughTarget) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache scalar_l2("scalar_l2");

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -62,6 +63,10 @@ public:
   /// Cacheable stores read-allocate and write through each modified byte range
   /// to L2. UC and CC stores bypass K$.
   void store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
+
+  /// @brief Scalar atomic read-modify-write against globally visible memory.
+  void atomic_rmw(uint64_t addr, uint32_t size,
+                  const std::function<void(uint8_t *, uint32_t)> &fn, uint32_t vmid = 0);
 
   /// @brief Handle s_dcache_wb; a no-op because K$ is write-through.
   /// @param vmid Ignored. Retained only for call-site signature symmetry.

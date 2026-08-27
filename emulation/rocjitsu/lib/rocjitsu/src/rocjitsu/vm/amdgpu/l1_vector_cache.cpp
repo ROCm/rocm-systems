@@ -46,7 +46,7 @@ uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, 
 } // namespace
 
 L1VectorCache::L1VectorCache(L2Cache *l2)
-    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_l1_epoch()) {}
 
 L1VectorCache::~L1VectorCache() = default;
 
@@ -132,7 +132,8 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
 }
 
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
-                                bool non_temporal, uint32_t vmid) {
+                                bool non_temporal, uint32_t vmid,
+                                DeviceCacheCoherence::DeviceWriteBoundary &coherence_guard) {
   Mtype inst_mtype = mtype;
   Mtype effective = mtype;
   if (memory_)
@@ -166,6 +167,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     if (chunk_mtype == Mtype::UC || non_temporal) {
       cache_.invalidate(ea, vmid);
       l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+      coherence_guard.publish_write(l2_, ea, chunk, vmid);
       copied += chunk;
       continue;
     }
@@ -178,6 +180,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     // granularity via L2::write(), rather than full-line replacement via
     // writeback_line() during L1 eviction/flush.
     l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+    coherence_guard.publish_write(l2_, ea, chunk, vmid);
 
     simdojo::CacheTag *tag = nullptr;
     cache_.lookup(ea, &tag, vmid);
@@ -207,7 +210,7 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
                           uint32_t wf_size, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_device_write_boundary();
   synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
@@ -217,7 +220,7 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
   store_l2_writes_ += for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
         write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
-                    non_temporal, vmid);
+                    non_temporal, vmid, coherence_guard);
       });
 }
 
@@ -242,7 +245,7 @@ void L1VectorCache::flush_all() {
 void L1VectorCache::invalidate_all_locked() { cache_.invalidate_all(); }
 
 void L1VectorCache::synchronize_epoch_locked() {
-  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_l1_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
   invalidate_all_locked();

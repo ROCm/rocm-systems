@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
 #define ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 
@@ -63,7 +64,7 @@ private:
   void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
                   bool request_l1_bypass, uint32_t vmid);
   void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
-                   uint32_t vmid);
+                   uint32_t vmid, DeviceCacheCoherence::DeviceWriteBoundary &coherence_guard);
   void ensure_line(uint64_t addr, uint32_t vmid);
 
   CacheStore cache_;

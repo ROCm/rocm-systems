@@ -15,7 +15,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 L1ScalarCache::L1ScalarCache(L2Cache *l2)
-    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_l1_epoch()) {}
 
 L1ScalarCache::~L1ScalarCache() = default;
 
@@ -47,7 +47,7 @@ void L1ScalarCache::ensure_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_device_write_boundary();
   synchronize_epoch_locked();
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
@@ -67,6 +67,7 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
       if (mtype == Mtype::UC) {
         flush_line_locked(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        coherence_guard.publish_write(l2_, chunk_addr, chunk, vmid);
         copied += chunk;
         continue;
       }
@@ -74,6 +75,7 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
       if (mtype == Mtype::CC) {
         flush_line_locked(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        coherence_guard.publish_write(l2_, chunk_addr, chunk, vmid);
         copied += chunk;
         continue;
       }
@@ -86,10 +88,20 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
 
       cache_.write_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
       l2_->write(chunk_addr, buf + copied, chunk, mtype, vmid);
+      coherence_guard.publish_write(l2_, chunk_addr, chunk, vmid);
       tag->dirty = false;
       copied += chunk;
     }
   }
+}
+
+void L1ScalarCache::atomic_rmw(uint64_t addr, uint32_t size,
+                               const std::function<void(uint8_t *, uint32_t)> &fn,
+                               uint32_t vmid) {
+  l2_->atomic_rmw(addr, size, fn, vmid);
+
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
 }
 
 void L1ScalarCache::writeback_all(uint32_t vmid) {
@@ -106,7 +118,7 @@ void L1ScalarCache::invalidate_all() {
 void L1ScalarCache::invalidate_all_locked() { cache_.invalidate_all(); }
 
 void L1ScalarCache::synchronize_epoch_locked() {
-  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_l1_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
   invalidate_all_locked();

@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -2267,8 +2268,14 @@ constexpr uint32_t v_add_u32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
 constexpr uint32_t v_cndmask_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
   return vop2(0, vdst, s0, vs1);
 }
+constexpr uint32_t v_lshrrev_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
+  return vop2(16, vdst, s0, vs1);
+}
 constexpr uint32_t v_lshlrev_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
   return vop2(18, vdst, s0, vs1);
+}
+constexpr uint32_t v_and_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
+  return vop2(19, vdst, s0, vs1);
 }
 
 // VOPC: encoding[31:25]=0x3E, op[24:17], vsrc1[16:9], src0[8:0]
@@ -2304,9 +2311,10 @@ constexpr uint32_t flat_hi(uint32_t vdst, uint32_t data, uint32_t addr, uint32_t
 //         op[24:18], encoding[31:26]=0x38
 // dword1: vaddr[7:0], vdata[15:8], srsrc[20:16], acc[23], soffset[31:24]
 constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0,
-                            uint32_t idxen = 0, uint32_t lds = 0) {
-  return (0x38u << 26) | (op << 18) | (lds << 16) | (idxen << 13) | (offen << 12) |
-         (offset & 0xFFFu);
+                            uint32_t idxen = 0, uint32_t lds = 0, uint32_t sc0 = 0,
+                            uint32_t sc1 = 0, uint32_t nt = 0) {
+  return (0x38u << 26) | (op << 18) | (nt << 17) | (lds << 16) | (sc1 << 15) | (sc0 << 14) |
+         (idxen << 13) | (offen << 12) | (offset & 0xFFFu);
 }
 constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
                             uint32_t soffset = INLINE_CONST(0)) {
@@ -2314,6 +2322,7 @@ constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
 }
 
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
+constexpr uint32_t S_BARRIER = sopp(10, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
@@ -2651,6 +2660,304 @@ TEST_P(IsaTest, SEndpgm_Halts) {
   ExecFixture fx(arch());
   fx.load_program({SOPP_S_ENDPGM});
   EXPECT_TRUE(fx.halted());
+}
+
+TEST(Cdna4SmemAtomicTest, SAtomicIncReturnsOldValueAndUpdatesMemory) {
+  using namespace enc;
+
+  ExecFixture fx("cdna4");
+  constexpr uint64_t kCounterAddr = 0x5000;
+  constexpr uint32_t kInitialValue = 3;
+  constexpr uint32_t kBound = 63;
+  fx.f.mem()->write32(kCounterAddr, kInitialValue);
+
+  const auto atomic_inc = cdna4::build_smem(
+      cdna4::kSAtomicIncSmem, {.sbase = 2, .sdata = 6, .glc = 1, .imm = 1, .offset = 0});
+  std::vector<uint32_t> prog = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(kCounterAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(kBound)),
+      atomic_inc[0],
+      atomic_inc[1],
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  fx.load_program(prog);
+
+  ASSERT_TRUE(fx.halted());
+  EXPECT_EQ(fx.f.mem()->read32(kCounterAddr), kInitialValue + 1);
+  EXPECT_EQ(fx.read_sgpr(6), kInitialValue);
+}
+
+TEST(Cdna4SmemAtomicTest, SAtomicIncWithoutGlcDoesNotWriteBackOldValue) {
+  using namespace enc;
+
+  ExecFixture fx("cdna4");
+  constexpr uint64_t kCounterAddr = 0x5040;
+  constexpr uint32_t kInitialValue = 5;
+  constexpr uint32_t kBound = 63;
+  fx.f.mem()->write32(kCounterAddr, kInitialValue);
+
+  const auto atomic_inc = cdna4::build_smem(
+      cdna4::kSAtomicIncSmem, {.sbase = 2, .sdata = 6, .glc = 0, .imm = 1, .offset = 0});
+  std::vector<uint32_t> prog = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(kCounterAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(kBound)),
+      atomic_inc[0],
+      atomic_inc[1],
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  fx.load_program(prog);
+
+  ASSERT_TRUE(fx.halted());
+  EXPECT_EQ(fx.f.mem()->read32(kCounterAddr), kInitialValue + 1);
+  EXPECT_EQ(fx.read_sgpr(6), kBound);
+}
+
+TEST(Cdna4SmemAtomicTest, SAtomicIncWrapsWhenOldValueReachesBound) {
+  using namespace enc;
+
+  ExecFixture fx("cdna4");
+  constexpr uint64_t kCounterAddr = 0x5080;
+  constexpr uint32_t kInitialValue = 63;
+  constexpr uint32_t kBound = 63;
+  fx.f.mem()->write32(kCounterAddr, kInitialValue);
+
+  const auto atomic_inc = cdna4::build_smem(
+      cdna4::kSAtomicIncSmem, {.sbase = 2, .sdata = 6, .glc = 1, .imm = 1, .offset = 0});
+  std::vector<uint32_t> prog = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(kCounterAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(kBound)),
+      atomic_inc[0],
+      atomic_inc[1],
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  fx.load_program(prog);
+
+  ASSERT_TRUE(fx.halted());
+  EXPECT_EQ(fx.f.mem()->read32(kCounterAddr), 0u);
+  EXPECT_EQ(fx.read_sgpr(6), kInitialValue);
+}
+
+TEST(Cdna4SmemAddressTest, RegisterOffsetUsesOffsetFieldWhenImmIsClear) {
+  using namespace enc;
+
+  ExecFixture fx("cdna4");
+  constexpr uint64_t kBaseAddr = 0x52000;
+  constexpr uint32_t kOffsetBytes = 0x20;
+  constexpr uint32_t kStoredValue = 0x12345678;
+  constexpr uint32_t kBaseSentinel = 0xBAD0C0DE;
+  constexpr uint32_t kSbase = 5; // s[10:11]
+  constexpr uint32_t kOffsetSgpr = 12;
+  constexpr uint32_t kStoreSgpr = 16;
+  constexpr uint32_t kLoadSgpr = 17;
+
+  fx.f.mem()->write32(kBaseAddr, kBaseSentinel);
+
+  const auto store = cdna4::build_smem(
+      cdna4::kSStoreDwordSmem,
+      {.sbase = kSbase, .sdata = kStoreSgpr, .glc = 1, .imm = 0, .offset = kOffsetSgpr});
+  const auto load = cdna4::build_smem(
+      cdna4::kSLoadDwordSmem,
+      {.sbase = kSbase, .sdata = kLoadSgpr, .glc = 1, .imm = 0, .offset = kOffsetSgpr});
+
+  std::vector<uint32_t> prog = {
+      s_mov_b32(SGPR(kSbase * 2 + 0), 255),
+      static_cast<uint32_t>(kBaseAddr),
+      s_mov_b32(SGPR(kSbase * 2 + 1), INLINE_CONST(0)),
+      s_mov_b32(SGPR(kOffsetSgpr), 255),
+      kOffsetBytes,
+      s_mov_b32(SGPR(kStoreSgpr), 255),
+      kStoredValue,
+      store[0],
+      store[1],
+      S_WAITCNT_0,
+      load[0],
+      load[1],
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  fx.load_program(prog);
+
+  ASSERT_TRUE(fx.halted());
+  EXPECT_EQ(fx.f.mem()->read32(kBaseAddr), kBaseSentinel);
+  EXPECT_EQ(fx.f.mem()->read32(kBaseAddr + kOffsetBytes), kStoredValue);
+  EXPECT_EQ(fx.read_sgpr(kLoadSgpr), kStoredValue);
+}
+
+TEST(Cdna4ModelKernelSmokeTest, MultiWaveLocalSplitReduction) {
+  using namespace enc;
+
+  constexpr uint32_t kLdsBytes = 4 * 1024;
+  constexpr uint32_t kWaveCount = 4;
+  constexpr uint32_t kWaveSize = 64;
+  constexpr uint32_t kDsWriteB32 = 13;
+  constexpr uint32_t kDsReadB32 = 54;
+
+  VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
+
+  const uint32_t code[] = {
+      v_lshrrev_b32(1, INLINE_CONST(6), 0), // v1 = wave-in-workgroup
+      v_and_b32(2, INLINE_CONST(63), 0),    // v2 = lane-in-wave
+      v_lshlrev_b32(2, INLINE_CONST(2), 2), // v2 = lane byte offset
+      v_lshlrev_b32(3, INLINE_CONST(10), 1),
+      v_add_u32(3, VGPR_SRC(2), 3), // v3 = wave slot * 1024 + lane offset
+      v_lshlrev_b32(4, INLINE_CONST(2), 1),
+
+      v_add_u32(5, INLINE_CONST(1), 4),
+      ds_lo(kDsWriteB32),
+      ds_hi(/*vdst=*/0, /*data0=*/5, /*addr=*/3),
+      v_add_u32(5, INLINE_CONST(2), 4),
+      ds_lo(kDsWriteB32, /*offset0=*/0, /*offset1=*/1),
+      ds_hi(/*vdst=*/0, /*data0=*/5, /*addr=*/3),
+      v_add_u32(5, INLINE_CONST(3), 4),
+      ds_lo(kDsWriteB32, /*offset0=*/0, /*offset1=*/2),
+      ds_hi(/*vdst=*/0, /*data0=*/5, /*addr=*/3),
+      v_add_u32(5, INLINE_CONST(4), 4),
+      ds_lo(kDsWriteB32, /*offset0=*/0, /*offset1=*/3),
+      ds_hi(/*vdst=*/0, /*data0=*/5, /*addr=*/3),
+
+      S_WAITCNT_0,
+      S_BARRIER,
+
+      v_lshlrev_b32(6, INLINE_CONST(8), 1),
+      v_add_u32(6, VGPR_SRC(2), 6), // v6 = accumulator slot * 256 + lane offset
+      ds_lo(kDsReadB32),
+      ds_hi(/*vdst=*/8, /*data0=*/0, /*addr=*/6),
+      ds_lo(kDsReadB32, /*offset0=*/0, /*offset1=*/4),
+      ds_hi(/*vdst=*/9, /*data0=*/0, /*addr=*/6),
+      ds_lo(kDsReadB32, /*offset0=*/0, /*offset1=*/8),
+      ds_hi(/*vdst=*/10, /*data0=*/0, /*addr=*/6),
+      ds_lo(kDsReadB32, /*offset0=*/0, /*offset1=*/12),
+      ds_hi(/*vdst=*/11, /*data0=*/0, /*addr=*/6),
+      S_WAITCNT_0,
+
+      v_add_u32(12, VGPR_SRC(8), 9),
+      v_add_u32(12, VGPR_SRC(12), 10),
+      v_add_u32(12, VGPR_SRC(12), 11),
+      S_ENDPGM,
+  };
+
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, kLdsBytes, false, 0);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, kWaveCount * kWaveSize, kWaveCount * kWaveSize);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), kWaveCount);
+  for (uint32_t wave = 0; wave < kWaveCount; ++wave) {
+    const auto *wf = snap->by_wf_id(wave);
+    ASSERT_NE(wf, nullptr) << "wavefront " << wave;
+    const uint32_t expected_sum = 28 + 4 * wave;
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+      EXPECT_EQ(wf->vgpr(8, lane), 1u + wave) << "wf " << wave << " lane " << lane;
+      EXPECT_EQ(wf->vgpr(9, lane), 5u + wave) << "wf " << wave << " lane " << lane;
+      EXPECT_EQ(wf->vgpr(10, lane), 9u + wave) << "wf " << wave << " lane " << lane;
+      EXPECT_EQ(wf->vgpr(11, lane), 13u + wave) << "wf " << wave << " lane " << lane;
+      EXPECT_EQ(wf->vgpr(12, lane), expected_sum) << "wf " << wave << " lane " << lane;
+    }
+  }
+}
+
+TEST(Cdna4ModelKernelSmokeTest, ScalarFlagPublishesVectorPartialsToConsumerWorkgroup) {
+  using namespace enc;
+
+  constexpr uint32_t kWaveCount = 4;
+  constexpr uint32_t kWaveSize = 64;
+  constexpr uint32_t kWorkgroupSize = kWaveCount * kWaveSize;
+  constexpr uint64_t kDataAddr = 0x50000;
+  constexpr uint64_t kFlagAddr = 0x51000;
+  constexpr uint32_t kSrd = 4;       // s[4:7]
+  constexpr uint32_t kFlagSbase = 4; // s[8:9]
+  constexpr uint32_t kBufferLoadDword = cdna4::kBufferLoadDwordMubuf;
+  constexpr uint32_t kBufferStoreDword = cdna4::kBufferStoreDwordMubuf;
+
+  std::vector<uint32_t> code;
+  auto emit = [&](uint32_t word) { code.push_back(word); };
+  auto emit_words = [&](const auto &words) { code.insert(code.end(), words.begin(), words.end()); };
+
+  emit(s_mov_b32(SGPR(kSrd + 0), 255));
+  emit(static_cast<uint32_t>(kDataAddr));
+  emit(s_mov_b32(SGPR(kSrd + 1), INLINE_CONST(0)));
+  emit(s_mov_b32(SGPR(kSrd + 2), 255));
+  emit(kWorkgroupSize * sizeof(uint32_t));
+  emit(s_mov_b32(SGPR(kSrd + 3), 255));
+  emit(0x00020000u); // dword format, structured, stride 0
+  emit(s_mov_b32(SGPR(kFlagSbase * 2 + 0), 255));
+  emit(static_cast<uint32_t>(kFlagAddr));
+  emit(s_mov_b32(SGPR(kFlagSbase * 2 + 1), INLINE_CONST(0)));
+  emit(v_lshlrev_b32(1, INLINE_CONST(2), 0)); // v1 = workitem_id_x * 4
+  emit(v_add_u32(8, INLINE_CONST(1), 0));     // v8 = 1 + workitem_id_x
+  emit(s_cmp_eq_i32(SGPR(2), INLINE_CONST(0)));
+  const size_t branch_to_consumer = code.size();
+  emit(0);
+
+  emit(mubuf_lo(kBufferStoreDword, /*offset=*/0, /*offen=*/1, /*idxen=*/0, /*lds=*/0,
+                /*sc0=*/1, /*sc1=*/1));
+  emit(mubuf_hi(/*vdata=*/8, /*vaddr=*/1, kSrd / 4));
+  emit(S_WAITCNT_0);
+  emit(S_BARRIER);
+  emit(s_mov_b32(SGPR(10), INLINE_CONST(1)));
+  emit_words(cdna4::build_smem(cdna4::kSStoreDwordSmem,
+                               {.sbase = kFlagSbase, .sdata = 10, .glc = 1, .imm = 1}));
+  emit(S_WAITCNT_0);
+  emit(S_ENDPGM);
+
+  const size_t consumer = code.size();
+  const size_t wait_loop = code.size();
+  emit_words(cdna4::build_smem(cdna4::kSLoadDwordSmem,
+                               {.sbase = kFlagSbase, .sdata = 10, .glc = 1, .imm = 1}));
+  emit(S_WAITCNT_0);
+  emit(s_cmp_eq_i32(SGPR(10), INLINE_CONST(1)));
+  const size_t branch_to_wait_loop = code.size();
+  emit(0);
+  emit(S_BARRIER);
+  emit(mubuf_lo(kBufferLoadDword, /*offset=*/0, /*offen=*/1));
+  emit(mubuf_hi(/*vdata=*/10, /*vaddr=*/1, kSrd / 4));
+  emit(S_WAITCNT_0);
+  emit(S_ENDPGM);
+
+  auto branch_offset = [&](size_t branch_word, size_t target_word) {
+    return static_cast<int16_t>(static_cast<int64_t>(target_word) -
+                                static_cast<int64_t>(branch_word + 1));
+  };
+  code[branch_to_consumer] = s_cbranch_scc0(branch_offset(branch_to_consumer, consumer));
+  code[branch_to_wait_loop] = s_cbranch_scc0(branch_offset(branch_to_wait_loop, wait_loop));
+
+  VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
+  uint64_t ko =
+      f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t), 104, 256, 2, 0, false, 0);
+  f.mem()->write32(kFlagAddr, 0);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 2 * kWorkgroupSize, kWorkgroupSize);
+  step_until_halted(*f.engine, {f.cu()}, 100000);
+
+  ASSERT_EQ(snap->snapshots().size(), 2u * kWaveCount);
+  uint32_t consumer_waves = 0;
+  for (const auto &wf : snap->snapshots()) {
+    if (wf.wg_id != 1)
+      continue;
+    ++consumer_waves;
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+      const uint32_t tid = wf.vgpr(0, lane);
+      EXPECT_EQ(wf.vgpr(10, lane), tid + 1) << "consumer wave " << wf.wf_id << " lane " << lane;
+    }
+  }
+  EXPECT_EQ(consumer_waves, kWaveCount);
 }
 
 TEST_P(IsaTest, VMovB32_PerLane) {

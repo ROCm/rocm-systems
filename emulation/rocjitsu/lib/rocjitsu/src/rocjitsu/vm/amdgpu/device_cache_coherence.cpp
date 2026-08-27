@@ -40,8 +40,31 @@ DeviceCacheCoherence::AtomicBoundary::~AtomicBoundary() {
     owner_->release_l2_locks(locked_l2_count_);
 }
 
+DeviceCacheCoherence::DeviceWriteBoundary::DeviceWriteBoundary(
+    DeviceWriteBoundary &&other) noexcept
+    : owner_(std::exchange(other.owner_, nullptr)),
+      published_(std::exchange(other.published_, false)),
+      coherence_lock_(std::move(other.coherence_lock_)) {}
+
+DeviceCacheCoherence::DeviceWriteBoundary::~DeviceWriteBoundary() {
+  if (owner_ && published_)
+    owner_->advance_l1_epoch_locked();
+}
+
+void DeviceCacheCoherence::DeviceWriteBoundary::publish_write(L2Cache *source_l2, uint64_t addr,
+                                                              uint32_t size, uint32_t vmid) {
+  if (owner_ == nullptr || size == 0)
+    return;
+  owner_->invalidate_remote_l2_range_locked(source_l2, addr, size, vmid);
+  published_ = true;
+}
+
 DeviceCacheCoherence::L1AccessGuard DeviceCacheCoherence::acquire_l1_access() {
   return L1AccessGuard(mutex_);
+}
+
+DeviceCacheCoherence::DeviceWriteBoundary DeviceCacheCoherence::acquire_device_write_boundary() {
+  return DeviceWriteBoundary(this, std::unique_lock(mutex_));
 }
 
 DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_boundary() {
@@ -60,17 +83,43 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
     for (L2Cache *cache : l2_caches_)
       cache->flush_dirty_locked();
 
-    // Eagerly walking every cache tag makes lane-level atomics prohibitively
-    // expensive. Advancing the epoch makes all extant clean lines logically
-    // stale; each cache discards them once, on its next ordinary access.
-    [[maybe_unused]] const uint64_t next_epoch = epoch_.fetch_add(1, std::memory_order_release) + 1;
-    assert(next_epoch != 0 && "device cache coherence epoch wrapped");
+    advance_epoch_locked();
   } catch (...) {
     release_l2_locks(locked_l2_count);
     throw;
   }
 
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
+}
+
+void DeviceCacheCoherence::advance_l1_epoch_locked() {
+  // Eagerly walking every cache tag makes frequent synchronization boundaries
+  // prohibitively expensive. Advancing the epoch makes all extant clean L1
+  // lines logically stale; each L1 discards them once, on its next access.
+  [[maybe_unused]] const uint64_t next_epoch =
+      l1_epoch_.fetch_add(1, std::memory_order_release) + 1;
+  assert(next_epoch != 0 && "device L1 cache coherence epoch wrapped");
+}
+
+void DeviceCacheCoherence::advance_l2_epoch_locked() {
+  // L2 invalidation is only needed for full device ordering boundaries, such as
+  // atomics that must consume previously dirty L2 state from every cache.
+  [[maybe_unused]] const uint64_t next_epoch =
+      l2_epoch_.fetch_add(1, std::memory_order_release) + 1;
+  assert(next_epoch != 0 && "device L2 cache coherence epoch wrapped");
+}
+
+void DeviceCacheCoherence::advance_epoch_locked() {
+  advance_l1_epoch_locked();
+  advance_l2_epoch_locked();
+}
+
+void DeviceCacheCoherence::invalidate_remote_l2_range_locked(L2Cache *source_l2, uint64_t addr,
+                                                             uint32_t size, uint32_t vmid) {
+  for (L2Cache *cache : l2_caches_) {
+    if (cache != source_l2)
+      cache->invalidate_range(addr, size, vmid);
+  }
 }
 
 void DeviceCacheCoherence::release_l2_locks(size_t locked_l2_count) noexcept {
