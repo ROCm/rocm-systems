@@ -25,6 +25,12 @@ TEST(TransportTest, CollNetRecvSetup) {
   ncclPeerInfo peerInfo[3] = {};
   comm.peerInfo = peerInfo;
 
+  // --- Setup bootstrap ---
+  // bootstrapAllGather reads rank/nranks from this state and is a no-op at nranks==1
+  ncclComm_t bootstrapComm = nullptr;
+  ASSERT_EQ(ncclCommInitAll(&bootstrapComm, 1, nullptr), ncclSuccess);
+  comm.bootstrap = bootstrapComm->bootstrap;
+
   // --- Setup channel ---
   ncclChannel channel = {};
   static ncclChannelPeer peerArray[3];
@@ -77,6 +83,7 @@ TEST(TransportTest, CollNetRecvSetup) {
   // --- Cleanup ---
   ASSERT_EQ(hipFree(devPeerArrayDevice), hipSuccess);
   ASSERT_EQ(hipFree(devPeerPtrsDevice), hipSuccess);
+  ncclCommDestroy(bootstrapComm);
 }
 
 TEST(TransportTest, CollNetSendSetup) {
