@@ -1512,15 +1512,127 @@ TEST(Memory, VMemUnmapRemapCycle) {
   }
   EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
 
-  // TODO Re-mapping the same reserved VA range against the same handle should work, but on
-  // XDNA the second map fails. Runtime::MappedHandle's default CPU mapping does
-  // mmap(va, size, PROT_NONE, MAP_SHARED | MAP_FIXED, <accel drm fd>, bo_mmap_offset), and
-  // that mmap returns EACCES the second time round: the BO's DRM vma node is no longer
-  // accessible through the device fd after the first map/unmap cycle (XdnaDriver::Map
-  // exports a PRIME fd and immediately closes it; XdnaDriver::Unmap munmaps the range).
-  EXPECT_NE(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+  // Re-mapping the same reserved VA range against the same handle must work: unmapping
+  // releases the mapping, not the underlying allocation, so the contents written through
+  // the first mapping are still there.
+  ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_vmem_set_access(buffer, allocation_size, &desc, 1), HSA_STATUS_SUCCESS);
+  for (std::size_t i = 0; i < buffer_size; ++i) {
+    ASSERT_EQ(buffer[i], static_cast<std::uint32_t>(i));
+  }
 
   // cleanup
+  EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+// Repeats the unmap/remap cycle so that a leak or a premature release shows up as a failure
+// rather than as a single cycle that happens to survive. The allocation is owned by the AIE
+// agent that is granted access, so every set_access re-imports a bo XdnaDriver already owns.
+TEST(Memory, VMemRepeatedUnmapRemapCycles) {
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  hsa_amd_memory_pool_t global_memory_pool = {};
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(
+          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
+      HSA_STATUS_INFO_BREAK);
+
+  constexpr std::size_t buffer_size = 1024;
+  constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
+  hsa_amd_vmem_alloc_handle_t memory_handle = {};
+  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
+                                       &memory_handle),
+            HSA_STATUS_SUCCESS);
+
+  std::uint32_t* buffer = nullptr;
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
+                                               0, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
+            HSA_STATUS_SUCCESS);
+
+  hsa_amd_memory_access_desc_t desc{HSA_ACCESS_PERMISSION_RW, aie_agents.front()};
+
+  constexpr int num_cycles = 8;
+  for (int cycle = 0; cycle < num_cycles; ++cycle) {
+    ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS)
+        << "cycle " << cycle;
+    ASSERT_EQ(hsa_amd_vmem_set_access(buffer, allocation_size, &desc, 1), HSA_STATUS_SUCCESS)
+        << "cycle " << cycle;
+
+    // The allocation outlives every mapping, so each cycle observes what the previous wrote.
+    if (cycle > 0) {
+      for (std::size_t i = 0; i < buffer_size; ++i) {
+        ASSERT_EQ(buffer[i], static_cast<std::uint32_t>(i + cycle - 1)) << "cycle " << cycle;
+      }
+    }
+    for (std::size_t i = 0; i < buffer_size; ++i) {
+      buffer[i] = static_cast<std::uint32_t>(i + cycle);
+    }
+
+    ASSERT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS) << "cycle " << cycle;
+  }
+
+  // cleanup
+  EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+// Covers the other side of XdnaDriver::ImportMemoryHandle: the allocation belongs to the GPU,
+// so granting the AIE agent access is a genuine foreign import that must create a bo of its
+// own. Releasing that import must not disturb the GPU allocation, which is still mapped and
+// remapped here afterwards.
+TEST(Memory, VMemUnmapRemapCycleFromGPUPool) {
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  std::vector<hsa_agent_t> gpu_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(gpu_agents.empty());
+
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  hsa_amd_memory_pool_t global_memory_pool = {};
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(
+          gpu_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
+      HSA_STATUS_INFO_BREAK);
+
+  constexpr std::size_t buffer_size = 1024;
+  constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
+  hsa_amd_vmem_alloc_handle_t memory_handle = {};
+  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
+                                       &memory_handle),
+            HSA_STATUS_SUCCESS);
+
+  std::uint32_t* buffer = nullptr;
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
+                                               0, 0, 0 /* flags */),
+            HSA_STATUS_SUCCESS);
+
+  hsa_amd_memory_access_desc_t desc{HSA_ACCESS_PERMISSION_RW, aie_agents.front()};
+
+  // First cycle: the AIE agent imports the GPU allocation, then the mapping is released.
+  ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_vmem_set_access(buffer, allocation_size, &desc, 1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
+
+  // The GPU allocation must have survived releasing the AIE import.
+  ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_vmem_set_access(buffer, allocation_size, &desc, 1), HSA_STATUS_SUCCESS);
+
+  // cleanup
+  EXPECT_EQ(hsa_amd_vmem_unmap(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_address_free(buffer, allocation_size), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
