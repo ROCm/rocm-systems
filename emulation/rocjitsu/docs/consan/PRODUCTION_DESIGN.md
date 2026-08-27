@@ -6441,6 +6441,29 @@ for nominal line-count reductions.
   five supported targets, and the 26-case physical-gfx950 cross-engine smoke
   pass. E2E validation remains outside this deletion work.
 
+### Slice 5DJ: give descriptor allocation counts one authority
+
+- **Shared descriptor facts:** MOI resource admission and owner/epoch prologue
+  planning now consume the same VGPR, ordinary-VGPR, and SGPR allocation
+  queries as shared analysis, SuperCollider, and final validation. CDNA's
+  descriptor-defined AccVGPR boundary therefore has one implementation instead
+  of an engine-private copy.
+- **Deliberate remainder:** `moi_descriptor_unified_vgpr_allocation_count`
+  remains because prologue planning needs the unclamped unified allocation to
+  determine whether the ordinary boundary actually backs a live accumulator
+  bank. It is not interchangeable with the shared ordinary-allocation query.
+- **Contract coverage:** Existing focused tests cover gfx1250 wave32 descriptor
+  granularity, CDNA4 scalar fallback at AccVGPR boundaries, per-owner boundary
+  variation, descriptor growth, and SuperCollider spill/readback at the same
+  boundary. No public behavior or type changes in this cutover.
+- **Accounting:** Across the two affected implementation files, physical lines
+  fall from 10,591 to 10,560, nonblank lines from 10,222 to 10,195, and
+  estimated comment-excluded code lines from 9,339 to 9,312. The slice adds
+  five and deletes 36 physical implementation lines, a net deletion of 31.
+- **Batched gate:** Compilation and the broader checked-in gate are deferred to
+  the current deletion tranche so several bisectable semantic-preserving
+  commits share one test run. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

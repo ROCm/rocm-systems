@@ -772,6 +772,16 @@ single-entry CFG queries directly, and shared workgroup sources compare through
 their value type. A helper remains only when it adds a semantic rule, validates
 an input, or assembles a transaction; a private synonym is not a component.
 
+Descriptor register allocation has one shared decoding authority. Analysis,
+SuperCollider, MOI resource admission, prologue planning, and final validation
+all use `descriptor_vgpr_allocation_count`,
+`descriptor_ordinary_vgpr_allocation_count`, and
+`descriptor_sgpr_allocation_count`. The ordinary-VGPR query applies CDNA's
+descriptor-defined AccVGPR boundary. MOI separately retains the unclamped
+unified allocation count only where it must decide whether that boundary backs
+a live accumulator bank; this is a distinct resource fact rather than another
+decoder for the ordinary allocation.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

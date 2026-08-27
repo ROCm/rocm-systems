@@ -574,6 +574,12 @@ and the instrumentation builders directly; MOI uses the descriptor, CFG-window,
 and workgroup-source contracts directly. Nine one-line renames no longer hide
 which established component owns those operations.
 
+MOI no longer maintains private descriptor allocation-count implementations.
+Its VGPR, ordinary-VGPR/AccVGPR-boundary, and SGPR admission paths consume the
+same descriptor queries as shared analysis, SuperCollider, and final
+validation. The one remaining MOI-specific unified-VGPR query deliberately
+answers a different question needed to distinguish a live accumulator bank.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

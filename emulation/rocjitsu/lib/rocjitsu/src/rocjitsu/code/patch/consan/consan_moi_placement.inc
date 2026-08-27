@@ -805,43 +805,12 @@ moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
   return kernel_profile ? kernel_profile->vgpr_allocation_granularity : 0u;
 }
 
-[[nodiscard]] uint32_t moi_descriptor_vgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
-  const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
-  const uint32_t granulated =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  const uint32_t allocated = (granulated + 1u) * granularity;
-  return std::min<uint32_t>(allocated, kMaxVgprs);
-}
-
 [[nodiscard]] uint32_t moi_descriptor_unified_vgpr_allocation_count(const KD &desc,
                                                                     rj_code_arch_t arch) {
   const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
   const uint32_t granulated =
       AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   return (granulated + 1u) * granularity;
-}
-
-[[nodiscard]] uint32_t moi_descriptor_ordinary_vgpr_allocation_count(const KD &desc,
-                                                                     rj_code_arch_t arch) {
-  const uint32_t unified_count = moi_descriptor_vgpr_allocation_count(desc, arch);
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (!profile || profile->accumulator_model != ConSanAccumulatorModel::DescriptorPartitioned)
-    return unified_count;
-
-  const uint32_t encoded_accum_offset =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-  if (encoded_accum_offset == 0u)
-    return unified_count;
-  const uint32_t accvgpr_base =
-      (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
-  return unified_count > accvgpr_base ? std::min(unified_count, accvgpr_base) : unified_count;
-}
-
-[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
-  const uint32_t granulated = AMDHSA_BITS_GET(
-      desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  const uint32_t allocated = amdgpu_kernel_descriptor_sgpr_count(granulated, arch);
-  return std::min<uint32_t>(allocated, kMaxSgprs);
 }
 
 struct MoiSgprRange {
@@ -910,7 +879,7 @@ struct MoiSgprRange {
     }
   }
 
-  if (required_count <= moi_descriptor_vgpr_allocation_count(desc, arch))
+  if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
     return true;
 
   const uint32_t granularity = std::max<uint32_t>(moi_descriptor_vgpr_granularity(desc, arch), 1u);
@@ -927,7 +896,7 @@ struct MoiSgprRange {
                                                        rj_code_arch_t arch) {
   if (required_count == 0 || required_count > kMaxSgprs)
     return false;
-  if (required_count <= moi_descriptor_sgpr_allocation_count(desc, arch))
+  if (required_count <= descriptor_sgpr_allocation_count(desc, arch))
     return true;
 
   constexpr uint32_t kSgprGranularity = 8;
@@ -2092,7 +2061,7 @@ struct MoiResourcePlanningState {
       KD descriptor{};
       std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
       stored.current_vgpr_count =
-          static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor, arch));
+          static_cast<uint16_t>(descriptor_vgpr_allocation_count(descriptor, arch));
       if (consan_uses_gfx9_cdna_encoding(arch)) {
         const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
             descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
@@ -2111,7 +2080,7 @@ struct MoiResourcePlanningState {
         }
       }
       stored.current_sgpr_count =
-          static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor, arch));
+          static_cast<uint16_t>(descriptor_sgpr_allocation_count(descriptor, arch));
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
       stored.descriptor_valid = true;
     }

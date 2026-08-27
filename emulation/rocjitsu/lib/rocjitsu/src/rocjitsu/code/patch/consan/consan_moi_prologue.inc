@@ -2655,7 +2655,7 @@ void try_apply_owner_epoch_prologue_patch(
 
       const uint32_t entry_abi_vgpr_count = *workitem_id_dimensions;
       const uint32_t original_allocation =
-          moi_descriptor_ordinary_vgpr_allocation_count(original_descriptor, arch);
+          descriptor_ordinary_vgpr_allocation_count(original_descriptor, arch);
       const uint32_t unified_allocation =
           moi_descriptor_unified_vgpr_allocation_count(original_descriptor, arch);
       const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
