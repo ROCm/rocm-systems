@@ -1,7 +1,7 @@
 # Percent Metric Bounds — Problem Statement
 
 **Status:** Draft for team review  
-**Audience:** All rocprofiler-compute stakeholders (design, HW, driver, docs)  
+**Audience:** All rocprofiler-compute stakeholders (profiler designers, perfmon counter designers)  
 **JIRA:** AIPROFCOMP-78  
 **Related:** [Correction methods (normative)](metric-counter-correction-methods.md) · [Single-pass grouping evaluation](single-pass-counter-grouping-evaluation.md) · [AIPROFCOMP-78 validation data](../reports/aiprofcomp78-multipass-root-cause-report.md)
 

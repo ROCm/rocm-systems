@@ -8,7 +8,7 @@
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[Problem statement](metric-counter-correction-problem-statement.md)** | Symptoms, root causes, evidence from CPX workloads | **Whole team** — start here |
+| **[Problem statement](metric-counter-correction-problem-statement.md)** | Symptoms, root causes, evidence from CPX workloads | **Profiler / perfmon designers** — start here |
 | **[Single-pass grouping evaluation](single-pass-counter-grouping-evaluation.md)** | Pass-count cost, grouping policy trade-offs | Designers / profiling owners |
 | **[Multi-pass root-cause report](../reports/aiprofcomp78-multipass-root-cause-report.md)** | Data showing multi-pass stitching (`cpx_fix` branch) | Reviewers |
 | **[Grouping policy evaluation](../reports/aiprofcomp78-grouping-policy-evaluation.md)** | Simulated policy cost and co-location (`cpx_fix` branch) | Reviewers |
