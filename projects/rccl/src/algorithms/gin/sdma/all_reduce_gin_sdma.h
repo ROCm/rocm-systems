@@ -20,13 +20,16 @@
 namespace gin::sdma{
 using dda::common::vecElementAdd;
 
+// Scalar sum for the one-shot kernel; covers float, half and bf16.
+//
+// bf16 must not go through __hadd. That is a half intrinsic whose bf16 overload only exists on
+// CUDA for __CUDA_ARCH__ >= 800 (device/reduce_kernel.h gates it on exactly that), so on HIP it
+// either fails to compile or silently converts bf16 -> half -> bf16, clipping bf16's 8-bit
+// exponent to half's 5-bit one. operator+ is what the DDA bf16 path uses (vecElementAdd in
+// dda/device/CollCommon.h) and is available wherever __hadd is on CUDA.
 template <typename T>
 __device__ __forceinline__ T allReduceLsaSumAdd(T a, T b) {
-  if constexpr (std::is_same<T, bf16>::value) {
-    return __hadd(a, b);
-  } else {
-    return a + b;
-  }
+  return a + b;
 }
 
 template <typename T>
