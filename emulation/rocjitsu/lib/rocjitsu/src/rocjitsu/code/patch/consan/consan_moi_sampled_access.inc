@@ -267,7 +267,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(original_text, result, arch, local_entry_island_words,
-                                options.preapplied_reserved_ranges);
+                                resource_state.reserved_ranges);
   }
   BranchOnlyRelayRouter branch_router;
   if (local_entry_islands) {
@@ -313,7 +313,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     std::string relay_error;
     if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, resource_state.blocks, original_text, synchronization_ranges,
+            result, options, arch, resource_state, original_text, synchronization_ranges,
             candidate_ranges, dense_entry_hosts, route_frontier_source,
             2u * branch_only_candidate_count, branch_only_placement_planner, branch_router,
             direct_branch_reservoirs, &relay_error)) {

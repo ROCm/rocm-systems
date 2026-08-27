@@ -3412,16 +3412,18 @@ intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
 }
 
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
-                               rj_code_arch_t arch, const ConSanOptions &options,
+                               rj_code_arch_t arch,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                std::span<ConSanAccessInventorySite> access_sites,
                                SynchronizationInventoryBuildView inventory,
                                ConSanTransformArtifacts &result) {
+  const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
+      result.program_inventory.preapplied_mutation().code_ranges;
   const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
       code_object, result.program_inventory.kernels(), result.program_inventory.functions(),
-      options.preapplied_code_ranges);
+      preapplied_ranges);
   std::vector<std::unique_ptr<BasicBlock>> rebuilt_blocks;
-  if (reusable_blocks == nullptr || !options.preapplied_code_ranges.empty()) {
+  if (reusable_blocks == nullptr || !preapplied_ranges.empty()) {
     rebuilt_blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
     reusable_blocks = &rebuilt_blocks;
   }
@@ -3435,7 +3437,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entry_offsets;
-    for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
+    for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
       if (range.kernel_name != kernel.name)
         continue;
       if (block_for_offset(block_index, range.text_offset) != nullptr)

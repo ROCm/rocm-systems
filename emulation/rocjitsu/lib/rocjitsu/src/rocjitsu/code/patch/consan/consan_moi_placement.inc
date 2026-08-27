@@ -1824,6 +1824,10 @@ struct MoiDenseOwnerLivenessProof {
 struct MoiResourcePlanningState {
   std::span<const uint8_t> bytes;
   rj_code_arch_t arch;
+  /// Bytes unavailable to this lowering attempt. The initial entries come
+  /// from the immutable staged-image inventory; MOI may append reservations
+  /// for deferred prologue anchors without mutating that inventory.
+  std::vector<ConSanPreappliedReservedRange> reserved_ranges;
   AmdGpuCodeObject code_object;
   std::unique_ptr<Decoder> decoder;
   std::vector<std::unique_ptr<BasicBlock>> blocks;
@@ -1835,14 +1839,15 @@ struct MoiResourcePlanningState {
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
                            const ConSanOptions &options, const ConSanTransformArtifacts &result)
-      : bytes(input), arch(arch), code_object(input.data(), input.size()),
-        decoder(Decoder::create(arch)) {
+      : bytes(input), arch(arch),
+        reserved_ranges(result.program_inventory.preapplied_mutation().reserved_ranges),
+        code_object(input.data(), input.size()), decoder(Decoder::create(arch)) {
     if (!code_object.is_valid() || !decoder)
       return;
 
     const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
         code_object, result.program_inventory.kernels(), result.program_inventory.functions(),
-        options.preapplied_code_ranges);
+        result.program_inventory.preapplied_mutation().code_ranges);
     blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_index = build_block_offset_index(blocks);
     CodeObjectPatcher patcher(code_object);
@@ -1886,7 +1891,8 @@ struct MoiResourcePlanningState {
       if (!kernel.has_text_range)
         continue;
       std::vector<uint64_t> additional_entry_offsets;
-      for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
+      for (const ConSanPreappliedCodeRange &range :
+           result.program_inventory.preapplied_mutation().code_ranges) {
         if (range.kernel_name != kernel.name)
           continue;
         if (block_for_offset(block_index, range.text_offset) != nullptr)
@@ -2753,7 +2759,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
 /// when the underlying planner fails.
 [[nodiscard]] bool plan_moi_access_direct_reservoirs(
     const ConSanTransformArtifacts &result, const ConSanOptions &options, rj_code_arch_t arch,
-    std::span<const std::unique_ptr<BasicBlock>> blocks, std::span<const uint8_t> original_text,
+    const MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
     std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
     const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, uint64_t route_frontier_source,
@@ -2764,14 +2770,14 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
                                                               synchronization_ranges.end());
   protected_ranges.reserve(protected_ranges.size() + candidate_ranges.size() +
                            result.program_inventory.kernels().size() +
-                           options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
+                           resource_state.reserved_ranges.size() + dense_entry_hosts.size());
   protected_ranges.insert(protected_ranges.end(), candidate_ranges.begin(), candidate_ranges.end());
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     protected_ranges.emplace_back(
         kernel.entry_text_offset,
         std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
   }
-  for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
+  for (const ConSanPreappliedReservedRange &range : resource_state.reserved_ranges)
     protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
   for (const auto &[dispatcher, host] : dense_entry_hosts) {
     (void)dispatcher;
@@ -2780,8 +2786,8 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
   }
 
   std::vector<BasicBlock *> reservoir_blocks;
-  reservoir_blocks.reserve(blocks.size());
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+  reservoir_blocks.reserve(resource_state.blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : resource_state.blocks) {
     if (block)
       reservoir_blocks.push_back(block.get());
   }
@@ -2960,7 +2966,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
                   .owner_end = owner_end,
                   .host_word_count = host_word_count,
                   .anchors = anchors,
-                  .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+                  .preapplied_reserved_ranges = resource_state.reserved_ranges,
                   .owner_proof = owner_proof,
                   .bootstrap_ranges = host_bootstrap_ranges,
               },

@@ -205,6 +205,10 @@ struct SynchronizationInventoryBuildView {
 /// `ProgramInventory`.
 struct ConSanProgramInventoryStorage {
   ConSanCodeObjectId code_object_id;
+  /// Ownership and occupied-byte facts inherited from an earlier stage of a
+  /// composed transform. They are properties of this exact input image, not
+  /// options that an engine may mutate while lowering it.
+  ConSanPreappliedMutationLayout preapplied_mutation;
   /// True only after the pristine bytes have passed structural AMDGPU code
   /// object parsing. This is an immutable input fact, independent of whether
   /// the target has a supported semantic architecture.
@@ -242,6 +246,10 @@ public:
   }
   [[nodiscard]] const ConSanCodeObjectId &code_object_id() const {
     return storage_ ? storage_->code_object_id : empty_storage().code_object_id;
+  }
+  /// Return immutable geometry inherited from a prior mutation stage.
+  [[nodiscard]] const ConSanPreappliedMutationLayout &preapplied_mutation() const {
+    return storage_ ? storage_->preapplied_mutation : empty_storage().preapplied_mutation;
   }
   /// Return whether the input was structurally parsed as an AMDGPU code object.
   [[nodiscard]] bool code_object_parsed() const { return storage_ && storage_->code_object_parsed; }
@@ -344,9 +352,11 @@ private:
 class ProgramInventoryBuilder {
 public:
   /// Start a fresh inventory for one pristine code-object image.
-  explicit ProgramInventoryBuilder(std::span<const uint8_t> code_object_bytes = {})
+  explicit ProgramInventoryBuilder(std::span<const uint8_t> code_object_bytes = {},
+                                   const ConSanPreappliedMutationLayout &preapplied_mutation = {})
       : storage_(std::make_shared<ConSanProgramInventoryStorage>()) {
     storage_->code_object_id = make_consan_code_object_id(code_object_bytes);
+    storage_->preapplied_mutation = preapplied_mutation;
   }
 
   /// Start a distinct mutable analysis revision from an immutable inventory.

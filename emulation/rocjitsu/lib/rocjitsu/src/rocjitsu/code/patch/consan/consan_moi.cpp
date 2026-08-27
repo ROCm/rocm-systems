@@ -780,7 +780,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
       const bool entry_already_reserved = std::ranges::any_of(
-          effective_options.preapplied_reserved_ranges,
+          resource_planning_state.reserved_ranges,
           [&](const ConSanPreappliedReservedRange &reserved) {
             return reserved.size != 0u && kernel.entry_text_offset >= reserved.text_offset &&
                    kernel.entry_text_offset - reserved.text_offset < reserved.size;
@@ -789,7 +789,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
         // Dynamic-stack owner/epoch setup must branch in place from the
         // original entry. Keep every Sampled cave/relay allocator off that
         // anchor until the prologue is emitted in the final growth pass.
-        effective_options.preapplied_reserved_ranges.push_back(
+        resource_planning_state.reserved_ranges.push_back(
             {.text_offset = kernel.entry_text_offset, .size = sizeof(uint32_t)});
       }
     }

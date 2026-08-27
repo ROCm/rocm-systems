@@ -173,7 +173,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(text_bytes, result, arch, local_entry_island_words,
-                                options.preapplied_reserved_ranges);
+                                resource_state.reserved_ranges);
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result, options, arch, resource_state, original_text, candidates,
@@ -275,7 +275,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   std::vector<BorrowedEntryProtectedRange> borrowed_entry_protected_ranges;
   borrowed_entry_protected_ranges.reserve(
       candidates.size() + result.program_inventory.kernels().size() +
-      result.program_inventory.functions().size() + options.preapplied_reserved_ranges.size());
+      result.program_inventory.functions().size() + resource_state.reserved_ranges.size());
   for (const ConSanMoiCandidate *candidate : candidates) {
     borrowed_entry_protected_ranges.push_back(
         {candidate->anchor(), candidate->anchor() + candidate->size(), candidate});
@@ -295,7 +295,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     append_borrowed_entry_sync_ranges(kernel);
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_borrowed_entry_sync_ranges(function);
-  for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges) {
+  for (const ConSanPreappliedReservedRange &range : resource_state.reserved_ranges) {
     borrowed_entry_protected_ranges.push_back(
         {range.text_offset, range.text_offset + range.size, nullptr});
   }
@@ -376,7 +376,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     std::string relay_error;
     if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, resource_state.blocks, original_text, synchronization_ranges,
+            result, options, arch, resource_state, original_text, synchronization_ranges,
             candidate_ranges, dense_entry_hosts, route_frontier_source,
             saturated_multiply(2u, branch_only_routing_demand_count), branch_only_placement_planner,
             branch_router, direct_branch_reservoirs, &relay_error)) {

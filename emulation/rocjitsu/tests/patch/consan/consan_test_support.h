@@ -54,11 +54,22 @@ namespace rocjitsu {
 /// production header declares this symbol.
 [[nodiscard]] ConSanTransformArtifacts
 complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr);
+                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+                         const ConSanPreappliedMutationLayout &preapplied_mutation = {});
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+}
+
+/// Lower one focused fixture whose input image already contains committed
+/// mutation geometry. This keeps staged-image ownership out of mutable
+/// `ConSanOptions` while allowing placement and CFG tests to construct the
+/// exact composition boundary they exercise.
+[[nodiscard]] inline ConSanTransformArtifacts test_lower_consan_with_preapplied_mutation(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    const ConSanPreappliedMutationLayout &preapplied_mutation) {
+  return complete_consan_lowering(code_object_bytes, options, nullptr, preapplied_mutation);
 }
 
 /// Request the complete dry-run synchronization and fault-site inventory used

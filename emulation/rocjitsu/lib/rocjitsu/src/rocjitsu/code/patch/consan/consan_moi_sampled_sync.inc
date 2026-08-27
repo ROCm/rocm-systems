@@ -1301,7 +1301,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
               .owner_end = container_end,
               .host_word_count = static_cast<size_t>(host_words_count),
               .anchors = anchors,
-              .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+              .preapplied_reserved_ranges = resource_state.reserved_ranges,
               .owner_proof = host_owner_proof,
               .bootstrap_ranges = host_bootstrap_ranges,
           },
@@ -2169,7 +2169,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       original_text_size +
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
   std::vector<ConSanPreappliedReservedRange> local_island_reserved_ranges =
-      options.preapplied_reserved_ranges;
+      resource_state.reserved_ranges;
   const uint64_t reserved_sync_island_bytes =
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t) +
       reserved_atomic_island_count * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
@@ -2549,7 +2549,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
               .owner_end = owner_end,
               .host_word_count = static_cast<size_t>(host_words_count),
               .anchors = anchors,
-              .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+              .preapplied_reserved_ranges = resource_state.reserved_ranges,
               .owner_proof = host_owner_proof,
               .bootstrap_ranges = host_bootstrap_ranges,
           },

@@ -7296,14 +7296,15 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3;
   options.max_patches = 2;
+  ConSanPreappliedMutationLayout preapplied_mutation;
   // Model filler already owned by an earlier composition phase so only the
   // two intended reservoir runs can donate relay capacity. The guest scalar
   // uses remain present for ordinary liveness analysis.
   const auto reserve_kernel_filler = [&](uint64_t kernel_offset, size_t reservoir_word) {
-    options.preapplied_reserved_ranges.push_back(
+    preapplied_mutation.reserved_ranges.push_back(
         {.text_offset = kernel_offset + 2u * sizeof(uint32_t),
          .size = static_cast<uint32_t>((reservoir_word - 2u) * sizeof(uint32_t))});
-    options.preapplied_reserved_ranges.push_back(
+    preapplied_mutation.reserved_ranges.push_back(
         {.text_offset = kernel_offset + (reservoir_word + kReservoirWords) * sizeof(uint32_t),
          .size = static_cast<uint32_t>((kTextWords - reservoir_word - kReservoirWords - 1u) *
                                        sizeof(uint32_t))});
@@ -7311,7 +7312,8 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   reserve_kernel_filler(0u, kFirstReservoirWord);
   reserve_kernel_filler(kTextWords * sizeof(uint32_t), kSecondReservoirWord);
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan_with_preapplied_mutation(bytes, options, preapplied_mutation);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7514,16 +7516,18 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
   options.probe_lds_check_trap = true;
   options.max_patches = 3u;
   options.scratch_vgpr = 6u;
-  options.preapplied_reserved_ranges.push_back(
+  ConSanPreappliedMutationLayout preapplied_mutation;
+  preapplied_mutation.reserved_ranges.push_back(
       {.text_offset = 6u * sizeof(uint32_t),
        .size = static_cast<uint32_t>(kReservoirOffset - 6u * sizeof(uint32_t))});
-  options.preapplied_reserved_ranges.push_back(
+  preapplied_mutation.reserved_ranges.push_back(
       {.text_offset = kReservoirOffset + kReservoirWords * sizeof(uint32_t),
        .size = static_cast<uint32_t>(
            (kTextWords - kReservoirOffset / sizeof(uint32_t) - kReservoirWords - 1u) *
            sizeof(uint32_t))});
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan_with_preapplied_mutation(bytes, options, preapplied_mutation);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);

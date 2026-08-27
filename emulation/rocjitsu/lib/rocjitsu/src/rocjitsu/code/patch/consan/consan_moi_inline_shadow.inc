@@ -209,7 +209,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
     local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
-                                options.preapplied_reserved_ranges);
+                                resource_state.reserved_ranges);
   BranchOnlyRelayRouter branch_router;
   std::optional<uint64_t> latest_generated_frontier_word;
   if (local_entry_islands) {
@@ -222,7 +222,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   const size_t dense_group_capacity =
       arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : (consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u);
-  const auto &dense_host_blocks = resource_state.blocks;
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result, options, arch, resource_state, original_text, candidates, dense_group_capacity,
       access_island_begin, access_relay_words, use_indirect_appended,
@@ -272,7 +271,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     std::string relay_error;
     if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, dense_host_blocks, original_text, synchronization_ranges,
+            result, options, arch, resource_state, original_text, synchronization_ranges,
             candidate_ranges, dense_entry_hosts, route_frontier_source, 2u * candidates.size(),
             placement_planner, branch_router, direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);

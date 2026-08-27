@@ -70,12 +70,12 @@ void append_unique_sites(std::vector<Site> &source, std::vector<Site> &destinati
 
 void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_bytes,
                                         Decoder &decoder, rj_code_arch_t arch,
-                                        const ConSanOptions &options,
                                         ProgramInventoryBuilder &inventory,
                                         ConSanTransformArtifacts &result) {
   std::span<ConSanKernelInfo> kernels = inventory.kernels();
   std::span<ConSanFunctionInfo> functions = inventory.functions();
-  for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
+  for (const ConSanPreappliedCodeRange &range :
+       result.program_inventory.preapplied_mutation().code_ranges) {
     const auto kernel = std::ranges::find_if(
         kernels, [&](const ConSanKernelInfo &item) { return item.name == range.kernel_name; });
     if (kernel == kernels.end()) {
@@ -331,7 +331,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       std::span<const CarriedPerturbationPlan> carried_plans = {},
                       std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
-                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
+                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+                      const ConSanPreappliedMutationLayout &preapplied_mutation = {}) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -340,7 +341,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
   perturbation = {};
   result.mutation.fault.requested = options.fault_mutation_count();
-  ProgramInventoryBuilder inventory_builder(code_object_bytes);
+  ProgramInventoryBuilder inventory_builder(code_object_bytes, preapplied_mutation);
   result.program_inventory = inventory_builder.view();
   const bool has_fault = options.has_fault_mutation();
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
@@ -437,6 +438,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         major_image_ownership::Phase::CompositeIncrementalPatch);
 
     ConSanOptions instrument_options = options;
+    ConSanPreappliedMutationLayout instrument_preapplied;
     instrument_options.fault_drop_barrier = false;
     instrument_options.fault_move_barrier = false;
     instrument_options.fault_mutate_barrier_id_scope = false;
@@ -454,11 +456,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     instrument_options.abort_unmatched_barrier_wait = false;
     for (const ConSanPatchInfo &patch : mutation_stage.patches) {
       if (patch.original_size != 0) {
-        instrument_options.preapplied_reserved_ranges.push_back(
+        instrument_preapplied.reserved_ranges.push_back(
             {.text_offset = patch.anchor_offset, .size = patch.original_size});
       }
       if (patch.trampoline_size != 0) {
-        instrument_options.preapplied_reserved_ranges.push_back(
+        instrument_preapplied.reserved_ranges.push_back(
             {.text_offset = patch.trampoline_offset, .size = patch.trampoline_size});
       }
       if (patch.kind != ConSanPatchKind::InlineBarrierMoveTargetRewrite ||
@@ -474,7 +476,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
             "ConSan markerless barrier move could not retain fault-cave kernel ownership");
         return fault_result;
       }
-      instrument_options.preapplied_code_ranges.push_back(
+      instrument_preapplied.code_ranges.push_back(
           {.text_offset = patch.trampoline_offset,
            .size = patch.trampoline_size,
            .kernel_name = owner->name,
@@ -494,7 +496,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried, {},
-                              &perturbation),
+                              &perturbation, instrument_preapplied),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
         /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
     const major_image_ownership::ScopedOwner instrument_result_owner(
@@ -760,14 +762,13 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     for (ConSanKernelInfo &kernel : inventory_builder.kernels())
       preflight_kernel(kernel, result.warnings);
   }
-  reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, options, inventory_builder,
-                                     result);
+  reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, inventory_builder, result);
   if (!result.errors.empty()) {
     return result;
   }
-  prune_unreachable_inferred_ranges(*code_object, *decoder, arch, options,
-                                    inventory_builder.kernels(), inventory_builder.functions(),
-                                    inventory_builder.access_sites());
+  prune_unreachable_inferred_ranges(
+      *code_object, *decoder, arch, result.program_inventory.preapplied_mutation().code_ranges,
+      inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites());
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
                                         options.fault_dry_run || has_fault || has_perturbation ||
                                         options.abort_unmatched_barrier_wait;
@@ -796,7 +797,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     if (options.fault_move_barrier)
       build_barrier_move_destination_inventory(*code_object, sync_blocks, sync_events, arch,
                                                synchronization_inventory.sync_sequences, result);
-    annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks,
+    annotate_execution_owners(*code_object, *decoder, arch, &sync_blocks,
                               inventory_builder.access_sites(), synchronization_inventory, result);
     associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
                                               synchronization_inventory);
@@ -814,7 +815,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // SuperCollider's ordinary clean transform does not consume synchronization
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.
-    annotate_execution_owners(*code_object, *decoder, arch, options, nullptr,
+    annotate_execution_owners(*code_object, *decoder, arch, nullptr,
                               inventory_builder.access_sites(), synchronization_inventory, result);
   }
   result.program_inventory = inventory_builder.view();

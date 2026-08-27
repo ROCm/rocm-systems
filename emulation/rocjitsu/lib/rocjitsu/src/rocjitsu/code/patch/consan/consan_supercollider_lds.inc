@@ -53,8 +53,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<LocalNopCave> local_nop_caves = find_uncovered_nop_caves(code_object, result, arch);
   std::erase_if(local_nop_caves, [&](const LocalNopCave &cave) {
     return overlaps_preapplied_reserved_range(
-        options, {cave.text_offset,
-                  cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t)});
+        result.program_inventory,
+        {cave.text_offset,
+         cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t)});
   });
   uint32_t max_uncovered_nop_cave_words = 0;
   for (const LocalNopCave &cave : local_nop_caves)
@@ -419,7 +420,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           s_clause_blocked_offsets.contains(offset) ||
           overlaps_future_flat_probe(offset, inst.size()) ||
           overlaps_preapplied_reserved_range(
-              options, {offset, offset + static_cast<uint64_t>(inst.size())})) {
+              result.program_inventory, {offset, offset + static_cast<uint64_t>(inst.size())})) {
         continue;
       }
       ScRelayAnchorCandidate candidate;
@@ -458,7 +459,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             overlaps_supported_lds_probe(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
             overlaps_future_flat_probe(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
             overlaps_preapplied_reserved_range(
-                options, {inst.src_loc(), inst.src_loc() + static_cast<uint64_t>(inst.size())}) ||
+                result.program_inventory,
+                {inst.src_loc(), inst.src_loc() + static_cast<uint64_t>(inst.size())}) ||
             !range_is_in_selected_container(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
             static_cast<uint32_t>(inst.size()) >
                 kMaxWideRelayHostWords * sizeof(uint32_t) - accumulated_size) {
@@ -499,7 +501,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         !range_is_in_selected_container(offset, static_cast<uint64_t>(size)) ||
         overlaps_supported_lds_probe(offset, static_cast<uint64_t>(size)) ||
         overlaps_future_flat_probe(offset, static_cast<uint64_t>(size)) ||
-        overlaps_preapplied_reserved_range(options,
+        overlaps_preapplied_reserved_range(result.program_inventory,
                                            {offset, offset + static_cast<uint64_t>(size)})) {
       return false;
     }
@@ -1132,9 +1134,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       uint32_t observed_padding = count_nop_padding(
           original_bytes, site.file_offset + site.instruction_size, padding_words, arch);
       if (overlaps_preapplied_reserved_range(
-              options, {site.physical_id.original_text_offset,
-                        site.physical_id.original_text_offset +
-                            requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
+              result.program_inventory,
+              {site.physical_id.original_text_offset,
+               site.physical_id.original_text_offset +
+                   requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
         observed_padding = 0;
       }
       max_observed_padding_words = std::max(max_observed_padding_words, observed_padding);
@@ -1727,7 +1730,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                 }) ||
             overlaps_supported_lds_probe(host_offset, host_bytes) ||
             overlaps_future_flat_probe(host_offset, host_bytes) ||
-            overlaps_preapplied_reserved_range(options, {host_offset, host_offset + host_bytes}) ||
+            overlaps_preapplied_reserved_range(result.program_inventory,
+                                               {host_offset, host_offset + host_bytes}) ||
             !dense_host_scratch_is_dead_at_entry(*instruction)) {
           continue;
         }

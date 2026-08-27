@@ -118,8 +118,9 @@ void publish_sc_access_coverage_support(ConSanTransformArtifacts &result, ConSan
   }
 }
 
-void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result, ConSanAccessOrigin origin,
-                                          uint64_t file_offset, std::string detail) {
+void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result,
+                                          ConSanAccessOrigin origin, uint64_t file_offset,
+                                          std::string detail) {
   const auto site = std::ranges::find_if(
       result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
         return candidate.origin == origin && candidate.file_offset == file_offset;
@@ -268,10 +269,11 @@ text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_of
   return lhs.begin < rhs.end && rhs.begin < lhs.end;
 }
 
-[[nodiscard]] bool overlaps_preapplied_reserved_range(const ConSanOptions &options,
+[[nodiscard]] bool overlaps_preapplied_reserved_range(const ProgramInventory &inventory,
                                                       ByteRange range) {
   return std::ranges::any_of(
-      options.preapplied_reserved_ranges, [&](const ConSanPreappliedReservedRange &reserved) {
+      inventory.preapplied_mutation().reserved_ranges,
+      [&](const ConSanPreappliedReservedRange &reserved) {
         if (reserved.size == 0 ||
             reserved.text_offset > std::numeric_limits<uint64_t>::max() - reserved.size)
           return false;

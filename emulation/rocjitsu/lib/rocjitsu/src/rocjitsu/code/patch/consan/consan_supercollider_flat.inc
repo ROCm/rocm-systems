@@ -215,8 +215,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::vector<LocalNopCave> local_nop_caves = find_uncovered_nop_caves(code_object, result, arch);
   std::erase_if(local_nop_caves, [&](const LocalNopCave &cave) {
     return overlaps_preapplied_reserved_range(
-        options, {cave.text_offset,
-                  cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t)});
+        result.program_inventory,
+        {cave.text_offset,
+         cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t)});
   });
   uint32_t max_uncovered_nop_cave_words = 0;
   for (const LocalNopCave &cave : local_nop_caves)
@@ -490,9 +491,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint32_t observed_padding = count_nop_padding(
         original_bytes, site.file_offset + site.instruction_size, padding_words, arch);
     if (overlaps_preapplied_reserved_range(
-            options, {site.physical_id.original_text_offset,
-                      site.physical_id.original_text_offset +
-                          requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
+            result.program_inventory,
+            {site.physical_id.original_text_offset,
+             site.physical_id.original_text_offset +
+                 requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
       observed_padding = 0;
     }
     max_observed_padding_words = std::max(max_observed_padding_words, observed_padding);
@@ -567,7 +569,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                 (cursor != site.physical_id.original_text_offset &&
                  (!is_relocatable_anchor(*instruction, cursor, text_bytes, arch) ||
                   overlaps_preapplied_reserved_range(
-                      options, {cursor, cursor + static_cast<uint64_t>(instruction->size())})))) {
+                      result.program_inventory,
+                      {cursor, cursor + static_cast<uint64_t>(instruction->size())})))) {
               displaced_words.clear();
               break;
             }
@@ -810,7 +813,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     protected_ranges.reserve(admitted_sites.size() + local_nop_caves.size() +
                              result.program_inventory.kernels().size() +
                              result.program_inventory.functions().size() +
-                             options.preapplied_reserved_ranges.size() + result.patches.size());
+                             result.program_inventory.preapplied_mutation().reserved_ranges.size() +
+                             result.patches.size());
     for (const auto &[file_offset, access] : admitted_sites) {
       (void)file_offset;
       protected_ranges.emplace_back(access->physical_id.original_text_offset,
@@ -839,7 +843,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       protect_sync_sites(function);
-    for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
+    for (const ConSanPreappliedReservedRange &range :
+         result.program_inventory.preapplied_mutation().reserved_ranges)
       protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
     for (const ConSanPatchInfo &patch : result.patches) {
       protected_ranges.emplace_back(patch.anchor_offset,

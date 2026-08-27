@@ -289,6 +289,27 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.find_function_by_name("missing"), nullptr);
 }
 
+TEST(ConSanProgramInventory, PreappliedMutationGeometryBelongsToExactInputRevision) {
+  const std::array<uint8_t, 8> bytes = {1, 2, 3, 4, 5, 6, 7, 8};
+  ConSanPreappliedMutationLayout staged{
+      .code_ranges =
+          {{.text_offset = 64, .size = 16, .kernel_name = "owner", .continuation_text_offset = 32}},
+      .reserved_ranges = {{.text_offset = 24, .size = 8}},
+  };
+  const ConSanPreappliedMutationLayout expected = staged;
+  ProgramInventoryBuilder builder(bytes, staged);
+  const ProgramInventory published = builder.view();
+
+  staged.code_ranges.clear();
+  staged.reserved_ranges.front().size = 4;
+  EXPECT_EQ(published.preapplied_mutation(), expected);
+
+  ProgramInventoryBuilder revision(published);
+  EXPECT_EQ(revision.view().preapplied_mutation(), expected);
+  EXPECT_TRUE(ProgramInventory{}.preapplied_mutation().code_ranges.empty());
+  EXPECT_TRUE(ProgramInventory{}.preapplied_mutation().reserved_ranges.empty());
+}
+
 TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) {
   static_assert(
       std::same_as<typename decltype(SynchronizationInventoryView{}.sync_events)::element_type,

@@ -177,6 +177,8 @@ struct ConSanPreappliedCodeRange {
   uint32_t size = 0;
   std::string kernel_name;
   std::optional<uint64_t> continuation_text_offset;
+
+  bool operator==(const ConSanPreappliedCodeRange &) const = default;
 };
 
 /// Bytes unavailable to the current placement pass. Mutation composition uses
@@ -187,6 +189,27 @@ struct ConSanPreappliedCodeRange {
 struct ConSanPreappliedReservedRange {
   uint64_t text_offset = 0;
   uint32_t size = 0;
+
+  bool operator==(const ConSanPreappliedReservedRange &) const = default;
+};
+
+/// Geometry already committed by an earlier stage of one composed transform.
+///
+/// A fault mutation can add executable bytes outside the source kernel's
+/// symbol range and can occupy bytes that a following instrumentation stage
+/// would otherwise mistake for padding or a code cave. This value carries the
+/// ownership and reservation facts into construction of the mutated image's
+/// immutable `ProgramInventory`. It contains no sanitizer request, register
+/// choice, or engine working state.
+struct ConSanPreappliedMutationLayout {
+  /// Executable ranges introduced by the earlier mutation, paired with the
+  /// dispatchable owner and continuation needed to recover their CFG scope.
+  std::vector<ConSanPreappliedCodeRange> code_ranges;
+  /// Original anchors and generated ranges that later placement passes must
+  /// treat as occupied even when their bytes resemble reusable padding.
+  std::vector<ConSanPreappliedReservedRange> reserved_ranges;
+
+  bool operator==(const ConSanPreappliedMutationLayout &) const = default;
 };
 
 /// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
@@ -793,11 +816,6 @@ struct ConSanOptions : ConSanRequest,
   /// its hardware dispatch identity in private entry state because no
   /// code-object-wide persistent SGPR pair survives the guest program.
   bool automatic_moi_private_dispatch_id = false;
-  /// Internal metadata used only by the mutation-then-instrument composition
-  /// path. It prevents appended fault code from being attributed to an
-  /// unrelated tail function merely because that FUNC covers the cave bytes.
-  std::vector<ConSanPreappliedCodeRange> preapplied_code_ranges;
-  std::vector<ConSanPreappliedReservedRange> preapplied_reserved_ranges;
   /// Scalar state kept outside a spill-backed Inline transient window.
   std::optional<uint16_t> moi_inline_indirect_pc_sgpr;
   std::optional<uint16_t> moi_inline_call_return_sgpr;

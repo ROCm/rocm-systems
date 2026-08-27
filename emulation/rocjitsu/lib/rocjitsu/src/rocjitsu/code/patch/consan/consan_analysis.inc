@@ -2512,7 +2512,8 @@ void prune_inferred_range_sites(Container &container, const BlockOffsetIndex &bl
 // ConSan's inventory in only these inferred ranges to instructions with a
 // validated kernel CFG owner.
 void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Decoder &decoder,
-                                       rj_code_arch_t arch, const ConSanOptions &options,
+                                       rj_code_arch_t arch,
+                                       std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
                                        std::span<ConSanKernelInfo> kernels,
                                        std::span<ConSanFunctionInfo> functions,
                                        std::vector<ConSanAccessInventorySite> &accesses) {
@@ -2522,8 +2523,8 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   if (!needs_pruning)
     return;
 
-  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      code_object, kernels, functions, options.preapplied_code_ranges);
+  const consan_detail::ConSanCfgBuildInputs cfg =
+      consan_detail::build_consan_cfg_inputs(code_object, kernels, functions, preapplied_ranges);
   auto blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   CodeObjectPatcher patcher(code_object);
@@ -2533,7 +2534,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entries;
-    for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
+    for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
       if (range.kernel_name != kernel.name)
         continue;
       if (block_for_offset(block_index, range.text_offset) != nullptr)
