@@ -648,6 +648,16 @@ class gfx12_cntx_prim {
   //     gate -> "0 wavefronts analyzed").  Match PAL: leave auto-flush OFF.
   //   - LOWATER_OFFSET: PAL=SqttLoWaterOffsetValue=4 (aqlprofile had 3).
   //   - GL1X_PREFETCH_PAGE: PAL leaves 0 (aqlprofile had 13).
+  //   - REG_AT_HWM: PAL=2 for the default stallMode=GpuProfilerStallAlways ("stall always so we
+  //     get accurate data"); aqlprofile never set it (=0).  REG_AT_HWM governs whether the SQ is
+  //     stalled at the buffer high-watermark to avoid DROPPING tokens.  With it 0 the HW does not
+  //     stall at HWM, so under buffer pressure it drops/mis-emits SQTT tokens instead of stalling.
+  //     That is the fingerprint of the remaining gfx1201 desync: unpaired excess WaveStarts
+  //     (observed tc66 count == exactly the WaveStart-WaveEnd deficit) plus WaveStart tokens whose
+  //     thread_count reads a bogus 66/68/69 in the reserved [65,94] gap -> RGP mis-classifies them
+  //     wave64 -> wave32/64 mode-mismatch kill gate -> "N of 1024 analyzed" collapse.  PAL's
+  //     known-good capture with REG_AT_HWM=2 produces WaveStart==WaveEnd (deficit 0) and 100%
+  //     thread_count=127.  Match PAL: stall at HWM (gfx12PerfExperiment.cpp:1185, REG_AT_HWM=2).
   static uint32_t sqtt_ctrl_value(bool on, bool double_buffer) {
     uint32_t sq_thread_trace_ctrl{0};
     sq_thread_trace_ctrl =
@@ -659,6 +669,7 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SQ_STALL_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 4) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 0) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, REG_AT_HWM, 2) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DOUBLE_BUFFER, double_buffer ? 1 : 0);
     return sq_thread_trace_ctrl;
   }
