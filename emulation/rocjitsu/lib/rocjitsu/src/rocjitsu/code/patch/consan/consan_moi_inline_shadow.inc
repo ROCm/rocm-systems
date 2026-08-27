@@ -729,7 +729,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
     candidate_options.moi_inline_workgroup_shadow = workgroup_shadow.has_value();
     candidate_options.scratch_vgpr = resources->base;
-    candidate_options.moi_spill_overlaps_guest_operands = spill.has_value();
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_inline_shadow_words(
@@ -739,8 +738,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         private_layout ? private_layout->workgroup_key_offset : std::nullopt,
         private_layout ? private_layout->dispatch_id_offset : std::nullopt,
-        workgroup_shadow_compact_token, resources->count, spill ? &*spill : nullptr,
-        candidate_errors, &guest_instruction_word_count);
+        workgroup_shadow_compact_token, resources->count, spill.has_value(),
+        spill ? &*spill : nullptr, candidate_errors, &guest_instruction_word_count);
     if (!words) {
       for (std::string &error : candidate_errors) {
         error += " for " + candidate.mnemonic + " at text offset " +
@@ -1226,7 +1225,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       candidate_options.moi_inline_workgroup_shadow = planned_patch.workgroup_shadow.has_value();
       candidate_options.scratch_vgpr = planned_patch.resources.base;
-      candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
       if (planned_patch.private_dispatch_id_offset) {
         const auto reload = moi_indirect_jump_sgprs(candidate_options);
         if (!reload) {
@@ -1242,8 +1240,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
           planned_patch.private_owner_shift, planned_patch.private_workgroup_key_offset,
           planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
-          planned_patch.resources.count, planned_patch.spill ? &*planned_patch.spill : nullptr,
-          result.errors);
+          planned_patch.resources.count, planned_patch.spill.has_value(),
+          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
       if (!words)
         return;
 
@@ -1698,7 +1696,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             candidate_options.moi_inline_workgroup_shadow =
                 planned_patch.workgroup_shadow.has_value();
             candidate_options.scratch_vgpr = planned_patch.resources.base;
-            candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
             if (planned_patch.private_dispatch_id_offset) {
               const auto reload = moi_indirect_jump_sgprs(candidate_options);
               if (!reload) {
@@ -1716,6 +1713,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 planned_patch.private_workgroup_key_offset,
                 planned_patch.private_dispatch_id_offset,
                 planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
+                planned_patch.spill.has_value(),
                 planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
           },
           [](const PlannedInlineShadowPatch &planned_patch) {
@@ -2087,7 +2085,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
     uint32_t record_index, std::span<const uint32_t> prior_record_indices,
-    uint32_t window_bank_count, bool spill_backed_operand_recovery, bool relocate_instruction,
+    uint32_t window_bank_count, bool spill_overlaps_guest_operands,
+    bool spill_backed_operand_recovery, bool relocate_instruction,
     uint32_t pending_acquire_owner_bank_count,
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
     std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
@@ -2132,7 +2131,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
   if (preserved_lds_byte_offset_vgpr)
     lds_byte_offset_vgpr = preserved_lds_byte_offset_vgpr;
-  if (!options.moi_spill_overlaps_guest_operands &&
+  if (!spill_overlaps_guest_operands &&
       reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
@@ -2825,11 +2824,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    uint32_t pending_acquire_owner_bank_count, bool spill_backed_operand_recovery,
-    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr,
+    uint32_t pending_acquire_owner_bank_count, bool spill_overlaps_guest_operands,
+    bool spill_backed_operand_recovery, const VgprSpillSequence *spill,
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
@@ -3005,7 +3004,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, access_ranges[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
-        window_bank_count, spill_backed_operand_recovery,
+        window_bank_count, spill_overlaps_guest_operands, spill_backed_operand_recovery,
         range_index == 0u && !spill_backed_operand_recovery, pending_acquire_owner_bank_count,
         preserved_lds_byte_offset_vgpr, spill, spilled_lds_byte_offset_vgpr,
         sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,

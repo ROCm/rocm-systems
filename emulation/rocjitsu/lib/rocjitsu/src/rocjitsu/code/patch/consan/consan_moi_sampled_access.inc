@@ -580,13 +580,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
-      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     } else if (spill && sampled_access_can_emit_spill_over_guest_operands(candidate_options,
                                                                           candidate, arch)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
-      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     }
     const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
         candidate_options.automatic_moi_record_replay_sgpr_spill);
@@ -692,7 +690,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         layout.sampled_pending_acquires_offset,
         consan_moi_sampled_pending_acquire_owner_bank_count(layout.sampled_pending_acquire_capacity,
                                                             layout.sampled_causal_window_capacity),
-        spill_backed_operand_recovery, spill ? &*spill : nullptr,
+        spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         runtime_workgroup_gate_in_body, candidate_errors, &probe_guest_instruction_offset,
@@ -998,8 +996,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         return;
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
-      candidate_options.moi_spill_overlaps_guest_operands =
-          planned_patch.spill_overlaps_guest_operands;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
       if (planned_patch.private_epoch_offset ||
@@ -1020,7 +1016,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
           consan_moi_sampled_pending_acquire_owner_bank_count(
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
-          planned_patch.spill_backed_operand_recovery,
+          planned_patch.spill_overlaps_guest_operands, planned_patch.spill_backed_operand_recovery,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift,
           planned_patch.runtime_workgroup_gate_in_body, result.errors);
@@ -1392,8 +1388,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               return std::optional<std::vector<uint32_t>>{};
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;
-            candidate_options.moi_spill_overlaps_guest_operands =
-                planned_patch.spill_overlaps_guest_operands;
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             if (planned_patch.private_epoch_offset ||
@@ -1414,6 +1408,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
                 consan_moi_sampled_pending_acquire_owner_bank_count(
                     layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
+                planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill_backed_operand_recovery,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,

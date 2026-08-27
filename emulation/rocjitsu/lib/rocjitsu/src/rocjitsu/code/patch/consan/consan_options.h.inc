@@ -789,9 +789,6 @@ struct ConSanOptions : ConSanRequest,
   /// least one ordinary access probe. Atomic-only objects need fewer
   /// transient EXEC pairs than access probes with causal-token lookup.
   bool moi_inline_access_present = false;
-  /// Internal proof marker: an appended Inline access body saves and restores
-  /// its complete scratch window before executing the displaced guest access.
-  bool moi_spill_overlaps_guest_operands = false;
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
   bool automatic_moi_owner_sgpr = false;
   /// Internal marker set after ConSan assigns the persistent hardware

@@ -2408,8 +2408,8 @@
     std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_workgroup_key_offset,
     std::optional<uint32_t> private_dispatch_id_offset, uint16_t workgroup_shadow_compact_token,
-    uint16_t scratch_count, const VgprSpillSequence *spill, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_word_count = nullptr) {
+    uint16_t scratch_count, bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_word_count = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -2453,7 +2453,7 @@
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
-  if (!options.moi_spill_overlaps_guest_operands &&
+  if (!spill_overlaps_guest_operands &&
       reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;

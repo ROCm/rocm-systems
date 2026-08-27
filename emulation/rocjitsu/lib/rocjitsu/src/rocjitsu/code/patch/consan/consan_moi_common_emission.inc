@@ -890,9 +890,10 @@ private:
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t logical_range_index, const ConSanMoiReportBufferLayout &layout,
-    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
     errors.emplace_back(message);
@@ -943,7 +944,7 @@ private:
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
-  if (!options.moi_spill_overlaps_guest_operands &&
+  if (!spill_overlaps_guest_operands &&
       reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
@@ -1325,8 +1326,7 @@ private:
   const uint16_t address_group_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
       !materialize_flat_address && !save_clobbered_address && spill != nullptr &&
-              options.moi_spill_overlaps_guest_operands &&
-              *lds_byte_offset_vgpr >= spill->vgpr_base &&
+              spill_overlaps_guest_operands && *lds_byte_offset_vgpr >= spill->vgpr_base &&
               *lds_byte_offset_vgpr < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count
           ? lds_byte_offset_vgpr
           : std::nullopt;

@@ -5896,6 +5896,25 @@ analysis completed.
   simulator-device tests across the five supported targets also pass. E2E
   validation remains outside this deletion work.
 
+### Slice 5CS: keep MOI access overlap patch-local
+
+- **One access, one overlap fact:** Each Record/Replay and Sampled planned
+  access already records whether its selected scratch spill overlaps guest
+  operands; Inline Shadow derives the same fact from its per-patch spill. All
+  three root access emitters now receive that exact value directly.
+- **Completed deletion:** The code-object-wide
+  `moi_spill_overlaps_guest_operands` option, three planning publications, and
+  six final-emission reconstructions are gone. Scratch-overlap admission and
+  spilled-address recovery can no longer depend on whichever candidate most
+  recently mutated a copied global options object.
+- **Accounting:** Implementation files add 30 and delete 42 physical lines
+  after formatting, a net deletion of twelve.
+- **Checked-in gate:** All 152 focused spill, overlap, full-pressure, and
+  dynamic-stack host tests pass across Record/Replay, Sampled, and Inline
+  Shadow. All 1,531 ConSan host tests, all 172 HSA-hook tests, and all 2,878
+  generated simulator-device tests across the five supported targets also
+  pass. E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

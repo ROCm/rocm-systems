@@ -613,7 +613,10 @@ remain on its plan. For example, Sampled decides during access planning whether
 an overlapping LDS address will be recovered from the authoritative spill.
 That decision is stored on `PlannedSampledPatch` and passed directly to the
 Sampled emitter; it is not copied into code-object-wide `ConSanOptions` and
-rediscovered during final emission. The same ownership rule guides the
+rediscovered during final emission. All three MOI access planners likewise
+pass the selected patch's scratch/spill overlap directly to their emitter;
+Record/Replay, Sampled, and Inline Shadow cannot observe another candidate's
+overlap through global mutable state. The same ownership rule guides the
 remaining resource-state cleanup.
 
 ## Invariants and failure model

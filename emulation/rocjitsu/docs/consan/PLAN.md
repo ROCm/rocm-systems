@@ -441,7 +441,9 @@ its mutable `faults_preapplied` guard are gone. Perturbation composition retains
 the pristine semantic view only while translating its selected plan across the
 mutation. Sampled spill-backed operand recovery is likewise owned by each
 planned access patch and passed directly to emission instead of being mirrored
-through global mutable lowerer options.
+through global mutable lowerer options. Record/Replay, Sampled, and Inline
+Shadow now also pass each access patch's scratch/spill overlap fact directly;
+there is no code-object-wide candidate-overlap flag.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

@@ -889,7 +889,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
-      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     }
     const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
         candidate_options.automatic_moi_record_replay_sgpr_spill);
@@ -936,7 +935,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t guest_instruction_word_count = 0;
     auto words = build_first_light_access_record_words(
         bytes, candidate, candidate_options, arch, 0, 0, planned_logical_range_count, layout,
-        spill ? &*spill : nullptr,
+        spill_overlaps_guest_operands, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
@@ -1491,8 +1490,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanOptions candidate_options = options;
       candidate_options.scratch_vgpr = planned_patch.resources.base;
-      candidate_options.moi_spill_overlaps_guest_operands =
-          planned_patch.spill_overlaps_guest_operands;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_record_replay_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
@@ -1507,6 +1504,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       auto words = build_first_light_access_record_words(
           bytes, candidate, candidate_options, arch, planned_patch.record_index,
           planned_record_count, planned_patch.logical_range_index, layout,
+          planned_patch.spill_overlaps_guest_operands,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
       if (!words)
@@ -1876,8 +1874,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           [&](const PlannedAccessRecordPatch &planned_patch) {
             ConSanOptions candidate_options = options;
             candidate_options.scratch_vgpr = planned_patch.resources.base;
-            candidate_options.moi_spill_overlaps_guest_operands =
-                planned_patch.spill_overlaps_guest_operands;
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_record_replay_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
@@ -1888,7 +1884,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,
                 planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
-                layout, planned_patch.spill ? &*planned_patch.spill : nullptr,
+                layout, planned_patch.spill_overlaps_guest_operands,
+                planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, result.errors);
           },
