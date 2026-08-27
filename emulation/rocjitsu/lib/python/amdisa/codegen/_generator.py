@@ -4942,9 +4942,24 @@ class CodeGenerator:
         """
         if sem.name in self._TRAP_RETURN_NAMES:
             # Return from exception: restore the PC the trap handler saved in
-            # ssrc0. The 48-bit mask drops the status bits the hardware packs
-            # into the high half, and the instruction size is subtracted
-            # because the interpreter advances the PC after execute() returns.
+            # ssrc0. gfx12.5 has a 57-bit PC; older targets use 48 address bits.
+            # The instruction size is subtracted because the interpreter
+            # advances the PC after execute() returns.
+            pc_mask = (
+                '0x01FFFFFFFFFFFFFFULL'
+                if sem.name == 'S_RFE_I64'
+                else '0x0000FFFFFFFFFFFFULL'
+            )
+            split_state_status_restore = (
+                '  // GFX12 returns the interrupted wave state while preserving the handler\'s\n'
+                '  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.\n'
+                '  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {\n'
+                '    uint32_t restored_status = wf.trap_saved_status();\n'
+                '    restored_status = keep_halted ? (restored_status | kStatusHalt)\n'
+                '                                   : (restored_status & ~kStatusHalt);\n'
+                '    wf.set_status_raw(restored_status);\n'
+                '  }\n'
+            )
             return (
                 # Bare operand and size_ spellings: that is the arch-local form
                 # every generated execute_impl() uses, and
@@ -4953,8 +4968,12 @@ class CodeGenerator:
                 # here instead compiles only on the ISAs that happen to share
                 # the body -- S_RFE_I64 is gfx1250-only, so it does not.
                 '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
-                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                f'  constexpr uint64_t kPcAddressMask = {pc_mask};\n'
                 '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;\n'
+                f'{split_state_status_restore}'
                 '\n'
                 '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
                 '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
@@ -4970,8 +4989,7 @@ class CodeGenerator:
                 '\n'
                 '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
                 '  // stopped for the debugger; honour that on the way out.\n'
-                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
-                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '  if (keep_halted) {\n'
                 '    wf.set_debug_single_step(false);\n'
                 '    wf.set_debug_halted(true);\n'
                 '  } else {\n'
@@ -12098,7 +12116,7 @@ class CodeGenerator:
                 if classifier is None:
                     lines.append(probe)
                 else:
-                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append('  if (!alu_exception_trap_enables(wf)) {')
                     lines.append(probe.replace('  ', '    ', 1))
                     lines.append('  }')
             lines.append(prefixed_body)

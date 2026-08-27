@@ -17,6 +17,18 @@ inline constexpr uint32_t kAluExceptionModeShift = 12;
 inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << kAluExceptionModeShift;
 inline constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
 
+/// @brief Return the enabled ALU trap causes in EXCP_FLAG bit positions.
+///
+/// GFX12 moved these enables out of MODE[18:12], where those bits now select
+/// VGPR high banks, and into TRAP_CTRL[6:0]. Keeping the normalized mask here
+/// prevents exception checks from treating a debugger's trap enables as VGPR
+/// selectors, or a shader's VGPR selectors as enabled exceptions.
+inline uint32_t alu_exception_trap_enables(const Wavefront &wf) {
+  return wf.uses_separate_trap_ctrl()
+             ? wf.gfx12_trap_ctrl_raw() & kAluExceptionTrapstsMask
+             : (wf.mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
+}
+
 // Every classifier below reports what it found through wf.raise_alu_causes()
 // as well as returning it. The generated call sites OR the return value into
 // TRAPSTS, which is architecturally sticky and so cannot tell the CU whether

@@ -651,7 +651,16 @@ public:
     uint32_t ring_size = 0;
     uint32_t queue_type = 0;
     uint32_t gpu_id = 0;
+    uint32_t xcc_id = 0;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+
+    /// @brief Area used by the XCC that owns this queue.
+    uint64_t cwsr_xcc_address() const {
+      return ctx_save_restore_address == 0
+                 ? 0
+                 : ctx_save_restore_address +
+                       static_cast<uint64_t>(xcc_id) * ctx_save_restore_area_size;
+    }
   };
   std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
 
