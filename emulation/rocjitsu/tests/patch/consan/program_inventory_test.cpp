@@ -262,6 +262,33 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_EQ(moved.program_inventory.access_sites().front().container.name, "inventory_kernel");
 }
 
+TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
+  ProgramInventory empty;
+  EXPECT_EQ(empty.find_kernel_by_descriptor(512), nullptr);
+  EXPECT_EQ(empty.find_kernel_by_name("kernel"), nullptr);
+  EXPECT_EQ(empty.find_function_by_name("helper"), nullptr);
+
+  ProgramInventoryBuilder builder;
+  ConSanKernelInfo first = make_inventory_kernel("kernel");
+  builder.kernels().push_back(first);
+  ConSanKernelInfo duplicate = first;
+  duplicate.descriptor_file_offset = 768;
+  builder.kernels().push_back(duplicate);
+  ConSanFunctionInfo helper;
+  helper.name = "helper";
+  builder.functions().push_back(helper);
+  builder.functions().push_back(helper);
+
+  const ProgramInventory inventory = builder.view();
+  EXPECT_EQ(inventory.find_kernel_by_descriptor(512), &inventory.kernels()[0]);
+  EXPECT_EQ(inventory.find_kernel_by_descriptor(768), &inventory.kernels()[1]);
+  EXPECT_EQ(inventory.find_kernel_by_descriptor(1024), nullptr);
+  EXPECT_EQ(inventory.find_kernel_by_name("kernel"), &inventory.kernels()[0]);
+  EXPECT_EQ(inventory.find_kernel_by_name("missing"), nullptr);
+  EXPECT_EQ(inventory.find_function_by_name("helper"), &inventory.functions()[0]);
+  EXPECT_EQ(inventory.find_function_by_name("missing"), nullptr);
+}
+
 TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) {
   static_assert(
       std::same_as<typename decltype(SynchronizationInventoryView{}.sync_events)::element_type,
@@ -290,6 +317,8 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
 
   ProgramInventory empty;
   EXPECT_TRUE(empty.sync().empty());
+  EXPECT_EQ(empty.sync().find_event("event"), nullptr);
+  EXPECT_EQ(empty.sync().find_unique_sequence_containing("event"), nullptr);
   EXPECT_TRUE(empty.sync().sync_events.empty());
   EXPECT_TRUE(empty.sync().sync_sequences.empty());
   EXPECT_TRUE(empty.sync().barrier_lifecycle_groups.empty());
@@ -336,6 +365,10 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ASSERT_EQ(view.moi_fence_candidates.size(), 1u);
   EXPECT_TRUE(view.sync_events.front().semantic_id.valid());
   EXPECT_EQ(view.find_event(event.semantic_id), &view.sync_events.front());
+  EXPECT_EQ(view.find_event("event"), &view.sync_events.front());
+  EXPECT_EQ(view.find_event("missing"), nullptr);
+  EXPECT_EQ(view.find_unique_sequence_containing("event"), &view.sync_sequences.front());
+  EXPECT_EQ(view.find_unique_sequence_containing("missing"), nullptr);
   SemanticSiteId absent_event = event.semantic_id;
   ++absent_event.physical.original_text_offset;
   EXPECT_EQ(view.find_event(absent_event), nullptr);

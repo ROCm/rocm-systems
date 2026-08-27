@@ -417,14 +417,14 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
   sequence.member_event_identities = {"event-a", "event-b"};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
-  ASSERT_NE(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
-  EXPECT_EQ(find_consan_sync_sequence_for_event(result, "missing"), nullptr);
+  ASSERT_NE(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);
+  EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("missing"), nullptr);
 
   sequence.identity = "sequence-b";
   sequence.member_event_identities = {"event-b"};
   inventory.synchronization().sync_sequences.push_back(sequence);
   result.program_inventory = inventory.view();
-  EXPECT_EQ(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
+  EXPECT_EQ(result.program_inventory.sync().find_unique_sequence_containing("event-b"), nullptr);
 }
 
 TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {

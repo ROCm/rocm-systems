@@ -706,7 +706,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;
         return std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
-          const ConSanKernelInfo *kernel = kernel_for_descriptor(result, offset);
+          const ConSanKernelInfo *kernel =
+              result.program_inventory.find_kernel_by_descriptor(offset);
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
       });

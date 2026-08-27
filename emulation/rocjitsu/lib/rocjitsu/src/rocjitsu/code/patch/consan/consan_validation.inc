@@ -2752,20 +2752,18 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       continue;
     }
     if (composite && candidate->in_kernel) {
-      const auto source_owner = std::ranges::find(
-          pristine.program_inventory.kernels(), candidate->container_name, &ConSanKernelInfo::name);
-      if (source_owner == pristine.program_inventory.kernels().end() ||
-          patch.perturbation_source_owner_descriptor_file_offset !=
-              source_owner->descriptor_file_offset) {
+      const ConSanKernelInfo *source_owner =
+          pristine.program_inventory.find_kernel_by_name(candidate->container_name);
+      if (source_owner == nullptr || patch.perturbation_source_owner_descriptor_file_offset !=
+                                         source_owner->descriptor_file_offset) {
         errors.emplace_back(
             "ConSan composite perturbation proof did not retain its pristine kernel owner");
         continue;
       }
     } else if (candidate->in_kernel) {
-      const auto owner = std::ranges::find(semantic_inventory.program_inventory.kernels(),
-                                           candidate->container_name, &ConSanKernelInfo::name);
-      if (owner == semantic_inventory.program_inventory.kernels().end() ||
-          patch.owner_descriptor_file_offsets.size() != 1u ||
+      const ConSanKernelInfo *owner =
+          semantic_inventory.program_inventory.find_kernel_by_name(candidate->container_name);
+      if (owner == nullptr || patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {
         errors.emplace_back("ConSan SC perturbation proof did not retain its exact kernel owner");
         continue;
@@ -3602,7 +3600,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     if (event == result.program_inventory.sync().sync_events.end())
       return false;
     const ConSanSyncSequence *sequence =
-        find_consan_sync_sequence_for_event(result, event->identity);
+        result.program_inventory.sync().find_unique_sequence_containing(event->identity);
     return sequence != nullptr &&
            (sequence->memory_role == ConSanSyncMemoryRole::Release ||
             sequence->memory_role == ConSanSyncMemoryRole::AcquireRelease ||

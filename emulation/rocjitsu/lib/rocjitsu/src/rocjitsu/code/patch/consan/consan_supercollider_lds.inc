@@ -26,10 +26,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         const std::vector<uint64_t> owners =
             sc_execution_owner_descriptor_file_offsets(*entry.second);
         return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
-          const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner,
-                                                &ConSanKernelInfo::descriptor_file_offset);
-          return kernel != result.program_inventory.kernels().end() &&
-                 kernel->preflight_action != ConSanPreflightAction::Blocked;
+          const ConSanKernelInfo *kernel =
+              result.program_inventory.find_kernel_by_descriptor(owner);
+          return kernel != nullptr && kernel->preflight_action != ConSanPreflightAction::Blocked;
         });
       });
   if (!has_plannable_supported_site) {
@@ -349,9 +348,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         container.name.find(options.test_kernel_name_filter) != std::string::npos)
       return true;
     const auto owner_matches = [&](uint64_t descriptor_offset) {
-      const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                                            &ConSanKernelInfo::descriptor_file_offset);
-      return kernel != result.program_inventory.kernels().end() &&
+      const ConSanKernelInfo *kernel =
+          result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+      return kernel != nullptr &&
              kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
     };
     const auto site_has_matching_owner = [&](const auto &site) {
@@ -4235,11 +4234,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
-      const auto original_kernel =
-          std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                            &ConSanKernelInfo::descriptor_file_offset);
+      const ConSanKernelInfo *original_kernel =
+          result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
       const auto moved_kernel =
-          original_kernel == result.program_inventory.kernels().end()
+          original_kernel == nullptr
               ? patched_probe.kernels().end()
               : std::ranges::find(patched_probe.kernels(), original_kernel->name,
                                   &AmdGpuKernelInfo::name);

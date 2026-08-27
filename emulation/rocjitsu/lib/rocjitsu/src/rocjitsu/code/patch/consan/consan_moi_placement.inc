@@ -1488,10 +1488,9 @@ find_moi_transient_sgpr_assignment(const ConSanOptions &options, uint64_t descri
 automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &options,
                                                         const ConSanResult &result) {
   const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
-    const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                                          &ConSanKernelInfo::descriptor_file_offset);
-    return kernel != result.program_inventory.kernels().end() &&
-           kernel->uses_dynamic_stack.value_or(false);
+    const ConSanKernelInfo *kernel =
+        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   };
   if (std::ranges::any_of(options.moi_transient_sgpr_assignments,
                           [&](const ConSanMoiTransientSgprAssignment &assignment) {
@@ -4318,9 +4317,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
       const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) -> std::optional<bool> {
-        const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                                              &ConSanKernelInfo::descriptor_file_offset);
-        if (kernel == result.program_inventory.kernels().end())
+        const ConSanKernelInfo *kernel =
+            result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+        if (kernel == nullptr)
           return std::nullopt;
         if (kernel->uses_dynamic_stack)
           return kernel->uses_dynamic_stack;
@@ -4522,10 +4521,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         consan_address_free_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
           !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const auto kernel =
-                std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                                  &ConSanKernelInfo::descriptor_file_offset);
-            if (kernel != result.program_inventory.kernels().end() && kernel->uses_dynamic_stack)
+            const ConSanKernelInfo *kernel =
+                result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+            if (kernel != nullptr && kernel->uses_dynamic_stack)
               return !*kernel->uses_dynamic_stack;
             if (descriptor_offset > state.bytes.size() ||
                 sizeof(KD) > state.bytes.size() - descriptor_offset) {
@@ -6503,11 +6501,9 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (component_base + component_persistent_count > component_limit) {
         const bool has_dynamic_stack_owner =
             std::ranges::any_of(component, [&](uint64_t descriptor_offset) {
-              const auto kernel =
-                  std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
-                                    &ConSanKernelInfo::descriptor_file_offset);
-              return kernel != result.program_inventory.kernels().end() &&
-                     kernel->uses_dynamic_stack.value_or(false);
+              const ConSanKernelInfo *kernel =
+                  result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+              return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
             });
         if (!crosses_encoded_component_boundary &&
             (options.moi_engine == ConSanMoiEngine::InlineShadow ||
@@ -6984,13 +6980,4 @@ void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
     if (!inserted)
       it->second = std::max(it->second, layout.required_group_segment_size);
   }
-}
-
-[[nodiscard]] const ConSanKernelInfo *kernel_for_descriptor(const ConSanResult &result,
-                                                            uint64_t descriptor_offset) {
-  const auto it = std::ranges::find_if(result.program_inventory.kernels(),
-                                       [descriptor_offset](const auto &kernel) {
-                                         return kernel.descriptor_file_offset == descriptor_offset;
-                                       });
-  return it == result.program_inventory.kernels().end() ? nullptr : &*it;
 }

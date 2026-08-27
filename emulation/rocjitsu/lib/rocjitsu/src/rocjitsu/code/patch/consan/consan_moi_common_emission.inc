@@ -269,7 +269,8 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
     return std::nullopt;
   }
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    const ConSanKernelInfo *kernel =
+        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI private epoch references an unknown kernel descriptor");
       return std::nullopt;
@@ -302,7 +303,8 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
         consan_arch_has_cluster_facilities(arch) &&
         std::ranges::any_of(
             resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-              const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+              const ConSanKernelInfo *kernel =
+                  result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
               return kernel != nullptr && kernel->uses_gfx1250_cluster_workgroup_id;
             });
     record_replay_workgroup_offset_values = std::array<uint64_t, 4>{
@@ -416,7 +418,8 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   bool has_dynamic_owner = false;
   bool has_fixed_owner = false;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    const ConSanKernelInfo *kernel =
+        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
       return std::nullopt;
@@ -720,7 +723,8 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
       errors.emplace_back("ConSan MOI resource-plan descriptor exceeds ELF bytes");
       return false;
     }
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    const ConSanKernelInfo *kernel =
+        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
       return false;
@@ -746,7 +750,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
       errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
       return false;
     }
-    if (kernel_for_descriptor(result, descriptor_offset) == nullptr) {
+    if (result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
       errors.emplace_back("ConSan MOI scalar plan references an unknown kernel descriptor");
       return false;
     }
@@ -769,7 +773,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                   std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
-        kernel_for_descriptor(result, descriptor_offset) == nullptr) {
+        result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes or has no owner");
       return false;
     }

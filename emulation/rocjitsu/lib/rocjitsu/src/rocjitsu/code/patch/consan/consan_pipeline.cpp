@@ -90,9 +90,8 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
     return true;
   };
   const auto note_descriptor = [&](uint64_t descriptor_offset, const auto &apply) {
-    const auto kernel = std::ranges::find(inventory.kernels(), descriptor_offset,
-                                          &ConSanKernelInfo::descriptor_file_offset);
-    return kernel != inventory.kernels().end() && note_kernel(*kernel, apply);
+    const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(descriptor_offset);
+    return kernel != nullptr && note_kernel(*kernel, apply);
   };
   const auto note_physical_site = [&](const PhysicalSiteId &physical, const auto &apply) {
     bool attributed = false;

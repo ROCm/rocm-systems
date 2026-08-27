@@ -144,7 +144,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       uint32_t active_private_size = 0u;
       bool active_descriptor_missing = false;
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-        const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+        const ConSanKernelInfo *kernel =
+            result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
         const auto active_kernel =
             kernel == nullptr
                 ? code_object.kernels().end()

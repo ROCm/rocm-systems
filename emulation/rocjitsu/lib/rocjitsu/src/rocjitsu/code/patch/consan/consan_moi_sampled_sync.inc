@@ -1288,16 +1288,16 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       uint64_t container_end = 0u;
       std::string_view container_name = container.second;
       if (container.first) {
-        const auto kernel = std::ranges::find(result.program_inventory.kernels(), container.second,
-                                              &ConSanKernelInfo::name);
-        if (kernel == result.program_inventory.kernels().end())
+        const ConSanKernelInfo *kernel =
+            result.program_inventory.find_kernel_by_name(container.second);
+        if (kernel == nullptr)
           continue;
         container_begin = kernel->entry_text_offset;
         container_end = container_begin + kernel->code_size;
       } else {
-        const auto function = std::ranges::find(result.program_inventory.functions(),
-                                                container.second, &ConSanFunctionInfo::name);
-        if (function == result.program_inventory.functions().end())
+        const ConSanFunctionInfo *function =
+            result.program_inventory.find_function_by_name(container.second);
+        if (function == nullptr)
           continue;
         container_begin = function->entry_text_offset;
         container_end = container_begin + function->code_size;
@@ -1839,9 +1839,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // owner evidence canonical in the original inventory coordinate system.
   std::unordered_map<uint64_t, uint64_t> active_to_canonical_owner;
   for (const AmdGpuKernelInfo &active_kernel : code_object.kernels()) {
-    const auto canonical = std::ranges::find(result.program_inventory.kernels(), active_kernel.name,
-                                             &ConSanKernelInfo::name);
-    if (canonical != result.program_inventory.kernels().end())
+    const ConSanKernelInfo *canonical =
+        result.program_inventory.find_kernel_by_name(active_kernel.name);
+    if (canonical != nullptr)
       active_to_canonical_owner.emplace(active_kernel.descriptor_file_offset,
                                         canonical->descriptor_file_offset);
   }
@@ -2472,16 +2472,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       uint64_t owner_begin = 0u;
       uint64_t owner_end = 0u;
       if (in_kernel) {
-        const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner_name,
-                                              &ConSanKernelInfo::name);
-        if (kernel == result.program_inventory.kernels().end())
+        const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(owner_name);
+        if (kernel == nullptr)
           continue;
         owner_begin = kernel->entry_text_offset;
         owner_end = owner_begin + kernel->code_size;
       } else {
-        const auto function = std::ranges::find(result.program_inventory.functions(), owner_name,
-                                                &ConSanFunctionInfo::name);
-        if (function == result.program_inventory.functions().end())
+        const ConSanFunctionInfo *function =
+            result.program_inventory.find_function_by_name(owner_name);
+        if (function == nullptr)
           continue;
         owner_begin = function->entry_text_offset;
         owner_end = owner_begin + function->code_size;

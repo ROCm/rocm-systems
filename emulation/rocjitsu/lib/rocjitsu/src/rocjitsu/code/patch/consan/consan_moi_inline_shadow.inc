@@ -8,7 +8,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
     return false;
   }
   return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, offset);
+    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(offset);
     return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   });
 }
@@ -425,14 +425,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         };
         std::optional<MoiDenseRelayHost> best_host;
         if (key.first) {
-          const auto kernel = std::ranges::find(result.program_inventory.kernels(), key.second,
-                                                &ConSanKernelInfo::name);
-          if (kernel != result.program_inventory.kernels().end())
+          const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(key.second);
+          if (kernel != nullptr)
             best_host = find_container_host(*kernel);
         } else {
-          const auto function = std::ranges::find(result.program_inventory.functions(), key.second,
-                                                  &ConSanFunctionInfo::name);
-          if (function != result.program_inventory.functions().end())
+          const ConSanFunctionInfo *function =
+              result.program_inventory.find_function_by_name(key.second);
+          if (function != nullptr)
             best_host = find_container_host(*function);
         }
         if (best_host) {
@@ -1117,7 +1116,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           options.moi_init_owner_epoch &&
           std::ranges::any_of(
               resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-                const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+                const ConSanKernelInfo *kernel =
+                    result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
                 if (kernel == nullptr || kernel->entry_text_offset != candidate.anchor()) {
                   return false;
                 }

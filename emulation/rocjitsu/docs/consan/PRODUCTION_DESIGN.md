@@ -5373,6 +5373,32 @@ analysis completed.
   smoke remains the periodic physical gate; E2E validation remains outside
   this work.
 
+### Slice 5BY: make immutable inventory own its joins
+
+- **One query owner:** `ProgramInventory` now resolves kernel descriptors and
+  exact kernel/function names, while `SynchronizationInventoryView` resolves
+  typed or named events and unique event-to-sequence membership. Exact absence
+  returns null; duplicate names retain code-object order for compatibility;
+  ambiguous sequence membership fails closed.
+- **Deleted result coupling:** The raw-`ConSanResult`
+  `find_consan_sync_sequence_for_event` API, the private
+  `kernel_for_descriptor` helper, a second named-event helper, and the
+  corresponding engine-local joins are deleted. Record/Replay, Sampled,
+  Inline Shadow, SuperCollider, mutation, validation, report planning, and the
+  typed pipeline all query the same immutable owner.
+- **Focused contract coverage:** Inventory tests cover empty, exact, absent,
+  duplicate-name, descriptor, typed-event, named-event, and unique-sequence
+  queries. Existing ambiguity coverage proves that two sequences containing
+  the same event remain a hard failure rather than an arbitrary first match.
+- **Deletion accounting:** Implementation files add 206 and delete 226
+  physical lines, a net deletion of twenty. Tests add forty-two and delete
+  nine lines. No compatibility wrapper preserves either removed query API.
+- **Checked-in gate:** All 1,526 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in 69.23
+  seconds. Slice 5BM's physical-gfx950 smoke remains the periodic physical
+  gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -474,15 +474,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                                 .substr(in_kernel     ? sizeof("kernel:") - 1u
                                                         : in_function ? sizeof("function:") - 1u
                                                                       : 0u);
-        const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner_name,
-                                              &ConSanKernelInfo::name);
-        if (kernel != result.program_inventory.kernels().end()) {
+        const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(owner_name);
+        if (kernel != nullptr) {
           owner_begin = kernel->entry_text_offset;
           owner_end = owner_begin + kernel->code_size;
         } else {
-          const auto function = std::ranges::find(result.program_inventory.functions(), owner_name,
-                                                  &ConSanFunctionInfo::name);
-          if (function == result.program_inventory.functions().end())
+          const ConSanFunctionInfo *function =
+              result.program_inventory.find_function_by_name(owner_name);
+          if (function == nullptr)
             continue;
           owner_begin = function->entry_text_offset;
           owner_end = owner_begin + function->code_size;

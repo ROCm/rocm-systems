@@ -165,9 +165,9 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
     bool sequence_semantics_weakened = false;
     std::optional<uint64_t> source_owner_descriptor_file_offset;
     if (candidate->in_kernel) {
-      const auto owner = std::ranges::find(pristine_plan.program_inventory.kernels(),
-                                           candidate->container_name, &ConSanKernelInfo::name);
-      if (owner == pristine_plan.program_inventory.kernels().end()) {
+      const ConSanKernelInfo *owner =
+          pristine_plan.program_inventory.find_kernel_by_name(candidate->container_name);
+      if (owner == nullptr) {
         *error = "selected perturbation edge lost its pristine kernel owner";
         return std::nullopt;
       }
@@ -280,21 +280,6 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 }
 
 } // namespace
-
-const ConSanSyncSequence *find_consan_sync_sequence_for_event(const ConSanResult &result,
-                                                              std::string_view event_identity) {
-  const ConSanSyncSequence *match = nullptr;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    if (std::ranges::find(sequence.member_event_identities, event_identity) ==
-        sequence.member_event_identities.end()) {
-      continue;
-    }
-    if (match != nullptr)
-      return nullptr;
-    match = &sequence;
-  }
-  return match;
-}
 
 namespace {
 

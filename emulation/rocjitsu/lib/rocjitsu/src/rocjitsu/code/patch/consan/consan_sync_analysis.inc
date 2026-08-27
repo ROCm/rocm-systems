@@ -1346,18 +1346,18 @@ void build_barrier_move_destination_inventory(
     uint64_t text_file_offset = 0;
     bool found_container = false;
     if (sequence.in_kernel) {
-      const auto container = std::ranges::find(result.program_inventory.kernels(),
-                                               sequence.container_name, &ConSanKernelInfo::name);
-      if (container != result.program_inventory.kernels().end() && container->has_text_range) {
+      const ConSanKernelInfo *container =
+          result.program_inventory.find_kernel_by_name(sequence.container_name);
+      if (container != nullptr && container->has_text_range) {
         container_begin = container->entry_text_offset;
         container_end = container_begin + container->code_size;
         text_file_offset = container->text_file_offset;
         found_container = true;
       }
     } else {
-      const auto container = std::ranges::find(result.program_inventory.functions(),
-                                               sequence.container_name, &ConSanFunctionInfo::name);
-      if (container != result.program_inventory.functions().end()) {
+      const ConSanFunctionInfo *container =
+          result.program_inventory.find_function_by_name(sequence.container_name);
+      if (container != nullptr) {
         container_begin = container->entry_text_offset;
         container_end = container_begin + container->code_size;
         text_file_offset = container->text_file_offset;
@@ -2693,18 +2693,11 @@ void associate_ordinary_acquire_sync_sequences(
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-[[nodiscard]] const ConSanSyncEvent *find_sync_event(const ConSanResult &result,
-                                                     std::string_view identity) {
-  const auto event = std::ranges::find(result.program_inventory.sync().sync_events, identity,
-                                       &ConSanSyncEvent::identity);
-  return event == result.program_inventory.sync().sync_events.end() ? nullptr : &*event;
-}
-
 [[nodiscard]] bool sequence_has_exact_members(const ConSanResult &result,
                                               const ConSanSyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
   for (const std::string &identity : sequence.member_event_identities) {
-    const ConSanSyncEvent *event = find_sync_event(result, identity);
+    const ConSanSyncEvent *event = result.program_inventory.sync().find_event(identity);
     if (event == nullptr || event->container_name != sequence.container_name ||
         event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
         event->text_offset < sequence.begin_text_offset ||
@@ -3217,10 +3210,9 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     info.perturbation_composite_atomic_overlap = patch.plan->overlaps_atomic_mutation;
     info.perturbation_composite_removed_boundary = patch.plan->removed_cache_boundary;
     if (patch.candidate->in_kernel) {
-      const auto owner =
-          std::ranges::find(result.program_inventory.kernels(), patch.candidate->container_name,
-                            &ConSanKernelInfo::name);
-      if (owner == result.program_inventory.kernels().end()) {
+      const ConSanKernelInfo *owner =
+          result.program_inventory.find_kernel_by_name(patch.candidate->container_name);
+      if (owner == nullptr) {
         result.errors.emplace_back("ConSan carried perturbation lost its exact kernel owner");
         result.replacement.clear();
         return;
@@ -3570,10 +3562,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                                              std::string_view filter) {
   if (filter.empty())
     return nullptr;
-  const auto exact =
-      std::ranges::find(result.program_inventory.kernels(), filter, &ConSanKernelInfo::name);
-  if (exact != result.program_inventory.kernels().end())
-    return &*exact;
+  if (const ConSanKernelInfo *exact = result.program_inventory.find_kernel_by_name(filter))
+    return exact;
   const ConSanKernelInfo *match = nullptr;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.name.find(filter) == std::string::npos)

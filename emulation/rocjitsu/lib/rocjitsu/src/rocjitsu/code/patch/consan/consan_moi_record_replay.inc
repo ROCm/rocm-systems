@@ -350,16 +350,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
       if (!island && group_resource != nullptr) {
-        const auto kernel = key.first ? std::ranges::find(result.program_inventory.kernels(),
-                                                          key.second, &ConSanKernelInfo::name)
-                                      : result.program_inventory.kernels().end();
-        const auto function = !key.first ? std::ranges::find(result.program_inventory.functions(),
-                                                             key.second, &ConSanFunctionInfo::name)
-                                         : result.program_inventory.functions().end();
+        const ConSanKernelInfo *kernel =
+            key.first ? result.program_inventory.find_kernel_by_name(key.second) : nullptr;
+        const ConSanFunctionInfo *function =
+            !key.first ? result.program_inventory.find_function_by_name(key.second) : nullptr;
         const bool has_owner_range =
-            (kernel != result.program_inventory.kernels().end() && kernel->has_text_range &&
-             kernel->code_size != 0u) ||
-            (function != result.program_inventory.functions().end() && function->code_size != 0u);
+            (kernel != nullptr && kernel->has_text_range && kernel->code_size != 0u) ||
+            (function != nullptr && function->code_size != 0u);
         if (has_owner_range) {
           const std::vector<MoiSgprRange> host_bootstrap_ranges =
               moi_relocatable_host_scalar_ranges(group_options,

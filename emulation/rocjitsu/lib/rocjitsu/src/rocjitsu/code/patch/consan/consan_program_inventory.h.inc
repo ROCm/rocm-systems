@@ -149,6 +149,31 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve one decoded event name to its sole published record. Event names
+  /// are the compatibility identity carried by synchronization sequences;
+  /// newer policy should prefer the typed `SemanticSiteId` overload above.
+  [[nodiscard]] const ConSanSyncEvent *find_event(std::string_view identity) const {
+    const auto event = std::ranges::find(sync_events, identity, &ConSanSyncEvent::identity);
+    return event == sync_events.end() ? nullptr : &*event;
+  }
+
+  /// Find the unique logical sequence containing a decoded event name.
+  /// Absence and ambiguous membership both return null so callers cannot
+  /// silently choose one of several contradictory ordering interpretations.
+  [[nodiscard]] const ConSanSyncSequence *
+  find_unique_sequence_containing(std::string_view event_identity) const {
+    const ConSanSyncSequence *match = nullptr;
+    for (const ConSanSyncSequence &sequence : sync_sequences) {
+      if (std::ranges::find(sequence.member_event_identities, event_identity) ==
+          sequence.member_event_identities.end())
+        continue;
+      if (match != nullptr)
+        return nullptr;
+      match = &sequence;
+    }
+    return match;
+  }
+
   /// Return whether semantic analysis published no synchronization-derived
   /// records of any kind.
   [[nodiscard]] bool empty() const {
@@ -249,9 +274,32 @@ public:
     return storage_ ? std::span<const ConSanKernelInfo>(storage_->kernels)
                     : std::span<const ConSanKernelInfo>{};
   }
+  /// Resolve a kernel descriptor's immutable inventory record. Descriptor
+  /// offsets are unique physical identities within one code object.
+  [[nodiscard]] const ConSanKernelInfo *find_kernel_by_descriptor(uint64_t offset) const {
+    const std::span<const ConSanKernelInfo> records = kernels();
+    const auto kernel =
+        std::ranges::find(records, offset, &ConSanKernelInfo::descriptor_file_offset);
+    return kernel == records.end() ? nullptr : &*kernel;
+  }
+  /// Resolve the first published kernel with an exact symbol name. This
+  /// preserves object order for malformed inputs containing duplicate names;
+  /// physical ownership should use the descriptor lookup whenever available.
+  [[nodiscard]] const ConSanKernelInfo *find_kernel_by_name(std::string_view name) const {
+    const std::span<const ConSanKernelInfo> records = kernels();
+    const auto kernel = std::ranges::find(records, name, &ConSanKernelInfo::name);
+    return kernel == records.end() ? nullptr : &*kernel;
+  }
   [[nodiscard]] std::span<const ConSanFunctionInfo> functions() const {
     return storage_ ? std::span<const ConSanFunctionInfo>(storage_->functions)
                     : std::span<const ConSanFunctionInfo>{};
+  }
+  /// Resolve the first published non-dispatchable function with an exact
+  /// symbol name, preserving code-object order for malformed duplicate names.
+  [[nodiscard]] const ConSanFunctionInfo *find_function_by_name(std::string_view name) const {
+    const std::span<const ConSanFunctionInfo> records = functions();
+    const auto function = std::ranges::find(records, name, &ConSanFunctionInfo::name);
+    return function == records.end() ? nullptr : &*function;
   }
   [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)

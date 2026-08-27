@@ -1948,11 +1948,9 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
                                            options.flat_provenance_mode))
       continue;
     if (access.container.kernel_descriptor_file_offset) {
-      const auto kernel = std::ranges::find(result.program_inventory.kernels(),
-                                            *access.container.kernel_descriptor_file_offset,
-                                            &ConSanKernelInfo::descriptor_file_offset);
-      if (kernel == result.program_inventory.kernels().end() ||
-          kernel->preflight_action == ConSanPreflightAction::Blocked)
+      const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(
+          *access.container.kernel_descriptor_file_offset);
+      if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
         continue;
     }
     candidates.push_back(&access);

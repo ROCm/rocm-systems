@@ -613,7 +613,6 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   bool requires_full_lds_aperture = false;
   uint64_t declared_lds_extent = 0;
   uint64_t native_static_extent = 0;
-  const auto kernels = program_inventory.kernels();
   for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
     switch (intent.kind) {
     case ConSanProbeIntentKind::ExactShadowAccess: {
@@ -660,9 +659,8 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
           return requirements;
         }
         for (uint64_t owner_offset : owners) {
-          const auto owner =
-              std::ranges::find(kernels, owner_offset, &ConSanKernelInfo::descriptor_file_offset);
-          if (owner == kernels.end() || !owner->declared_group_segment_bytes) {
+          const ConSanKernelInfo *owner = program_inventory.find_kernel_by_descriptor(owner_offset);
+          if (owner == nullptr || !owner->declared_group_segment_bytes) {
             requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
             return requirements;
           }

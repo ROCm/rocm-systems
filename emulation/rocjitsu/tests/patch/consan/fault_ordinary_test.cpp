@@ -233,7 +233,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
   EXPECT_EQ(load->sync_confidence, ConSanSemanticConfidence::Conservative);
 
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *load->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryLoad);
@@ -257,7 +257,7 @@ TEST(ConSan, AssociatesRetainedOrdinaryLoadSelfLoopExitAcquireSequence) {
   ASSERT_NE(load, result.fault_sites.end());
   ASSERT_TRUE(load->sync_event_identity);
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *load->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->memory_role_confidence, ConSanSemanticConfidence::Conservative);
@@ -289,7 +289,7 @@ TEST(ConSan, AssociatesGfx1250BufferPollLoopWithBoundedAddressSetup) {
   ASSERT_NE(load, result.fault_sites.end());
   ASSERT_TRUE(load->sync_event_identity);
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *load->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_identities.size(), 2u);
@@ -318,7 +318,7 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   ASSERT_NE(load, result.fault_sites.end());
   ASSERT_TRUE(load->sync_event_identity);
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *load->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*load->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_identities.size(), 2u);
@@ -457,7 +457,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
   EXPECT_EQ(store->sync_confidence, ConSanSemanticConfidence::Conservative);
 
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *store->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*store->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
   EXPECT_EQ(sequence->operation, ConSanSyncOperation::OrdinaryStore);
@@ -546,7 +546,7 @@ TEST(ConSan, AssociatesExactScopedOrdinaryReleaseWaitTail) {
   EXPECT_EQ(store->semantic_role, "ordinary-release-store");
   EXPECT_EQ(store->sync_memory_role, ConSanSyncMemoryRole::Release);
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *store->sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*store->sync_event_identity);
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->release_wait_text_offset, 0u);

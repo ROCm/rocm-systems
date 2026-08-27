@@ -34,25 +34,23 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
       continue;
     bool eligible = false;
     for (const std::string &identity : sequence.member_event_identities) {
-      const auto event = std::ranges::find(result.program_inventory.sync().sync_events, identity,
-                                           &ConSanSyncEvent::identity);
-      if (event == result.program_inventory.sync().sync_events.end() ||
-          event->kind != ConSanSyncEventKind::Atomic)
+      const ConSanSyncEvent *event = result.program_inventory.sync().find_event(identity);
+      if (event == nullptr || event->kind != ConSanSyncEventKind::Atomic)
         continue;
       const ConSanAtomicSite *site = nullptr;
       if (event->in_kernel) {
-        const auto kernel = std::ranges::find(result.program_inventory.kernels(),
-                                              event->container_name, &ConSanKernelInfo::name);
-        if (kernel != result.program_inventory.kernels().end()) {
+        const ConSanKernelInfo *kernel =
+            result.program_inventory.find_kernel_by_name(event->container_name);
+        if (kernel != nullptr) {
           const auto found = std::ranges::find(kernel->atomic_sites, event->text_offset,
                                                &ConSanAtomicSite::text_offset);
           if (found != kernel->atomic_sites.end())
             site = &*found;
         }
       } else {
-        const auto function = std::ranges::find(result.program_inventory.functions(),
-                                                event->container_name, &ConSanFunctionInfo::name);
-        if (function != result.program_inventory.functions().end()) {
+        const ConSanFunctionInfo *function =
+            result.program_inventory.find_function_by_name(event->container_name);
+        if (function != nullptr) {
           const auto found = std::ranges::find(function->atomic_sites, event->text_offset,
                                                &ConSanAtomicSite::text_offset);
           if (found != function->atomic_sites.end())
@@ -471,14 +469,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         };
         std::optional<MoiDenseRelayHost> best_host;
         if (key.first) {
-          const auto kernel = std::ranges::find(result.program_inventory.kernels(), key.second,
-                                                &ConSanKernelInfo::name);
-          if (kernel != result.program_inventory.kernels().end())
+          const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(key.second);
+          if (kernel != nullptr)
             best_host = find_container_host(*kernel);
         } else {
-          const auto function = std::ranges::find(result.program_inventory.functions(), key.second,
-                                                  &ConSanFunctionInfo::name);
-          if (function != result.program_inventory.functions().end())
+          const ConSanFunctionInfo *function =
+              result.program_inventory.find_function_by_name(key.second);
+          if (function != nullptr)
             best_host = find_container_host(*function);
         }
         if (best_host) {

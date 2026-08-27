@@ -219,11 +219,6 @@ consan_sync_confidence_meets(ConSanSemanticConfidence actual,
   return static_cast<uint8_t>(actual) <= static_cast<uint8_t>(weakest_accepted);
 }
 
-/// Finds the unique logical sequence containing a stable decoded event.
-/// Returns null when the event is absent or appears in more than one sequence.
-[[nodiscard]] const ConSanSyncSequence *
-find_consan_sync_sequence_for_event(const ConSanResult &result, std::string_view event_identity);
-
 [[nodiscard]] const char *consan_flavor_name(ConSanFlavor flavor);
 [[nodiscard]] const char *consan_moi_engine_name(ConSanMoiEngine engine);
 [[nodiscard]] const char *consan_transform_outcome_name(ConSanTransformOutcome outcome);

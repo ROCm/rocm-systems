@@ -205,6 +205,13 @@ the sole owner of the pristine byte count and fingerprint as well.
 `ConSanResult` no longer duplicates those facts, so retry, policy, lowering,
 and the runtime coordinator cannot observe inconsistent identities.
 
+Container and synchronization lookup is part of the immutable inventory
+contract as well. `ProgramInventory` resolves kernel descriptors and exact
+kernel/function names; `SynchronizationInventoryView` resolves typed or named
+events and the unique sequence containing an event. Absence and ambiguous
+sequence membership fail closed. Engines do not rebuild those joins through a
+raw lowering result or maintain engine-local lookup helpers.
+
 ### Engine policy and observation plan
 
 Policy is split by semantic domain:
@@ -324,17 +331,20 @@ declare that private entry locally while the lowerer is decomposed.
 `transform_consan_with_mutation` is the separate validation-only entry point
 for fault and perturbation composition. Both return `TransformResult`.
 
-Each `TransformResult` records every stage exactly once:
+Each `TransformResult` records the state of six independent contracts exactly
+once, in a fixed array whose position owns the stage identity:
 
 1. configuration;
 2. target and runtime capabilities;
 3. program inventory;
 4. observation plan;
 5. evidence requirements;
-6. runtime binding;
-7. legacy lowering;
-8. final validation; and
-9. completion.
+6. runtime binding.
+
+Lowering, final validation, and overall completion are not additional
+contracts: their result is already represented by `TransformResult::outcome`
+and the validated artifact set. Stage states therefore do not repeat either a
+stage tag or the pristine code-object identity owned by the result.
 
 A stage is `Completed`, `Deferred`, `NotApplicable`, `Unsupported`, or
 `Invalid`. The result carries the pristine image identity, inventory,

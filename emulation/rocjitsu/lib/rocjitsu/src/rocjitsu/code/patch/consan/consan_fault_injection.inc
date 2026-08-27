@@ -24,7 +24,7 @@ select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSan
         !site.sync_sequence_identity ||
         !owned_by_requested_kernel(site.execution_owners, result, options))
       return std::nullopt;
-    const ConSanSyncEvent *load = find_sync_event(result, *site.sync_event_identity);
+    const ConSanSyncEvent *load = sync.find_event(*site.sync_event_identity);
     const auto sequence_it = std::ranges::find(sync.sync_sequences, *site.sync_sequence_identity,
                                                &ConSanSyncSequence::identity);
     if (load == nullptr || sequence_it == sync.sync_sequences.end())
@@ -42,8 +42,7 @@ select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSan
         sequence->member_event_identities.front() != load->identity ||
         !same_owners(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
-    const ConSanSyncEvent *cache =
-        find_sync_event(result, sequence->member_event_identities.back());
+    const ConSanSyncEvent *cache = sync.find_event(sequence->member_event_identities.back());
     if (cache == nullptr || cache->kind != ConSanSyncEventKind::Fence ||
         cache->mnemonic != "global_inv" || cache->container_name != load->container_name ||
         cache->in_kernel != load->in_kernel ||
@@ -72,7 +71,7 @@ select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSan
   if (!site.sync_event_identity)
     return false;
   const ConSanSyncSequence *sequence =
-      find_consan_sync_sequence_for_event(result, *site.sync_event_identity);
+      result.program_inventory.sync().find_unique_sequence_containing(*site.sync_event_identity);
   return sequence != nullptr && sequence->operation == ConSanSyncOperation::BarrierFull &&
          consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) &&
@@ -429,7 +428,8 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
     const ConSanSyncSequence *sequence =
         primary != nullptr && primary->sync_event_identity
-            ? find_consan_sync_sequence_for_event(result, *primary->sync_event_identity)
+            ? result.program_inventory.sync().find_unique_sequence_containing(
+                  *primary->sync_event_identity)
             : nullptr;
     if (primary == nullptr || sequence == nullptr ||
         !owned_by_requested_kernel(sequence->execution_owners, result, options) ||
@@ -702,7 +702,8 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
                           : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     const ConSanSyncSequence *sequence =
         atomic_fault_supports_order(encoding) && atomic->sync_event_identity
-            ? find_consan_sync_sequence_for_event(result, *atomic->sync_event_identity)
+            ? result.program_inventory.sync().find_unique_sequence_containing(
+                  *atomic->sync_event_identity)
             : nullptr;
     const ConSanSyncEvent *fence = nullptr;
     std::optional<uint64_t> release_wait_text_offset;
@@ -1055,13 +1056,13 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   std::vector<const ConSanSyncEvent *> members;
   members.reserve(member_identities.size());
   for (const std::string &identity : member_identities) {
-    const auto event = std::ranges::find(sync.sync_events, identity, &ConSanSyncEvent::identity);
-    if (event == sync.sync_events.end()) {
+    const ConSanSyncEvent *event = sync.find_event(identity);
+    if (event == nullptr) {
       result.errors.emplace_back(
           "ConSan barrier ID/scope mutation could not resolve every logical member");
       return;
     }
-    members.push_back(&*event);
+    members.push_back(event);
   }
   if (lifecycle_group == nullptr &&
       (members.size() != 2u || members[0]->operation != ConSanSyncOperation::BarrierSignal ||
@@ -1258,8 +1259,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   std::optional<BarrierSite> second_site;
   const ConSanSyncSequence *selected_sequence = nullptr;
   if (selected_inventory_site != nullptr && selected_inventory_site->sync_event_identity) {
-    selected_sequence =
-        find_consan_sync_sequence_for_event(result, *selected_inventory_site->sync_event_identity);
+    selected_sequence = result.program_inventory.sync().find_unique_sequence_containing(
+        *selected_inventory_site->sync_event_identity);
     if (selected_sequence == nullptr ||
         !owned_by_requested_kernel(selected_sequence->execution_owners, result, options) ||
         selected_sequence->operation != ConSanSyncOperation::BarrierFull ||
@@ -1661,7 +1662,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
   if (options.fault_atomic_weaken_order) {
     const ConSanSyncSequence *sequence =
         selected->sync_event_identity
-            ? find_consan_sync_sequence_for_event(result, *selected->sync_event_identity)
+            ? result.program_inventory.sync().find_unique_sequence_containing(
+                  *selected->sync_event_identity)
             : nullptr;
     const ConSanSyncEvent *fence = nullptr;
     std::optional<uint64_t> release_wait_text_offset;
@@ -2084,11 +2086,9 @@ find_first_supported_lds_read_b32_site(const ConSanResult &result) {
         site.origin != ConSanAccessOrigin::NativeLds || site.kind != ConSanLdsAccessKind::Read ||
         !site.supported_mvp || site.decoded_width_bits != 32)
       continue;
-    const auto kernel = std::ranges::find(result.program_inventory.kernels(),
-                                          *site.container.kernel_descriptor_file_offset,
-                                          &ConSanKernelInfo::descriptor_file_offset);
-    if (kernel == result.program_inventory.kernels().end() ||
-        kernel->preflight_action == ConSanPreflightAction::Blocked)
+    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(
+        *site.container.kernel_descriptor_file_offset);
+    if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;
     if (best == nullptr || site.file_offset < best->file_offset)
       best = &site;
