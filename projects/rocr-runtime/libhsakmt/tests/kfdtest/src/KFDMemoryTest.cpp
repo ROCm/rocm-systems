@@ -781,9 +781,11 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
  */
 void KFDMemoryTest::LargestSysBufferTest(int gpuNode) {
 
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
     const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
-    if (pNodeProps && pNodeProps->Integrated) {
-        LOG() << "Skipping test on APU." << std::endl;
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
 
@@ -823,9 +825,11 @@ TEST_F(KFDMemoryTest, LargestSysBufferTest) {
 
 void KFDMemoryTest::LargestVramBufferTest(int gpuNode) {
 
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
     const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
-    if (pNodeProps && pNodeProps->Integrated) {
-        LOG() << "Skipping test on APU." << std::endl;
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
 
@@ -874,9 +878,11 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
  */
 void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
 
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
     const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
-    if (pNodeProps && pNodeProps->Integrated) {
-        LOG() << "Skipping test on APU." << std::endl;
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
 
