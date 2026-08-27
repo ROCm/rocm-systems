@@ -968,6 +968,17 @@ class GTestSummaryRunner(unittest.TextTestRunner):
             return test_id[len("__main__.") :]
         return test_id
 
+    @staticmethod
+    def _owning_test_id(test):
+        """The id of the test that owns *test*, folding subTests onto their parent.
+
+        unittest reports a failing subTest as a separate object whose id is the parent
+        id plus its parameters -- ``Class.test_modes (mode='NPS1')`` -- while a plain
+        test id never contains a space. Cutting at the first space therefore yields the
+        owning test in both cases.
+        """
+        return test.id().split(" ", 1)[0]
+
     def _color(self, code, text):
         """Wrap *text* in *code* only when colors are appropriate.
 
@@ -996,8 +1007,17 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         # They cause wasSuccessful() to return False, so count them as failures so
         # the summary accurately reflects the overall run status.
         unexpectedSuccesses = len(getattr(result, "unexpectedSuccesses", []))
-        failures = len(result.failures) + len(result.errors) + unexpectedSuccesses
-        passed = result.testsRun - skipped - failures
+        # Failures come in two units: a *record* is one reported failure, and a single
+        # test can add several (a cleanup failing after the body, or one per subTest).
+        # Records are what gets listed below; distinct tests are what testsRun counts,
+        # so that is the unit passed has to net out. Class-level errors and leak
+        # markers arrive as stand-ins that testsRun never counted, so skip those.
+        failure_records = result.failures + result.errors
+        failed_tests = {
+            self._owning_test_id(t) for t, _ in failure_records if isinstance(t, unittest.TestCase)
+        }
+        failures = len(failure_records) + unexpectedSuccesses
+        passed = result.testsRun - skipped - len(failed_tests) - unexpectedSuccesses
 
         stream.writeln()
         stream.writeln(
@@ -1014,12 +1034,10 @@ class GTestSummaryRunner(unittest.TextTestRunner):
             stream.writeln(
                 self._color(
                     self._RED,
-                    f"[  FAILED  ] {failures} test{self._plural(failures)}, listed below:",
+                    f"[  FAILED  ] {failures} failure{self._plural(failures)}, listed below:",
                 )
             )
-            for t, _ in result.failures:
-                stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
-            for t, _ in result.errors:
+            for t, _ in failure_records:
                 stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
             # unexpectedSuccesses items are bare TestCase instances (not (test, traceback) tuples).
             for t in getattr(result, "unexpectedSuccesses", []):
