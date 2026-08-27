@@ -723,9 +723,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
-  const MoiOptions exec_planning_base = effective_options;
-  const std::vector<ConSanMoiTransientSgprAssignment> exec_planning_base_assignments =
-      result.moi_operating_point.owner_transient_sgprs;
+  const ConSanMoiOperatingPoint exec_planning_base =
+      capture_moi_operating_point(effective_options, result.moi_operating_point);
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, result, resource_planning_state, moi_candidates);
@@ -735,8 +734,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // search. Re-run that search with the dynamic frame ABI visible so its
     // stack registers, scalar width, and any architecture-specific scratch
     // demand participate in the same resource proof.
-    effective_options = exec_planning_base;
-    result.moi_operating_point.owner_transient_sgprs = exec_planning_base_assignments;
+    restore_moi_operating_point(effective_options, result, exec_planning_base);
     effective_options.moi_dynamic_stack_spill = true;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);

@@ -1455,33 +1455,53 @@ apply_moi_transient_sgpr_assignment(MoiOptions &options, const ConSanMoiOperatin
   return true;
 }
 
-/// Freeze the code-object-wide portion of the final register allocation before
-/// the transform leaves lowering. Per-owner assignments are already built in
-/// the typed allocation and must not be copied from mutable lowerer options.
-void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifacts &result) {
-  static_cast<ConSanMoiResolvedState &>(result.moi_operating_point) =
+/// Capture one complete attempted operating point from the mutable placement
+/// compatibility state and the already-typed owner assignments. Search and
+/// fallback code stores this value as one rollback unit instead of retaining
+/// an independently selected flag or assignment vector.
+[[nodiscard]] ConSanMoiOperatingPoint
+capture_moi_operating_point(const MoiOptions &options,
+                            const ConSanMoiOperatingPoint &owner_assignments) {
+  ConSanMoiOperatingPoint point = owner_assignments;
+  static_cast<ConSanMoiResolvedState &>(point) =
       static_cast<const ConSanMoiResolvedState &>(options);
-  const auto transient_state = [](const MoiOptions &resolved) {
-    return ConSanMoiTransientSgprState{
-        .exec_save_sgpr = resolved.moi_exec_save_sgpr,
-        .owner_sgpr = resolved.moi_owner_sgpr,
-        .dispatch_id_sgpr = resolved.moi_dispatch_id_sgpr,
-        .spill_backed = resolved.automatic_moi_inline_sgpr_spill ||
-                        resolved.automatic_moi_record_replay_sgpr_spill,
-        .indirect_pc_sgpr = resolved.moi_inline_indirect_pc_sgpr,
-        .indirect_scc_sgpr = resolved.moi_inline_indirect_scc_sgpr,
-        .dispatch_key_sgpr = resolved.moi_engine == ConSanMoiEngine::RecordReplay
-                                 ? resolved.moi_record_replay_dispatch_key_sgpr
-                                 : resolved.moi_inline_dispatch_key_sgpr,
-        .call_return_sgpr = resolved.moi_engine == ConSanMoiEngine::RecordReplay
-                                ? resolved.moi_record_replay_call_return_sgpr
-                                : resolved.moi_inline_call_return_sgpr,
-        .visible_evidence_sgpr = resolved.moi_inline_visible_evidence_sgpr,
-        .branch_only_scalar_spill = resolved.moi_inline_branch_only_scalar_spill,
-        .dynamic_stack_borrowed_sgpr = resolved.moi_inline_dynamic_stack_borrowed_sgpr,
-    };
+  point.default_transient_sgprs = {
+      .exec_save_sgpr = options.moi_exec_save_sgpr,
+      .owner_sgpr = options.moi_owner_sgpr,
+      .dispatch_id_sgpr = options.moi_dispatch_id_sgpr,
+      .spill_backed =
+          options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill,
+      .indirect_pc_sgpr = options.moi_inline_indirect_pc_sgpr,
+      .indirect_scc_sgpr = options.moi_inline_indirect_scc_sgpr,
+      .dispatch_key_sgpr = options.moi_engine == ConSanMoiEngine::RecordReplay
+                               ? options.moi_record_replay_dispatch_key_sgpr
+                               : options.moi_inline_dispatch_key_sgpr,
+      .call_return_sgpr = options.moi_engine == ConSanMoiEngine::RecordReplay
+                              ? options.moi_record_replay_call_return_sgpr
+                              : options.moi_inline_call_return_sgpr,
+      .visible_evidence_sgpr = options.moi_inline_visible_evidence_sgpr,
+      .branch_only_scalar_spill = options.moi_inline_branch_only_scalar_spill,
+      .dynamic_stack_borrowed_sgpr = options.moi_inline_dynamic_stack_borrowed_sgpr,
   };
-  result.moi_operating_point.default_transient_sgprs = transient_state(options);
+  return point;
+}
+
+/// Restore every transient-placement choice and owner assignment from one
+/// prior operating-point attempt. Caller configuration is deliberately left
+/// untouched; only state that placement selected is rolled back.
+void restore_moi_operating_point(MoiOptions &options, ConSanTransformArtifacts &result,
+                                 const ConSanMoiOperatingPoint &point) {
+  static_cast<ConSanMoiResolvedState &>(options) =
+      static_cast<const ConSanMoiResolvedState &>(point);
+  options.moi_exec_save_sgpr = point.default_transient_sgprs.exec_save_sgpr;
+  options.moi_owner_sgpr = point.default_transient_sgprs.owner_sgpr;
+  result.moi_operating_point = point;
+}
+
+/// Freeze the complete accepted operating point before emission or final
+/// validation consumes it.
+void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifacts &result) {
+  result.moi_operating_point = capture_moi_operating_point(options, result.moi_operating_point);
 }
 
 [[nodiscard]] bool
@@ -5742,16 +5762,15 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   // needs a complete owner-local scalar ABI for every newly included component.
   // Sampled instead retains the independently proven EXEC window and overrides
   // only a conflicting dispatch pair with its literal identity representation.
+  const ConSanMoiOperatingPoint prior_operating_point =
+      capture_moi_operating_point(options, result.moi_operating_point);
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
       result.moi_operating_point.owner_transient_sgprs;
-  const auto prior_assignments = owner_transient_sgprs;
-  const bool prior_partial_exec = options.automatic_moi_partial_exec_save_sgprs;
   owner_transient_sgprs.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
   const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled;
   if (!configure_automatic_moi_transient_sgpr_assignments(options, result, state, dispatch_only)) {
-    owner_transient_sgprs = prior_assignments;
-    options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
+    restore_moi_operating_point(options, result, prior_operating_point);
     return false;
   }
 
@@ -5762,7 +5781,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // resurrect a code-object-wide EXEC window that the owner had already
     // rejected, silently dropping all sites in that component.
     const auto dispatch_assignments = std::move(owner_transient_sgprs);
-    owner_transient_sgprs = prior_assignments;
+    owner_transient_sgprs = prior_operating_point.owner_transient_sgprs;
     for (const ConSanMoiTransientSgprAssignment &dispatch_assignment : dispatch_assignments) {
       auto prior =
           std::ranges::find(owner_transient_sgprs, dispatch_assignment.descriptor_file_offset,
@@ -5773,7 +5792,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         // global EXEC base, so admitting that newly synthesized assignment
         // would resurrect the excluded owner with an unsafe transient
         // window. Owners that safely use the global EXEC ABI remain eligible.
-        if (prior_partial_exec) {
+        if (prior_operating_point.automatic_moi_partial_exec_save_sgprs) {
           const std::array owners{dispatch_assignment.descriptor_file_offset};
           const auto owner_contexts = resolve_moi_scalar_owner_contexts(state, owners);
           if (!owner_contexts || !moi_scalar_contexts_admit_reserved_window(
@@ -5790,7 +5809,8 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // The dispatch-only proof must not reclassify a globally liveness-dead
     // EXEC window as an owner-wide reserved window. The latter is deliberately
     // stricter and would reject guest uses outside instrumentation sites.
-    options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
+    options.automatic_moi_partial_exec_save_sgprs =
+        prior_operating_point.automatic_moi_partial_exec_save_sgprs;
   }
 
   // The component planner connects all callers of shared text. It retains the
@@ -5800,8 +5820,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const bool selected_zero_generation = std::ranges::any_of(
       owner_transient_sgprs, [](const auto &assignment) { return !assignment.dispatch_id_sgpr; });
   if (!selected_zero_generation) {
-    owner_transient_sgprs = prior_assignments;
-    options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
+    restore_moi_operating_point(options, result, prior_operating_point);
     return false;
   }
 
