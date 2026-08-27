@@ -63,16 +63,19 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
 
   Barrier(args);
 
-  // Pass 1: allocate stamps and launch the timed kernel on EVERY local GPU before
-  // synchronizing any of them. The collective bodies do an all-ranks device barrier
-  // and each local GPU is its own rank under -g N, so all local GPUs must be
-  // in-flight concurrently -- synchronizing GPU i before launching GPU i+1 would
-  // block GPU 0 at the barrier waiting for GPUs that were never launched (deadlock).
-  // This mirrors the launch-then-complete split in startColl()/completeColl().
+  // Pass 1: allocate stamp buffers on every local GPU, then launch the timed
+  // kernel on every local GPU, before synchronizing any of them. Malloc-first
+  // keeps the error path safe: if GPU i's hipMalloc fails, no kernel is in
+  // flight yet. Launch-all-then-sync avoids the -g N>1 device-barrier deadlock
+  // (GPU 0 would spin waiting for GPUs never launched). Mirrors startColl()/
+  // completeColl().
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(hipSetDevice(args->gpus[i]));
     CUDACHECK(hipMalloc(&d_start[i], (size_t)gridCtas * sizeof(long long)));
     CUDACHECK(hipMalloc(&d_end[i], (size_t)gridCtas * sizeof(long long)));
+  }
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(hipSetDevice(args->gpus[i]));
     launch(i, d_start[i], d_end[i]);
   }
 
