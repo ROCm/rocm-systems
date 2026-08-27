@@ -258,6 +258,15 @@ public:
     return qs == nullptr ? 0 : qs->accepted_entries;
   }
 
+  /// @brief Kinds of the first two entries accepted on this CP for the queue.
+  /// @details Test-only. The order matches the queue's ordered push site.
+  [[nodiscard]] std::array<DispatchPacketKind, 2>
+  first_accepted_entry_kinds_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? std::array<DispatchPacketKind, 2>{} : qs->first_accepted_entry_kinds;
+  }
+
   /// @brief Hardware queues registered with this CP, including fan-out replicas.
   ///
   /// @details Test-only. Whether a queue is present here as an owner or as a

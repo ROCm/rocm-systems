@@ -416,10 +416,10 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
 // the kernel ahead of it, so the ordering each XCD reads from the entries in front
 // of a barrier'd packet is the owner's ordering and not a shortened one.
 //
-// The acceptance count is read from each CP AFTER the run. It proves both entries
-// reached each queue without requiring them to coexist there: with one thread per
-// XCD, a peer may legitimately retire its kernel shard before the owner fans out
-// the IB behind it.
+// The acceptance count and first two packet kinds are read from each CP AFTER the
+// run. Together they prove that the kernel and then the IB reached each queue
+// without requiring them to coexist there: with one thread per XCD, a peer may
+// legitimately retire its kernel shard before the owner fans out the IB behind it.
 TEST(XcdDistributionTest, EveryXcdAcceptsNonKernelPacketsInQueueOrder) {
   XcdDistributionFixture fx(Threading::ThreadPerXcd);
 
@@ -433,10 +433,15 @@ TEST(XcdDistributionTest, EveryXcdAcceptsNonKernelPacketsInQueueOrder) {
   fx.engine->run();
 
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
-    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->accepted_entry_count_for_test(
-                  /*queue_id=*/1, /*process_id=*/0),
-              2u)
+    auto *xcd_cp = fx.soc->xcd(xi)->command_processor();
+    EXPECT_EQ(xcd_cp->accepted_entry_count_for_test(/*queue_id=*/1, /*process_id=*/0), 2u)
         << "xcd" << xi << " did not accept the kernel share and the IB behind it";
+    const auto kinds =
+        xcd_cp->first_accepted_entry_kinds_for_test(/*queue_id=*/1, /*process_id=*/0);
+    EXPECT_EQ(kinds[0], amdgpu::DispatchPacketKind::Kernel)
+        << "xcd" << xi << " did not accept the kernel share first";
+    EXPECT_EQ(kinds[1], amdgpu::DispatchPacketKind::NonKernel)
+        << "xcd" << xi << " did not accept the IB after the kernel share";
   }
 }
 

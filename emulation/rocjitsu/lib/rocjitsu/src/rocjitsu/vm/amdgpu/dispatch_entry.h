@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -442,6 +443,11 @@ struct HwQueueState {
   /// test verify delivery AFTER the run without depending on how many entries
   /// happened to coexist in the queue or reaching into a running peer CP.
   size_t accepted_entries = 0;
+  /// @brief Kinds of the first two accepted entries, for tests.
+  /// @details Bounded because the replication-order test needs only the submitted
+  /// kernel and the non-kernel packet behind it; production queues must not retain
+  /// an unbounded history after entries retire.
+  std::array<DispatchPacketKind, 2> first_accepted_entry_kinds{};
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
   uint64_t queue_desc_va = 0;
@@ -454,6 +460,8 @@ struct HwQueueState {
   /// @details The single ordered push site, so the acceptance count cannot drift
   /// from the deque. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
+    if (accepted_entries < first_accepted_entry_kinds.size())
+      first_accepted_entry_kinds[accepted_entries] = entry.kind;
     entries.push_back(std::move(entry));
     ++accepted_entries;
   }
