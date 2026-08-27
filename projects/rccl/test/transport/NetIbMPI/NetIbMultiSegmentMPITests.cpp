@@ -422,6 +422,60 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// A multi-recv can combine buffers backed by different composite handles.
+// iflush must fence every non-zero entry, not only the final receive.
+TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh0 = nullptr; void* comm = nullptr;
+    if (!SetupRegistered(kNumSegments, pair, guard, &mh0, &comm)) SETUP_OR_SKIP();
+    NetMHandleGuard mhGuard0(mh0, NetMHandleDeleter(net_, comm));
+
+    MultiSegmentVmmBuffer* buf0 = lastBuf_;
+    MultiSegmentVmmBuffer* buf1 = AllocSym(kNumSegments);
+    if (SyncSkip(buf1 == nullptr)) GTEST_SKIP() << "second multi-segment VMM allocation unavailable";
+    void* mh1 = nullptr;
+    ASSERT_EQ(RegisterMultiSegmentMr(comm, *buf1, &mh1), ncclSuccess);
+    ASSERT_NE(mh1, nullptr);
+    NetMHandleGuard mhGuard1(mh1, NetMHandleDeleter(net_, comm));
+
+    const size_t chunk = 64 * 1024;
+    void* bufs[2] = {
+        static_cast<uint8_t*>(buf0->ptr) + chunk,
+        static_cast<uint8_t*>(buf1->ptr) + 2 * buf1->segSize + chunk,
+    };
+    size_t recvSizes[2] = {chunk, chunk};
+    int tags[2] = {602, 603};
+    void* handles[2] = {mh0, mh1};
+    const int rank = MPIEnvironment::world_rank;
+
+    if (rank == 0) {
+        void* req = nullptr;
+        ASSERT_EQ(PostRecv(pair.recvComm, 2, bufs, recvSizes, tags, handles, &req), ncclSuccess);
+        int completedSizes[2] = {};
+        EXPECT_EQ(WaitForCompletion(req, completedSizes, kLargeTransferTimeoutMs), ncclSuccess);
+
+        int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
+        void* flushReq = nullptr;
+        EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
+        if (flushReq != nullptr) {
+            int flushSize = 0;
+            EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
+        }
+        EXPECT_TRUE(VerifyDevice(bufs[0], chunk, 0x62));
+        EXPECT_TRUE(VerifyDevice(bufs[1], chunk, 0x63));
+    } else {
+        void* reqs[2] = {};
+        FillDevice(bufs[0], chunk, 0x62);
+        FillDevice(bufs[1], chunk, 0x63);
+        PostSendWithRetry(pair.sendComm, bufs[0], chunk, tags[0], handles[0], &reqs[0]);
+        PostSendWithRetry(pair.sendComm, bufs[1], chunk, tags[1], handles[1], &reqs[1]);
+        for (int i = 0; i < 2; i++) {
+            int sentSize = 0;
+            EXPECT_EQ(WaitForCompletion(reqs[i], &sentSize, kLargeTransferTimeoutMs), ncclSuccess);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // REGRESSION (pointer types): the segment-aware changes only affect nSegments>1
 // handles; single-region host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers
 // must still register and transfer through the unchanged nSegments==1 fast path
