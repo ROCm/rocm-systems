@@ -722,6 +722,27 @@ struct ConSanOptions : ConSanRequest,
                        RuntimeCapabilities,
                        BoundRuntimeResources,
                        TransformPolicy {
+  /// Default construction is retained for focused mechanism tests that build
+  /// mutable lowering state directly. Production orchestration uses the typed
+  /// constructor below.
+  ConSanOptions() = default;
+
+  /// Construct one fresh lowerer state from the complete immutable production
+  /// inputs. The six base subobjects preserve those inputs verbatim; only the
+  /// temporary nonoptional flavor and lowerer-specific derived controls are
+  /// computed here.
+  ConSanOptions(const ConSanRequest &request, const TransformPolicy &transform_policy,
+                const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources)
+      : ConSanRequest(request), ConSanDebugOverrides(debug), MutationRequest(mutation),
+        RuntimeCapabilities(capabilities), BoundRuntimeResources(resources),
+        TransformPolicy(transform_policy), flavor(request.flavor.value_or(ConSanFlavor::None)),
+        collect_barrier_move_destinations(mutation.fault_move_barrier),
+        moi_inline_workgroup_shadow(request.flavor == ConSanFlavor::Moi &&
+                                    request.moi_engine == ConSanMoiEngine::InlineShadow),
+        force_vgpr_spill(debug.test_force_vgpr_spill),
+        force_private_epoch(debug.test_force_private_epoch) {}
+
   ConSanFlavor flavor = ConSanFlavor::None;
   /// Build the potentially expensive all-instruction destination inventory
   /// used only by markerless barrier movement. Direct library callers retain

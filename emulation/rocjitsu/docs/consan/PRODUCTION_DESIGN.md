@@ -273,7 +273,7 @@ here so a name is meaningful on first use; section 5.2 gives the full contract.
 | `RunVerdict` | Conclusion formed after runtime evidence is decoded and analyzed. |
 | `TargetClassifier` | Narrow target-dependent operation that maps decoded native instructions to shared semantic forms. |
 | `TargetLowerer` | Narrow target-dependent operation that maps probe intents and assigned resources to native instructions. |
-| `LegacyOptionsAdapter` | Temporary converter from the new immutable request/binding types to one fresh current-prototype `ConSanOptions` value. |
+| `ConSanOptions` | Temporary mutable compatibility-lowering state. Its production constructor preserves each typed input as a base subobject and derives only lowerer-internal controls; default construction exists only for focused mechanism tests. |
 | Compatibility lowering operations | Explicit temporary boundary containing current probe emission, resource, and placement machinery after semantic policy moves out of it. The former wrapper class has been deleted. |
 
 These names describe responsibilities, not a requirement that each become a
@@ -1948,13 +1948,13 @@ The HSA adapter now performs one region walk per load to produce
 `RuntimeCapabilities`. Automatic SuperCollider and MOI report paths state and
 validate their capability requirements before allocation, and the typed
 maximum workgroup-LDS fact replaces the former separate group-region query.
-The production transformer entry accepts the separated contracts. A
-`LegacyOptionsAdapter` creates a fresh `ConSanOptions` only at the remaining
-prototype lowering, retry, and inventory seams; the direct `ConSanOptions`
-overload is marked internal for focused legacy tests. The former production
-hook block that manually copied approximately ninety policy, mutation,
-register, and report fields has been deleted, and the adapter exposes a
-reviewed projection inventory. The hook-test transform override now receives
+The production transformer entry accepts the separated contracts. The
+temporary `ConSanOptions` compatibility state constructs itself directly from
+those contracts only at the remaining prototype lowering, retry, and inventory
+seams; its raw transform overload is internal to focused mechanism tests. The
+former production hook block that manually copied approximately ninety policy,
+mutation, register, and report fields and the later standalone compatibility
+adapter have both been deleted. The hook-test transform override now receives
 the same separated typed inputs as production, so inventory and retry tests no
 longer force the hook to reconstruct a `ConSanOptions` value. Its raw return is
 only a synthetic lowerer fixture and is immediately published into the typed
@@ -1982,11 +1982,11 @@ engines.
   narrow HSA/simulator query adapter. The configuration parser constructs the
   request/policy values and validates cross-field policy once; it does not
   manufacture runtime capabilities.
-- **Temporary seam and consumers:** `LegacyOptionsAdapter` translates the new
-  values into a fresh `ConSanOptions` only at the legacy-lowering call. Keep the
-  old direct overload for host tests during this slice; mark it internal.
-  Existing resource/report consumers temporarily receive projections from the
-  typed runtime-capability value.
+- **Current compatibility seam and consumers:** `ConSanOptions` constructs one
+  fresh mutable lowerer state from the separated typed values only at the raw
+  lowering call. Its old direct overload remains internal for focused mechanism
+  tests. Production resource/report consumers use the typed runtime and binding
+  subobjects rather than parallel projections.
 - **Test gate:** Direct request parsing/default/conflict tests, especially
   load-only Record/Replay activation and fail-open/closed separation; existing
   hook configuration tests; physical/simulator capability fixtures and missing-
@@ -4905,6 +4905,32 @@ analysis completed.
   `gfx1100`, `gfx1201`, and `gfx1250` pass in 69.35 seconds. Slice 5BF remains
   the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
   remains outside this work.
+
+### Slice 5BH: delete the standalone options adapter
+
+- **No compatibility wrapper:** `LegacyOptionsAdapter` is deleted from
+  production and tests. Once every caller-owned input became an actual base
+  subobject of the temporary lowerer state, the adapter contained no policy or
+  validation responsibility and merely forwarded six values plus four derived
+  controls.
+- **Fresh-state construction has one owner:** `ConSanOptions` now has one
+  explicit production constructor that copies the six typed inputs verbatim
+  and derives only its nonoptional flavor, barrier-move inventory switch,
+  InlineShadow workgroup mode, and two renamed test-path selectors. Default
+  construction remains available for focused mechanism tests. The five former
+  adapter tests are renamed as construction tests and continue to prove whole-
+  value preservation, derived controls, caller immutability, and independence
+  between constructed values.
+- **Deletion accounting:** Production adds 28 and deletes 40 physical lines, a
+  net deletion of twelve; tests add twenty and delete twenty-six, a net
+  deletion of six. No production or test source names the deleted adapter.
+- **Checked-in gate:** All five focused construction tests pass. Renaming them
+  brings them under the broad `*ConSan*` host filter, which now passes all 1,513
+  runnable tests with the two expected benchmark-object skips. All 172 HSA-hook
+  and hook-lifecycle tests pass, and all 2,908 simulator-device tests across
+  `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250` pass in 73.28 seconds.
+  Slice 5BF remains the latest physical-gfx950 gate, with all 593 tests passing;
+  E2E validation remains outside this work.
 
 ### Slice 6: explicit pipeline and result cutover
 

@@ -421,35 +421,3 @@ validate_consan_configuration(const ConSanRequest &request, const TransformPolic
   }
   return validate_bound_runtime_resources(resources);
 }
-
-/// Temporary, one-way compatibility boundary from immutable Slice-2 inputs to
-/// the current mutable lowering structure.
-///
-/// The adapter always returns a fresh `ConSanOptions`; it never accepts or
-/// mutates a caller-owned legacy value.
-class LegacyOptionsAdapter {
-public:
-  [[nodiscard]] static ConSanOptions
-  adapt(const ConSanRequest &request, const TransformPolicy &transform_policy,
-        const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-        const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
-    ConSanOptions options;
-    static_cast<ConSanRequest &>(options) = request;
-    options.flavor = request.flavor.value_or(ConSanFlavor::None);
-    options.moi_inline_workgroup_shadow =
-        request.flavor == ConSanFlavor::Moi && request.moi_engine == ConSanMoiEngine::InlineShadow;
-
-    static_cast<TransformPolicy &>(options) = transform_policy;
-
-    static_cast<ConSanDebugOverrides &>(options) = debug;
-    options.force_vgpr_spill = debug.test_force_vgpr_spill;
-    options.force_private_epoch = debug.test_force_private_epoch;
-
-    static_cast<MutationRequest &>(options) = mutation;
-    options.collect_barrier_move_destinations = mutation.fault_move_barrier;
-
-    static_cast<RuntimeCapabilities &>(options) = capabilities;
-    static_cast<BoundRuntimeResources &>(options) = resources;
-    return options;
-  }
-};
