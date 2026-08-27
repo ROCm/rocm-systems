@@ -162,7 +162,6 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.data_vgpr = 3;
     site.raw_ioffset = 0;
     site.address_space_hint = ConSanFlatAddressSpaceHint::Group;
-    site.owner_descriptor_file_offsets = {512};
     site.mnemonic = "flat_store_b32";
     kernel.flat_sites.push_back(std::move(site));
   } else {
@@ -175,12 +174,12 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     site.width_bits = 32;
     site.addr_vgpr = 2;
     site.data_vgpr = 3;
-    site.owner_descriptor_file_offsets = {512};
     site.mnemonic = "ds_store_b32";
     kernel.lds_sites.push_back(std::move(site));
   }
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory(bytes);
+  builder.access_sites().front().execution_owner_descriptor_file_offsets = {512};
 
   InlineEvidenceFixture fixture;
   fixture.inventory = builder.view();

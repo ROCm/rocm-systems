@@ -561,7 +561,6 @@ private:
     result.operands.address_vgpr = site.addr_vgpr;
     result.operands.data_vgpr = site.data_vgpr;
     result.operands.second_data_vgpr = site.second_data_vgpr;
-    result.execution_owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
     append_common_exclusions(result, site.direct_to_lds);
     if (is_two_address_lds(site.mnemonic)) {
       const auto width = two_address_element_width_bits(site.mnemonic);
@@ -621,7 +620,6 @@ private:
     result.operands.raw_segment = site.raw_segment;
     result.operands.raw_scope = site.raw_scope;
     result.operands.raw_th = site.raw_th;
-    result.execution_owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
     append_common_exclusions(result, false);
     if (site.width_bits != 0 && site.width_bits % 8u == 0) {
       result.ranges.push_back({.id = access_range_id(site.text_offset, 0),

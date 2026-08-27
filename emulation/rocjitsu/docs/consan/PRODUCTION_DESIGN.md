@@ -4288,6 +4288,26 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AL: delete prototype access-owner state
+
+- **One owner representation:** `ConSanLdsSite` and `ConSanFlatSite` no longer
+  carry execution-owner descriptor vectors. Ownership is a control-flow fact
+  of the normalized access inventory, not an instruction-decoder field and not
+  state that engines may read from prototype containers.
+- **No reverse copy:** Inventory normalization no longer copies owner state
+  from either legacy record. Focused evidence and pipeline fixtures seed the
+  normalized owner fact explicitly, while the pure decode-normalization test
+  requires that ownership remain absent until the owner-analysis stage.
+- **Deletion result:** Production source is six physical lines smaller. Two
+  duplicate vectors, their comments, and both copy assignments are gone; no
+  alias or compatibility accessor replaces them.
+- **Completed checked-in gate:** The 73 focused inventory,
+  evidence-requirement, and pipeline tests pass. The complete host gate passes
+  1,510 tests with the two expected benchmark-object skips; all 194 HSA-hook
+  tests pass; and all 2,908 simulator-device tests across the five supported
+  targets pass in 59.84 seconds. Slice 5AC completed the periodic
+  physical-gfx950 gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

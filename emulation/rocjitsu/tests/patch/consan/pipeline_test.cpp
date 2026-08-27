@@ -265,7 +265,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_access.width_bits = 32u;
   shared_access.mnemonic = "ds_read_b32";
   shared_access.addr_vgpr = 0u;
-  shared_access.owner_descriptor_file_offsets = {64u, 128u};
   kernel_a.lds_sites.push_back(shared_access);
   inventory_builder.kernels().push_back(kernel_a);
   ConSanKernelInfo kernel_b;
@@ -283,6 +282,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   kernel_c.has_text_range = true;
   inventory_builder.kernels().push_back(kernel_c);
   inventory_builder.rebuild_access_inventory(bytes);
+  inventory_builder.access_sites().front().execution_owner_descriptor_file_offsets = {64u, 128u};
   ConSanSyncEvent barrier;
   barrier.semantic_id = {
       .physical = {.code_object = inventory_builder.view().code_object_id(),

@@ -168,9 +168,6 @@ struct ConSanLdsSite {
   std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
   std::string mnemonic;
-  /// Kernel descriptors whose dispatches can execute this site. Shared
-  /// helpers name every reachable owner after execution-owner analysis.
-  std::vector<uint64_t> owner_descriptor_file_offsets;
 };
 
 struct ConSanFlatSite {
@@ -193,7 +190,6 @@ struct ConSanFlatSite {
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
   ConSanFlatAddressSpaceHint address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
   std::string mnemonic;
 };
 

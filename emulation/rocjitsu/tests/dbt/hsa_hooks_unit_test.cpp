@@ -5229,11 +5229,12 @@ rocjitsu::ConSanResult auto_report_sampled_transform_result(
 rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
   rocjitsu::ConSanResult result = auto_report_replay_transform_result();
   constexpr std::array<uint8_t, 8> instruction_bytes{};
+  constexpr uint64_t owner_descriptor_offset = 0x100u;
   rocjitsu::ProgramInventoryBuilder inventory(instruction_bytes);
   inventory.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   rocjitsu::ConSanKernelInfo kernel;
   kernel.name = "auto_report_inline_shadow";
-  kernel.descriptor_file_offset = 0x100u;
+  kernel.descriptor_file_offset = owner_descriptor_offset;
   kernel.declared_group_segment_bytes = 256u;
   rocjitsu::ConSanLdsSite access;
   access.kind = rocjitsu::ConSanLdsAccessKind::Write;
@@ -5244,11 +5245,12 @@ rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
   access.width_bits = 32u;
   access.addr_vgpr = 0u;
   access.data_vgpr = 1u;
-  access.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
   access.mnemonic = "ds_store_b32";
   kernel.lds_sites.push_back(std::move(access));
   inventory.kernels().push_back(std::move(kernel));
   inventory.rebuild_access_inventory(instruction_bytes);
+  inventory.access_sites().front().execution_owner_descriptor_file_offsets = {
+      owner_descriptor_offset};
   result.program_inventory = inventory.view();
   install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
                                rocjitsu::ConSanAccessPolicyReason::None,

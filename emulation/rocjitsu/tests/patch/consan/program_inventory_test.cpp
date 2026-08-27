@@ -466,7 +466,6 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   byte_site.dst_vgpr = 2;
   byte_site.dst_accvgpr = 4;
   byte_site.second_data_vgpr = 8;
-  byte_site.owner_descriptor_file_offsets = {512, 768};
   kernel.lds_sites.push_back(byte_site);
   kernel.lds_sites.push_back(make_inventory_lds_site("ds_store_b16", 24, 0, 16));
   ConSanLdsSite direct_to_lds = make_inventory_lds_site("global_load_lds_b32", 32, 0, 32);
@@ -493,7 +492,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.operands.address_vgpr, 3u);
   EXPECT_EQ(byte.operands.data_vgpr, 7u);
   EXPECT_EQ(byte.operands.second_data_vgpr, 8u);
-  EXPECT_EQ(byte.execution_owner_descriptor_file_offsets, (std::vector<uint64_t>{512u, 768u}));
+  EXPECT_TRUE(byte.execution_owner_descriptor_file_offsets.empty());
   ASSERT_EQ(byte.ranges.size(), 1u);
   EXPECT_EQ(byte.ranges[0].byte_width, 1u);
   EXPECT_EQ(byte.ranges[0].static_byte_offset, 0);
