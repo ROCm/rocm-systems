@@ -5961,6 +5961,27 @@ analysis completed.
   five supported targets also pass. E2E validation remains outside this
   deletion work.
 
+### Slice 5CV: use one typed fault-presence contract
+
+- **Single decision:** Staged mutation composition now uses
+  `MutationRequest::has_fault_mutation()`, and requested-fault cardinality now
+  comes from `MutationRequest::fault_mutation_count()`. Presence and count share
+  one enumeration of the eleven switches; the lowerer-local counting helper
+  and composition's independent presence predicate are gone.
+- **Contract coverage:** The request-contract unit tests enumerate every fault
+  kind, assert unit cardinality, and distinguish faults from SuperCollider
+  perturbations.
+- **Accounting:** After formatting the previously nonconforming fault-lowering
+  include, implementation files add 46 and delete 47 physical lines, a net
+  deletion of one. The semantic change deletes the independent presence
+  predicate and the complete lowerer-local cardinality helper. Tests add two
+  assertions. No production behavior or existing test expectation changes.
+- **Checked-in gate:** All 115 focused request, fault, mutation, and composition
+  tests pass. All 1,530 ConSan host tests, all 172 HSA-hook tests, all 2,878
+  generated simulator-device tests across the five supported targets, and the
+  26-case physical-gfx950 cross-engine smoke also pass. E2E validation remains
+  outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

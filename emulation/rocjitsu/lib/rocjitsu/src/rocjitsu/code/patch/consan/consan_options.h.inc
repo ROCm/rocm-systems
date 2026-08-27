@@ -501,12 +501,21 @@ struct MutationRequest {
 
   /// Return whether a fault transform (as opposed to timing perturbation) was
   /// requested.
-  [[nodiscard]] bool has_fault_mutation() const {
-    return fault_drop_barrier || fault_move_barrier || fault_mutate_barrier_id_scope ||
-           fault_mutate_barrier_participants || fault_atomic_wrong_address ||
-           fault_atomic_weaken_order || fault_atomic_weaken_scope || fault_lds_wrong_address ||
-           fault_ordinary_wrong_address || fault_ordinary_weaken_order ||
-           fault_ordinary_weaken_scope;
+  [[nodiscard]] bool has_fault_mutation() const { return fault_mutation_count() != 0u; }
+
+  /// Return the number of independently requested fault transformations.
+  /// Selection controls and perturbations are not fault transformations.
+  [[nodiscard]] size_t fault_mutation_count() const {
+    return static_cast<size_t>(fault_drop_barrier) + static_cast<size_t>(fault_move_barrier) +
+           static_cast<size_t>(fault_mutate_barrier_id_scope) +
+           static_cast<size_t>(fault_mutate_barrier_participants) +
+           static_cast<size_t>(fault_atomic_wrong_address) +
+           static_cast<size_t>(fault_atomic_weaken_order) +
+           static_cast<size_t>(fault_atomic_weaken_scope) +
+           static_cast<size_t>(fault_lds_wrong_address) +
+           static_cast<size_t>(fault_ordinary_wrong_address) +
+           static_cast<size_t>(fault_ordinary_weaken_order) +
+           static_cast<size_t>(fault_ordinary_weaken_scope);
   }
 
   /// Return whether either a fault transform or SuperCollider perturbation was

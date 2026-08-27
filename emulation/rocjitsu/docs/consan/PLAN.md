@@ -452,6 +452,9 @@ preflight and its mechanism-only test are gone.
 Per-kernel VGPR scratch chosen solely to initialize scalar persistent state is
 also a lowering-attempt-local placement-to-prologue handoff; it no longer
 lives in or is copied with the mutable options object.
+Mutation composition now asks the typed `MutationRequest` whether a fault was
+requested and how many independent faults were requested instead of
+maintaining separate eleven-flag presence and cardinality enumerations.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

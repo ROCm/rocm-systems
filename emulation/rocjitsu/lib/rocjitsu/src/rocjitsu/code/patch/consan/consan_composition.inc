@@ -287,7 +287,7 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options,
   // outcome or any mutation-stage state from the sizing pass.
   result.warnings.clear();
   result.outcome = ConSanTransformOutcome::Unchanged;
-  result.mutation.fault.requested = requested_fault_mutation_count(options);
+  result.mutation.fault.requested = options.fault_mutation_count();
   result.mutation.fault.planned = 0;
   result.mutation.fault.applied = 0;
   result.mutation.applied_fault_logical_identity.reset();
@@ -339,16 +339,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   ConSanPerturbationPlanningState &perturbation =
       inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
   perturbation = {};
-  result.mutation.fault.requested = requested_fault_mutation_count(options);
+  result.mutation.fault.requested = options.fault_mutation_count();
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
   result.program_inventory = inventory_builder.view();
-  const bool has_fault = options.fault_drop_barrier || options.fault_move_barrier ||
-                         options.fault_mutate_barrier_id_scope ||
-                         options.fault_mutate_barrier_participants ||
-                         options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-                         options.fault_atomic_weaken_scope || options.fault_lds_wrong_address ||
-                         options.fault_ordinary_wrong_address ||
-                         options.fault_ordinary_weaken_order || options.fault_ordinary_weaken_scope;
+  const bool has_fault = options.has_fault_mutation();
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
   const bool has_atomic_fault = options.fault_atomic_wrong_address ||
                                 options.fault_atomic_weaken_order ||

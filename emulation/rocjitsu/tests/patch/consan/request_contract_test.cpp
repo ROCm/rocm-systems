@@ -221,6 +221,7 @@ TEST(MutationRequestContractTest, EnabledCoversEveryMutationFamily) {
   const MutationRequest none;
   EXPECT_FALSE(none.has_mutation());
   EXPECT_FALSE(none.has_fault_mutation());
+  EXPECT_EQ(none.fault_mutation_count(), 0u);
 
   MutationRequest request;
   request.fault_drop_barrier = true;
@@ -257,6 +258,7 @@ TEST(MutationRequestContractTest, EveryLiveFaultSwitchParticipatesInDerivedPredi
     request.*fault_switch = true;
     EXPECT_TRUE(request.has_fault_mutation());
     EXPECT_TRUE(request.has_mutation());
+    EXPECT_EQ(request.fault_mutation_count(), 1u);
   }
 }
 
