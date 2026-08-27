@@ -35,8 +35,32 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
+
+namespace rocjitsu::amdgpu::tensor_dma_detail {
+struct TensorDmaDescriptor;
+}
 
 namespace rocjitsu::plugins::data_hazard {
+
+/// A stretch of LDS one access covers, relative to the wave's LDS allocation.
+struct LocalMemoryRange {
+  uint64_t address = 0;
+  uint32_t size = 0;
+};
+
+/// The LDS a `tensor_load_to_lds` writes, derived from the descriptor it
+/// transfers under: a variable base, an element size, tile dimensions, an
+/// iteration stride, and padding that skews the rows apart. A descriptor that
+/// transfers nothing, or one the executor rejects, writes no LDS and yields no
+/// ranges.
+///
+/// A padded run is reported as the whole span it skews across, gaps included.
+/// The gaps hold no transferred data, but they sit between rows of the same
+/// tile, and reporting them apart would leave a pending write per row for every
+/// later LDS access to walk.
+std::vector<LocalMemoryRange>
+tensor_lds_write_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc);
 
 /// @brief Renders instruction identity for hazard messages.
 ///
@@ -154,7 +178,10 @@ private:
 
   void emit_source_reads(const InstructionView &view, const Instruction &inst, bool is_memory_op);
   void emit_destination_writes(const InstructionView &view, const Instruction &inst);
-  void emit_tensor_lds_write(const InstructionView &view, const amdgpu::Wavefront &wf);
+  /// Routes the LDS a `tensor_load_to_lds` writes, derived from the descriptor
+  /// the transfer will execute from.
+  void emit_tensor_lds_write(const InstructionView &view, const Instruction &inst,
+                             const amdgpu::Wavefront &wf);
   void route_scalar_memory(const Instruction &inst, amdgpu::Wavefront &wf,
                            const InstructionView &current);
   void route_vector_memory(const Instruction &inst, amdgpu::Wavefront &wf,

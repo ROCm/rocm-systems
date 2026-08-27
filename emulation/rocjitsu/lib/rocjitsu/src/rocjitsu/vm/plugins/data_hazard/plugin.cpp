@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/data_hazard/plugin.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -13,8 +14,12 @@
 #include "flatbuffers/idl.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
+#include <exception>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <unordered_set>
@@ -123,6 +128,80 @@ std::array<uint32_t, 4> copy_raw_isa(const Instruction &inst) {
       std::min<size_t>(raw.size(), static_cast<size_t>(inst.size()) / sizeof(uint32_t));
   std::copy(words, words + word_count, raw.begin());
   return raw;
+}
+
+/// Ranges past this leave the transfer tracked as the span it covers. Every LDS
+/// access afterwards scans the pending tensor writes, so a descriptor scattering
+/// its tile over more pieces than this is cheaper to over-approximate than to
+/// leave behind an entry per piece.
+constexpr size_t kMaxTensorRanges = 64;
+
+/// A range the hazard engine can carry: LDS addresses are 32 bits wide, and an
+/// access is rejected above the engine's size ceiling, which no real LDS
+/// allocation comes near.
+std::optional<LocalMemoryRange> make_local_range(uint64_t begin, uint64_t end) {
+  if (begin > std::numeric_limits<uint32_t>::max() || end <= begin)
+    return std::nullopt;
+  const uint64_t size = std::min<uint64_t>(end - begin, hazard_core::MAX_ACCESS_SIZE_BYTES);
+  return LocalMemoryRange{begin, static_cast<uint32_t>(size)};
+}
+
+/// Merges the ranges that touch or overlap.
+std::vector<LocalMemoryRange> coalesce_local_ranges(std::vector<LocalMemoryRange> ranges) {
+  std::sort(ranges.begin(), ranges.end(),
+            [](const LocalMemoryRange &lhs, const LocalMemoryRange &rhs) {
+              return lhs.address < rhs.address;
+            });
+
+  std::vector<LocalMemoryRange> merged;
+  for (const LocalMemoryRange &range : ranges) {
+    if (!merged.empty() && range.address <= merged.back().address + merged.back().size) {
+      const uint64_t end = std::max<uint64_t>(merged.back().address + merged.back().size,
+                                              range.address + range.size);
+      if (const auto joined = make_local_range(merged.back().address, end))
+        merged.back() = *joined;
+      continue;
+    }
+    merged.push_back(range);
+  }
+
+  if (merged.size() <= kMaxTensorRanges)
+    return merged;
+
+  const auto span =
+      make_local_range(merged.front().address, merged.back().address + merged.back().size);
+  return span ? std::vector<LocalMemoryRange>{*span} : std::vector<LocalMemoryRange>{};
+}
+
+/// The descriptor a tensor DMA is about to transfer under, or nothing when its
+/// operands are ones the executor will reject.
+///
+/// Reading the descriptor reports reads of the same scalar registers the
+/// transfer is about to read itself, which is where the reads attributed to this
+/// instruction would have come from anyway.
+std::optional<amdgpu::tensor_dma_detail::TensorDmaDescriptor>
+read_tensor_descriptor(const Instruction &inst, const amdgpu::Wavefront &wf) {
+  namespace tdm = amdgpu::tensor_dma_detail;
+
+  // The four descriptor groups are the instruction's only sources, in order.
+  std::array<int, 4> descriptor_regs{};
+  if (inst.num_src_operands() < static_cast<int>(descriptor_regs.size()))
+    return std::nullopt;
+  for (size_t group = 0; group < descriptor_regs.size(); ++group) {
+    const auto *op = inst.src_operand(static_cast<int>(group));
+    if (op == nullptr)
+      return std::nullopt;
+    descriptor_regs[group] = static_cast<int>(op->encoding_value());
+  }
+
+  try {
+    return tdm::parse_descriptor(tdm::read_sgpr_group<4>(wf, descriptor_regs[0], false),
+                                 tdm::read_sgpr_group<8>(wf, descriptor_regs[1], false),
+                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[2], true),
+                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[3], true));
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
 }
 
 } // namespace
@@ -408,7 +487,7 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
 
   emit_source_reads(view, inst, is_memory_op);
   if (inst.mnemonic() == "tensor_load_to_lds")
-    emit_tensor_lds_write(view, wf);
+    emit_tensor_lds_write(view, inst, wf);
   // Destination writes of memory instructions are emitted when the access is
   // routed, where the wait counter that guards them is known.
   if (!is_memory_op)
@@ -547,17 +626,61 @@ void DataHazardPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wa
   }
 }
 
-void DataHazardPlugin::emit_tensor_lds_write(const InstructionView &view,
+std::vector<LocalMemoryRange>
+tensor_lds_write_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc) {
+  namespace tdm = amdgpu::tensor_dma_detail;
+
+  // A descriptor whose count is zero transfers nothing at all.
+  if (!desc.active())
+    return {};
+
+  std::vector<LocalMemoryRange> ranges;
+  try {
+    const tdm::TensorDmaLayout layout(desc);
+    // A descriptor the executor rejects faults instead of writing LDS.
+    tdm::validate_supported_descriptor(desc, layout);
+
+    tdm::for_each_lds_run(desc, layout, [&](const tdm::TensorDmaLdsRun &run) {
+      if (run.element_count == 0)
+        return;
+      // The run covers its last element too, so it reaches an element size past
+      // where that element begins.
+      const uint64_t begin = tdm::lds_element_offset(desc, run.first_element, false);
+      const uint64_t end =
+          tdm::lds_element_offset(desc, run.first_element + run.element_count - 1, false) +
+          desc.elem_size;
+      if (const auto range = make_local_range(begin, end))
+        ranges.push_back(*range);
+    });
+  } catch (const std::exception &) {
+    // Fields execution will reject too: leave the transfer untracked rather
+    // than guess at the LDS it would have written.
+    return {};
+  }
+
+  return coalesce_local_ranges(std::move(ranges));
+}
+
+void DataHazardPlugin::emit_tensor_lds_write(const InstructionView &view, const Instruction &inst,
                                              const amdgpu::Wavefront &wf) {
-  MemoryRouteView route;
-  route.instruction = view;
-  route.writes_local_memory = true;
-  route.local_write_wait = hazard_core::WaitCntType::TENSOR;
-  route.local_address = 0;
-  route.local_size_bytes = kBytesPerDword;
-  route.exec_mask = wf.exec();
-  route.is_tensor = true;
-  adapter_.on_memory_route(route);
+  const auto desc = read_tensor_descriptor(inst, wf);
+  if (!desc)
+    return;
+
+  // One route per stretch of LDS the transfer writes. A wait drains them
+  // together, because the TENSORcnt slot belongs to the instruction rather than
+  // to the entries it leaves behind.
+  for (const LocalMemoryRange &range : tensor_lds_write_ranges(*desc)) {
+    MemoryRouteView route;
+    route.instruction = view;
+    route.writes_local_memory = true;
+    route.local_write_wait = hazard_core::WaitCntType::TENSOR;
+    route.local_address = range.address;
+    route.local_size_bytes = range.size;
+    route.exec_mask = wf.exec();
+    route.is_tensor = true;
+    adapter_.on_memory_route(route);
+  }
 }
 
 void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Instruction &inst,

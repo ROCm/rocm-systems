@@ -334,11 +334,10 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   return util::Result::success();
 }
 
-// copy_tensor validates the descriptor and GPU-memory attachment before entering
-// the element loops. No rejection check or diagnostic work is needed per element.
-inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
-                       uint64_t lds_element, bool in_bounds, bool store_from_lds) {
-  const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
+/// The byte @p lds_element of the transfer's LDS element stream lands on,
+/// relative to the wave's LDS allocation rather than absolute in LDS.
+inline uint64_t lds_element_offset(const TensorDmaDescriptor &desc, uint64_t lds_element,
+                                   bool store_from_lds) {
   uint64_t lds_byte = lds_element * desc.elem_size;
   // The ISA applies descriptor padding only to memory-to-LDS transfers.
   // Stores read the ordinary dense LDS stream and ignore the padding fields.
@@ -347,8 +346,51 @@ inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t 
     const uint32_t pad_amount_bytes = desc.pad_amount * sizeof(uint32_t);
     lds_byte += (lds_byte / pad_interval_bytes) * pad_amount_bytes;
   }
+  return static_cast<uint64_t>(desc.lds_base) + lds_byte;
+}
 
-  const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
+/// A stretch of the transfer's LDS element stream that is consecutive before
+/// padding skews it: @p element_count elements from @p first_element.
+struct TensorDmaLdsRun {
+  uint64_t first_element = 0;
+  uint64_t element_count = 0;
+};
+
+/// Visits the runs of LDS elements the transfer covers, in the order the copy
+/// loops below walk them. A dense tile leaves one run per iteration, because
+/// the tile coordinates are the mixed-radix digits of the element's position in
+/// its tile, and gather packs its rows into a single run. Tensor bounds do not
+/// enter into it: a load writes every element of the tile, filling the ones
+/// outside the tensor with zeros.
+template <typename Fn>
+void for_each_lds_run(const TensorDmaDescriptor &desc, const TensorDmaLayout &layout, Fn visit) {
+  if (desc.gather) {
+    visit(TensorDmaLdsRun{0, static_cast<uint64_t>(desc.valid_indices) *
+                                 static_cast<uint64_t>(desc.tile_dims[0])});
+    return;
+  }
+
+  const uint32_t rank = layout.rank();
+  if (rank == 0)
+    return;
+
+  uint64_t element_count = 1;
+  for (uint32_t dim = 0; dim < rank; ++dim)
+    element_count *= desc.tile_dims[dim];
+
+  const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
+  for (uint32_t iter = 0; iter < iteration_count; ++iter)
+    visit(TensorDmaLdsRun{static_cast<uint64_t>(iter) * desc.lds_increment, element_count});
+}
+
+inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
+                       uint64_t lds_element, bool in_bounds, bool store_from_lds) {
+  if (!wf.has_gpu_memory())
+    throw util::UnimplementedInst("tensor DMA without GPU memory");
+
+  const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
+  const uint32_t lds_addr =
+      wf.lds_base() + static_cast<uint32_t>(lds_element_offset(desc, lds_element, store_from_lds));
   std::array<uint8_t, 8> bytes{};
   auto element_bytes = std::span<uint8_t>(bytes).first(desc.elem_size);
   if (store_from_lds) {

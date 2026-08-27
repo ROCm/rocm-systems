@@ -153,6 +153,14 @@ spans of consecutive registers, LDS and global memory as byte ranges. A
 multi-register load is one pending entry spanning every register it writes, so a
 read of any register in the span is caught.
 
+A tensor DMA into LDS names no address in its encoding: the LDS base, element
+size, tile dimensions, iteration stride and row padding all come from a
+descriptor the transfer reads out of scalar registers. The plugin reads that same
+descriptor as the instruction issues and tracks the stretches of LDS the transfer
+will write, one pending entry each, so a read anywhere in the tile before
+`s_wait_tensorcnt` is caught. A descriptor that disables its transfer, or one the
+executor will reject, writes no LDS and leaves nothing pending.
+
 Wait counts are read from the disassembled operand — `vmcnt(1) expcnt(0)
 lgkmcnt(3)` — and carried to the adapter as the counts themselves rather than
 repacked into an immediate. The s_waitcnt field widths differ by family, four
@@ -186,6 +194,8 @@ Unit tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   suggestion wording.
 - `data-hazard/data_hazard_adapter_tests.cpp` — instruction view to engine event
   translation.
+- `data-hazard/tensor_lds_range_tests.cpp` — the LDS a tensor DMA writes, derived
+  from its descriptor.
 
 ```bash
 ctest --test-dir build -R "DataHazard|Hazard"
@@ -215,6 +225,13 @@ python -m mutate_and_test --hazard-detection --arch gfx950 shaders/*.hip
 - **Wait immediates only**: hazards are resolved by `s_wait_*` and `s_barrier`.
   Software synchronization the hardware does not express through a wait counter
   is invisible to the engine.
+
+- **Padded tensor tiles are tracked as one span**: a tensor DMA that pads its
+  rows apart leaves gaps of untransferred bytes between them, and the tile is
+  tracked as the span the padded rows occupy rather than as one range per row.
+  An access to a gap byte while the transfer is still outstanding is therefore
+  reported, and the alternative leaves every later LDS access scanning a pending
+  entry per row of the tile.
 
 - **XCNT is not a data counter**: `s_wait_xcnt` tracks address translation
   replay rather than data completion, so removing it produces no hazard. The
