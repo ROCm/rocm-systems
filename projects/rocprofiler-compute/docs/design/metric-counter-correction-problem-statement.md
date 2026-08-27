@@ -30,6 +30,7 @@ During full-panel `analyze` on MI300-class GPUs (gfx940–942), some **Percent**
 | **Asynchronous sampling** | Counters in different IP blocks are not sample-aligned even within one pass. | Moderate — shows up on short dispatches |
 | **Non-partition pairs** | Numerator/denominator are not strict subsets (e.g. SPI busy vs GUI active). | By design — capping is display-only for these |
 | **Hardware / driver bug** | Persistent `a > b` under **single-pass** collection on stable workloads. | Must be ruled out before caps (escalate, do not clamp-only) |
+| **Dynamic power management (DPM)** | Clock and power state may differ across kernel re-runs in multi-pass profiling, reducing comparability of counters stitched onto the same dispatch row. | Speculative — possible contributor; not yet validated in AIPROFCOMP-78 data |
 
 **Key insight:** A row in merged `pmc_perf.csv` does **not** mean all counters on that row were collected in the same profiling pass.
 
