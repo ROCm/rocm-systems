@@ -4541,6 +4541,37 @@ analysis completed.
   gate also passes all 593 tests in 435.17 seconds. E2E validation remains
   outside this work.
 
+### Slice 5AT: delete copied fence-event projections
+
+- **One synchronization-event owner:** `ConSanMoiFenceCandidate` is now only a
+  typed association between the authoritative fence and communication events.
+  It no longer copies either event's string identity, container, kernel flag,
+  instruction location and size, address source and displacement, or raw
+  scope. Those facts remain owned by the immutable synchronization inventory.
+- **Typed joins at policy and lowering boundaries:** Fence policy groups and
+  filters associations through their `SemanticSiteId` references. Record/Replay
+  lowering resolves those references once and carries a borrowed pointer to the
+  authoritative fence event in its short-lived operand-rich adapter. Missing or
+  stale references fail closed; no string identity is reconstructed as an
+  alternate join key. `SynchronizationInventoryView::find_event` is the shared
+  lookup contract, and lowering does not wrap it in another index.
+- **Contract coverage:** Focused analysis, policy, inventory, fault, Inline
+  Shadow, and Record/Replay tests now inspect fence and communication facts
+  through the typed join. They cover successful and absent event lookup,
+  qualified and unqualified associations, conflicting aliases, stale typed
+  identities, buffer-address policy, and ordinary load/store communication.
+  The cross-target device suite retains paired correct/incorrect fence and
+  atomic publication contracts.
+- **Deletion accounting:** Production changes add 110 and delete 123 physical
+  lines, a net deletion of 13 lines. Tests add 73 and delete 67 lines while
+  replacing assertions on copied fields with assertions on the authoritative
+  event records and their typed associations.
+- **Completed checked-in gate:** The host gate passes all 1,512 runnable tests
+  with the two expected benchmark-object skips; all 194 HSA-hook tests pass;
+  and all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 84.78 seconds. Slice 5AS completed the
+  periodic physical-gfx950 gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -202,8 +202,17 @@ sampled_atomic_semantics_for_site(const ConSanResult &result,
   return semantics;
 }
 
+/// Short-lived operand-rich lowering view for one admitted Record/Replay fence.
+///
+/// Association and fence-event pointers borrow the immutable program inventory
+/// owned by the enclosing `ConSanResult`; copies of this value remain valid only
+/// during that result's lowering. Concrete communication operands and patch
+/// coordinates are lowering facts, not another semantic inventory.
 struct FenceRecordCandidate {
-  ConSanMoiFenceCandidate fence;
+  /// Association borrowed from the immutable program inventory.
+  const ConSanMoiFenceCandidate *association = nullptr;
+  /// Authoritative fence event borrowed from the immutable program inventory.
+  const ConSanSyncEvent *fence_event = nullptr;
   // Fence emission consumes the common address-plan input shape. Ordinary
   // buffer communication is normalized into that shape without reclassifying
   // the source event as an atomic.
@@ -222,14 +231,14 @@ struct FenceRecordCandidate {
   std::optional<uint64_t> scalar_clause_text_offset;
 };
 
-/// Temporary operand-rich lowering adapter for Record/Replay fence records.
-/// It prevents legacy association helpers from widening pure policy output.
 void retain_admitted_fence_record_candidates(const ConSanObservationPlan &plan,
                                              std::vector<FenceRecordCandidate> &candidates) {
   std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
     const auto decision =
         std::ranges::find_if(plan.fence_site_decisions, [&](const ConSanFenceSiteDecision &site) {
-          return site.semantic_site.physical.original_text_offset == candidate.fence.text_offset;
+          return candidate.fence_event != nullptr &&
+                 site.semantic_site.physical.original_text_offset ==
+                     candidate.fence_event->text_offset;
         });
     return decision == plan.fence_site_decisions.end() ||
            decision->kind != ConSanSiteDecisionKind::Admitted;
@@ -270,18 +279,19 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
 }
 
 void append_fence_record_candidates(const ConSanResult &result,
-                                    const MoiSyncInventoryIndex &sync_index,
                                     std::vector<FenceRecordCandidate> &candidates) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates) {
     if (!fence.eligible())
       continue;
-    const ConSanSyncEvent *event = sync_index.event(fence.communication_event_identity);
-    if (event == nullptr ||
+    const ConSanSyncEvent *fence_event = sync.find_event(fence.fence_event);
+    const ConSanSyncEvent *event =
+        fence.communication_event ? sync.find_event(*fence.communication_event) : nullptr;
+    if (fence_event == nullptr || event == nullptr ||
         (event->kind != ConSanSyncEventKind::Atomic &&
          event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
-        event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
-        event->execution_owners.empty())
+        event->container_name != fence_event->container_name ||
+        event->in_kernel != fence_event->in_kernel || event->execution_owners.empty())
       continue;
     const auto sequence_it = std::ranges::find(sync.sync_sequences, fence.sequence_identity,
                                                &ConSanSyncSequence::identity);
@@ -306,14 +316,15 @@ void append_fence_record_candidates(const ConSanResult &result,
                                &ConSanAtomicSite::text_offset) != 1)
           return;
         FenceRecordCandidate candidate;
-        candidate.fence = fence;
+        candidate.association = &fence;
+        candidate.fence_event = fence_event;
         candidate.communication_site = *site;
         candidate.kernel_descriptor_file_offset = descriptor_file_offset;
         candidate.container_entry_text_offset = container.entry_text_offset;
         candidate.text_file_offset = container.text_file_offset;
-        candidate.patch_text_offset = fence.text_offset;
-        candidate.patch_file_offset = fence.file_offset;
-        candidate.patch_size = fence.size;
+        candidate.patch_text_offset = fence_event->text_offset;
+        candidate.patch_file_offset = fence_event->file_offset;
+        candidate.patch_size = fence_event->size;
         candidates.push_back(std::move(candidate));
         return;
       }
@@ -326,14 +337,15 @@ void append_fence_record_candidates(const ConSanResult &result,
            site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly))
         return;
       FenceRecordCandidate candidate;
-      candidate.fence = fence;
+      candidate.association = &fence;
+      candidate.fence_event = fence_event;
       candidate.communication_site = normalize_ordinary_fence_communication(*site);
       candidate.kernel_descriptor_file_offset = descriptor_file_offset;
       candidate.container_entry_text_offset = container.entry_text_offset;
       candidate.text_file_offset = container.text_file_offset;
-      candidate.patch_text_offset = fence.text_offset;
-      candidate.patch_file_offset = fence.file_offset;
-      candidate.patch_size = fence.size;
+      candidate.patch_text_offset = fence_event->text_offset;
+      candidate.patch_file_offset = fence_event->file_offset;
+      candidate.patch_size = fence_event->size;
       if (fence.memory_role == ConSanSyncMemoryRole::Acquire) {
         // Generated two-address loads may place their destination in either
         // address VGPR. Preserve the exact communication token before the
@@ -343,7 +355,7 @@ void append_fence_record_candidates(const ConSanResult &result,
             sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
             sequence->begin_text_offset != site->text_offset ||
             sequence->end_text_offset <= sequence->begin_text_offset ||
-            sequence->end_text_offset < fence.text_offset + fence.size ||
+            sequence->end_text_offset < fence_event->text_offset + fence_event->size ||
             sequence->end_text_offset - sequence->begin_text_offset >
                 std::numeric_limits<uint32_t>::max()) {
           return;
@@ -357,15 +369,16 @@ void append_fence_record_candidates(const ConSanResult &result,
       }
       candidates.push_back(std::move(candidate));
     };
-    if (fence.in_kernel) {
+    if (fence_event->in_kernel) {
       const auto kernel = std::ranges::find(result.program_inventory.kernels(),
-                                            fence.container_name, &ConSanKernelInfo::name);
+                                            fence_event->container_name, &ConSanKernelInfo::name);
       if (kernel != result.program_inventory.kernels().end() &&
           !is_rocclr_runtime_kernel_name(kernel->name))
         append_from(*kernel, kernel->descriptor_file_offset);
     } else {
-      const auto function = std::ranges::find(result.program_inventory.functions(),
-                                              fence.container_name, &ConSanFunctionInfo::name);
+      const auto function =
+          std::ranges::find(result.program_inventory.functions(), fence_event->container_name,
+                            &ConSanFunctionInfo::name);
       if (function != result.program_inventory.functions().end())
         append_from(*function, std::nullopt);
     }
@@ -474,13 +487,13 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
 
 [[nodiscard]] bool
 ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &result,
-                                                       const MoiSyncInventoryIndex &sync_index,
                                                        const AtomicRecordCandidate &candidate) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   return std::ranges::any_of(sync.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
     if (!fence.eligible())
       return false;
-    const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
+    const ConSanSyncEvent *communication =
+        fence.communication_event ? sync.find_event(*fence.communication_event) : nullptr;
     return communication != nullptr && communication->kind == ConSanSyncEventKind::OrdinaryMemory &&
            communication->file_offset == candidate.site.file_offset;
   });

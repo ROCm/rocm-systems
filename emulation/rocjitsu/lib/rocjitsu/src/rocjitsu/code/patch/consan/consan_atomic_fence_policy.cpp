@@ -82,31 +82,9 @@ build_event_index(std::span<const ConSanSyncEvent> events) {
 
 [[nodiscard]] bool fence_policy_semantics_equal(const ConSanMoiFenceCandidate &lhs,
                                                 const ConSanMoiFenceCandidate &rhs) {
-  return std::tie(lhs.in_kernel, lhs.text_offset, lhs.file_offset, lhs.size, lhs.memory_role,
-                  lhs.communication_address_source, lhs.communication_static_byte_offset,
-                  lhs.raw_scope, lhs.association) ==
-         std::tie(rhs.in_kernel, rhs.text_offset, rhs.file_offset, rhs.size, rhs.memory_role,
-                  rhs.communication_address_source, rhs.communication_static_byte_offset,
-                  rhs.raw_scope, rhs.association);
-}
-
-[[nodiscard]] std::vector<std::string>
-fence_source_container_names(std::span<const ConSanMoiFenceCandidate *const> aliases) {
-  std::vector<std::string> result;
-  result.reserve(aliases.size());
-  for (const ConSanMoiFenceCandidate *fence : aliases) {
-    if (std::ranges::find(result, fence->container_name) == result.end())
-      result.push_back(fence->container_name);
-  }
-  std::ranges::sort(result);
-  return result;
-}
-
-[[nodiscard]] bool fence_filter_matches(std::span<const ConSanMoiFenceCandidate *const> aliases,
-                                        std::string_view filter) {
-  return filter.empty() || std::ranges::any_of(aliases, [&](const ConSanMoiFenceCandidate *fence) {
-           return fence->container_name.find(filter) != std::string::npos;
-         });
+  return lhs.fence_event == rhs.fence_event && lhs.sequence_identity == rhs.sequence_identity &&
+         lhs.communication_event == rhs.communication_event && lhs.memory_role == rhs.memory_role &&
+         lhs.association == rhs.association;
 }
 
 [[nodiscard]] std::vector<std::string>
@@ -514,10 +492,10 @@ void add_covered_site(ConSanObservationPlan &plan, ConSanProbeIntentId id,
 }
 
 [[nodiscard]] bool has_qualified_fence_for(const SynchronizationInventoryView &inventory,
-                                           std::string_view communication_identity) {
+                                           const SemanticSiteId &communication_identity) {
   return std::ranges::any_of(
       inventory.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-        return fence.eligible() && fence.communication_event_identity == communication_identity;
+        return fence.eligible() && fence.communication_event == communication_identity;
       });
 }
 
@@ -635,7 +613,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       const bool record_replay_fence_owns_ordinary =
           request.engine == ConSanCapabilityEngine::RecordReplay &&
           event.kind == ConSanSyncEventKind::OrdinaryMemory &&
-          has_qualified_fence_for(synchronization, event.identity);
+          has_qualified_fence_for(synchronization, event.semantic_id);
       if (!record_replay_fence_owns_ordinary) {
         decision.intent_ids.push_back(add_intent(
             result.plan, semantic_id.physical, {semantic_id}, atomic_evidence_kind(request.engine),
@@ -647,20 +625,20 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
 
   std::map<uint64_t, std::vector<const ConSanMoiFenceCandidate *>> fence_aliases_by_site;
   for (const ConSanMoiFenceCandidate &fence : synchronization.moi_fence_candidates)
-    fence_aliases_by_site[fence.text_offset].push_back(&fence);
+    fence_aliases_by_site[fence.fence_event.physical.original_text_offset].push_back(&fence);
 
-  for (const auto &[fence_offset, aliases] : fence_aliases_by_site) {
+  for (const auto &fence_aliases : fence_aliases_by_site) {
+    const auto &aliases = fence_aliases.second;
     const ConSanMoiFenceCandidate &fence = *aliases.front();
-    const auto fence_event_entry = events_by_identity.find(fence.fence_event_identity);
-    const ConSanSyncEvent *fence_event =
-        fence_event_entry == events_by_identity.end() ? nullptr : fence_event_entry->second;
-    const SemanticSiteId fence_id =
-        fence_event != nullptr ? event_semantic_id(inventory, *fence_event)
-                               : SemanticSiteId{
-                                     .physical = {.code_object = inventory.code_object_id(),
-                                                  .original_text_offset = fence_offset},
-                                     .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
-                                 };
+    const ConSanSyncEvent *fence_event = synchronization.find_event(fence.fence_event);
+    std::vector<const ConSanSyncEvent *> fence_events;
+    fence_events.reserve(aliases.size());
+    for (const ConSanMoiFenceCandidate *alias : aliases) {
+      if (const ConSanSyncEvent *event = synchronization.find_event(alias->fence_event)) {
+        fence_events.push_back(event);
+      }
+    }
+    const SemanticSiteId fence_id = fence.fence_event;
     const ConSanCapabilityDisposition capability = consan_capability_disposition(
         inventory.target(), request.engine, ConSanCapabilityForm::AddressedOrdinaryFence);
     const bool conflicting_alias =
@@ -676,7 +654,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .inventory_association = fence.association,
         .association = std::nullopt,
         .intent_ids = {},
-        .source_containers = fence_source_container_names(aliases),
+        .source_containers = source_container_names(fence_events),
     };
     if (!fence.sequence_identity.empty())
       decision.association = ConSanSynchronizationAssociationId{fence.sequence_identity};
@@ -685,7 +663,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       decision.reason = ConSanFencePolicyReason::TrackingDisabled;
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
-    } else if (!fence_filter_matches(aliases, request.container_filter)) {
+    } else if (!filter_matches(fence_events, request.container_filter)) {
       decision.reason = ConSanFencePolicyReason::ContainerFilterExcluded;
     } else if (conflicting_alias) {
       decision.kind = ConSanSiteDecisionKind::Unsupported;
@@ -697,9 +675,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                capability != ConSanCapabilityDisposition::AssociatedOnly) {
       decision.reason = ConSanFencePolicyReason::TargetCapabilityUnavailable;
     } else {
-      const auto communication_entry = events_by_identity.find(fence.communication_event_identity);
       const ConSanSyncEvent *communication =
-          communication_entry == events_by_identity.end() ? nullptr : communication_entry->second;
+          fence.communication_event ? synchronization.find_event(*fence.communication_event)
+                                    : nullptr;
       const auto atomic_decision =
           communication == nullptr
               ? result.plan.atomic_site_decisions.end()

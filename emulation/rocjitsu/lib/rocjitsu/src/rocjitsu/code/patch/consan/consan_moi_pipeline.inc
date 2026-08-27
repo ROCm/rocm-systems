@@ -25,17 +25,16 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   }
 
   std::vector<FenceRecordCandidate> candidates;
-  const MoiSyncInventoryIndex sync_index(result);
-  append_fence_record_candidates(result, sync_index, candidates);
+  append_fence_record_candidates(result, candidates);
   if (!options.test_kernel_name_filter.empty()) {
     std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
-      return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
+      return candidate.fence_event->container_name.find(options.test_kernel_name_filter) ==
              std::string::npos;
     });
   }
   retain_admitted_fence_record_candidates(result.observation_plan, candidates);
   std::ranges::sort(candidates, {}, [](const FenceRecordCandidate &candidate) {
-    return candidate.fence.text_offset;
+    return candidate.fence_event->text_offset;
   });
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -72,7 +71,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (selected.size() == max_candidates)
       break;
     FenceRecordCandidate candidate = candidates[candidate_index];
-    const ConSanMoiFenceCandidate &fence = candidate.fence;
+    const ConSanSyncEvent &fence_event = *candidate.fence_event;
     if (candidate.patch_text_offset > old_text.size() ||
         candidate.patch_size > old_text.size() - candidate.patch_text_offset) {
       result.errors.emplace_back("ConSan MOI fence record patch site is outside .text");
@@ -89,7 +88,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     const uint16_t scratch_count = fence_record_scratch_count(candidate.communication_site, arch);
     const ConSanCandidateResourcePlan *existing_plan =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence.text_offset);
+        resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence_event.text_offset);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
@@ -98,8 +97,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &candidate.communication_site);
     if (!existing_plan) {
-      if (candidate.patch_text_offset != fence.text_offset)
-        plan.semantic_text_offset = fence.text_offset;
+      if (candidate.patch_text_offset != fence_event.text_offset)
+        plan.semantic_text_offset = fence_event.text_offset;
       result.resource_plans.push_back(plan);
     }
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
@@ -295,7 +294,6 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     return std::nullopt;
   };
   for (const PlannedFenceRecord &planned : selected) {
-    const ConSanMoiFenceCandidate &fence = planned.candidate.fence;
     const uint64_t cave_text_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
@@ -454,7 +452,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (!direct_entry && !has_indirect_entry_island && !dense_relay) {
       result.warnings.emplace_back(
           "ConSan MOI fence record patch found no reachable indirect entry island in " +
-          fence.container_name);
+          planned.candidate.fence_event->container_name);
       continue;
     }
     std::string placement_error;
@@ -719,7 +717,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                          [&](const AtomicRecordCandidate &candidate) {
                            return options.moi_engine != ConSanMoiEngine::RecordReplay ||
                                   !ordinary_atomic_candidate_is_covered_by_eligible_fence(
-                                      result, sync_index, candidate);
+                                      result, candidate);
                          });
     apply_test_container_filter(candidates, options);
     if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
@@ -739,10 +737,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   }
   if (options.moi_track_atomics && options.moi_engine == ConSanMoiEngine::RecordReplay) {
     std::vector<FenceRecordCandidate> candidates;
-    append_fence_record_candidates(result, sync_index, candidates);
+    append_fence_record_candidates(result, candidates);
     if (!options.test_kernel_name_filter.empty()) {
       std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
-        return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
+        return candidate.fence_event->container_name.find(options.test_kernel_name_filter) ==
                std::string::npos;
       });
     }
@@ -754,8 +752,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           candidate.kernel_descriptor_file_offset,
           fence_record_scratch_count(candidate.communication_site, state.arch), nullptr,
           &candidate.communication_site);
-      if (candidate.patch_text_offset != candidate.fence.text_offset)
-        plan.semantic_text_offset = candidate.fence.text_offset;
+      if (candidate.patch_text_offset != candidate.fence_event->text_offset)
+        plan.semantic_text_offset = candidate.fence_event->text_offset;
       result.resource_plans.push_back(std::move(plan));
     }
   }

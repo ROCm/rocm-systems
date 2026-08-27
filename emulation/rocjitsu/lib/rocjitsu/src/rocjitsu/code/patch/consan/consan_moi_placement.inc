@@ -1996,7 +1996,7 @@ struct MoiResourcePlanningState {
       for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
         query_offsets.insert(intent.physical_site.original_text_offset);
       for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates)
-        query_offsets.insert(fence.text_offset);
+        query_offsets.insert(fence.fence_event.physical.original_text_offset);
       for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
         if (kernel.has_text_range)
           query_offsets.insert(kernel.entry_text_offset);

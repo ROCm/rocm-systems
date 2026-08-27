@@ -3184,9 +3184,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   }
   const bool requires_raw_th = !consan_uses_gfx9_cdna_encoding(arch);
-  if (!address_plan.supported() || !candidate.fence.raw_scope ||
+  if (!address_plan.supported() || !candidate.communication_site.raw_scope ||
       (requires_raw_th && !candidate.communication_site.raw_th) ||
-      candidate.fence.communication_event_identity.empty()) {
+      candidate.association == nullptr || !candidate.association->communication_event ||
+      candidate.fence_event == nullptr) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
     return std::nullopt;
   }
@@ -3318,9 +3319,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t record_base = base + fence_records_offset;
-  const ConSanMoiFenceEventKind kind = candidate.fence.memory_role == ConSanSyncMemoryRole::Release
-                                           ? ConSanMoiFenceEventKind::Release
-                                           : ConSanMoiFenceEventKind::Acquire;
+  const ConSanMoiFenceEventKind kind =
+      candidate.association->memory_role == ConSanSyncMemoryRole::Release
+          ? ConSanMoiFenceEventKind::Release
+          : ConSanMoiFenceEventKind::Acquire;
   if (!options.moi_exec_save_sgpr) {
     errors.emplace_back("ConSan MOI dynamic fence record requires scalar EXEC state");
     return std::nullopt;
@@ -3409,14 +3411,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
              *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
         !append_dynamic_fence_store_u32_literal(
             record_words, record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
-            static_cast<uint32_t>(candidate.fence.text_offset), slot_vgpr, *options.scratch_vgpr,
-            arch) ||
+            static_cast<uint32_t>(candidate.fence_event->text_offset), slot_vgpr,
+            *options.scratch_vgpr, arch) ||
         !append_dynamic_fence_store_u32_literal(
             record_words, record_base + offsetof(ConSanMoiFenceRecord, kind),
             static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch) ||
         !append_dynamic_fence_store_u32_literal(
             record_words, record_base + offsetof(ConSanMoiFenceRecord, scope),
-            *candidate.fence.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
+            *candidate.communication_site.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
         !append_dynamic_fence_store_u32_literal(
             record_words, record_base + offsetof(ConSanMoiFenceRecord, semantics),
             candidate.communication_site.raw_th.value_or(0u), slot_vgpr, *options.scratch_vgpr,

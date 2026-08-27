@@ -12074,8 +12074,9 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_EQ(fence->anchor_offset,
-            result.program_inventory.sync().moi_fence_candidates.front().text_offset);
+  EXPECT_EQ(fence->anchor_offset, result.program_inventory.sync()
+                                      .moi_fence_candidates.front()
+                                      .fence_event.physical.original_text_offset);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
@@ -12171,7 +12172,8 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   for (ConSanMoiFenceCandidate &candidate :
        stale_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible());
-    candidate.communication_event_identity += "|stale";
+    ASSERT_TRUE(candidate.communication_event);
+    ++candidate.communication_event->physical.original_text_offset;
   }
   inventory.program_inventory = stale_inventory.view();
 
@@ -12218,9 +12220,10 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   for (const ConSanMoiFenceCandidate &candidate :
        unowned_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible());
+    ASSERT_TRUE(candidate.communication_event);
     auto &sync_events = unowned_inventory.synchronization().sync_events;
-    const auto event = std::ranges::find(sync_events, candidate.communication_event_identity,
-                                         &ConSanSyncEvent::identity);
+    const auto event = std::ranges::find(sync_events, *candidate.communication_event,
+                                         &ConSanSyncEvent::semantic_id);
     ASSERT_NE(event, sync_events.end());
     event->execution_owners.clear();
   }

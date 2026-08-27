@@ -2125,13 +2125,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       continue;
 
     ConSanMoiFenceCandidate candidate;
-    candidate.identity = fence.identity + "|moi-fence-candidate";
-    candidate.fence_event_identity = fence.identity;
-    candidate.container_name = fence.container_name;
-    candidate.in_kernel = fence.in_kernel;
-    candidate.text_offset = fence.text_offset;
-    candidate.file_offset = fence.file_offset;
-    candidate.size = fence.size;
+    candidate.fence_event = fence.semantic_id;
 
     const auto membership = sequence_by_event_identity.find(fence.identity);
     if (membership == sequence_by_event_identity.end() || !membership->second.unique ||
@@ -2240,10 +2234,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       continue;
     }
 
-    candidate.communication_event_identity = communication->identity;
-    candidate.communication_address_source = communication->address_source;
-    candidate.communication_static_byte_offset = communication->static_byte_offset;
-    candidate.raw_scope = communication->raw_scope;
+    candidate.communication_event = communication->semantic_id;
     candidate.association = ConSanFenceAssociation::Qualified;
     candidates.push_back(std::move(candidate));
   }

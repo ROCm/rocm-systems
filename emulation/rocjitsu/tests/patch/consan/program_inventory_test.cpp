@@ -341,8 +341,9 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   recipe.sequence_identity = sequence.identity;
   build.communication_address_recipes.push_back(recipe);
   ConSanMoiFenceCandidate fence;
-  fence.identity = "fence";
+  fence.fence_event = event.semantic_id;
   fence.sequence_identity = sequence.identity;
+  fence.communication_event = event.semantic_id;
   fence.association = ConSanFenceAssociation::Qualified;
   build.moi_fence_candidates.push_back(fence);
 
@@ -361,6 +362,10 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ASSERT_EQ(view.communication_address_recipes.size(), 1u);
   ASSERT_EQ(view.moi_fence_candidates.size(), 1u);
   EXPECT_TRUE(view.sync_events.front().semantic_id.valid());
+  EXPECT_EQ(view.find_event(event.semantic_id), &view.sync_events.front());
+  SemanticSiteId absent_event = event.semantic_id;
+  ++absent_event.physical.original_text_offset;
+  EXPECT_EQ(view.find_event(absent_event), nullptr);
   EXPECT_TRUE(view.sync_sequences.front().member_semantic_ids.front().valid());
   EXPECT_TRUE(view.communication_address_recipes.front().supported());
   EXPECT_TRUE(view.moi_fence_candidates.front().eligible());
@@ -374,7 +379,8 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_groups.front().identity, "lifecycle");
   EXPECT_EQ(moved.program_inventory.sync().communication_address_recipes.front().sequence_identity,
             "sequence");
-  EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().identity, "fence");
+  EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().fence_event,
+            event.semantic_id);
 }
 
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
@@ -399,7 +405,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   recipe.sequence_identity = "original-sequence";
   original.synchronization().communication_address_recipes.push_back(recipe);
   ConSanMoiFenceCandidate fence;
-  fence.identity = "original-fence";
+  fence.fence_event = event.semantic_id;
   original.synchronization().moi_fence_candidates.push_back(fence);
   original.publish_decoded_accesses(bytes);
   const ProgramInventory published = original.view();

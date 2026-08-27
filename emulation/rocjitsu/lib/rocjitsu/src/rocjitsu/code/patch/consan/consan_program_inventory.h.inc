@@ -234,6 +234,14 @@ struct SynchronizationInventoryView {
   std::span<const ConSanCommunicationAddressRecipe> communication_address_recipes;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
 
+  /// Resolve one typed event identity to its sole authoritative record. An
+  /// absent identity returns null; physical aliases have already been
+  /// canonicalized before this immutable view is published.
+  [[nodiscard]] const ConSanSyncEvent *find_event(const SemanticSiteId &identity) const {
+    const auto event = std::ranges::find(sync_events, identity, &ConSanSyncEvent::semantic_id);
+    return event == sync_events.end() ? nullptr : &*event;
+  }
+
   /// Return whether semantic analysis published no synchronization-derived
   /// records of any kind.
   [[nodiscard]] bool empty() const {

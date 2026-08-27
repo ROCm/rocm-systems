@@ -323,10 +323,15 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_identities.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-  EXPECT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
-  EXPECT_EQ(
-      result.program_inventory.sync().moi_fence_candidates.front().communication_address_source,
-      ConSanSyncAddressSource::BufferResource);
+  const ConSanMoiFenceCandidate &fence =
+      result.program_inventory.sync().moi_fence_candidates.front();
+  EXPECT_TRUE(fence.eligible());
+  ASSERT_TRUE(fence.communication_event);
+  const auto communication =
+      std::ranges::find(result.program_inventory.sync().sync_events, *fence.communication_event,
+                        &ConSanSyncEvent::semantic_id);
+  ASSERT_NE(communication, result.program_inventory.sync().sync_events.end());
+  EXPECT_EQ(communication->address_source, ConSanSyncAddressSource::BufferResource);
 }
 
 TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {

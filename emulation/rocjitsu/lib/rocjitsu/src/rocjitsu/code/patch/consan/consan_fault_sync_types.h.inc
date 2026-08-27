@@ -396,28 +396,25 @@ consan_fence_association_name(ConSanFenceAssociation association) {
 static_assert(kConSanFenceAssociations.size() ==
               static_cast<size_t>(ConSanFenceAssociation::Count));
 
-/// A cache/fence instruction and its immutable addressed-sequence association.
+/// Immutable association between one cache/fence event and an addressed
+/// synchronization sequence.
 ///
-/// Selection never invents a numeric communication token:
-/// `communication_event_identity` names the unique address-bearing atomic or
-/// ordinary-memory event whose effective address a later policy may request.
-/// Non-qualified records deliberately retain empty association fields and
-/// remain in inventory so policy can explain why the event is outside the
-/// observation contract.
+/// The two typed event identities refer back to the authoritative
+/// `ConSanSyncEvent` inventory. This record deliberately does not copy the
+/// events' container, instruction, address, or scope facts. A qualified record
+/// names the unique address-bearing atomic or ordinary-memory event whose
+/// effective address a later policy may request. Non-qualified records retain
+/// no communication event and remain in inventory so policy can explain why
+/// the fence is outside the observation contract.
 struct ConSanMoiFenceCandidate {
-  std::string identity;
+  /// Original cache/fence event being associated.
+  SemanticSiteId fence_event;
+  /// Stable identity of the unique synchronization sequence, when one exists.
   std::string sequence_identity;
-  std::string fence_event_identity;
-  std::string communication_event_identity;
-  std::string container_name;
-  bool in_kernel = true;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
+  /// Unique address-bearing event selected from the sequence when qualified.
+  std::optional<SemanticSiteId> communication_event;
+  /// Release/acquire role contributed by this fence within the sequence.
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
-  ConSanSyncAddressSource communication_address_source = ConSanSyncAddressSource::NotApplicable;
-  std::optional<int64_t> communication_static_byte_offset;
-  std::optional<uint32_t> raw_scope;
   /// Typed result of shared sequence association.
   ConSanFenceAssociation association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
 

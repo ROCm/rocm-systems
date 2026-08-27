@@ -3291,8 +3291,7 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
-  const std::string &communication_identity =
-      result.program_inventory.sync().sync_events[1].identity;
+  const ConSanSyncEvent &communication = result.program_inventory.sync().sync_events[1];
   const ConSanMoiFenceCandidate &release = result.program_inventory.sync().moi_fence_candidates[0];
   const ConSanMoiFenceCandidate &acquire = result.program_inventory.sync().moi_fence_candidates[1];
   EXPECT_TRUE(release.eligible()) << consan_fence_association_name(release.association);
@@ -3303,16 +3302,13 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
             result.program_inventory.sync().sync_sequences.front().identity);
   EXPECT_EQ(acquire.sequence_identity,
             result.program_inventory.sync().sync_sequences.front().identity);
-  EXPECT_EQ(release.communication_event_identity, communication_identity);
-  EXPECT_EQ(acquire.communication_event_identity, communication_identity);
-  EXPECT_EQ(release.communication_address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  EXPECT_EQ(acquire.communication_address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  ASSERT_TRUE(release.raw_scope);
-  ASSERT_TRUE(acquire.raw_scope);
-  EXPECT_EQ(*release.raw_scope, 2u);
-  EXPECT_EQ(*acquire.raw_scope, 2u);
-  EXPECT_FALSE(release.identity.empty());
-  EXPECT_FALSE(acquire.identity.empty());
+  EXPECT_EQ(release.communication_event, communication.semantic_id);
+  EXPECT_EQ(acquire.communication_event, communication.semantic_id);
+  EXPECT_EQ(communication.address_source, ConSanSyncAddressSource::GlobalScalarVector);
+  ASSERT_TRUE(communication.raw_scope);
+  EXPECT_EQ(*communication.raw_scope, 2u);
+  EXPECT_TRUE(release.fence_event.valid());
+  EXPECT_TRUE(acquire.fence_event.valid());
 }
 
 TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
@@ -3396,11 +3392,15 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
       result.program_inventory.sync().moi_fence_candidates.front();
   EXPECT_TRUE(candidate.eligible()) << consan_fence_association_name(candidate.association);
   EXPECT_EQ(candidate.memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(candidate.communication_event_identity,
-            result.program_inventory.sync().sync_events.back().identity);
-  EXPECT_EQ(candidate.communication_static_byte_offset, 4u);
-  ASSERT_TRUE(candidate.raw_scope);
-  EXPECT_EQ(*candidate.raw_scope, 2u);
+  ASSERT_TRUE(candidate.communication_event);
+  EXPECT_EQ(*candidate.communication_event,
+            result.program_inventory.sync().sync_events.back().semantic_id);
+  const ConSanSyncEvent *communication =
+      result.program_inventory.sync().find_event(*candidate.communication_event);
+  ASSERT_NE(communication, nullptr);
+  EXPECT_EQ(communication->static_byte_offset, 4u);
+  ASSERT_TRUE(communication->raw_scope);
+  EXPECT_EQ(*communication->raw_scope, 2u);
 }
 
 TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
@@ -3549,8 +3549,8 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
                                &ConSanMoiFenceCandidate::eligible),
             1u);
   EXPECT_EQ(admitted->memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(admitted->communication_event_identity,
-            result.program_inventory.sync().sync_events.front().identity);
+  EXPECT_EQ(admitted->communication_event,
+            result.program_inventory.sync().sync_events.front().semantic_id);
   const auto prefix = std::ranges::find(result.program_inventory.sync().moi_fence_candidates, false,
                                         &ConSanMoiFenceCandidate::eligible);
   ASSERT_NE(prefix, result.program_inventory.sync().moi_fence_candidates.end());
@@ -3578,8 +3578,7 @@ TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
        result.program_inventory.sync().moi_fence_candidates) {
     EXPECT_FALSE(candidate.eligible());
     EXPECT_EQ(candidate.association, ConSanFenceAssociation::NotAddressedCommunication);
-    EXPECT_TRUE(candidate.communication_event_identity.empty());
-    EXPECT_FALSE(candidate.raw_scope);
+    EXPECT_FALSE(candidate.communication_event);
   }
 }
 
@@ -3610,9 +3609,7 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
   EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
   EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates.front().association,
             ConSanFenceAssociation::NotAddressedCommunication);
-  EXPECT_TRUE(result.program_inventory.sync()
-                  .moi_fence_candidates.front()
-                  .communication_event_identity.empty());
+  EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().communication_event);
 }
 
 TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {

@@ -198,19 +198,10 @@ make_fence_candidate(const ConSanSyncEvent &communication, const ConSanSyncEvent
                      const ConSanSyncSequence &sequence,
                      ConSanFenceAssociation association = ConSanFenceAssociation::Qualified) {
   return {
-      .identity = "fence-candidate",
+      .fence_event = fence.semantic_id,
       .sequence_identity = sequence.identity,
-      .fence_event_identity = fence.identity,
-      .communication_event_identity = communication.identity,
-      .container_name = communication.container_name,
-      .in_kernel = true,
-      .text_offset = fence.text_offset,
-      .file_offset = fence.file_offset,
-      .size = fence.size,
+      .communication_event = communication.semantic_id,
       .memory_role = fence.memory_role,
-      .communication_address_source = communication.address_source,
-      .communication_static_byte_offset = std::nullopt,
-      .raw_scope = sequence.raw_scope,
       .association = association,
   };
 }
@@ -480,7 +471,6 @@ TEST(ConSanAtomicFencePolicy, Gfx1250RecordReplayAdmitsExactBufferOrdinaryFenceC
   sequence.memory_role = ConSanSyncMemoryRole::Acquire;
   ConSanMoiFenceCandidate candidate = make_fence_candidate(communication, fence, sequence);
   candidate.memory_role = ConSanSyncMemoryRole::Acquire;
-  candidate.communication_address_source = ConSanSyncAddressSource::BufferResource;
 
   const auto make_inventory = [&](ConSanOrdinaryMemorySite site) {
     return build_atomic_inventory({communication, fence}, {sequence}, {}, {std::move(site)},
@@ -760,7 +750,7 @@ TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) 
   std::vector missing_sequences{make_atomic_sequence(missing_events.front())};
   ConSanMoiFenceCandidate missing_fence =
       make_fence_candidate(missing_events[0], missing_events[1], missing_sequences[0]);
-  missing_fence.communication_event_identity = "absent-communication-event";
+  missing_fence.communication_event->physical.original_text_offset = 999u;
   const ConSanAtomicFencePolicyResult missing_communication = plan_consan_atomic_fence_observation(
       build_atomic_inventory(std::move(missing_events), std::move(missing_sequences), {},
                              {make_global_store_site({})}, {std::move(missing_fence)}),
@@ -775,10 +765,10 @@ TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) 
 TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
   std::vector events{make_ordinary_store_event(), make_fence_event()};
   std::vector sequences{make_atomic_sequence(events.front())};
+  events[1].source_containers = {"atomic_kernel", "aliased_kernel"};
   ConSanMoiFenceCandidate first = make_fence_candidate(events[0], events[1], sequences[0]);
   ConSanMoiFenceCandidate conflict = first;
-  conflict.container_name = "aliased_kernel";
-  conflict.size += sizeof(uint32_t);
+  conflict.memory_role = ConSanSyncMemoryRole::Acquire;
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
       build_atomic_inventory(std::move(events), std::move(sequences), {},
                              {make_global_store_site({})}, {std::move(first), std::move(conflict)}),
