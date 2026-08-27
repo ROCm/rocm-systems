@@ -3373,3 +3373,167 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturns
   EXPECT_EQ(1, fflushHook.calls);
   EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
 }
+
+
+// ===========================================================================
+// main (renamed rasClientMain here): the only place the file's five helpers are
+// composed. Each helper is tested on its own above, so these tests assert only
+// main's own bookkeeping -- which worker ran, what it returned, and the exact
+// close(sock) sequence per arm.
+// ===========================================================================
+
+namespace {
+
+// Not the fakes' default 42 and not a std stream fd, so a g_closedFds match
+// cannot be a coincidence.
+constexpr int kMainSockFd = 57;
+
+// The handshake connectToNCCL always sends before any worker command.
+const std::string kMainClientHello = "CLIENT PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n";
+
+// Drives connectToNCCL to success on the first addrinfo entry, handing back
+// kMainSockFd. `timeout` stays -1 so the optional TIMEOUT exchange is skipped.
+void MainArmSuccessfulConnect() {
+  g_nextSocketFd = kMainSockFd;
+  ScriptReadData("SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n");
+}
+
+}  // namespace
+
+// connectToNCCL fails before any socket exists: nothing to close, no worker.
+TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsBeforeAnySocket_ReturnsOneAndClosesNothing) {
+  g_getaddrinfoResult = EAI_NONAME;
+  RasArgv args{"rccl-ras-client"};
+
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook socketHook(g_socket, [](int, int, int) { return kMainSockFd; });
+    log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+    EXPECT_EQ(0, socketHook.calls);
+  }
+
+  EXPECT_EQ(1, rc);
+  const std::string resolveLine =
+      std::string("Resolving ") + kDefaultHost + ":" + kDefaultPort + ": " + gai_strerror(EAI_NONAME) + "\n";
+  EXPECT_TRUE(LogHas(log, resolveLine.c_str())) << log;
+  EXPECT_TRUE(g_closedFds.empty()) << g_closedFds.size();
+  EXPECT_TRUE(g_writtenData.empty()) << g_writtenData;
+  EXPECT_EQ(-1, sock);
+}
+
+// connectToNCCL fails with the socket already open: its own fail: label closes
+// it, main adds no second close, and `sock` is left holding the closed fd.
+TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsAfterSocketOpened_ClosesOnceAndLeavesSockStale) {
+  g_nextSocketFd = kMainSockFd;
+  ScriptReadData("HELLO SAILOR\n");
+  RasArgv args{"rccl-ras-client"};
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: HELLO SAILOR\n")) << log;
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
+  EXPECT_EQ(kMainClientHello, g_writtenData);
+  EXPECT_TRUE(g_stdoutData.empty()) << g_stdoutData;
+  EXPECT_EQ(kMainSockFd, sock);
+}
+
+// setOutputFormat failing: main owns the close, and no worker command follows.
+TEST_F(RasClientMicrotest, RasClientMain_SetOutputFormatFails_ClosesSockOnceAndReturnsOne) {
+  MainArmSuccessfulConnect();
+  format = "json";
+  ScriptReadData("NOPE\n");
+  RasArgv args{"rccl-ras-client"};
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: NOPE\n")) << log;
+  EXPECT_EQ(kMainClientHello + "SET FORMAT json\n", g_writtenData);
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
+  EXPECT_TRUE(g_stdoutData.empty()) << g_stdoutData;
+}
+
+// monitorMode clear selects getNCCLStatus: only it sends "STATUS\n" and only it
+// streams a non-"OK\n" first reply straight to stdout.
+TEST_F(RasClientMicrotest, RasClientMain_MonitorModeClear_RunsGetNcclStatusAndReturnsZero) {
+  MainArmSuccessfulConnect();
+  ScriptReadData("peer 0 ok\n");
+  RasArgv args{"rccl-ras-client"};
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
+  EXPECT_EQ("peer 0 ok\n", g_stdoutData);
+  EXPECT_FALSE(LogHas(log, "RAS Monitor Mode")) << log;
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
+}
+
+// monitorMode set selects monitorNCCLEvents: only it sends "MONITOR\n", only it
+// prints the monitor banner, and it consumes the "OK\n" ack rather than echoing
+// it. Driven through argv, so deleting the parseArgs call also fails this test.
+TEST_F(RasClientMicrotest, RasClientMain_MonitorFlagInArgv_RunsMonitorNcclEventsAndReturnsZero) {
+  MainArmSuccessfulConnect();
+  ScriptReadData("OK\n");
+  ScriptReadData("peer 3 left\n");
+  RasArgv args{"rccl-ras-client", "--monitor"};
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_TRUE(monitorMode);
+  EXPECT_EQ(kMainClientHello + "MONITOR\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "RAS Monitor Mode - watching for peer changes (Ctrl+C to exit)...\n")) << log;
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+  EXPECT_EQ("peer 3 left\n", g_stdoutData);
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
+}
+
+// Worker returning non-zero: main closes exactly once and reports 1.
+TEST_F(RasClientMicrotest, RasClientMain_WorkerReturnsNonZero_ClosesSockOnceAndReturnsOne) {
+  MainArmSuccessfulConnect();
+  ScriptRead(-1, ECONNRESET, "");
+  RasArgv args{"rccl-ras-client"};
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
+  const std::string readLine = std::string("read socket: ") + strerror(ECONNRESET) + "\n";
+  EXPECT_TRUE(LogHas(log, readLine.c_str())) << log;
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, g_closedFds);
+  EXPECT_TRUE(g_stdoutData.empty()) << g_stdoutData;
+}
+
+// The final close failing turns an otherwise fully successful run into a 1.
+TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturnsOne) {
+  MainArmSuccessfulConnect();
+  ScriptReadData("peer 0 ok\n");
+  RasArgv args{"rccl-ras-client"};
+
+  std::vector<int> closed;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook closeHook(g_close, [&](int fd) {
+      closed.push_back(fd);
+      errno = EIO;
+      return -1;
+    });
+    log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+    EXPECT_EQ(1, closeHook.calls);
+  }
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ(std::vector<int>{kMainSockFd}, closed);
+  const std::string closeLine = std::string("close socket: ") + strerror(EIO) + "\n";
+  EXPECT_TRUE(LogHas(log, closeLine.c_str())) << log;
+  EXPECT_EQ("peer 0 ok\n", g_stdoutData);
+}
