@@ -449,6 +449,9 @@ representation rather than a mutable rollout mode: each planned patch owns
 the optional local layout, and semantic fallbacks select the external shadow
 without a parallel global flag. The unreachable external-only capacity
 preflight and its mechanism-only test are gone.
+Per-kernel VGPR scratch chosen solely to initialize scalar persistent state is
+also a lowering-attempt-local placement-to-prologue handoff; it no longer
+lives in or is copied with the mutable options object.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

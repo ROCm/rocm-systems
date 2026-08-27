@@ -628,6 +628,13 @@ properties, so no code-object-wide rollout flag can select a legacy layout or
 be reconstructed from an unrelated patch. Atomic-only objects use the
 independent access-inventory fact to avoid reserving access-only scalar state.
 
+Persistent scalar owner/epoch placement similarly returns its per-kernel
+entry-scratch assignments to the one lowering attempt that immediately emits
+the entry prologues. Those descriptor-indexed temporaries are not request
+options, are not copied into access or synchronization candidates, and do not
+survive the prologue stage. The durable result remains the emitted prologue
+patch and the completed scalar allocation it initializes.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

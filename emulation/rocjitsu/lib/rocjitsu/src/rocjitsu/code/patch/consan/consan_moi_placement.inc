@@ -1465,15 +1465,6 @@ find_moi_persistent_vgpr_assignment(const ConSanOptions &options, uint64_t descr
   return assignment == options.moi_persistent_vgpr_assignments.end() ? nullptr : &*assignment;
 }
 
-[[nodiscard]] const ConSanMoiPrologueScratchVgprAssignment *
-find_moi_prologue_scratch_vgpr_assignment(const ConSanOptions &options,
-                                          uint64_t descriptor_offset) {
-  const auto assignment =
-      std::ranges::find(options.moi_prologue_scratch_vgpr_assignments, descriptor_offset,
-                        &ConSanMoiPrologueScratchVgprAssignment::descriptor_file_offset);
-  return assignment == options.moi_prologue_scratch_vgpr_assignments.end() ? nullptr : &*assignment;
-}
-
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
 find_moi_transient_sgpr_assignment(const ConSanOptions &options, uint64_t descriptor_offset) {
   const auto assignment =
@@ -5833,9 +5824,10 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   return false;
 }
 
-[[nodiscard]] bool
-configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransformArtifacts &result,
-                                         const MoiResourcePlanningState &planning_state) {
+[[nodiscard]] bool configure_automatic_moi_persistent_vgprs(
+    ConSanOptions &options, ConSanTransformArtifacts &result,
+    const MoiResourcePlanningState &planning_state,
+    std::vector<ConSanMoiPrologueScratchVgprAssignment> &prologue_scratch_assignments) {
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   const bool has_supported_sampled_sync =
@@ -6145,7 +6137,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransform
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
         options.automatic_moi_persistent_sgprs = true;
-        options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
+        prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
             std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
@@ -6246,7 +6238,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransform
         assign_scalar_persistent_state(*persistent_hole);
         options.moi_init_owner_epoch = true;
         options.automatic_moi_persistent_sgprs = true;
-        options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
+        prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
             std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
@@ -6343,7 +6335,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransform
           };
           options.moi_init_owner_epoch = true;
           options.automatic_moi_persistent_vgprs = true;
-          options.moi_prologue_scratch_vgpr_assignments.clear();
+          prologue_scratch_assignments.clear();
           result.warnings.emplace_back(
               "ConSan MOI assigned hybrid persistent vector owner/epoch and scalar "
               "exact-workgroup-tuple state to proven-unused CDNA register holes" +
@@ -6484,7 +6476,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransform
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
         options.automatic_moi_persistent_sgprs = true;
-        options.moi_prologue_scratch_vgpr_assignments = std::move(*prologue_scratch);
+        prologue_scratch_assignments = std::move(*prologue_scratch);
         result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
                                      std::string(needs_workgroup_key ? "/workgroup-key" : "") +
                                      " state s" + std::to_string(base) + ":s" +
@@ -6845,7 +6837,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanTransform
       assign_scalar_persistent_state(base);
       options.moi_init_owner_epoch = true;
       options.automatic_moi_persistent_sgprs = true;
-      options.moi_prologue_scratch_vgpr_assignments = std::move(*prologue_scratch);
+      prologue_scratch_assignments = std::move(*prologue_scratch);
       result.warnings.emplace_back(
           "ConSan MOI assigned persistent scalar " +
           std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +

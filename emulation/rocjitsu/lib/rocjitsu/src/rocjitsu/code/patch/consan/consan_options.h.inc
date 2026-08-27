@@ -750,7 +750,6 @@ struct ConSanOptions : ConSanRequest,
   /// Internal marker set when a full CDNA ordinary-VGPR bank forces
   /// persistent MOI wave identity into uniform scalar state instead.
   bool automatic_moi_persistent_sgprs = false;
-  std::vector<ConSanMoiPrologueScratchVgprAssignment> moi_prologue_scratch_vgpr_assignments;
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;

@@ -501,7 +501,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           // vectors keeps the per-site copy constant-size in dense objects.
           resolved.moi_transient_sgpr_assignments.clear();
           resolved.moi_persistent_vgpr_assignments.clear();
-          resolved.moi_prologue_scratch_vgpr_assignments.clear();
           cached->second = std::move(resolved);
         }
       }

@@ -737,7 +737,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // admission plan, not merely on the user's request to inventory barriers or
   // atomics. A code object containing only rejected sync sites remains
   // access-only instrumentation.
-  if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
+  std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments;
+  if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state,
+                                               prologue_scratch_assignments))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   freeze_moi_register_allocation(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
@@ -791,7 +793,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // owner/epoch prologue. Emit it before the large atomic helpers so the
     // original kernel entry can reach it without consuming a scarce local
     // branch island.
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
+                                         prologue_scratch_assignments, arch, result);
     owner_epoch_prologue_applied_early =
         std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
           return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -859,7 +862,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       automatic_record_replay_inventory;
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!prologue_needs_consumer || result.modified()))
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
+                                         prologue_scratch_assignments, arch, result);
   if (result.errors.empty())
     freeze_moi_register_allocation(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {

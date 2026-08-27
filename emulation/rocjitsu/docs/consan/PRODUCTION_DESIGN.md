@@ -5942,6 +5942,25 @@ analysis completed.
   cross-engine smoke also passes. E2E validation remains outside this deletion
   work.
 
+### Slice 5CU: keep scalar-prologue scratch attempt-local
+
+- **One explicit stage handoff:** Persistent-state placement returns the
+  descriptor-indexed entry VGPR scratch assignments to the current MOI
+  lowering attempt. The two possible owner/epoch prologue emission points
+  consume that same vector directly.
+- **Completed deletion:** `ConSanOptions` no longer owns or copies
+  `moi_prologue_scratch_vgpr_assignments`. Per-site Inline caches no longer
+  clear an unrelated code-object vector, and the one-consumer lookup wrapper
+  is gone. The assignment type remains the focused contract between placement
+  and prologue emission.
+- **Accounting:** Implementation files add 24 and delete 28 physical lines
+  after formatting, a net deletion of four.
+- **Checked-in gate:** All 35 focused prologue, scalar-persistence, full-VGPR,
+  and entry-scratch host tests pass. All 1,530 ConSan host tests, all 172
+  HSA-hook tests, and all 2,878 generated simulator-device tests across the
+  five supported targets also pass. E2E validation remains outside this
+  deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

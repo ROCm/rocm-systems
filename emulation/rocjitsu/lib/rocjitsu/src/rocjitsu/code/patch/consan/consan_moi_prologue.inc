@@ -2339,9 +2339,10 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
   return false;
 }
 
-void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
-                                          const ConSanOptions &options, rj_code_arch_t arch,
-                                          ConSanTransformArtifacts &result) {
+void try_apply_owner_epoch_prologue_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
+    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_init_owner_epoch)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -2474,9 +2475,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       return;
     }
     if (options.automatic_moi_persistent_sgprs) {
-      const auto *scratch =
-          find_moi_prologue_scratch_vgpr_assignment(options, kernel.descriptor_file_offset);
-      if (!scratch) {
+      const auto scratch =
+          std::ranges::find(prologue_scratch_assignments, kernel.descriptor_file_offset,
+                            &ConSanMoiPrologueScratchVgprAssignment::descriptor_file_offset);
+      if (scratch == prologue_scratch_assignments.end()) {
         result.errors.emplace_back(
             "ConSan MOI scalar owner/epoch prologue has no entry-local VGPR scratch for kernel '" +
             kernel.name + "'");
