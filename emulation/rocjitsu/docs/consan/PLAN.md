@@ -512,6 +512,16 @@ resource/routing telemetry copies are deleted, while evidence, shadow layout,
 borrowed-entry state, and relocated guest position remain with their semantic
 owners.
 
+Target-family cleanup now consumes the production profile instead of spelling
+current product lists inside lowerers. GFX12 encoding, CDNA execution family,
+call form, selectable VGPR banks, target admission, and kernarg-preload
+overflow recovery replace 43 local target-name predicates across inventory,
+policy, resource planning, emission, and validation. Inline epoch barriers
+also publish one planned resource transaction across direct, dense, and shared
+dispatcher placement, deleting three telemetry copies and three private-extent
+loops. This is a consolidation of existing target facts, not a new target
+adapter or a change in supported behavior.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

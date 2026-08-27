@@ -629,11 +629,10 @@
   // base+slot*stride for every field, replicating substantial address
   // arithmetic in every access probe even though all stores target one cold
   // diagnostic record.
-  const uint16_t diagnostic_address_vgpr = compact_local_diagnostic &&
-                                                   arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-                                                   arch != ROCJITSU_CODE_ARCH_CDNA4
-                                               ? static_cast<uint16_t>(*options.scratch_vgpr + 11u)
-                                               : *options.scratch_vgpr;
+  const uint16_t diagnostic_address_vgpr =
+      compact_local_diagnostic && !consan_uses_gfx9_cdna_encoding(arch)
+          ? static_cast<uint16_t>(*options.scratch_vgpr + 11u)
+          : *options.scratch_vgpr;
   if (!append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
                                                 diagnostic_address_vgpr, arch)) {
     return false;

@@ -466,10 +466,10 @@ private:
     const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.file_offset);
     if (!word0)
       return std::nullopt;
-    const bool cdna3_or_cdna4 =
-        storage_->arch == ROCJITSU_CODE_ARCH_CDNA3 || storage_->arch == ROCJITSU_CODE_ARCH_CDNA4;
     const uint32_t mask =
-        cdna3_or_cdna4 && site.kind == ConSanLdsAccessKind::Atomic ? 0xffu : 0xffffu;
+        consan_uses_gfx9_cdna_encoding(storage_->arch) && site.kind == ConSanLdsAccessKind::Atomic
+            ? 0xffu
+            : 0xffffu;
     return static_cast<int64_t>(*word0 & mask);
   }
 

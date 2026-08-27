@@ -171,12 +171,13 @@ classify_moi_access_support(const ConSanAccessInventorySite &access, rj_code_arc
     return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
   if (!access.operands.raw_ioffset)
     return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
-  if (*access.operands.raw_ioffset != 0 && !is_rdna4_family_arch(arch))
+  if (*access.operands.raw_ioffset != 0 && !consan_uses_gfx12_encoding(arch))
     return ConSanAccessPolicyReason::NonzeroFlatOffset;
-  if (is_rdna4_family_arch(arch) &&
+  if (consan_uses_gfx12_encoding(arch) &&
       (!access.operands.raw_saddr || !access.operands.raw_scale_offset))
     return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
-  const bool scalar_vector_address = is_rdna4_family_arch(arch) && access.operands.raw_saddr &&
+  const bool scalar_vector_address = consan_uses_gfx12_encoding(arch) &&
+                                     access.operands.raw_saddr &&
                                      *access.operands.raw_saddr != vector_flat_no_saddr(arch);
   if (access.operands.address_vgpr && *access.operands.address_vgpr >= 255u &&
       !scalar_vector_address)

@@ -1117,7 +1117,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 [[nodiscard]] bool
 candidate_uses_gfx12_scalar_vector_flat_address(const ConSanMoiCandidate &candidate,
                                                 rj_code_arch_t arch) {
-  return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
+  return consan_uses_gfx12_encoding(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
          candidate.operands.raw_saddr &&
          !is_vector_flat_no_saddr(*candidate.operands.raw_saddr, arch);
 }
@@ -1125,7 +1125,7 @@ candidate_uses_gfx12_scalar_vector_flat_address(const ConSanMoiCandidate &candid
 [[nodiscard]] bool
 candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &candidate,
                                                       rj_code_arch_t arch) {
-  return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
+  return consan_uses_gfx12_encoding(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
          candidate.operands.raw_saddr && candidate.operands.raw_ioffset &&
          candidate.operands.raw_scale_offset &&
          (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch) ||
@@ -1292,7 +1292,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   const uint16_t flat_offset_address_count =
       gfx12_flat_access_address_scratch_count(candidate, arch);
   const uint16_t dynamic_stack_reservoir_count =
-      is_rdna4_family_arch(arch) && options.moi_dynamic_stack_spill
+      consan_uses_gfx12_encoding(arch) && options.moi_dynamic_stack_spill
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
           : 0u;
   const uint16_t two_address_replay_count =
@@ -4348,9 +4348,9 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
       // borrow initialized guest SGPRs; only the live-through router state
       // must remain liveness-dead. CDNA retains its stricter preload boundary.
       const uint32_t scalar_spill_begin =
-          is_rdna4_family_arch(arch) ? 0u : std::max(initialized_end, liveness_search_floor);
+          consan_uses_gfx12_encoding(arch) ? 0u : std::max(initialized_end, liveness_search_floor);
       const uint32_t router_begin =
-          is_rdna4_family_arch(arch) ? liveness_search_floor : fresh_begin;
+          consan_uses_gfx12_encoding(arch) ? liveness_search_floor : fresh_begin;
       for (uint32_t base = util::align_up(scalar_spill_begin, 2u);
            !selected.valid && base + count <= limit; base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
@@ -4469,12 +4469,12 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
         return std::nullopt;
       };
       const bool all_owners_use_dynamic_stack =
-          is_rdna4_family_arch(arch) && !owners.empty() &&
+          consan_uses_gfx12_encoding(arch) && !owners.empty() &&
           std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
             return owner_uses_dynamic_stack(descriptor_offset).value_or(false);
           });
       const bool all_owners_use_fixed_stack =
-          is_rdna4_family_arch(arch) && !owners.empty() &&
+          consan_uses_gfx12_encoding(arch) && !owners.empty() &&
           std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
             const std::optional<bool> uses_dynamic_stack =
                 owner_uses_dynamic_stack(descriptor_offset);
@@ -4645,8 +4645,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
     // VGPR spill reservoir and reach the appended body using only direct SOPP
     // branch relays. Unlike the compact scalar-spill path above, this remains
     // valid without a dead indirect-PC pair or SCC slot.
-    if (!selected.valid && supports_compact_scalar_spill &&
-        (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+    if (!selected.valid && supports_compact_scalar_spill && consan_arch_is_cdna(arch) &&
         consan_address_free_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
           !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
@@ -5075,7 +5074,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
   // can preserve a transient window in private memory, but entry islands and
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
-  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow &&
+  if (consan_uses_gfx12_encoding(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.moi_inline_access_present && state.valid && saw_site) {
     const size_t ordinary_access_count =
         std::ranges::count_if(candidates, [](const ConSanMoiCandidate &candidate) {
@@ -5215,7 +5214,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
   // This is deliberately more conservative than site-local liveness: the
   // retained window is safe across entry relays and every guest instruction
   // in each admitted kernel.
-  if (is_rdna4_family_arch(arch)) {
+  if (consan_uses_gfx12_encoding(arch)) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -5442,8 +5441,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   // owner and let resource-plan rebuilding reject only incompatible groups.
   // The pair remains code-object-wide, so this does not change the report ABI
   // or any emitted probe sequence.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (consan_arch_is_cdna(arch)) {
     const int32_t last_base =
         static_cast<int32_t>((ordinary_sgpr_limit - dispatch_state_count) & ~1u);
     for (int32_t base = last_base; base >= 20; base -= 2) {
@@ -5826,7 +5824,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   const bool branch_only_scalar_invalid =
       options.moi_inline_branch_only_scalar_spill &&
       (options.moi_engine != ConSanMoiEngine::InlineShadow ||
-       !options.automatic_moi_inline_sgpr_spill || !is_rdna4_family_arch(arch) ||
+       !options.automatic_moi_inline_sgpr_spill || !consan_uses_gfx12_encoding(arch) ||
        !options.moi_exec_save_sgpr || options.moi_inline_indirect_pc_sgpr ||
        options.moi_inline_indirect_scc_sgpr || options.moi_inline_dispatch_key_sgpr ||
        options.moi_inline_call_return_sgpr);
@@ -5852,7 +5850,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
     return options.moi_engine != ConSanMoiEngine::InlineShadow ||
            !options.automatic_moi_inline_sgpr_spill ||
            !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
-           !is_rdna4_family_arch(arch) || base % 2u != 0u ||
+           !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
            static_cast<uint32_t>(base) + 2u > limit ||
            moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, 2u, arch) ||
@@ -5934,8 +5932,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
                !plan.owner_descriptor_file_offsets.empty() &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
-  const bool is_rdna_dispatch_vgpr_arch =
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch);
+  const bool is_rdna_dispatch_vgpr_arch = consan_uses_gfx11_or_gfx12_encoding(arch);
   const bool private_inline_dispatch_incompatible_with_dynamic_stack =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.automatic_moi_private_dispatch_id &&
@@ -6794,14 +6791,13 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       !sampled_requires_persistent_owner &&
       (has_dynamic_lds_owner ||
        (would_grow_descriptor && options.moi_engine != ConSanMoiEngine::InlineShadow));
-  const bool rdna_needs_scalar_epoch =
-      (arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch)) &&
-      !options.test_force_private_epoch &&
-      (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-       ((options.moi_engine == ConSanMoiEngine::Sampled ||
-         options.moi_engine == ConSanMoiEngine::InlineShadow) &&
-        has_dynamic_stack_owner)) &&
-      (persistent_end > kMaxVgprs || prefer_private_epoch);
+  const bool rdna_needs_scalar_epoch = consan_uses_gfx11_or_gfx12_encoding(arch) &&
+                                       !options.test_force_private_epoch &&
+                                       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                        ((options.moi_engine == ConSanMoiEngine::Sampled ||
+                                          options.moi_engine == ConSanMoiEngine::InlineShadow) &&
+                                         has_dynamic_stack_owner)) &&
+                                       (persistent_end > kMaxVgprs || prefer_private_epoch);
   if (rdna_needs_scalar_epoch) {
     const std::string rdna_arch_name = rj_code_arch_name(arch);
     if (needs_persistent_dispatch_vgprs) {

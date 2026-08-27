@@ -553,6 +553,12 @@ which targets share it, and have a focused builder/classifier test plus a device
 contract when observable in execution. An engine-plus-target conditional is a
 design warning unless the semantic facility itself exists only on that target.
 
+Lowerers query these facts through the target profile rather than rebuilding
+target lists. In particular, CDNA family, GFX11/GFX12 encoding, selectable
+VGPR-bank, direct-call form, and kernarg-preload overflow recovery are distinct
+queries: two targets that share an encoding do not thereby share an ABI, and a
+new target joins a shared path by declaring the required fact in its profile.
+
 ## Engine-to-component relationships
 
 ```mermaid
@@ -694,6 +700,13 @@ fixed private-segment extent, VGPR spill count, and dynamic-stack addend. The
 caller still owns semantic patch kind, placement, covered events, and
 engine-specific evidence. This keeps validation and later prologue synthesis
 consistent without making telemetry part of resource admission.
+
+Inline epoch barriers have one additional local plan because an epoch-only
+barrier may own descriptors without owning the ordinary scratch transaction.
+Its direct, dense, and shared-dispatcher placements nevertheless publish that
+plan through one local projection and accumulate private descriptor extents
+through one maximum rule. Placement alternatives therefore cannot acquire
+different resource telemetry without changing the plan itself.
 
 The native event emitters still accept the mutable compatibility options.
 `bind_moi_record_event_options` is the one explicit boundary that projects a

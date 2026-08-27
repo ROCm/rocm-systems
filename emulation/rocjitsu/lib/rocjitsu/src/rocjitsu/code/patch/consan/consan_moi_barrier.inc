@@ -1035,6 +1035,34 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
   };
+  // Every direct, dense, and shared-dispatcher placement below publishes the
+  // same resource transaction. Keep that mechanical projection beside the
+  // plan so placement alternatives cannot silently omit private-state facts.
+  const auto note_planned_resource_info = [](ConSanPatchInfo &info,
+                                             const PlannedInlineEpochBarrier &planned) {
+    info.scratch_vgpr = planned.scratch_vgpr;
+    info.persistent_epoch_private_offset = planned.private_epoch_offset;
+    info.persistent_owner_private_offset = planned.private_owner_offset;
+    info.persistent_record_replay_workgroup_private_offsets =
+        planned.private_record_replay_workgroup_offsets;
+    if (planned.persistent_private_state_end != 0u)
+      info.persistent_private_state_end = planned.persistent_private_state_end;
+    info.required_private_segment_size = planned.required_private_bytes;
+    info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
+    if (planned.spill) {
+      info.spilled_vgpr_count = planned.spill->vgpr_count;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
+    }
+  };
+  const auto note_private_requirements = [](MoiDescriptorPrivateRequirements &requirements,
+                                            std::span<const uint64_t> owners,
+                                            uint32_t required_bytes) {
+    for (uint64_t descriptor_offset : owners) {
+      auto [it, inserted] = requirements.emplace(descriptor_offset, required_bytes);
+      if (!inserted)
+        it->second = std::max(it->second, required_bytes);
+    }
+  };
   std::vector<PlannedInlineEpochBarrier> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
   MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
@@ -1123,12 +1151,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           required_private_bytes =
               std::max(required_private_bytes, scalar_spill->total_private_bytes);
         }
-        for (uint64_t descriptor_offset : owners) {
-          auto [it, inserted] =
-              private_requirements.emplace(descriptor_offset, required_private_bytes);
-          if (!inserted)
-            it->second = std::max(it->second, required_private_bytes);
-        }
+        note_private_requirements(private_requirements, owners, required_private_bytes);
         planned_candidates.push_back(PlannedInlineEpochBarrier{
             .candidate = candidate,
             .owner_descriptor_file_offsets = owners,
@@ -1163,12 +1186,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const uint32_t required_private_bytes =
           std::max(access_patch->required_private_segment_size, spill->total_private_bytes);
-      for (uint64_t descriptor_offset : owners) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, required_private_bytes);
-      }
+      note_private_requirements(private_requirements, owners, required_private_bytes);
       planned_candidates.push_back(PlannedInlineEpochBarrier{
           .candidate = candidate,
           .owner_descriptor_file_offsets = owners,
@@ -1276,12 +1294,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           continue;
         required_private_bytes =
             std::max(required_private_bytes, scalar_spill->total_private_bytes);
-        for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-          auto [it, inserted] = visible_evidence_private_requirements.emplace(
-              descriptor_offset, scalar_spill->total_private_bytes);
-          if (!inserted)
-            it->second = std::max(it->second, scalar_spill->total_private_bytes);
-        }
+        note_private_requirements(visible_evidence_private_requirements,
+                                  resources->owner_descriptor_file_offsets,
+                                  scalar_spill->total_private_bytes);
       }
       note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
@@ -1505,15 +1520,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const bool has_spill_backed_dense_router =
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 ||
-            ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
-             (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
+            consan_arch_has_selectable_vgpr_bank(arch) ||
+            (consan_is_capability_arch(arch) &&
+             ((candidate_options.moi_engine == ConSanMoiEngine::InlineShadow &&
+               !consan_uses_gfx11_encoding(arch)) ||
               (candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-               candidate_options.moi_record_replay_dense_barrier_router))) ||
-            ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-              arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-             candidate_options.moi_record_replay_dense_barrier_router);
+               candidate_options.moi_record_replay_dense_barrier_router)));
         if (has_dense_router &&
             (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             !planned.owner_descriptor_file_offsets.empty()) {
@@ -1603,19 +1615,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       info.relocated_guest_instruction_offset =
           cave_text_offset + (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t) : 0u);
     }
-    info.scratch_vgpr = planned.scratch_vgpr;
-    info.persistent_epoch_private_offset = planned.private_epoch_offset;
-    info.persistent_owner_private_offset = planned.private_owner_offset;
-    info.persistent_record_replay_workgroup_private_offsets =
-        planned.private_record_replay_workgroup_offsets;
-    if (planned.persistent_private_state_end != 0u)
-      info.persistent_private_state_end = planned.persistent_private_state_end;
-    info.required_private_segment_size = planned.required_private_bytes;
-    info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      note_dynamic_stack_private_requirement(info, &*planned.spill);
-    }
+    note_planned_resource_info(info, planned);
     patches.push_back(info);
   }
 
@@ -1867,19 +1867,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           info.relocated_guest_instruction_offset =
               body_offset + (candidate_options.moi_persistent_epoch_sgpr ? sizeof(uint32_t) : 0u);
         }
-        info.scratch_vgpr = planned.scratch_vgpr;
-        info.persistent_epoch_private_offset = planned.private_epoch_offset;
-        info.persistent_owner_private_offset = planned.private_owner_offset;
-        info.persistent_record_replay_workgroup_private_offsets =
-            planned.private_record_replay_workgroup_offsets;
-        if (planned.persistent_private_state_end != 0u)
-          info.persistent_private_state_end = planned.persistent_private_state_end;
-        info.required_private_segment_size = planned.required_private_bytes;
-        info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-        if (planned.spill) {
-          info.spilled_vgpr_count = planned.spill->vgpr_count;
-          note_dynamic_stack_private_requirement(info, &*planned.spill);
-        }
+        note_planned_resource_info(info, planned);
         staged_barriers.push_back({.site_offset = site.text_offset,
                                    .call_word = *call,
                                    .body_words = std::move(*body_words),
@@ -2252,19 +2240,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         } else {
           info.relocated_guest_instruction_offset = body.relocated_guest_instruction_offset;
         }
-        info.scratch_vgpr = planned.scratch_vgpr;
-        info.persistent_epoch_private_offset = planned.private_epoch_offset;
-        info.persistent_owner_private_offset = planned.private_owner_offset;
-        info.persistent_record_replay_workgroup_private_offsets =
-            planned.private_record_replay_workgroup_offsets;
-        if (planned.persistent_private_state_end != 0u)
-          info.persistent_private_state_end = planned.persistent_private_state_end;
-        info.required_private_segment_size = planned.required_private_bytes;
-        info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-        if (planned.spill) {
-          info.spilled_vgpr_count = planned.spill->vgpr_count;
-          note_dynamic_stack_private_requirement(info, &*planned.spill);
-        }
+        note_planned_resource_info(info, planned);
         patches.push_back(std::move(info));
       }
     }
@@ -2381,9 +2357,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                                   ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI barrier record patch does not support this architecture");
     return;

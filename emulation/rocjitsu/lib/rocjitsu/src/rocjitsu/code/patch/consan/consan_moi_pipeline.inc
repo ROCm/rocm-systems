@@ -271,7 +271,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     uint32_t displaced_original_size = patch_size;
     bool entry_island_at_anchor = false;
     bool compact_entry_without_scc = false;
-    if (!direct_entry && !has_indirect_entry_island && is_rdna4_family_arch(arch)) {
+    if (!direct_entry && !has_indirect_entry_island && consan_uses_gfx12_encoding(arch)) {
       constexpr size_t kCompactEntryIslandWords = 7u;
       BasicBlock *entry_block = block_for_offset(resource_state.block_index, patch_text_offset);
       const Instruction *entry_instruction = instruction_at(entry_block, patch_text_offset);
@@ -846,9 +846,8 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
                                 ConSanTransformArtifacts &result) {
   append_moi_resource_plans(state, options, candidates, result);
   append_moi_operational_resource_plans(state, options, result);
-  if ((state.arch == ROCJITSU_CODE_ARCH_CDNA5 || state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-       state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      options.automatic_moi_dispatch_id_sgprs && options.moi_dispatch_id_sgpr) {
+  if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
+      options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&

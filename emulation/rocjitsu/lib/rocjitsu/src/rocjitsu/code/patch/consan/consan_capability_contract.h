@@ -581,6 +581,23 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
   return consan_target_profile(arch) != nullptr;
 }
 
+/// Return whether an admitted target uses the compute-oriented CDNA execution
+/// architecture. This is a target-profile fact, not an encoding-family test:
+/// gfx1250 is CDNA even though it shares GFX12 encodings with RDNA4.
+[[nodiscard]] constexpr bool consan_arch_is_cdna(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->architecture_family == ConSanArchitectureFamily::Cdna;
+}
+
+/// Return whether a target can recover system-SGPR payload that overflows the
+/// descriptor's ordinary preload window. Entry-prologue lowering uses this
+/// capability instead of naming the current targets that implement it.
+[[nodiscard]] constexpr bool
+consan_arch_supports_kernarg_preload_overflow_recovery(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->supports_kernarg_preload_overflow_recovery;
+}
+
 [[nodiscard]] constexpr bool consan_profile_supports_wave_size(const ConSanTargetProfile &profile,
                                                                uint32_t wave_size) {
   return (wave_size == 32u && profile.supports_wave32) ||

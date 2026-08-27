@@ -293,7 +293,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
   const auto dense_candidates = consan_detail::partition_moi_dense_candidates(
-      candidates, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : 64u);
+      candidates, consan_arch_has_selectable_vgpr_bank(arch) ? 0u : 64u);
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   std::map<uint64_t, MoiDenseEntryHost> dense_entry_hosts;
   // Resource planning has already decoded the complete pristine CFG and keeps
@@ -301,11 +301,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // is particularly expensive for generated libraries containing thousands
   // of kernels, and cannot reveal any instruction that is absent from the
   // planning graph.
-  const bool supports_explicit_key_dense_router = arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                                                  arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-                                                  arch == ROCJITSU_CODE_ARCH_RDNA4;
-  if ((supports_explicit_key_dense_router || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
-      use_indirect_appended && local_entry_islands) {
+  const bool supports_dense_router =
+      consan_is_capability_arch(arch) && !consan_uses_gfx11_encoding(arch);
+  if (supports_dense_router && use_indirect_appended && local_entry_islands) {
     std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
     for (const auto &group : dense_candidates.groups) {
       const ConSanCandidateResourcePlan *group_resource =

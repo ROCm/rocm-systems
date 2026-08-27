@@ -1267,23 +1267,21 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr =
           spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
-      // GFX1250 uses an explicit key in a clone-local entry stub. Other
-      // architectures retain the call-return-derived entry key when their
+      // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
+      // S_CALL_B64 routes retain the call-return-derived entry key when their
       // scalar assignment is spill backed.
-      const bool use_gfx1250_clone_local_routes = arch == ROCJITSU_CODE_ARCH_CDNA5;
-      const bool derive_key_at_entry = spill_backed_router && !use_gfx1250_clone_local_routes;
+      const bool use_clone_local_routes = consan_arch_has_s_call_i64(arch);
+      const bool derive_key_at_entry = spill_backed_router && !use_clone_local_routes;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (consan_arch_has_s_call_i64(arch))
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (consan_arch_has_s_call_b64(arch) &&
-            (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-             arch == ROCJITSU_CODE_ARCH_CDNA4))
+        if (consan_arch_has_s_call_b64(arch) && !consan_uses_gfx11_encoding(arch))
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
       const uint64_t island_words_count =
-          use_gfx1250_clone_local_routes
+          use_clone_local_routes
               ? 2u * (indices.size() + 1u) + kMoiRecordReplayIndirectIslandWords
               : moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
@@ -1387,7 +1385,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
 
       const uint64_t island_offset = host_offset + sizeof(uint32_t);
       std::optional<std::vector<uint32_t>> island_words;
-      if (use_gfx1250_clone_local_routes) {
+      if (use_clone_local_routes) {
         std::vector<uint32_t> clone_local_words;
         clone_local_words.reserve(island_words_count);
         const uint64_t common_entry_offset =
@@ -1455,7 +1453,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       const auto append_target = [&](size_t route_id, uint64_t caller_return,
                                      uint64_t target) -> bool {
-        if (use_gfx1250_clone_local_routes) {
+        if (use_clone_local_routes) {
           const auto compare = instrumentation::build_s_cmp_eq_u32(
               key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_id)), arch);
           if (!compare)
@@ -1533,7 +1531,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const DenseBody &body = bodies[body_index];
         const Planned &planned = selected[body.selected_index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        const uint64_t call_target = use_gfx1250_clone_local_routes
+        const uint64_t call_target = use_clone_local_routes
                                          ? island_offset + 2u * (body_index + 1u) * sizeof(uint32_t)
                                          : island_offset;
         const auto call_delta = compute_sopp_branch_simm16(site.text_offset, call_target);

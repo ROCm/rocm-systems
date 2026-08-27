@@ -147,8 +147,7 @@ struct MoiEntryScalarBackup {
     }
   }
   if (plan.requires_kernarg_reload()) {
-    if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-         arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+    if (!consan_arch_supports_kernarg_preload_overflow_recovery(arch) ||
         plan.kernarg_reload_count > 2u) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an unsupported kernarg reload");
       return false;
@@ -180,8 +179,7 @@ cdna_guest_workgroup_payload_copies(const ConSanMoiWorkgroupSources &sources, rj
     return std::vector<std::pair<uint16_t, uint16_t>>{};
   }
   if (!sources.cdna_full_payload_base || !sources.cdna_guest_payload_base ||
-      (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+      !consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
     return std::nullopt;
   }
 
@@ -1585,10 +1583,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
 
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,
                                                         ConSanTransformArtifacts &result) {
-  if (result.replacement.empty() ||
-      (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA5)) {
+  if (result.replacement.empty() || !consan_is_capability_arch(arch)) {
     return true;
   }
 
@@ -1636,8 +1631,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-        arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
       const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(descriptor);
       const uint32_t required_sgpr_count =
           user_sgpr_count + 3u +
@@ -2012,8 +2006,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_private_record_replay_workgroup &&
-          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+          consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
         if (active_kernel->descriptor_file_offset > active_bytes.size() ||
             sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
           result.errors.emplace_back("ConSan MOI private exact-tuple descriptor exceeds ELF bytes");
@@ -2589,8 +2582,7 @@ void try_apply_owner_epoch_prologue_patch(
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_record_replay_workgroup_tuple &&
-          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+          consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
         full_payload_user_sgpr_count =
             dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
                           : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor));

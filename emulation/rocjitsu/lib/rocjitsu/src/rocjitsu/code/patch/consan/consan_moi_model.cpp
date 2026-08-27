@@ -2900,7 +2900,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       (plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized);
-  if (!is_rdna4_family_arch(arch) && !legacy_address_materialization)
+  if (!consan_uses_gfx12_encoding(arch) && !legacy_address_materialization)
     return std::nullopt;
   const bool buffer_resource = plan.kind == ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
   const bool scalar_vector =

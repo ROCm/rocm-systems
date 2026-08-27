@@ -1,5 +1,6 @@
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                         const ConSanOptions &options, ConSanTransformArtifacts &result) {
+                                         const ConSanOptions &options,
+                                         ConSanTransformArtifacts &result) {
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported architecture");
     return;
@@ -944,7 +945,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                              arch, options)
               : std::nullopt;
       std::optional<uint16_t> scalar_vcc_spill_sgpr;
-      if (!vcc_save && is_rdna4_family_arch(arch) && allocated_sgpr_count) {
+      if (!vcc_save && consan_uses_gfx12_encoding(arch) && allocated_sgpr_count) {
         scalar_vcc_spill_sgpr = choose_sc_borrowed_scalar_sgpr(*allocated_sgpr_count, options);
         vcc_save = scalar_vcc_spill_sgpr;
       }
@@ -1508,7 +1509,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // Reserving its appended bodies on another architecture would leave phantom
   // planner allocations when that route is not emitted, shifting every later
   // body away from the emitter's append cursor.
-  if (is_rdna4_family_arch(arch)) {
+  if (consan_uses_gfx12_encoding(arch)) {
     for (LdsCheckTrapCandidate &candidate : branch_only_candidates) {
       DbiPatchPlacementPlanner tentative_planner = placement_planner;
       auto placement = tentative_planner.plan_indirect_appended(
@@ -1541,7 +1542,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const bool is_large_majority_stranded =
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
-  const bool supports_dense_call = arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
+  const bool supports_dense_call =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 || consan_uses_gfx12_encoding(arch);
   if (supports_dense_call && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
       uint64_t container_entry_text_offset = 0;
@@ -2830,7 +2832,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // the same proven straight-line relay reservoirs used by ordinary entry
   // islands.  The two chains are disjoint, preserve every ordinary return,
   // and never make a live guest scalar carry a continuation.
-  if (is_rdna4_family_arch(arch) && !branch_only_candidates.empty() &&
+  if (consan_uses_gfx12_encoding(arch) && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
     std::string branch_only_route_error;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {

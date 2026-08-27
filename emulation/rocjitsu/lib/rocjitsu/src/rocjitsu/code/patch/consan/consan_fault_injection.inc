@@ -2332,12 +2332,11 @@ choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t
 
 [[nodiscard]] std::optional<std::array<uint32_t, 3>>
 retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx11_encoding(arch)) {
     words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
     return words;
   }
-  if (!is_rdna4_family_arch(arch))
+  if (!consan_uses_gfx12_encoding(arch))
     return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     words[1] = (words[1] & ~0xffu) | vdst;

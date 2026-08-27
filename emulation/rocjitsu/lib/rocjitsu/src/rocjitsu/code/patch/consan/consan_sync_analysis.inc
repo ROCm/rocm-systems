@@ -2637,7 +2637,7 @@ void associate_ordinary_acquire_sync_sequences(
   // VMEM/LDS zero wait. CDNA5's group-aperture form needs only the exact
   // combined zero wait: LDS has no cache invalidate operation. Keep this
   // fallback separate from RDNA's cache-associated acquire paths above.
-  if (!consan_uses_gfx9_cdna_encoding(arch) && arch != ROCJITSU_CODE_ARCH_CDNA5)
+  if (!consan_arch_is_cdna(arch))
     return;
   for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||

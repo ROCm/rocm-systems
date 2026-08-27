@@ -261,7 +261,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // unrelated code object. Retain the planning state's pristine CFG and
   // liveness facts so a relocated relay host cannot clobber transient state.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((consan_uses_gfx9_cdna_encoding(arch) || is_rdna4_family_arch(arch)) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx12_encoding(arch)) &&
       use_indirect_appended && local_entry_islands) {
     std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
     for (const auto &group : dense_candidates.groups) {

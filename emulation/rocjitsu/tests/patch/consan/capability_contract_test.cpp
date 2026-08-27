@@ -359,6 +359,10 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
     EXPECT_EQ(consan_arch_for_target(expected.target), expected.arch);
     EXPECT_TRUE(consan_is_capability_target(expected.target));
     EXPECT_TRUE(consan_is_capability_arch(expected.arch));
+    EXPECT_EQ(consan_arch_is_cdna(expected.arch),
+              expected.architecture_family == ConSanArchitectureFamily::Cdna);
+    EXPECT_EQ(consan_arch_supports_kernarg_preload_overflow_recovery(expected.arch),
+              expected.supports_kernarg_preload_overflow_recovery);
     for (size_t other = index + 1; other < kConSanTargetProfiles.size(); ++other) {
       EXPECT_NE(profile.target, kConSanTargetProfiles[other].target);
       EXPECT_NE(profile.arch, kConSanTargetProfiles[other].arch);
@@ -383,6 +387,8 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
   for (rj_code_arch_t arch : unsupported_arches) {
     EXPECT_EQ(consan_target_profile(arch), nullptr);
     EXPECT_FALSE(consan_is_capability_arch(arch));
+    EXPECT_FALSE(consan_arch_is_cdna(arch));
+    EXPECT_FALSE(consan_arch_supports_kernarg_preload_overflow_recovery(arch));
   }
 }
 

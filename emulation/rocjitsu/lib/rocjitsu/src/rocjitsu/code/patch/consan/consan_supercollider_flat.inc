@@ -435,7 +435,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(site_inst, owner_liveness, min_fresh_sgpr,
                                                          options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
-    if (!vcc_save && is_rdna4_family_arch(arch) && allocated_sgpr_count) {
+    if (!vcc_save && consan_uses_gfx12_encoding(arch) && allocated_sgpr_count) {
       vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options,
                                                           preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();

@@ -6196,6 +6196,43 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DB: consume target profiles and publish barrier resources once
+
+- **One source of target facts:** Lowerers now ask the existing
+  `ConSanTargetProfile` contract about GFX12 encoding, CDNA family, direct-call
+  form, selectable VGPR banks, target admission, and kernarg-preload overflow
+  recovery. Forty-three direct target-name predicates disappear from
+  inventory, access policy, resource planning, prologue, SuperCollider, all
+  three MOI engines, fault lowering, and final validation.
+- **Preserved distinctions:** Architecture family and encoding family remain
+  separate. In particular, gfx1250 is CDNA while sharing GFX12 encodings with
+  gfx1201, and the preload-recovery capability is shared by gfx942, gfx950, and
+  gfx1100. Dense-router admission is expressed as the same GFX11 exclusion and
+  selectable-bank exception as before; this slice does not broaden a target's
+  supported forms.
+- **One Inline barrier projection:** Direct, dense, and shared-dispatcher
+  placements publish scratch, owners, private state, spill extent, and dynamic
+  stack facts from `PlannedInlineEpochBarrier` through one local projection.
+  One local maximum accumulator likewise owns the three descriptor-private
+  extent loops. The plan remains local because an epoch-only Inline barrier can
+  own descriptors without satisfying the ordinary probe plan's mandatory
+  scratch invariant.
+- **Contract coverage:** The target-profile lookup test now checks CDNA-family
+  and preload-recovery projections for all five rows and rejects unsupported
+  architectures. Existing barrier resource/descriptor/telemetry tests cover
+  direct and dense paths, while the paired device matrix exercises every
+  engine/target combination; no behavior was added that calls for a new device
+  workload.
+- **Accounting:** Across the 18 affected implementation files, physical lines
+  fall from 48,570 to 48,543, nonblank lines from 46,973 to 46,944, and
+  estimated comment-excluded code lines from 44,708 to 44,670. The slice adds
+  132 and deletes 159 physical implementation lines, a net deletion of 27,
+  while reducing the direct target-discriminator audit from 217 to 174.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

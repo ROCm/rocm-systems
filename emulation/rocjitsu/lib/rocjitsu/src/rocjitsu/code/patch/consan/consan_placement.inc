@@ -83,8 +83,8 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
   return false;
 }
 
-[[nodiscard]] std::vector<LocalCaveOwnerRange> local_cave_owner_ranges(const ConSanTransformArtifacts &result,
-                                                                       uint64_t text_size) {
+[[nodiscard]] std::vector<LocalCaveOwnerRange>
+local_cave_owner_ranges(const ConSanTransformArtifacts &result, uint64_t text_size) {
   std::vector<LocalCaveOwnerRange> owners;
   owners.reserve(result.program_inventory.kernels().size() +
                  result.program_inventory.functions().size());
@@ -132,8 +132,8 @@ owner_of_uncovered_text_range(uint64_t begin, uint64_t end,
 }
 
 [[nodiscard]] std::vector<LocalNopCave>
-find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanTransformArtifacts &result,
-                         rj_code_arch_t arch) {
+find_uncovered_nop_caves(const AmdGpuCodeObject &code_object,
+                         const ConSanTransformArtifacts &result, rj_code_arch_t arch) {
   if (code_object.text_sections().size() != 1)
     return {};
 
@@ -310,7 +310,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3)
     return count == 0 ? instrumentation::build_s_wait_lds0(arch) : std::nullopt;
-  if (!is_rdna4_family_arch(arch))
+  if (!consan_uses_gfx12_encoding(arch))
     return std::nullopt;
   const uint16_t opcode =
       arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kSWaitDscntSopp : rdna4::kSWaitDscntSopp;

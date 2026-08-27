@@ -3758,9 +3758,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     // the successor release owner. All six stores intentionally use scratch+0
     // and ABI offset 4, so their encodings are identical; release-only
     // transactions retain the single-store shape.
-    const bool claimed_acquire_release_arch =
-        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-        arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
+    const bool claimed_acquire_release_arch = consan_is_capability_arch(arch);
     const ConSanAtomicSite *site = atomic_site_for(patch.anchor_offset);
     const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
     const bool claimed_compare_exchange = compare_exchange && cas_positions.size() == 3u;
