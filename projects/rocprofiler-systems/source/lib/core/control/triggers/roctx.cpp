@@ -91,7 +91,6 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
 void
 roctx::on_range_stop(std::uint64_t range_id)
 {
-    const scope_exit refresh{ [this] { refresh_state(); } };
     if(!filter_active())
     {
         return;
@@ -102,6 +101,7 @@ roctx::on_range_stop(std::uint64_t range_id)
         return;
     }
 
+    const scope_exit refresh{ [this] { refresh_state(); } };
     warn_if_paused_region_ended();
 }
 
