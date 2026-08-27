@@ -80,6 +80,7 @@ def get_amdgpu_version(
 # about; any other unknown name is a typo in the caller.
 _OPTIONAL_CAPABILITIES = frozenset({"CAP_PERFMON"})  # Introduced in kernel 5.8
 
+
 def find_roctx_site_packages(
     rocm_path: Optional[Path], python_version: str
 ) -> Optional[Path]:
