@@ -57,6 +57,24 @@ from rocprofsys import (
     PythonRunner,
     safe_remove,
 )
+from rocprofsys.markers import (
+    CTestExport,
+    MarkerCtx,
+    MarkerRegistry,
+    OnUnmet,
+    caps,
+    requires,
+)
+
+# Single registry owned by this conftest. Its register_* methods are bound to
+# module-level names so the declarations in the "Marker declarations" section
+# read naturally; the engine module itself holds no global state, so unit tests
+# can use an independent MarkerRegistry (see rocprofsys/markers.py).
+_MARKERS = MarkerRegistry()
+register_marker = _MARKERS.register_marker
+register_functional_marker = _MARKERS.register_functional_marker
+min_version = _MARKERS.min_version
+add_marker_dependency_if = _MARKERS.add_marker_dependency_if
 
 # Key for storing the single test result on pytest items
 # Item-level stash keys
@@ -160,169 +178,12 @@ def pytest_configure(config: pytest.Config) -> None:
     if timeout_plugin:
         config.pluginmanager.unregister(timeout_plugin)
 
-    # Functional markers (do more than just label a test)
-    #   See pytest_collection_modifyitems
-    config.addinivalue_line(
-        "markers",
-        "gpu: mark test as requiring a GPU",
-    )  # required for run_test to check if the target supports the current system architectures
-    config.addinivalue_line(
-        "markers",
-        "mpi_optional(target): If MPI is available and the target supports MPI, uses MPI to run the test",
-    )
-    config.addinivalue_line(
-        "markers",
-        "preserve(file): prevents the file from being deleted after the test, even if ROCPROFSYS_KEEP_TEST_OUTPUT is set to OFF",
-    )
-    config.addinivalue_line(
-        "markers",
-        "run_if_gpu_category(expr): run test only if GPU category expression is true "
-        "(e.g., 'apu and not instinct', 'instinct or radeon')",
-    )
-    config.addinivalue_line(
-        "markers",
-        "rocm_min_version(version): mark test as requiring minimum ROCm version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "oshrun_min_version(version): mark test as requiring minimum OpenSHMEM version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amdsmi_min_version(version): mark test as requiring minimum AMD-SMI version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "rocprofiler_sdk_min_version(version): mark test as requiring minimum rocprofiler-sdk version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
-    )
-    config.addinivalue_line(
-        "markers",
-        "mpi_implementation(implementation): mark test as requiring specific MPI implementation",
-    )
-    config.addinivalue_line(
-        "markers",
-        "python_versions: Test will be parametrized by Python version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "timeout(seconds): mark test as having a timeout of seconds (default: 300)",
-    )
-    # Used for CTest
-    config.addinivalue_line(
-        "markers",
-        "depends_on(*names): declare CTest dependency on the named tests"
-        " (used for CTest DEPENDS)",
-    )
-    config.addinivalue_line(
-        "markers",
-        "serialize: mark test as serializable (used for CTest)",
-    )
-    config.addinivalue_line(
-        "markers",
-        "class_name(segment): hyphenated logical name for standardized / CTest test "
-        "names (replaces the auto-derived class segment from TestCamelCase; "
-        "e.g. 'rocprofiler-systems-instrument')",
-    )
-    config.addinivalue_line(
-        "markers",
-        "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
-    )
-    config.addinivalue_line(
-        "markers",
-        "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
-    )
+    # Register all markers (functional + non-functional) declared in this file.
+    #   See the "Marker declarations" section and pytest_collection_modifyitems.
+    _MARKERS.register_markers_with_pytest(config)
 
-    # See pytest_collection_modifyitems
-    generic_functional_markers = [
-        "ucx",
-        "overflow",
-        "attach",
-        "mpi",
-        "python",
-        "annotate",
-        "julia",
-        "xnack",
-        "no_docker",
-        "shmem",
-        "nic",
-        "ainic",
-    ]
-
-    # Informational markers, only used for test labeling
-
-    config.addinivalue_line(
-        "markers", "rocprofiler: mark test as using ROCProfiler counters"
-    )
-    config.addinivalue_line("markers", "slow: mark test as slow running")
-    config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
-
-    # Can be described using generic desc below
-    non_functional_markers = [
-        "avail",
-        "instrument",
-        "baseline",
-        "sampling",
-        "binary_rewrite",
-        "runtime_instrument",
-        "sys_run",
-        "decode",
-        "videodecode",
-        "jpegdecode",
-        "rocprof_binary",
-        "rocprof_config",
-        "xgmi",
-        "sdma",
-        "group_by_queue",
-        "group_by_stream",
-        "openmp",
-        "openmp_target",
-        "fortran",
-        "sampling_duration",
-        "no_tmp_files",
-        "rccl",
-        "roctx",
-        "time_window",
-        "transpose",
-        "nic",
-        "network",
-        "fork",
-        "user_api",
-        "thread_limit",
-        "pthreads",
-        "rewrite_caller",
-        "locks",
-        "caller_include",
-        "causal",
-        "causal_e2e",
-        "papi",
-        "code_coverage",
-        "lulesh",
-        "unit_tests",
-        "hip_stream",
-        "presets",
-        "cli_help",
-        "hpc",
-        "hip",
-        "scratch_memory",
-        "rocm",
-        "kfd",
-        "unified_memory",
-        "validation_usm",
-        "selective_regions",
-        "minimal",
-        "rank_filter",
-        "pytest_impl",
-    ]
-    for label in non_functional_markers + generic_functional_markers:
-        config.addinivalue_line("markers", f"{label}: label test as {label}")
+    # Markers must be registered to be used, enforced via strict_markers below.
+    config.option.strict_markers = True
 
     # Keep a module-level ref for hooks that don't receive config directly
     pytest._config_ref = config
@@ -372,16 +233,6 @@ def pytest_generate_tests(metafunc):
             )
 
 
-# Used by the run_if_gpu_category marker
-def gpu_category_eval_context() -> dict[str, bool]:
-    info = get_gpu_info()
-    return {
-        "instinct": info is not None and "instinct" in info.categories,
-        "radeon": info is not None and "radeon" in info.categories,
-        "apu": info is not None and "apu" in info.categories,
-    }
-
-
 def pytest_collection_modifyitems(config, items) -> None:
     """Modify items based on markers."""
     verbose = config.option.verbose > 0
@@ -391,35 +242,22 @@ def pytest_collection_modifyitems(config, items) -> None:
     except Exception as e:
         pytest.exit(f"{e}")
 
+    def _ctx_for(item: pytest.Item, args) -> MarkerCtx:
+        return MarkerCtx(
+            config=rocprof_config,
+            gpu_info=get_gpu_info(),
+            args=tuple(args),
+        )
+
     # ----------------------------------------------------------------------------
     def base_modifications(item: pytest.Item) -> None:
         """This function should be called for every item."""
         _standardize_test_name(item, config, verbose=verbose)
 
-        # Handle optional markers
-        # The general form is <name>_optional(...). If the condition is met, <name> marker is added
-        if (
-            "mpi_optional" in item.keywords
-            and mpi_unavailable_reason(rocprof_config, config) is None
-        ):
-            target = item.get_closest_marker("mpi_optional").args[0]
-            try:
-                target_path = rocprof_config.get_target_executable(target)
-                if rocprof_config.capabilities.target_support_mpi(target_path):
-                    item.add_marker(pytest.mark.mpi)
-            except FileNotFoundError:
-                pass
-
-        # Marker dependencies
-        add_marker_if(
-            item,
-            "papi",
-            req_mark="annotate",
-            unavailable_reason=lambda: annotate_unavailable_reason(rocprof_config),
-        )
-        add_marker_if(item, "mpi", req_mark="mpi_implementation")
-        add_marker_if(item, "python", req_mark="python_versions")
-        add_marker_if(item, "gpu", req_mark="multi_gpu")
+        # Inject dependency markers declared via add_marker_dependency_if
+        # (e.g. annotate -> papi, mpi_implementation -> mpi, multi_gpu -> gpu,
+        # mpi_optional -> mpi when the target supports MPI).
+        _MARKERS.resolve_dependencies(_ctx_for, item)
 
         # Add corresponding runner type markers based on parametrized values ("mode")
         detected_runners: set[str] = set()
@@ -442,158 +280,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             base_modifications(item)
         return
 
-    # Marker checks
-    # "Skip" markers are left for runtime evaluation
+    # Marker checks. "Skip" markers are left for runtime evaluation.
     for item in items:
         base_modifications(item)
-        if "build_only" in item.keywords and rocprof_config.is_installed:
-            item.add_marker(
-                pytest.mark.skip(reason="Test only runs in build mode (build_only)")
-            )
-        if "gpu" in item.keywords:
-            _msg = gpu_unavailable_reason()
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "ucx" in item.keywords and not rocprof_config.capabilities.ucx_availability:
-            item.add_marker(pytest.mark.skip(reason="UCX not available"))
-        if "mpi" in item.keywords:
-            _msg = mpi_unavailable_reason(rocprof_config, config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "mpi_implementation" in item.keywords:
-            req_impl = item.get_closest_marker("mpi_implementation").args[0]
-            if req_impl != rocprof_config.capabilities.mpi_implementation:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"Requires {req_impl}, but {rocprof_config.capabilities.mpi_implementation} found"
-                    )
-                )
-        if "overflow" in item.keywords:
-            _msg = overflow_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "attach" in item.keywords:
-            _msg = attach_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "python" in item.keywords:
-            _msg = python_base_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-            _msg = python_versions_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "julia" in item.keywords:
-            _msg = julia_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "xnack" in item.keywords:
-            _msg = xnack_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "no_docker" in item.keywords:
-            _msg = no_docker_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "shmem" in item.keywords:
-            _msg = shmem_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "nic" in item.keywords:
-            _msg = nic_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "ainic" in item.keywords:
-            _msg = ainic_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "rocprofiler_sdk_min_version" in item.keywords:
-            req_version = item.get_closest_marker("rocprofiler_sdk_min_version").args[0]
-            _msg = rocprofiler_sdk_min_version_unavailable_reason(
-                rocprof_config, req_version
-            )
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
-        if "rocm_min_version" in item.keywords:
-            req_version = item.get_closest_marker("rocm_min_version").args[0]
-            system_version = rocprof_config.rocm_version
-            if system_version is None:
-                item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
-            # Parse min_version and compare
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
-        if "oshrun_min_version" in item.keywords:
-            req_version = item.get_closest_marker("oshrun_min_version").args[0]
-            system_version = rocprof_config.capabilities.oshrun_version
-            if system_version is None:
-                item.add_marker(pytest.mark.skip(reason="OpenSHMEM version not found"))
-            else:
-                min_parts = req_version.split(".")
-                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
-                if system_version < min_tuple:
-                    item.add_marker(
-                        pytest.mark.skip(
-                            reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
-                        )
-                    )
-        if "amdsmi_min_version" in item.keywords:
-            req_version = item.get_closest_marker("amdsmi_min_version").args[0]
-            system_version = rocprof_config.capabilities.amdsmi_version
-            if system_version is None:
-                item.add_marker(pytest.mark.skip(reason="AMD-SMI version not found"))
-            else:
-                min_parts = req_version.split(".")
-                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
-                if system_version < min_tuple:
-                    item.add_marker(
-                        pytest.mark.skip(
-                            reason=f"AMD-SMI {'.'.join(map(str, system_version))} < required {req_version}"
-                        )
-                    )
-        if "amdgpu_min_version" in item.keywords:
-            req_version = item.get_closest_marker("amdgpu_min_version").args[0]
-            system_version = rocprof_config.capabilities.amdgpu_version
-            if system_version is None:
-                item.add_marker(pytest.mark.skip(reason="amdgpu version not found"))
-            else:
-                min_parts = req_version.split(".")
-                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
-                if system_version < min_tuple:
-                    item.add_marker(
-                        pytest.mark.skip(
-                            reason=f"amdgpu {'.'.join(map(str, system_version))} < required {req_version}"
-                        )
-                    )
-        if "run_if_gpu_category" in item.keywords:
-            _gpu_msg = gpu_unavailable_reason()
-            if _gpu_msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_gpu_msg))
-            expr = item.get_closest_marker("run_if_gpu_category").args[0]
-            try:
-                result = eval(expr, {"__builtins__": {}}, gpu_category_eval_context())
-                if not result:
-                    item.add_marker(
-                        pytest.mark.skip(
-                            reason=f"GPU category condition '{expr}' is False"
-                        )
-                    )
-            except Exception as e:
-                pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
-        if "multi_gpu" in item.keywords:
-            num_gpu = item.get_closest_marker("multi_gpu").args[0]
-            info = get_gpu_info()
-            if info.device_count < num_gpu:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"Test requires atleast {num_gpu} GPUs but system has {info.device_count}"
-                    )
-                )
+        _MARKERS.apply_skip_conditions(_ctx_for, item)
 
 
 def pytest_collection_finish(session):
@@ -716,129 +406,337 @@ def pytest_sessionfinish(session, exitstatus):
 #
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
-# Collection-time availability: return None if OK, else a skip reason string.
+# Marker declarations (single source of truth for all test markers)
+# ----------------------------------------------------------------------------
+# Every test marker (functional + non-functional) is declared here via the
+# register_* helpers from rocprofsys/markers.py, which handles registration,
+# dependency injection, capability-based skipping, and CTest label export.
+#
+# A condition (a marker ``skip_if`` or a dependency ``when``) receives a
+# MarkerCtx and returns None when the requirement is met, or a skip-reason
+# string otherwise.
 # ----------------------------------------------------------------------------
 
 
-def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.perf_events_usable:
+def _overflow_reason(ctx: MarkerCtx) -> Optional[str]:
+    if caps(ctx).perf_events_usable:
         return None
     return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
 
 
-def gpu_unavailable_reason() -> Optional[str]:
-    gpu_info = get_gpu_info()
-    if gpu_info is not None and gpu_info.available:
+def _gpu_reason(ctx: MarkerCtx) -> Optional[str]:
+    if ctx.gpu_info is not None and ctx.gpu_info.available:
         return None
     return "No valid GPU available"
 
 
-def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    msg = overflow_unavailable_reason(rocprof_config)
+def _annotate_reason(ctx: MarkerCtx) -> Optional[str]:
+    msg = _overflow_reason(ctx)
     if msg is not None:
         return msg
-    if not rocprof_config.capabilities.papi_availability:
+    if not caps(ctx).papi_availability:
         return "PAPI not available"
     return None
 
 
-def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.ptrace_scope == 0:
-        return None
-    return (
-        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
-        "to enable attaching to process"
-    )
-
-
-def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_events_usable:
-        return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
-
-
-def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    """Check if AI NIC tracking is available.
-
-    Requires ``amd-smi static`` to report at least one NETDEV entry.
-    """
-    if not rocprof_config.capabilities.ai_nic_devices:
-        return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
-    return None
-
-
-def rocprofiler_sdk_min_version_unavailable_reason(
-    rocprof_config: RocprofsysConfig, req_version: str
-) -> Optional[str]:
-    """Return a skip reason if the detected rocprofiler-sdk is older than req_version.
-
-    ``req_version`` is a dotted version string (e.g. ``"1.2.2"``) supplied by the
-    test via the ``rocprofiler_sdk_min_version`` marker.
-    """
-    system_version = rocprof_config.capabilities.rocprofiler_sdk_version
-    min_parts = req_version.split(".")
-    min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
-    if system_version is not None and system_version >= min_tuple:
-        return None
-    _found = (
-        ".".join(map(str, system_version)) if system_version is not None else "not found"
-    )
-    return (
-        f"Requires rocprofiler-sdk minimum {req_version}, "
-        f"but system detected version {_found}"
-    )
-
-
-def mpi_unavailable_reason(
-    rocprof_config: RocprofsysConfig, config: pytest.Config
-) -> Optional[str]:
-    if rocprof_config.capabilities.mpiexec_exec is None:
+def _mpi_reason(ctx: MarkerCtx) -> Optional[str]:
+    if caps(ctx).mpiexec_exec is None:
         return "MPI not available"
     return None
 
 
-def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.rocprofsys_python is not None:
-        return None
-    return "rocprof-sys-python binary not found"
+def _mpi_implementation_reason(ctx: MarkerCtx) -> Optional[str]:
+    req_impl = ctx.args[0]
+    found = caps(ctx).mpi_implementation
+    if req_impl != found:
+        return f"Requires {req_impl}, but {found} found"
+    return None
 
 
-def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if (
-        rocprof_config.capabilities.supported_python_versions is not None
+def _python_reason(ctx: MarkerCtx) -> Optional[str]:
+    # Two independent checks; the first failing one is reported (a missing binary
+    # takes precedence over missing supported versions).
+    if ctx.config.rocprofsys_python is None:
+        return "rocprof-sys-python binary not found"
+    if not (
+        caps(ctx).supported_python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
     ):
-        return None
-    return (
-        "No supported Python versions. Each version needs a corresponding "
-        "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
-    )
+        return (
+            "No supported Python versions. Each version needs a corresponding "
+            "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
+        )
+    return None
 
 
-def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.julia_exec:
-        return None
-    return "Julia not available"
+def _multi_gpu_reason(ctx: MarkerCtx) -> Optional[str]:
+    num_gpu = ctx.args[0]
+    device_count = ctx.gpu_info.device_count
+    if device_count < num_gpu:
+        return f"Test requires atleast {num_gpu} GPUs but system has {device_count}"
+    return None
 
 
-def xnack_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if get_xnack_support(rocprof_config.rocm_path):
-        return None
-    return "XNACK not supported"
+def _run_if_gpu_category_reason(ctx: MarkerCtx) -> Optional[str]:
+    # The expression is always evaluated so an invalid expression aborts the
+    # session (a developer error) regardless of GPU presence. A missing GPU takes
+    # precedence over a false category when reporting the skip reason.
+    gpu_reason = _gpu_reason(ctx)
+    info = ctx.gpu_info
+    category_context = {
+        "instinct": info is not None and "instinct" in info.categories,
+        "radeon": info is not None and "radeon" in info.categories,
+        "apu": info is not None and "apu" in info.categories,
+    }
+    expr = ctx.args[0]
+    try:
+        result = eval(expr, {"__builtins__": {}}, category_context)
+    except Exception as e:
+        pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+    if gpu_reason is not None:
+        return gpu_reason
+    if not result:
+        return f"GPU category condition '{expr}' is False"
+    return None
 
 
-def no_docker_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if not rocprof_config.capabilities.is_inside_docker:
-        return None
-    return "Test cannot run inside a Docker container"
+def _mpi_optional_supported(ctx: MarkerCtx) -> Optional[str]:
+    """Return None to add the ``mpi`` marker for an ``mpi_optional`` target."""
+    if _mpi_reason(ctx) is not None:
+        return "MPI not available"
+    target = ctx.args[0]
+    try:
+        target_path = ctx.config.get_target_executable(target)
+    except FileNotFoundError:
+        return f"target executable '{target}' not found"
+    if not caps(ctx).target_support_mpi(target_path):
+        return f"target '{target}' does not support MPI"
+    return None
 
 
-def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.oshrun_exec:
-        return None
-    return "SHMEM not available"
+# Informational labels: purely for test categorization / CTest label filtering.
+_INFORMATIONAL_LABELS = [
+    "avail", "instrument", "baseline", "sampling", "binary_rewrite",
+    "runtime_instrument", "sys_run", "decode", "videodecode", "jpegdecode",
+    "rocprof_binary", "rocprof_config", "xgmi", "sdma", "group_by_queue",
+    "group_by_stream", "openmp", "openmp_target", "fortran", "sampling_duration",
+    "no_tmp_files", "rccl", "roctx", "time_window", "transpose", "network",
+    "fork", "user_api", "thread_limit", "pthreads", "rewrite_caller", "locks",
+    "caller_include", "causal", "causal_e2e", "code_coverage", "lulesh",
+    "unit_tests", "hip_stream", "presets", "cli_help", "hpc", "hip",
+    "scratch_memory", "rocm", "kfd", "unified_memory", "validation_usm",
+    "selective_regions", "minimal", "rank_filter", "pytest_impl", "annotate",
+]
+
+
+# -- Functional skip markers ----------------------------------------------
+register_functional_marker(
+    "build_only",
+    description="prevents the test from being run in install mode",
+    skip_if=requires(
+        lambda ctx: not ctx.config.is_installed,
+        "Test only runs in build mode (build_only)",
+    ),
+)
+register_functional_marker(
+    "gpu",
+    description="mark test as requiring a GPU",
+    skip_if=_gpu_reason,
+)
+register_functional_marker(
+    "ucx",
+    skip_if=requires(lambda ctx: caps(ctx).ucx_availability, "UCX not available"),
+)
+register_functional_marker("mpi", skip_if=_mpi_reason)
+register_functional_marker(
+    "mpi_implementation",
+    arg_hint="implementation",
+    description="mark test as requiring specific MPI implementation",
+    skip_if=_mpi_implementation_reason,
+    ctest=CTestExport.ARGS,
+)
+register_functional_marker("overflow", skip_if=_overflow_reason)
+register_functional_marker(
+    "attach",
+    skip_if=requires(
+        lambda ctx: caps(ctx).ptrace_scope == 0,
+        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
+        "to enable attaching to process",
+    ),
+)
+register_functional_marker("python", skip_if=_python_reason)
+register_functional_marker(
+    "julia",
+    skip_if=requires(lambda ctx: caps(ctx).julia_exec, "Julia not available"),
+)
+register_functional_marker(
+    "xnack",
+    skip_if=requires(
+        lambda ctx: get_xnack_support(ctx.config.rocm_path), "XNACK not supported"
+    ),
+)
+register_functional_marker(
+    "no_docker",
+    skip_if=requires(
+        lambda ctx: not caps(ctx).is_inside_docker,
+        "Test cannot run inside a Docker container",
+    ),
+    ctest=CTestExport.NONE,
+)
+register_functional_marker(
+    "shmem",
+    skip_if=requires(lambda ctx: caps(ctx).oshrun_exec, "SHMEM not available"),
+)
+register_functional_marker(
+    "nic",
+    skip_if=requires(
+        lambda ctx: caps(ctx).papi_nic_events is not None
+        and caps(ctx).perf_events_usable,
+        "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available",
+    ),
+)
+register_functional_marker(
+    "ainic",
+    skip_if=requires(
+        lambda ctx: caps(ctx).ai_nic_devices,
+        "No AI NIC devices found (amd-smi static reports no NETDEV entries)",
+    ),
+)
+register_functional_marker(
+    "run_if_gpu_category",
+    arg_hint="expr",
+    description=(
+        "run test only if GPU category expression is true "
+        "(e.g., 'apu and not instinct', 'instinct or radeon')"
+    ),
+    skip_if=_run_if_gpu_category_reason,
+    ctest=CTestExport.NONE,
+)
+register_functional_marker(
+    "multi_gpu",
+    arg_hint="num",
+    description="mark test as using requiring atleast num amount of GPUs",
+    skip_if=_multi_gpu_reason,
+    ctest=CTestExport.ALL,
+)
+
+# -- Minimum-version markers (built from the min_version template) ---------
+min_version(
+    "rocm_min_version",
+    lambda ctx: ctx.config.rocm_version,
+    parts=3,
+    label="ROCm",
+    description="mark test as requiring minimum ROCm version",
+)
+min_version(
+    "oshrun_min_version",
+    lambda ctx: caps(ctx).oshrun_version,
+    parts=2,
+    not_found_msg="OpenSHMEM version not found",
+    too_old_msg="oshrun version {found} < required {req}",
+    description="mark test as requiring minimum OpenSHMEM version",
+)
+min_version(
+    "amdsmi_min_version",
+    lambda ctx: caps(ctx).amdsmi_version,
+    parts=2,
+    label="AMD-SMI",
+    description="mark test as requiring minimum AMD-SMI version",
+)
+min_version(
+    "amdgpu_min_version",
+    lambda ctx: caps(ctx).amdgpu_version,
+    parts=3,
+    label="amdgpu",
+    description="mark test as requiring minimum amdgpu driver version",
+)
+min_version(
+    "rocprofiler_sdk_min_version",
+    lambda ctx: caps(ctx).rocprofiler_sdk_version,
+    parts=3,
+    not_found_msg=(
+        "Requires rocprofiler-sdk minimum {req}, "
+        "but system detected version {found}"
+    ),
+    too_old_msg=(
+        "Requires rocprofiler-sdk minimum {req}, "
+        "but system detected version {found}"
+    ),
+    description="mark test as requiring minimum rocprofiler-sdk version",
+)
+
+# -- Non-functional markers (labels / behavior; no skip condition) ---------
+register_marker("papi")
+register_marker(
+    "mpi_optional",
+    "If MPI is available and the target supports MPI, uses MPI to run the test",
+    arg_hint="target",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "preserve",
+    "prevents the file from being deleted after the test, even if ROCPROFSYS_KEEP_TEST_OUTPUT is set to OFF",
+    arg_hint="file",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "rocpd",
+    "mark test as using ROCpd and inject ROCpd env into given env",
+    arg_hint="env",
+    ctest=CTestExport.NAME,
+)
+register_marker(
+    "python_versions",
+    "Test will be parametrized by Python version",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "timeout",
+    "mark test as having a timeout of seconds (default: 300)",
+    arg_hint="seconds",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "depends_on",
+    "declare CTest dependency on the named tests (used for CTest DEPENDS)",
+    arg_hint="*names",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "serialize",
+    "mark test as serializable (used for CTest)",
+    ctest=CTestExport.NONE,
+)
+register_marker(
+    "class_name",
+    (
+        "hyphenated logical name for standardized / CTest test names "
+        "(replaces the auto-derived class segment from TestCamelCase; "
+        "e.g. 'rocprofiler-systems-instrument')"
+    ),
+    arg_hint="segment",
+    ctest=CTestExport.NONE,
+)
+register_marker("rocprofiler", "mark test as using ROCProfiler counters")
+register_marker("slow", "mark test as slow running")
+register_marker("loops", "mark test as testing loop instrumentation")
+for _label in _INFORMATIONAL_LABELS:
+    register_marker(_label)
+
+# -- Marker dependencies (add a marker when a trigger marker is present) ---
+# Declarative successor to the old ``add_marker_if`` calls.
+add_marker_dependency_if("gpu", when_present="multi_gpu")
+add_marker_dependency_if("mpi", when_present="mpi_implementation")
+add_marker_dependency_if("python", when_present="python_versions")
+add_marker_dependency_if("papi", when_present="annotate", when=_annotate_reason)
+add_marker_dependency_if(
+    "mpi",
+    when_present="mpi_optional",
+    when=_mpi_optional_supported,
+    on_unmet=OnUnmet.IGNORE,
+)
 
 
 # ----------------------------------------------------------------------------
@@ -1173,34 +1071,6 @@ def _ctest_generate_tests(
 ) -> None:
     """Generate a CTestTestfile.cmake file and print it to stdout."""
 
-    no_report_markers = {
-        "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
-        # Pytest built-in
-        "usefixtures",
-        "filterwarnings",
-        "skipif",
-        "skip",
-        "xfail",
-        # Internal markers
-        "python_versions",
-        "mpi_optional",
-        "no_docker",
-        "oshrun_min_version",
-        "rocm_min_version",
-        "amdsmi_min_version",
-        "amdgpu_min_version",
-        "rocprofiler_sdk_min_version",
-        "run_if_gpu_category",
-        "preserve",
-        # For CTests
-        "timeout",
-        "depends_on",
-        "serialize",
-        "class_name",
-    }
-    no_report_args_markers = {"rocpd"}
-    only_report_args_markers = {"mpi_implementation"}
-
     lines = _emit_ctest_header_block()
     lines.extend(_emit_prerequisite_block())
 
@@ -1225,20 +1095,10 @@ def _ctest_generate_tests(
         if hasattr(item, "callspec") and "mode" in item.callspec.params:
             labels.add(str(item.callspec.params["mode"]))
 
-        # Translate pytest markers to CTest labels
+        # Translate pytest markers to CTest labels per each marker's export policy
 
         for marker in item.iter_markers():
-            if marker.name in no_report_markers:
-                continue
-            if marker.name in only_report_args_markers:
-                for arg in marker.args:
-                    labels.add(str(arg))
-                continue
-            if marker.name in no_report_args_markers or not marker.args:
-                labels.add(marker.name)
-            else:
-                args_str = ", ".join(str(a) for a in marker.args)
-                labels.add(f"{marker.name}[{args_str}]")
+            labels |= _MARKERS.ctest_labels_for_marker(marker.name, marker.args)
 
         # Inject tier (quick/standard/comprehensive/full) labels from
         # test_categories.yaml
@@ -1500,40 +1360,6 @@ def _generate_rocprofsys_config_header() -> list[str]:
         header.append(_row(f"{key}:", value))
     header.extend(["=" * 70, ""])
     return header
-
-
-def add_marker_if(
-    item,
-    marker_to_add: str,
-    cond: Callable[[], bool] = lambda: True,
-    req_mark: Optional[str] = None,
-    skip_reason: Optional[str] = None,
-    unavailable_reason: Optional[Callable[[], Optional[str]]] = None,
-) -> None:
-    """Add a marker to a test item if:
-        - target_marker is present (or not specified)
-        - AND condition evaluates to True (lambda)
-
-    If ``unavailable_reason`` is set, it is called: ``None`` means add the marker;
-    a non-empty string means skip the test with that reason (preferred over cond/skip_reason).
-
-    If condition is False and skip_reason is provided, add a skip marker instead.
-    """
-    if req_mark and not item.get_closest_marker(req_mark):
-        return
-
-    if unavailable_reason is not None:
-        msg = unavailable_reason()
-        if msg is None:
-            item.add_marker(getattr(pytest.mark, marker_to_add))
-        else:
-            item.add_marker(pytest.mark.skip(reason=msg))
-        return
-
-    if cond():
-        item.add_marker(getattr(pytest.mark, marker_to_add))
-    elif skip_reason:
-        item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
 @lru_cache(maxsize=1)

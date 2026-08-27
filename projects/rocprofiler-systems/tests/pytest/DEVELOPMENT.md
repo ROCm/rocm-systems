@@ -204,25 +204,56 @@ class TestConsumer(RocprofsysTest):
 
 ### Adding Markers
 
-**Every marker must be registered in `pytest_configure()` before use.** Check the `non_functional_markers` and `generic_functional_markers` lists first; if the marker is not there, add it.
+**Every marker is declared once, with a `register_*` call** in the "Marker declarations" section of `conftest.py`. The declarative engine in `rocprofsys/markers.py` handles the rest: registration (`pytest --markers`), dependency injection, capability-based skipping, and CTest label export. There is no separate registration list, per-marker `if ... in item.keywords` block, or CTest export set to edit.
 
-There are two types of markers:
+> **Strict markers are enforced.** `conftest.py` sets `--strict-markers`, so using a `@pytest.mark.<name>` that has no `register_*` declaration is a **hard collection error**, not a warning. Declare the marker below before using it.
 
-- **Informational markers** — Used to categorize tests for CTest label filtering (e.g., `-L "avail"`). They don't affect test execution. Add these to the `non_functional_markers` list.
+There are two declaration functions plus one for dependencies:
 
-- **Functional markers** — Affect test behavior, typically used to skip tests based on system capabilities. Their logic is implemented in `pytest_collection_modifyitems`. Add these to the `generic_functional_markers` list (or register them individually with `config.addinivalue_line` if they need a custom description).
+- `register_marker(name, description=None, *, arg_hint=None, ctest=CTestExport.NAME)` — a **non-functional** marker (a label or behavior with no skip check), e.g. `slow`, `serialize`, `rocpd`.
+- `register_functional_marker(name, description=None, *, arg_hint=None, skip_if=None, ctest=CTestExport.NAME)` — a **functional** marker whose `skip_if` is evaluated at collection.
+- `add_marker_dependency_if(marker, *, when_present, when=None, on_unmet=OnUnmet.SKIP)` — declares that `marker` is added to a test whenever the `when_present` trigger marker is present (the declarative successor to the old `add_marker_if`).
 
-When adding a functional marker:
+The shared arguments:
 
-1. Register it in `pytest_configure()`.
-2. Add skip logic in `pytest_collection_modifyitems`. The convention is to define a checker function named `<keyword>_unavailable_reason(...)` that returns either `None` (when the requirement is met) or a `str` explaining why the test must be skipped (e.g. `gpu_unavailable_reason`, `mpi_unavailable_reason`). Then plug that function into the `_skip(...)` call for your marker.
-3. If the marker depends on a system capability not already tracked by `SystemCapabilities`, add it to `capabilities.py`.
+- `name` — the marker name (`@pytest.mark.<name>`).
+- `description` — text shown by `pytest --markers` (defaults to `"label test as <name>"`).
+- `arg_hint` — argument signature for the registration line, e.g. `"version"` renders `name(version): ...`.
+- `skip_if` (functional only) — a callable `ctx -> None | str`. Return `None` to run the test, or a skip-reason string to skip it. `ctx` is a `MarkerCtx` holding `ctx.config` (`RocprofsysConfig`), `ctx.gpu_info`, and `ctx.args` (the marker's arguments); use the `caps(ctx)` helper for system capabilities.
+- `ctest` — a `CTestExport` policy controlling the emitted CTest label: `NONE` (not a label), `NAME` (name only, args hidden — e.g. `rocpd`), `ARGS` (args only, name hidden — e.g. `mpi_implementation`), or `ALL` (name plus `name[args]`). The default is `NAME`.
 
-**CTest label behavior:** By default, all markers are included as CTest labels (e.g., `ctest -L "rocm"` filters by the `@pytest.mark.rocm` marker). To change how a marker appears in the generated CTest definitions, add it to one of these sets in `_generate_ctest_definitions()`:
+For dependencies, `add_marker_dependency_if` evaluates `when` (if given) with the trigger's `MarkerCtx`; a returned reason string means the requirement is unmet and `on_unmet` decides whether to skip the test (`OnUnmet.SKIP`) or leave it as-is (`OnUnmet.IGNORE`). Examples: `add_marker_dependency_if("gpu", when_present="multi_gpu")` and `add_marker_dependency_if("papi", when_present="annotate", when=_annotate_reason)`.
 
-- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`).
-- `no_report_args_markers` — Marker name is added as a label, but its **arguments are hidden** (e.g., `rocpd`).
-- `only_report_args_markers` — Only the marker's **arguments** are added as labels, not the marker name itself (e.g., `mpi_implementation`).
+**Informational markers** (pure labels, e.g. `avail`) just need a name; add them to the `_INFORMATIONAL_LABELS` list (or call `register_marker(name, description=...)` for a custom description).
+
+**Functional markers** call `register_functional_marker` with a `skip_if`. Example:
+
+```python
+register_functional_marker(
+    "nic",
+    description="requires PAPI network events",
+    skip_if=requires(
+        lambda ctx: caps(ctx).papi_nic_events and caps(ctx).perf_events_usable,
+        "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN)",
+    ),
+)
+```
+
+The `requires(predicate, reason)` helper builds a `skip_if` from a truthy predicate and a fixed message.
+
+**Minimum-version markers** use the `min_version(...)` template, which takes a version accessor, produces the `skip_if`, and registers the marker for you:
+
+```python
+min_version(
+    "rocm_min_version",
+    lambda ctx: ctx.config.rocm_version,
+    parts=3,
+    label="ROCm",
+    description="mark test as requiring minimum ROCm version",
+)
+```
+
+If a marker depends on a system capability not already tracked by `SystemCapabilities`, add it to `capabilities.py` and reference it via `caps(ctx)` in the condition.
 
 ### Template
 
