@@ -244,12 +244,12 @@ def generate_broadcast_api():
  *                         heap.
  * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
- *                         active set, from which the data is copied
+                           active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
  * @param[in] logPE_stride Stride of PEs participating in the reduction.
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
- *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
+                           be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
  *
  * @return void
  */\n"""
