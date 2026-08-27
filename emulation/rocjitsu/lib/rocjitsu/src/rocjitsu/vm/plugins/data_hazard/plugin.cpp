@@ -301,13 +301,18 @@ void DataHazardPlugin::onInit() {
 }
 
 void DataHazardPlugin::onShutdown() {
-  adapter_.on_shutdown();
   begin_shutdown();
   write_report();
 }
 
 void DataHazardPlugin::write_report() {
   std::call_once(report_once_, [this] {
+    // A workgroup's local memory epoch is only checked for cross-wave races
+    // when it closes, and after begin_shutdown() no callback can close it, so
+    // every workgroup still live here needs its last epoch checked before the
+    // report is built. The engine clears each epoch as it checks it, so this
+    // costs nothing on the paths that already closed them.
+    adapter_.on_shutdown();
     write_to_sink(collector_.to_summary());
     if (config_.report_path.empty())
       return;

@@ -126,7 +126,8 @@ public:
   /// hazards are still arriving. Called before every report write.
   void begin_shutdown();
 
-  /// @brief Emits the summary and, when configured, the JSON report file.
+  /// @brief Checks the outstanding local memory epochs, then emits the summary
+  /// and, when configured, the JSON report file.
   /// @details Idempotent: only the first call of a plugin's lifetime writes.
   /// Called from shutdown, from the destructor, and from a process-exit handler,
   /// because a launched application need not tear the VM down before exiting.
