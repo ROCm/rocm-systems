@@ -118,17 +118,24 @@ ResourceAccessEvent make_base_resource_event(const InstructionDescriptor &instru
   return event;
 }
 
-bool lane_is_active(uint64_t exec_mask, size_t lane) {
-  if (exec_mask == 0)
+bool lane_is_active(const std::optional<uint64_t> &exec_mask, size_t lane) {
+  if (!exec_mask.has_value())
     return true;
   if (lane >= 64)
     return false;
-  return (exec_mask & (1ull << lane)) != 0;
+  return (*exec_mask & (1ull << lane)) != 0;
 }
 
 template <typename Emit>
 void emit_per_lane_or_scalar(const std::vector<uint64_t> &per_lane_addresses,
-                             uint64_t scalar_address, uint64_t exec_mask, Emit emit) {
+                             uint64_t scalar_address, const std::optional<uint64_t> &exec_mask,
+                             Emit emit) {
+  // A route that knows its lanes and has none left touches no memory, so it
+  // must not fall back to the scalar address either: the addresses of inactive
+  // lanes are unwritten, and taking them invents accesses at address zero.
+  if (exec_mask.has_value() && *exec_mask == 0)
+    return;
+
   if (per_lane_addresses.empty()) {
     emit(scalar_address);
     return;
@@ -346,6 +353,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
   const uint32_t size_bytes = nonzero_size_or_dword(route.size_bytes);
   const uint32_t local_size_bytes = nonzero_size_or_dword(
       route.local_size_bytes == 0 ? route.size_bytes : route.local_size_bytes);
+  const uint64_t exec_mask = route.exec_mask.value_or(0);
 
   if (route.resource_kind == ResourceKind::GlobalMemory ||
       route.resource_kind == ResourceKind::ScratchMemory) {
@@ -358,7 +366,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     // already takes a slot of the load counter.
     if (route.is_store) {
       ResourceAccessEvent slot =
-          make_base_resource_event(instruction, size_bytes, route.is_atomic, route.exec_mask);
+          make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
       slot.resource_kind = route.resource_kind;
       slot.hazards.memory_op_wait = route.store_wait;
       api_.on_resource_access(slot);
@@ -367,7 +375,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     emit_per_lane_or_scalar(
         route.per_lane_addresses, route.address, route.exec_mask, [&](uint64_t address) {
           ResourceAccessEvent memory =
-              make_base_resource_event(instruction, size_bytes, route.is_atomic, route.exec_mask);
+              make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
           memory.resource_kind = route.resource_kind;
           memory.address = address;
           memory.is_read = route.is_load || route.is_atomic;
@@ -380,7 +388,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     emit_per_lane_or_scalar(
         route.per_lane_addresses, route.address, route.exec_mask, [&](uint64_t address) {
           ResourceAccessEvent memory =
-              make_base_resource_event(instruction, size_bytes, route.is_atomic, route.exec_mask);
+              make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
           memory.resource_kind = ResourceKind::LocalMemory;
           memory.address = address;
           memory.is_read = route.is_load || route.is_atomic;
@@ -395,7 +403,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     emit_per_lane_or_scalar(route.per_lane_local_addresses, route.local_address, route.exec_mask,
                             [&](uint64_t address) {
                               ResourceAccessEvent local = make_base_resource_event(
-                                  instruction, local_size_bytes, route.is_atomic, route.exec_mask);
+                                  instruction, local_size_bytes, route.is_atomic, exec_mask);
                               local.resource_kind = ResourceKind::LocalMemory;
                               local.address = address;
                               local.is_write = true;
@@ -408,7 +416,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
 
   if (route.is_load && !route.writes_local_memory && reg_kind != RegisterKind::None) {
     ResourceAccessEvent dest =
-        make_base_resource_event(instruction, size_bytes, route.is_atomic, route.exec_mask);
+        make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
     dest.register_kind = reg_kind;
     dest.resource_index = route.register_base;
     dest.is_write = true;

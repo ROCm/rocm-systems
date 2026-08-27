@@ -542,7 +542,11 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
   route.is_load = vmem->is_load;
   route.is_store = !vmem->is_load;
   route.is_atomic = vmem->atomic_op != amdgpu::AtomicOp::NONE;
-  route.exec_mask = vmem->lane_mask != 0 ? vmem->lane_mask : vmem->exec_mask;
+  // Address calculation narrows EXEC to the lanes that reach memory, dropping
+  // the ones a buffer bounds check rejects, and leaves their addresses unset.
+  // An empty result is the answer for a wave that accesses nothing, not a
+  // missing mask, so it is passed through rather than replaced by EXEC.
+  route.exec_mask = vmem->lane_mask;
   route.is_flat = starts_with(inst.mnemonic(), "flat_");
   route.store_wait = make_store_wait(vmem->wait_counter_type);
 
@@ -677,7 +681,6 @@ void DataHazardPlugin::emit_tensor_lds_write(const InstructionView &view, const 
     route.local_write_wait = hazard_core::WaitCntType::TENSOR;
     route.local_address = range.address;
     route.local_size_bytes = range.size;
-    route.exec_mask = wf.exec();
     route.is_tensor = true;
     adapter_.on_memory_route(route);
   }
