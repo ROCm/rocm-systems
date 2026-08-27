@@ -97,12 +97,6 @@ public:
         return std::regex_search(m_content, re);
     }
 
-    bool hasRegisteredDmaBufMrs(int n) const
-    {
-        const std::regex re("as\\s+" + std::to_string(n) + "\\s+DMA-BUF MRs\\b");
-        return std::regex_search(m_content, re);
-    }
-
     bool hasSymSysmemHandleReuse() const
     {
         return hasPattern("Symmetric window reusing system-memory handle");
@@ -2035,10 +2029,6 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridElasticRegistrationDisabled)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(
-            result == ncclUnhandledCudaError || result == ncclSystemError)) {
-        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
-    }
     EXPECT_EQ(result, ncclInvalidArgument);
     EXPECT_EQ(win, nullptr);
     if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
