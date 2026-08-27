@@ -501,6 +501,49 @@ requests, target-specific instruction choices are confined to narrow target
 operations, and prologue/emission code no longer recomputes placement or
 descriptor facts.
 
+#### Stage 3 exit evidence
+
+Stage 3 is complete. Reusable emission mechanics now cross the planning-to-
+emission boundary as immutable typed requests or plans. The covered families
+include private and register-backed entry initialization, scalar/execution-mask
+preservation, dynamic record-address formation, report-counter reservation,
+resident-wave and work-item owner identity, workgroup-key formation and shadow
+clearing, guest-access relocation, cache refresh, and global atomic completion.
+These contracts are defined in `consan_moi_internal.h`, carry documented
+invariants, and have direct host-unit coverage. Record/Replay established the
+boundary first; shared owner derivation, preservation, relocation, and target
+operations are also used by Sampled and InlineShadow where their semantics
+match.
+
+The final prologue emitters consume `MoiPrivateEpochPrologueEmissionPlan` or
+`MoiOwnerEpochPrologueEmissionPlan`. Resource counts, spill choices, ABI
+sources, runtime-selection facts, workgroup identity sources, and owner
+derivation are resolved before those plans are published. The emitters no
+longer read the descriptor or placement options to rediscover those choices.
+Access and synchronization paths similarly delegate their reusable target
+mechanics to narrow operations such as `MoiDynamicRecordAddressRequest`,
+`MoiAtomicCounterIncrementRequest`, `MoiResidentWaveOwnerRequest`, and
+`MoiGuestAccessRelocationRequest`; evidence selection and report meaning remain
+outside those operations.
+
+This tranche deliberately pays for explicit contracts before later stages
+delete all of the surrounding policy duplication. Relative to the Stage 2
+revision, production changes added 1,800 and deleted 907 physical lines. The
+measured implementation is now 94,948 physical lines, 90,594 nonblank lines,
+and 83,894 comment-excluded code lines in the same 79 files: a temporary
+453-code-line increase. Immediate deletion included 177 net physical lines
+from common emission, 50 from candidate construction, 20 from placement, and
+7 from pipeline orchestration, along with duplicated per-engine owner and
+special-state sequences. The remaining size debt is explicit input to Stages
+4, 5, and 7, which can now reuse these contracts rather than growing another
+parallel lowering path.
+
+The complete checked-in ConSan gate passed 5,271/5,271 tests at the Stage 3
+revision. It included 3,501 device tests and all 593 serialized physical-gfx950
+tests, and completed in 574.58 seconds wall time with `ctest -j64`. The slowest
+test, `ConSanGfx1250HipMoiSim.JakubProducerSkewBarrierDrop`, completed in 65.01
+seconds; there were no failures or timeouts.
+
 ### Stage 4: split synchronization semantics, flavor evidence, and emission
 
 Shared MOI synchronization/barrier code is 6,108 lines; core synchronization
