@@ -1,3 +1,45 @@
+/// One normalized byte range retained by the temporary MOI lowering operand.
+///
+/// This is a compact projection of `ConSanAccessRange`: policy and inventory
+/// have already validated the semantic identity, while current emitters need
+/// only the nonnegative displacement and width used by device evidence.
+struct ConSanMoiAccessRange {
+  uint32_t static_byte_offset = 0;
+  uint32_t byte_count = 0;
+
+  bool operator==(const ConSanMoiAccessRange &) const = default;
+};
+
+/// Temporary lowering state for one access admitted by semantic policy.
+///
+/// Its `ConSanAccessInventorySite` base is the exact normalized record selected
+/// by the observation plan. Lowering reads that snapshot without re-decoding
+/// or reclassifying it. The remaining members are facts created only after
+/// admission: target execution state, the selected execution owner, and the
+/// compact nonnegative ranges consumed by current emitters. Extending the
+/// inventory value keeps its established field vocabulary without maintaining
+/// an independent access identity, operand, or decode schema.
+struct ConSanMoiCandidate : ConSanAccessInventorySite {
+  /// Return the original-text instruction offset used as this lowering
+  /// operation's physical insertion anchor.
+  [[nodiscard]] uint64_t anchor() const { return physical_id.original_text_offset; }
+  /// Return the pristine guest instruction size in bytes. Lowering may reserve
+  /// a larger replacement body, but that does not change this displaced span.
+  [[nodiscard]] uint32_t size() const { return instruction_size; }
+  /// Return the normalized width in bits of each semantic access range.
+  [[nodiscard]] uint32_t width_bits() const { return decoded_width_bits; }
+
+  /// gfx1250 VGPR-bank mode active at this instruction, when analysis could
+  /// establish it for lowering.
+  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+  /// Descriptor selected as the concrete execution owner for this lowering
+  /// operation. Shared helper sites may be copied once per reachable owner.
+  std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Normalized ranges copied from the admitted `ProgramInventory` site.
+  /// Lowering must not reopen pristine bytes to classify or decode them.
+  std::vector<ConSanMoiAccessRange> access_ranges;
+};
+
 struct ConSanPerturbationCandidate {
   ConSanPerturbationKind kind = ConSanPerturbationKind::None;
   ConSanPerturbationEdge edge = ConSanPerturbationEdge::Release;

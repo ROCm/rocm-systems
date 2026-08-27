@@ -454,36 +454,6 @@ struct ConSanAccessOperandFacts {
   bool operator==(const ConSanAccessOperandFacts &) const = default;
 };
 
-/// One normalized byte range retained by the temporary MOI lowering operand.
-///
-/// This is a compact projection of `ConSanAccessRange`: policy and inventory
-/// have already validated the semantic identity, while current emitters need
-/// only the nonnegative displacement and width used by device evidence.
-struct ConSanMoiAccessRange {
-  uint32_t static_byte_offset = 0;
-  uint32_t byte_count = 0;
-
-  bool operator==(const ConSanMoiAccessRange &) const = default;
-};
-
-struct ConSanMoiCandidate {
-  ConSanProgramContainerRef container;
-  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
-  ConSanAccessOrigin origin = ConSanAccessOrigin::NativeLds;
-  ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
-  ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  ConSanAccessOperandFacts operands;
-  std::optional<uint64_t> kernel_descriptor_file_offset;
-  std::string mnemonic;
-  /// Normalized ranges copied from the admitted `ProgramInventory` site.
-  /// Lowering must not reopen pristine bytes to classify or decode them.
-  std::vector<ConSanMoiAccessRange> access_ranges;
-};
-
 /// Immutable original-program facts and decoded semantic inventory for one
 /// dispatchable kernel.
 ///

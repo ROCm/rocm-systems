@@ -182,7 +182,7 @@
         scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
         old_value_hi_vgpr, arch);
     const auto current_instruction = instrumentation::build_v_mov_b32_literal(
-        current_field_vgpr, static_cast<uint32_t>(candidate.text_offset), arch);
+        current_field_vgpr, static_cast<uint32_t>(candidate.anchor()), arch);
     const auto same_instruction = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_same_instruction =
@@ -706,7 +706,7 @@
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, backend),
                      static_cast<uint32_t>(ConSanMoiEngine::InlineShadow)) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
-                     static_cast<uint32_t>(candidate.text_offset)) ||
+                     static_cast<uint32_t>(candidate.anchor())) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
                      static_cast<uint32_t>(current_kind)) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask), 0u) ||
@@ -2552,7 +2552,7 @@
       workgroup_shadow && workgroup_shadow->compact
           ? 0u
           : static_cast<uint32_t>(
-                (candidate.text_offset & consan_moi_exact_shadow::max_instruction_offset)
+                (candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
                 << (consan_moi_exact_shadow::instruction_offset_shift - 32u));
   const uint64_t exact_shadow_base =
       *options.moi_report_buffer_address + layout.exact_shadow_entries_offset;
@@ -2560,8 +2560,8 @@
       byte_granular_external_shadow ? 1u : consan_moi_exact_shadow::granule_bytes;
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
-                (options.moi_epoch_vgpr ? 2u : 0u));
+  words.reserve(candidate.size() / sizeof(uint32_t) + 64u +
+                (options.moi_exec_save_sgpr ? 120u : 0u) + (options.moi_epoch_vgpr ? 2u : 0u));
   if (private_dispatch_id_offset) {
     if (!options.moi_dispatch_id_sgpr) {
       errors.emplace_back(

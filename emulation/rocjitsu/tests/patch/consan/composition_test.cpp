@@ -823,7 +823,9 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
   }));
   const auto post_return_candidate =
-      std::ranges::find(result.moi_candidates, 24u, &ConSanMoiCandidate::text_offset);
+      std::ranges::find_if(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
+        return candidate.anchor() == 24u;
+      });
   ASSERT_NE(post_return_candidate, result.moi_candidates.end());
   EXPECT_TRUE(post_return_candidate->kernel_descriptor_file_offset.has_value());
 

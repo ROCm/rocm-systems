@@ -691,7 +691,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   access_by_offset.reserve(result.moi_candidates.size());
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
     if (candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write)
-      access_by_offset.try_emplace(candidate.text_offset, &candidate);
+      access_by_offset.try_emplace(candidate.anchor(), &candidate);
   }
   bool has_multi_range_window = false;
   for (const ConSanPatchInfo &patch : result.patches) {

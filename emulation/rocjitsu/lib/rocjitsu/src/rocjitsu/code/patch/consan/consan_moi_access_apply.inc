@@ -69,11 +69,11 @@ write_moi_appended_anchor(std::vector<uint8_t> &text, const PlannedPatch &planne
   if (!planned_patch.entry_island_at_anchor)
     anchor_words.front() = build_s_branch(*forward, arch);
   const uint64_t anchor_bytes = anchor_words.size() * sizeof(uint32_t);
-  if (candidate.text_offset > text.size() || anchor_bytes > text.size() - candidate.text_offset) {
+  if (candidate.anchor() > text.size() || anchor_bytes > text.size() - candidate.anchor()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) + " anchor exceeds .text");
     return false;
   }
-  std::memcpy(text.data() + candidate.text_offset, anchor_words.data(),
+  std::memcpy(text.data() + candidate.anchor(), anchor_words.data(),
               static_cast<size_t>(anchor_bytes));
   return true;
 }
@@ -97,7 +97,7 @@ write_moi_entry_island(std::vector<uint8_t> &text, const PlannedPatch &planned_p
   if (!planned_patch.entry_island_at_anchor) {
     ConSanPatchInfo island_info;
     island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-    island_info.anchor_offset = planned_patch.candidate->text_offset;
+    island_info.anchor_offset = planned_patch.candidate->anchor();
     island_info.trampoline_offset = island_offset;
     island_info.trampoline_size = static_cast<uint32_t>(island_bytes);
     island_info.owner_descriptor_file_offsets =
@@ -252,8 +252,8 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
       return std::nullopt;
     }
     guest_word = *options.probe_guest_instruction_offset / sizeof(uint32_t);
-    guest_word_count = options.guest_instruction_word_count.value_or(planned_patch.candidate->size /
-                                                                     sizeof(uint32_t));
+    guest_word_count = options.guest_instruction_word_count.value_or(
+        planned_patch.candidate->size() / sizeof(uint32_t));
     if (*guest_word >= probe_words.size() || guest_word_count == 0u ||
         guest_word_count > probe_words.size() - *guest_word) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +

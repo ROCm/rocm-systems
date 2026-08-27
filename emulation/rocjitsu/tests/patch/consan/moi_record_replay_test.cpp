@@ -76,7 +76,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.moi_candidates[0].container.kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(result.moi_candidates[0].container.name, "lds_probe");
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b32");
-  EXPECT_EQ(result.moi_candidates[0].text_offset, 0u);
+  EXPECT_EQ(result.moi_candidates[0].anchor(), 0u);
   EXPECT_EQ(result.moi_candidates[0].file_offset, 0x100u);
   ASSERT_TRUE(result.moi_candidates[0].operands.address_vgpr);
   EXPECT_EQ(*result.moi_candidates[0].operands.address_vgpr, 0u);
@@ -1948,7 +1948,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   EXPECT_TRUE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
-  EXPECT_EQ(result.moi_candidates.front().text_offset, 0u);
+  EXPECT_EQ(result.moi_candidates.front().anchor(), 0u);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
@@ -1981,7 +1981,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().container.name, "lds_probe");
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
-  EXPECT_EQ(result.moi_candidates.front().text_offset, 0u);
+  EXPECT_EQ(result.moi_candidates.front().anchor(), 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
 }
@@ -3049,7 +3049,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
-    EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
+    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
@@ -3112,7 +3112,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
     EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
-    EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
+    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
     ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
     EXPECT_EQ(*result.moi_candidates.front().operands.address_vgpr, expected_addr_vgpr);
     if (expected_kind == ConSanLdsAccessKind::Read) {
@@ -6425,7 +6425,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 0u &&
-           patch.anchor_offset == result.moi_candidates.front().text_offset &&
+           patch.anchor_offset == result.moi_candidates.front().anchor() &&
            patch.trampoline_size != 0u;
   });
   ASSERT_NE(dispatcher, result.patches.end());
@@ -6842,7 +6842,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
             ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_b32");
-  EXPECT_EQ(result.moi_candidates.front().text_offset, 28u);
+  EXPECT_EQ(result.moi_candidates.front().anchor(), 28u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,
             ConSanPatchKind::InlineMoiAccessRecordStore);

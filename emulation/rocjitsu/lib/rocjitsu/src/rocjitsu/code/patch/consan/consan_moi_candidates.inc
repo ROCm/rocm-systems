@@ -360,20 +360,11 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
 /// address space, confidence, or logical ranges.
 [[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access) {
   ConSanMoiCandidate candidate;
-  candidate.container = access.container;
-  candidate.origin = access.origin;
-  candidate.kind = access.kind;
-  candidate.flat_address_space_hint = access.flat_address_space_hint;
-  candidate.text_offset = access.physical_id.original_text_offset;
-  candidate.file_offset = access.file_offset;
-  candidate.size = access.instruction_size;
-  candidate.width_bits = access.decoded_width_bits;
-  candidate.operands = access.operands;
+  static_cast<ConSanAccessInventorySite &>(candidate) = access;
   if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
     candidate.kernel_descriptor_file_offset =
         access.execution_owner_descriptor_file_offsets.front();
   }
-  candidate.mnemonic = access.mnemonic;
   for (const ConSanAccessRange &range : access.ranges) {
     if (access.origin == ConSanAccessOrigin::Flat) {
       candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = range.byte_width});
@@ -552,12 +543,6 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
     offset += sizeof(uint32_t);
   }
   return count;
-}
-
-[[nodiscard]] std::optional<uint32_t> byte_count_for_candidate(const ConSanMoiCandidate &site) {
-  if (site.width_bits == 0 || site.width_bits % 8 != 0)
-    return std::nullopt;
-  return site.width_bits / 8u;
 }
 
 [[nodiscard]] bool is_unconditionally_single_range_native_lds_mnemonic(std::string_view mnemonic) {

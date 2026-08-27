@@ -104,7 +104,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::vector<const ConSanMoiCandidate *> candidates = find_inline_shadow_access_candidates(result);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
-    return lhs->text_offset < rhs->text_offset;
+    return lhs->anchor() < rhs->anchor();
   });
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -308,7 +308,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         if (groups.empty() || groups.back().first != key ||
             (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
              groups.back().second.candidates.size() == max_group_size) ||
-            candidate->text_offset - groups.back().second.candidates.front()->text_offset >
+            candidate->anchor() - groups.back().second.candidates.front()->anchor() >
                 kMaxCommonRelayAnchorSpan) {
           groups.push_back(
               {key, {.candidates = {}, .first_candidate_index = candidate_indices.at(candidate)}});
@@ -330,24 +330,24 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       bool has_dense_neighbors = false;
       for (size_t index = 1; index < group.candidates.size(); ++index) {
         has_dense_neighbors |=
-            group.candidates[index]->text_offset <
-            group.candidates[index - 1u]->text_offset + kIndirectIslandWords * sizeof(uint32_t);
+            group.candidates[index]->anchor() <
+            group.candidates[index - 1u]->anchor() + kIndirectIslandWords * sizeof(uint32_t);
       }
       const bool has_stranded_entry =
           std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
             const size_t candidate_index = candidate_indices.at(candidate);
             const uint64_t default_entry =
                 access_island_begin + candidate_index * access_relay_words * sizeof(uint32_t);
-            return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
+            return !compute_sopp_branch_simm16(candidate->anchor(), default_entry);
           });
       const bool explicit_anchors_fit =
           arch == ROCJITSU_CODE_ARCH_CDNA5 ||
           std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
-            return candidate->size >= 2u * sizeof(uint32_t);
+            return candidate->size() >= 2u * sizeof(uint32_t);
           });
       const bool singleton_has_direct_island =
           group.candidates.size() == 1u &&
-          local_entry_islands->has_reachable(group.candidates.front()->text_offset,
+          local_entry_islands->has_reachable(group.candidates.front()->anchor(),
                                              kIndirectIslandWords);
       // gfx1250 also uses the shared call relay to compact nearby anchors.
       // CDNA3/4 and RDNA4 use an explicit key plus branch only when the
@@ -358,7 +358,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
       for (const ConSanMoiCandidate *candidate : group.candidates)
-        anchors.push_back(candidate->text_offset);
+        anchors.push_back(candidate->anchor());
       const uint64_t dispatcher =
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island = local_entry_islands->claim_reachable_from_all(anchors);
@@ -384,7 +384,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           const auto owner_candidates = owner_groups.find(key);
           if (owner_candidates != owner_groups.end()) {
             for (const ConSanMoiCandidate *candidate : owner_candidates->second)
-              append_occupied_range(candidate->text_offset, candidate->size);
+              append_occupied_range(candidate->anchor(), candidate->size());
           }
           for (const ConSanBarrierSite &site : container.barrier_sites)
             append_occupied_range(site.text_offset, site.size);
@@ -489,8 +489,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                              result.program_inventory.kernels().size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
     for (const ConSanMoiCandidate *candidate : candidates)
-      protected_ranges.emplace_back(candidate->text_offset,
-                                    candidate->text_offset + candidate->size);
+      protected_ranges.emplace_back(candidate->anchor(), candidate->anchor() + candidate->size());
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       protected_ranges.emplace_back(
           kernel.entry_text_offset,
@@ -506,7 +505,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
     for (const ConSanMoiCandidate *candidate : candidates) {
       if (uses_branch_only_scalar_spill(candidate))
-        route_frontier_source = std::min(route_frontier_source, candidate->text_offset);
+        route_frontier_source = std::min(route_frontier_source, candidate->anchor());
     }
     if (route_frontier_source == std::numeric_limits<uint64_t>::max()) {
       result.errors.emplace_back(
@@ -538,9 +537,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                 uint32_t original_size) {
     if (original_size <= sizeof(uint32_t))
       return;
-    branch_router.retire_range(candidate.text_offset, original_size);
-    for (uint64_t offset = candidate.text_offset + sizeof(uint32_t);
-         offset < candidate.text_offset + original_size; offset += sizeof(uint32_t)) {
+    branch_router.retire_range(candidate.anchor(), original_size);
+    for (uint64_t offset = candidate.anchor() + sizeof(uint32_t);
+         offset < candidate.anchor() + original_size; offset += sizeof(uint32_t)) {
       if (selected_inline_anchor_relay_offsets.insert(offset).second)
         (void)branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
     }
@@ -559,18 +558,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                if (lhs_branch_only != rhs_branch_only)
                                  return lhs_branch_only;
                                if (lhs_branch_only)
-                                 return lhs->text_offset > rhs->text_offset;
-                               return lhs->text_offset < rhs->text_offset;
+                                 return lhs->anchor() > rhs->anchor();
+                               return lhs->anchor() < rhs->anchor();
                              });
   }
   for (size_t planning_index = 0; planning_index < planning_candidates.size(); ++planning_index) {
     const ConSanMoiCandidate *candidate_ptr = planning_candidates[planning_index];
     const ConSanMoiCandidate &candidate = *candidate_ptr;
     const bool use_dense_call = dense_entry_islands.contains(candidate_ptr);
-    const uint64_t candidate_end = candidate.text_offset + candidate.size;
+    const uint64_t candidate_end = candidate.anchor() + candidate.size();
     if (use_indirect_appended && !use_dense_call &&
         std::ranges::any_of(planned_anchor_ranges, [&](const auto &range) {
-          return candidate.text_offset < range.second && range.first < candidate_end;
+          return candidate.anchor() < range.second && range.first < candidate_end;
         })) {
       result.warnings.emplace_back(
           "ConSan MOI inline-shadow probe skipped access site inside a relocated prefix");
@@ -853,7 +852,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!words) {
       for (std::string &error : candidate_errors) {
         error += " for " + candidate.mnemonic + " at text offset " +
-                 std::to_string(candidate.text_offset) + " with scratch v" +
+                 std::to_string(candidate.anchor()) + " with scratch v" +
                  std::to_string(resources->base) + ":v" +
                  std::to_string(resources->base + resources->count - 1u);
       }
@@ -895,9 +894,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   spill ? spill->total_private_bytes : 0u,
                   scalar_spill ? scalar_spill->total_private_bytes : 0u});
     const uint32_t available_padding =
-        count_nop_padding(bytes, candidate.file_offset + candidate.size, arch);
+        count_nop_padding(bytes, candidate.file_offset + candidate.size(), arch);
     const uint64_t available_bytes =
-        candidate.size + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
+        candidate.size() + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
     std::optional<DbiPatchPlacement> placement;
     std::optional<uint64_t> entry_island_offset;
     bool entry_island_at_anchor = false;
@@ -905,7 +904,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::optional<uint64_t> branch_only_relay_bank_offset;
     uint64_t branch_only_relay_bank_word_count = 0u;
-    uint32_t displaced_original_size = candidate.size;
+    uint32_t displaced_original_size = candidate.size();
     bool placed_through_indirect_island = false;
     if (use_indirect_appended && candidate_options.moi_inline_branch_only_scalar_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
@@ -981,7 +980,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
         const auto reservation =
             frontier_ready ? tentative_planner.plan_indirect_appended(
-                                 candidate.text_offset, candidate.size, body_reservation_bytes)
+                                 candidate.anchor(), candidate.size(), body_reservation_bytes)
                            : std::nullopt;
         if (!reservation) {
         } else {
@@ -992,8 +991,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           relay_limits.batch.fallback_setup = 1'000'000u;
           relay_limits.pair.greedy = 1'000'000u;
           branch_only_route = tentative_router.plan_pair(
-              tentative_planner, candidate.text_offset, reservation->body_offset,
-              reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
+              tentative_planner, candidate.anchor(), reservation->body_offset,
+              reservation->body_offset + patch_bytes, candidate.anchor() + candidate.size(),
               &relay_error, nullptr, relay_limits);
           if (branch_only_route && !tentative_router.commit(*branch_only_route, &relay_error)) {
             branch_only_route.reset();
@@ -1014,7 +1013,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             latest_generated_frontier_word = tentative_latest_frontier_word;
             placement = *reservation;
             placement->body_size = patch_bytes;
-            placement->return_target = candidate.text_offset + candidate.size;
+            placement->return_target = candidate.anchor() + candidate.size();
             placed_through_indirect_island = true;
           }
         }
@@ -1035,12 +1034,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                                   sizeof(uint32_t);
       }
       bool entry_island_reachable =
-          candidate.size >= sizeof(uint32_t) &&
-          compute_sopp_branch_simm16(candidate.text_offset, *candidate_entry_island_offset);
+          candidate.size() >= sizeof(uint32_t) &&
+          compute_sopp_branch_simm16(candidate.anchor(), *candidate_entry_island_offset);
       if (!use_dense_call && !entry_island_reachable) {
-        if (const auto local_island =
-                local_entry_islands ? local_entry_islands->claim_reachable(candidate.text_offset)
-                                    : std::nullopt) {
+        if (const auto local_island = local_entry_islands
+                                          ? local_entry_islands->claim_reachable(candidate.anchor())
+                                          : std::nullopt) {
           candidate_entry_island_offset = local_island;
           entry_island_reachable = true;
           retire_branch_relay_range(*local_island, kIndirectIslandWords);
@@ -1050,8 +1049,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         std::vector<uint32_t> displaced_words;
         while (displaced_words.size() < kIndirectIslandWords) {
           auto decoded = decode_relocatable_entry_instruction(
-              original_text, candidate.text_offset + displaced_words.size() * sizeof(uint32_t),
-              arch, candidate_errors, relocation_decoder.get());
+              original_text, candidate.anchor() + displaced_words.size() * sizeof(uint32_t), arch,
+              candidate_errors, relocation_decoder.get());
           if (!decoded) {
             displaced_words.clear();
             break;
@@ -1059,26 +1058,26 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
         }
         const uint64_t displaced_end =
-            candidate.text_offset + displaced_words.size() * sizeof(uint32_t);
+            candidate.anchor() + displaced_words.size() * sizeof(uint32_t);
         if (displaced_words.size() >= kIndirectIslandWords &&
             displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max() &&
-            moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
-                                             displaced_end - candidate.text_offset) &&
-            !relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
+            moi_entry_window_is_single_entry(resource_state.block_index, candidate.anchor(),
+                                             displaced_end - candidate.anchor()) &&
+            !relocation_overlaps_synchronization(candidate.anchor() + candidate.size(),
                                                  displaced_end)) {
-          const size_t candidate_words = candidate.size / sizeof(uint32_t);
+          const size_t candidate_words = candidate.size() / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,
                                         displaced_words.end());
             displaced_original_size =
                 static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
-            candidate_entry_island_offset = candidate.text_offset;
+            candidate_entry_island_offset = candidate.anchor();
             entry_island_reachable = true;
             entry_island_at_anchor = true;
           }
         } else if (!warned_access_relay_sync_overlap &&
                    displaced_words.size() >= kIndirectIslandWords &&
-                   relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
+                   relocation_overlaps_synchronization(candidate.anchor() + candidate.size(),
                                                        displaced_end)) {
           result.warnings.emplace_back(
               "ConSan MOI inline-shadow probe did not relocate a synchronization site through "
@@ -1100,12 +1099,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             (use_dense_call && arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1u : 7u) * sizeof(uint32_t);
         std::string placement_error;
         const auto reservation =
-            placement_planner.plan_indirect_appended(candidate.text_offset, displaced_original_size,
+            placement_planner.plan_indirect_appended(candidate.anchor(), displaced_original_size,
                                                      patch_bytes + return_bytes, &placement_error);
         if (reservation) {
           placement = *reservation;
           placement->body_size = patch_bytes;
-          placement->return_target = candidate.text_offset + displaced_original_size;
+          placement->return_target = candidate.anchor() + displaced_original_size;
           placed_through_indirect_island = true;
         }
       }
@@ -1119,7 +1118,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           std::ranges::any_of(
               resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
                 const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-                if (kernel == nullptr || kernel->entry_text_offset != candidate.text_offset) {
+                if (kernel == nullptr || kernel->entry_text_offset != candidate.anchor()) {
                   return false;
                 }
                 return kernel->uses_dynamic_stack.value_or(false) ||
@@ -1127,8 +1126,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                        options.automatic_moi_persistent_sgprs;
               });
       DbiPatchPlacementRequest placement_request;
-      placement_request.anchor_offset = candidate.text_offset;
-      placement_request.original_size = candidate.size;
+      placement_request.anchor_offset = candidate.anchor();
+      placement_request.original_size = candidate.size();
       placement_request.body_size = patch_bytes;
       placement_request.inline_capacity = spill || scalar_spill || private_layout ||
                                                   workgroup_shadow || needs_chainable_entry_patch ||
@@ -1178,8 +1177,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (routed_through_branch_only)
       publish_inline_anchor_relays(candidate, placement->original_size);
     if (use_indirect_appended && !use_dense_call)
-      planned_anchor_ranges.emplace_back(candidate.text_offset,
-                                         candidate.text_offset + placement->original_size);
+      planned_anchor_ranges.emplace_back(candidate.anchor(),
+                                         candidate.anchor() + placement->original_size);
     if (workgroup_shadow && workgroup_shadow->compact && candidate.kernel_descriptor_file_offset) {
       ++next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
     }
@@ -1207,8 +1206,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::unordered_map<uint64_t, size_t> inline_anchor_relay_donors;
   for (size_t index = 0; index < planned_patches.size(); ++index) {
     const PlannedInlineShadowPatch &planned = planned_patches[index];
-    for (uint64_t offset = planned.candidate->text_offset + sizeof(uint32_t);
-         offset < planned.candidate->text_offset + planned.placement.original_size;
+    for (uint64_t offset = planned.candidate->anchor() + sizeof(uint32_t);
+         offset < planned.candidate->anchor() + planned.placement.original_size;
          offset += sizeof(uint32_t)) {
       if (selected_inline_anchor_relay_offsets.contains(offset))
         inline_anchor_relay_donors.emplace(offset, index);
@@ -1362,7 +1361,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         island_info.trampoline_size = static_cast<uint32_t>(
             (entry_host->second.displaced_words.size() + kIndirectIslandWords) * sizeof(uint32_t));
       } else {
-        island_info.anchor_offset = group.front()->candidate->text_offset;
+        island_info.anchor_offset = group.front()->candidate->anchor();
         island_info.trampoline_offset = island_offset;
         island_info.trampoline_size = static_cast<uint32_t>(island_bytes);
       }
@@ -1481,7 +1480,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!call_return_sgpr ||
               !append_moi_call_return_match(dispatcher_words, dispatcher_offset,
-                                            candidate.text_offset + sizeof(uint32_t),
+                                            candidate.anchor() + sizeof(uint32_t),
                                             jump_sgprs.pc_sgpr, *call_return_sgpr, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode its relocatable caller match");
@@ -1505,8 +1504,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
               "ConSan MOI inline-shadow probe could not normalize its dense route SCC key");
           return;
         }
-        if (!explicit_dense_key && candidate.size > sizeof(uint32_t)) {
-          const uint32_t adjustment = candidate.size - sizeof(uint32_t);
+        if (!explicit_dense_key && candidate.size() > sizeof(uint32_t)) {
+          const uint32_t adjustment = candidate.size() - sizeof(uint32_t);
           matched_words.push_back(build_s_add_u32(*call_return_sgpr, *call_return_sgpr,
                                                   /*literal=*/255u, arch));
           matched_words.push_back(adjustment);
@@ -1562,7 +1561,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   dispatcher_words.size() * sizeof(uint32_t));
       ConSanPatchInfo dispatcher_info;
       dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      dispatcher_info.anchor_offset = group.front()->candidate->text_offset;
+      dispatcher_info.anchor_offset = group.front()->candidate->anchor();
       dispatcher_info.trampoline_offset = dispatcher_offset;
       dispatcher_info.trampoline_size =
           static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
@@ -1596,20 +1595,21 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         const PlannedInlineShadowPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
         const uint64_t branch_offset =
-            candidate.text_offset + (explicit_dense_key ? sizeof(uint32_t) : 0u);
+            candidate.anchor() + (explicit_dense_key ? sizeof(uint32_t) : 0u);
         const auto call_delta = compute_sopp_branch_simm16(branch_offset, island_offset);
         const std::optional<uint32_t> call =
             !call_delta ? std::nullopt
                         : instrumentation::build_s_call_i64(*call_return_sgpr, *call_delta, arch);
         if ((!explicit_dense_key && !call) ||
-            candidate.size < (explicit_dense_key ? 2u : 1u) * sizeof(uint32_t) ||
-            candidate.text_offset > new_text.size() ||
-            candidate.size > new_text.size() - candidate.text_offset) {
+            candidate.size() < (explicit_dense_key ? 2u : 1u) * sizeof(uint32_t) ||
+            candidate.anchor() > new_text.size() ||
+            candidate.size() > new_text.size() - candidate.anchor()) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode a dense call anchor");
           return;
         }
-        std::vector<uint32_t> anchor_words(candidate.size / sizeof(uint32_t), build_s_nop(0, arch));
+        std::vector<uint32_t> anchor_words(candidate.size() / sizeof(uint32_t),
+                                           build_s_nop(0, arch));
         if (explicit_dense_key) {
           if (!call_delta || group_index >= 64u) {
             result.errors.emplace_back(
@@ -1636,7 +1636,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         } else {
           anchor_words.front() = *call;
         }
-        std::memcpy(new_text.data() + candidate.text_offset, anchor_words.data(), candidate.size);
+        std::memcpy(new_text.data() + candidate.anchor(), anchor_words.data(), candidate.size());
       }
     }
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
@@ -1700,7 +1700,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       info.kind = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
                       ? ConSanPatchKind::TrampolineMoiExactShadowStore
                       : ConSanPatchKind::InlineMoiExactShadowStore;
-      info.anchor_offset = candidate.text_offset;
+      info.anchor_offset = candidate.anchor();
       info.scratch_vgpr = planned_patch.resources.base;
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
@@ -2019,20 +2019,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           result.errors.emplace_back("ConSan MOI inline-shadow probe final patch size changed");
           return;
         }
-        if (candidate.text_offset > new_text.size() ||
-            patch_bytes > new_text.size() - candidate.text_offset) {
+        if (candidate.anchor() > new_text.size() ||
+            patch_bytes > new_text.size() - candidate.anchor()) {
           result.errors.emplace_back("ConSan MOI inline-shadow probe exceeds .text");
           return;
         }
-        std::memcpy(new_text.data() + candidate.text_offset, words->data(),
+        std::memcpy(new_text.data() + candidate.anchor(), words->data(),
                     static_cast<size_t>(patch_bytes));
-        info.trampoline_offset = candidate.text_offset + candidate.size;
+        info.trampoline_offset = candidate.anchor() + candidate.size();
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
         if (planned_patch.guest_instruction_word_count != 0u &&
             planned_patch.guest_instruction_word_count <= words->size()) {
           info.relocated_guest_instruction_offset =
-              candidate.text_offset +
+              candidate.anchor() +
               (words->size() - planned_patch.guest_instruction_word_count) * sizeof(uint32_t);
         }
       }
@@ -2152,8 +2152,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;
             ConSanPatchInfo info;
             info.kind = ConSanPatchKind::InlineMoiExactShadowStore;
-            info.anchor_offset = candidate.text_offset;
-            info.trampoline_offset = candidate.text_offset + candidate.size;
+            info.anchor_offset = candidate.anchor();
+            info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
             info.scratch_vgpr = planned_patch.resources.base;
             info.owner_descriptor_file_offsets =
@@ -2646,7 +2646,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
           sizeof(ConSanMoiSampledPendingAcquireSlot);
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size / sizeof(uint32_t) + 40u + (derived_owner_word ? 1u : 0u) +
+  words.reserve(candidate.size() / sizeof(uint32_t) + 40u + (derived_owner_word ? 1u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u) +
                 (relocate_instruction && moi_load_clobbers_address(candidate) &&
                          !preserved_lds_byte_offset_vgpr
@@ -3632,7 +3632,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   const size_t selected_branch_index = words.size();
   words.push_back(build_s_nop(0, arch));
   words.push_back(*restore_scc);
-  for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
+  for (uint64_t offset = 0; offset < candidate.size(); offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
     words.push_back(word);

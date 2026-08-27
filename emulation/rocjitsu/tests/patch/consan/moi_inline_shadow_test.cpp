@@ -2003,7 +2003,7 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
-    EXPECT_EQ(result.moi_candidates.front().width_bits, 128u);
+    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
     ASSERT_EQ(result.resource_plans.size(), 1u);
     EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
     EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
@@ -2850,7 +2850,7 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().width_bits, 128u);
+  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4753,13 +4753,13 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
       });
   ASSERT_NE(full_access_candidate, result.moi_candidates.end());
   const ConSanIntentCoverageEntry *full_access_site =
-      consan_access_coverage_at(result, full_access_candidate->text_offset);
+      consan_access_coverage_at(result, full_access_candidate->anchor());
   ASSERT_NE(full_access_site, nullptr);
   EXPECT_EQ(full_access_site->lowering, ConSanLoweringOutcomeKind::Instrumented)
       << full_access_site->detail;
   const auto full_access_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return plan.text_offset == full_access_candidate->text_offset &&
+        return plan.text_offset == full_access_candidate->anchor() &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
   ASSERT_NE(full_access_plan, result.resource_plans.end());
@@ -5357,7 +5357,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
                                << " candidates=" << result.moi_candidates.size()
                                << " warnings=" << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().width_bits, 128u);
+  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
 
@@ -5416,7 +5416,7 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
         ASSERT_TRUE(result.modified);
         ASSERT_EQ(result.moi_candidates.size(), 1u);
         EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
-        EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
+        EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
 
         AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
         ASSERT_TRUE(patched.is_valid());
@@ -6457,7 +6457,7 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.moi_candidates.size(), kAccessCount);
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    EXPECT_GT(candidate.size, sizeof(uint32_t));
+    EXPECT_GT(candidate.size(), sizeof(uint32_t));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);

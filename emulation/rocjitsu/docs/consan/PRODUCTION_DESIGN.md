@@ -4059,6 +4059,38 @@ analysis completed.
   before this non-device formatter deletion. E2E validation remains outside
   this work.
 
+### Slice 5AE: reuse the complete normalized access record in MOI lowering
+
+- **No parallel access schema:** `ConSanMoiCandidate` now extends the exact
+  immutable `ConSanAccessInventorySite` selected by observation policy. It no
+  longer copies container identity, origin, access kind, FLAT address-space
+  hint, physical and file offsets, instruction size, decoded width, operand
+  facts, or mnemonic into ten independently maintained fields. The temporary
+  lowering value retains only state that is genuinely created after admission:
+  the gfx1250 bank mode, one selected execution-owner descriptor, and the
+  current emitters' compact nonnegative access ranges.
+- **One normalized snapshot:** Candidate construction copies the complete
+  inventory value once. Every engine, placement path, emitter, validator, and
+  hook-test fixture reads the inherited normalized facts. A focused host
+  contract compares the complete candidate base with its matching inventory
+  site for Record/Replay, Sampled, and Inline Shadow, so adding a future
+  inventory field cannot silently recreate a partial projection.
+- **Completed incidental deletion:** The first-light emitter called a helper
+  that converted decoded width to a byte count, rejected malformed widths,
+  and then never consumed the returned count. Admitted normalized ranges are
+  already the authority for emitted byte spans. The unused helper and its
+  redundant check are deleted rather than attached to the new representation.
+- **Deletion result:** Production source is 11 physical lines smaller despite
+  the documented candidate boundary; source plus tests is eight lines smaller.
+  No compatibility alias, fallback field, or second construction path was
+  retained.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 69.50
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate; this
+  representation cutover preserves the admitted sites and emitted byte ranges.
+  E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

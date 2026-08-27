@@ -2833,7 +2833,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
-  EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
+  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   expect_bounded_static_record_replay_probe_size(result.patches.front().original_size);

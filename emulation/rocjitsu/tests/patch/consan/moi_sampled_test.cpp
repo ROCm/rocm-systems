@@ -3275,7 +3275,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 0u &&
-           patch.anchor_offset == result.moi_candidates.front().text_offset;
+           patch.anchor_offset == result.moi_candidates.front().anchor();
   });
   ASSERT_NE(dispatcher, result.patches.end());
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());

@@ -5155,11 +5155,11 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   rocjitsu::ConSanMoiCandidate candidate;
   candidate.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
   candidate.kind = rocjitsu::ConSanLdsAccessKind::Write;
-  candidate.size = sizeof(uint32_t);
-  candidate.width_bits = 32u;
+  candidate.instruction_size = sizeof(uint32_t);
+  candidate.decoded_width_bits = 32u;
   candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = sizeof(uint32_t)});
   candidate.file_offset = 0u;
-  candidate.text_offset = 0u;
+  candidate.physical_id.original_text_offset = 0u;
   candidate.container.kind = rocjitsu::ConSanProgramContainerKind::Kernel;
   candidate.container.name = "auto_report_access";
   candidate.mnemonic = "ds_store_b32";
@@ -5413,7 +5413,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
   rocjitsu::ConSanMoiCandidate second_candidate =
       g_transform_override_live_fault_result->moi_candidates.front();
   second_candidate.file_offset = 4u;
-  second_candidate.text_offset = 4u;
+  second_candidate.physical_id.original_text_offset = 4u;
   g_transform_override_live_fault_result->moi_candidates.push_back(std::move(second_candidate));
   g_transform_override_live_fault_result->resource_plans.push_back(
       g_transform_override_live_fault_result->resource_plans.front());

@@ -63,7 +63,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
     const ConSanMoiCandidate &candidate = result.moi_candidates[index];
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
-    EXPECT_EQ(candidate.width_bits, expected_widths[index]);
+    EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
 }
@@ -120,7 +120,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
     EXPECT_EQ(site.addr_vgpr, expected_addresses[index]);
     const ConSanMoiCandidate &candidate = result.moi_candidates[index];
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-    EXPECT_EQ(candidate.width_bits, expected_widths[index]);
+    EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
 }
@@ -2218,7 +2218,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
         EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-        EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
+        EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
         EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
         ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
@@ -2353,7 +2353,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
         EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
-        EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
+        EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
         const auto semantics = consan_flat_store_subword_semantics(candidate.mnemonic);
         ASSERT_TRUE(semantics);
         EXPECT_EQ(semantics->placement, form.placement);
@@ -2596,7 +2596,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
     EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
     EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
               ConSanFlatAddressSpaceHint::Group);
-    EXPECT_EQ(result.moi_candidates.front().size, 2u * sizeof(uint32_t));
+    EXPECT_EQ(result.moi_candidates.front().size(), 2u * sizeof(uint32_t));
     EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_dword");
     EXPECT_EQ(result.moi_candidates.front().operands.raw_segment, 0u);
     ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
@@ -2650,9 +2650,9 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "flat_store_short");
-  EXPECT_EQ(result.moi_candidates[0].width_bits, 16u);
+  EXPECT_EQ(result.moi_candidates[0].decoded_width_bits, 16u);
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "flat_load_ushort");
-  EXPECT_EQ(result.moi_candidates[1].width_bits, 16u);
+  EXPECT_EQ(result.moi_candidates[1].decoded_width_bits, 16u);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
@@ -2707,9 +2707,9 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "flat_store_b16");
-  EXPECT_EQ(result.moi_candidates[0].width_bits, 16u);
+  EXPECT_EQ(result.moi_candidates[0].decoded_width_bits, 16u);
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "flat_load_u16");
-  EXPECT_EQ(result.moi_candidates[1].width_bits, 16u);
+  EXPECT_EQ(result.moi_candidates[1].decoded_width_bits, 16u);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,

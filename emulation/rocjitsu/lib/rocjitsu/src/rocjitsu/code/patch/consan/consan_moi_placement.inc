@@ -1002,7 +1002,7 @@ struct MoiSgprRange {
   // Wide local accesses retain an offset and iteration counter. Wide external
   // accesses retain an iteration counter and the workgroup key, since the
   // versioned transaction reuses all of its ordinary address temporaries.
-  return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits,
+  return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits(),
                                                          consan_moi_exact_shadow::granule_bytes);
 }
 
@@ -1080,10 +1080,10 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   if (!consan_uses_gfx9_cdna_encoding(arch))
     return false;
 
-  const uint16_t lane_stride_shift = candidate.width_bits == 32u    ? 2u
-                                     : candidate.width_bits == 96u  ? 4u
-                                     : candidate.width_bits == 128u ? 4u
-                                                                    : 0u;
+  const uint16_t lane_stride_shift = candidate.width_bits() == 32u    ? 2u
+                                     : candidate.width_bits() == 96u  ? 4u
+                                     : candidate.width_bits() == 128u ? 4u
+                                                                      : 0u;
   if (lane_stride_shift == 0u)
     return false;
   const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kRdna4ExecLo, arch);
@@ -1158,11 +1158,11 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
 
   if (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
     if (*candidate.operands.raw_saddr > 104u || (*candidate.operands.raw_saddr & 1u) != 0u ||
-        candidate.width_bits == 0u)
+        candidate.width_bits() == 0u)
       return false;
     const uint16_t offset_vgpr = static_cast<uint16_t>(result_vgpr + 2u);
     if (*candidate.operands.raw_scale_offset) {
-      const uint32_t byte_count = (candidate.width_bits + 7u) / 8u;
+      const uint32_t byte_count = (candidate.width_bits() + 7u) / 8u;
       const auto scale = instrumentation::build_v_mul_lo_u32_literal(offset_vgpr, offset_vgpr,
                                                                      byte_count, input_vgpr, arch);
       if (!scale)
@@ -1198,21 +1198,21 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
 }
 
 [[nodiscard]] uint16_t candidate_payload_vgpr_count(const ConSanMoiCandidate &candidate) {
-  if (candidate.width_bits == 0)
+  if (candidate.width_bits() == 0)
     return 1;
   const bool two_address = equals_any(
       candidate.mnemonic, {"ds_load_2addr_b32", "ds_load_2addr_b64", "ds_load_2addr_stride64_b32",
                            "ds_load_2addr_stride64_b64", "ds_store_2addr_b32", "ds_store_2addr_b64",
                            "ds_store_2addr_stride64_b32", "ds_store_2addr_stride64_b64"});
-  const uint32_t per_address = std::max<uint32_t>((candidate.width_bits + 31u) / 32u, 1u);
+  const uint32_t per_address = std::max<uint32_t>((candidate.width_bits() + 31u) / 32u, 1u);
   return static_cast<uint16_t>(per_address * (two_address ? 2u : 1u));
 }
 
 [[nodiscard]] uint16_t
 candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
-  if (candidate.width_bits == 0)
+  if (candidate.width_bits() == 0)
     return 1;
-  return static_cast<uint16_t>(std::max<uint32_t>((candidate.width_bits + 31u) / 32u, 1u));
+  return static_cast<uint16_t>(std::max<uint32_t>((candidate.width_bits() + 31u) / 32u, 1u));
 }
 
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
@@ -3169,7 +3169,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
     ConSanOptions site_options = options;
     uint16_t scratch_count = moi_access_scratch_vgpr_count(site_options, candidate, state.arch);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-        state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
+        state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
         candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
     // Persistent placement can deliberately mix private state with
     // component-local VGPR tuples. The first plan discovers the physical
@@ -3181,10 +3181,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
           moi_access_scratch_vgpr_count(owner_options, candidate, state.arch);
       if (owner_scratch_count != scratch_count) {
         scratch_count = owner_scratch_count;
-        plan = plan_moi_resource_site(state, owner_options, ConSanResourceSiteKind::Access,
-                                      candidate_index, candidate.text_offset,
-                                      candidate.kernel_descriptor_file_offset, scratch_count,
-                                      &candidate);
+        plan = plan_moi_resource_site(
+            state, owner_options, ConSanResourceSiteKind::Access, candidate_index,
+            candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
       }
       site_options = std::move(owner_options);
     }
@@ -3202,9 +3201,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
       const uint16_t spill_scratch_count =
           sampled_spill_backed_scratch_count(site_options, candidate, state.arch);
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
-          state, site_options, ConSanResourceSiteKind::Access, candidate_index,
-          candidate.text_offset, candidate.kernel_descriptor_file_offset, spill_scratch_count,
-          &candidate,
+          state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
+          candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
       const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
       const ConSanResourcePlanAlternative alternative{
@@ -3255,9 +3253,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
       const uint16_t spill_scratch_count =
           inline_shadow_spill_backed_scratch_count(site_options, candidate, state.arch);
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
-          state, site_options, ConSanResourceSiteKind::Access, candidate_index,
-          candidate.text_offset, candidate.kernel_descriptor_file_offset, spill_scratch_count,
-          &candidate,
+          state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
+          candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
       // The reduced window omits the dedicated address snapshot. If it spills
       // the clobbered address, emission recovers the value from its private

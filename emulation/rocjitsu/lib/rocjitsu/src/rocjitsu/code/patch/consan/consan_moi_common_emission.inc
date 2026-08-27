@@ -806,14 +806,14 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     uint16_t replay_address_vgpr, std::optional<uint16_t> adjusted_address_vgpr,
     std::vector<std::string> &errors) {
   const auto copy_original = [&]() -> std::optional<std::vector<uint32_t>> {
-    if (candidate.size == 0u || candidate.size % sizeof(uint32_t) != 0u ||
+    if (candidate.size() == 0u || candidate.size() % sizeof(uint32_t) != 0u ||
         candidate.file_offset > bytes.size() ||
-        candidate.size > bytes.size() - candidate.file_offset) {
+        candidate.size() > bytes.size() - candidate.file_offset) {
       errors.emplace_back("ConSan MOI relocated guest access exceeds the code object");
       return std::nullopt;
     }
-    std::vector<uint32_t> words(candidate.size / sizeof(uint32_t));
-    std::memcpy(words.data(), bytes.data() + candidate.file_offset, candidate.size);
+    std::vector<uint32_t> words(candidate.size() / sizeof(uint32_t));
+    std::memcpy(words.data(), bytes.data() + candidate.file_offset, candidate.size());
     return words;
   };
 
@@ -822,7 +822,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return copy_original();
 
   const auto &ranges = candidate.access_ranges;
-  const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits / 32u);
+  const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits() / 32u);
   if (ranges.size() != 2u ||
       (candidate.kind != ConSanLdsAccessKind::Read &&
        candidate.kind != ConSanLdsAccessKind::Write) ||
@@ -970,11 +970,6 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
           options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, *options.scratch_vgpr,
           scratch_count, "MOI Record/Replay cluster workgroup ID", errors))
     return std::nullopt;
-  auto byte_count = byte_count_for_candidate(candidate);
-  if (!byte_count) {
-    errors.emplace_back("ConSan MOI first-light probe could not determine LDS byte count");
-    return std::nullopt;
-  }
   const auto &access_ranges = candidate.access_ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
@@ -1049,7 +1044,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
+  words.reserve(candidate.size() / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
                 (options.moi_owner_vgpr || derived_owner_vgpr ? 9u : 0u) +
                 (options.moi_epoch_vgpr ? 9u : 0u) + derived_owner_words.size());
   InstructionSequence sequence(words);
@@ -1249,8 +1244,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
           !append_dynamic_access_store_u32_literal(
               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
-              static_cast<uint32_t>(candidate.text_offset), slot_vgpr, *options.scratch_vgpr,
-              arch) ||
+              static_cast<uint32_t>(candidate.anchor()), slot_vgpr, *options.scratch_vgpr, arch) ||
           !append_dynamic_access_store_u32_literal(
               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
               static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch)) {
@@ -1964,7 +1958,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         (options.moi_epoch_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
-                              static_cast<uint32_t>(candidate.text_offset)) ||
+                              static_cast<uint32_t>(candidate.anchor())) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token) ||
         !record.store_literal(
             offsetof(ConSanMoiAccessRecord, flags),

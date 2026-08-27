@@ -798,7 +798,7 @@ void expect_moi_engines_admit_native_b96_accesses(
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
       ASSERT_EQ(result.moi_candidates.size(), 1u);
       EXPECT_EQ(result.moi_candidates.front().mnemonic, mnemonic);
-      EXPECT_EQ(result.moi_candidates.front().width_bits, 96u);
+      EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 96u);
       const ConSanPatchKind expected_patch_kind =
           engine == ConSanMoiEngine::RecordReplay ? ConSanPatchKind::TrampolineMoiAccessRecordStore
           : engine == ConSanMoiEngine::InlineShadow
@@ -839,7 +839,7 @@ void expect_moi_engines_admit_native_b96_accesses(
         if (load_clobbers_address) {
           const uint16_t saved_address_vgpr = static_cast<uint16_t>(
               loop_counter_vgpr + consan_detail::inline_shadow_loop_scratch_count(
-                                      result.moi_candidates.front().width_bits,
+                                      result.moi_candidates.front().decoded_width_bits,
                                       consan_moi_exact_shadow::granule_bytes));
           EXPECT_LT(saved_address_vgpr, reserved_end);
           EXPECT_NE(std::ranges::find(body, build_v_mov_b32_e32(saved_address_vgpr,
@@ -1108,10 +1108,10 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(candidate.container.kind, ConSanProgramContainerKind::Function);
   EXPECT_EQ(candidate.container.name, "lds_helper");
   EXPECT_EQ(candidate.mnemonic, "flat_load_b32");
-  EXPECT_EQ(candidate.text_offset, 24u);
+  EXPECT_EQ(candidate.anchor(), 24u);
   EXPECT_EQ(candidate.file_offset, 0x118u);
-  EXPECT_EQ(candidate.size, 3u * sizeof(uint32_t));
-  EXPECT_EQ(candidate.width_bits, 32u);
+  EXPECT_EQ(candidate.size(), 3u * sizeof(uint32_t));
+  EXPECT_EQ(candidate.decoded_width_bits, 32u);
   ASSERT_TRUE(candidate.operands.destination_vgpr);
   EXPECT_EQ(*candidate.operands.destination_vgpr, 2u);
   ASSERT_TRUE(candidate.operands.address_vgpr);
@@ -2258,13 +2258,14 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
     }
     std::set<uint64_t> candidate_offsets;
     for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-      candidate_offsets.insert(candidate.text_offset);
+      candidate_offsets.insert(candidate.anchor());
       const auto site = std::ranges::find_if(
           result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &access) {
-            return access.physical_id.original_text_offset == candidate.text_offset &&
+            return access.physical_id.original_text_offset == candidate.anchor() &&
                    access.container.name == candidate.container.name;
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
+      EXPECT_EQ(static_cast<const ConSanAccessInventorySite &>(candidate), *site);
       ASSERT_EQ(candidate.access_ranges.size(), site->ranges.size());
       for (size_t range_index = 0; range_index < site->ranges.size(); ++range_index) {
         ASSERT_TRUE(site->ranges[range_index].static_byte_offset);
