@@ -1478,11 +1478,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               group_options, group.front()->resources.owner_descriptor_file_offsets) ||
           !group_options.moi_exec_save_sgpr)
         continue;
-      if (!emit_moi_dense_recording_access_group(
-              std::span<const PlannedAccessRecordPatch *const>(group), dispatcher_offset,
-              dense_entry_hosts, group_options, arch, access_slot_words,
-              /*collapse_spill_router_for_explicit_key=*/false, "first-light probe", new_text,
-              patches, result.errors)) {
+      if (!emit_moi_dense_access_group(std::span<const PlannedAccessRecordPatch *const>(group),
+                                       dispatcher_offset, dense_entry_hosts, group_options, arch,
+                                       access_slot_words,
+                                       /*collapse_spill_router_for_explicit_key=*/false,
+                                       "first-light probe", new_text, patches, result.errors)) {
         return;
       }
     }

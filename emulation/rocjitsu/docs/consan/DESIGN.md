@@ -339,14 +339,14 @@ range contracts but retains a specialized cached host search because it must
 also exclude qualified multi-instruction ordering sequences in very large
 generated objects.
 
-Record/Replay and Sampled access groups also share
-`emit_moi_dense_recording_access_group`, the route-emission mechanism that
-materializes the entry island, optional relocated entry host, dispatcher arms,
-SCC-preserving transfers, and original call anchors. The engines continue to
-own admission and their evidence bodies. Their one route-level policy
-difference—whether equal spill-backed PC and call-return assignments form a
-collapsed route on an explicit-key target—is an explicit input to the shared
-emitter rather than a duplicated lowering body.
+All three access engines also share `emit_moi_dense_access_group`, the
+route-emission mechanism that materializes the entry island, optional relocated
+entry host, dispatcher arms, SCC-preserving transfers, and original call
+anchors. The engines continue to own admission and their evidence bodies. The
+Record/Replay-versus-Sampled collapsed-spill decision is an explicit input.
+Inline Shadow supplies its distinct scalar ABI, while its SCC-tagged explicit
+key and indirect-PC dependency wait are explicit route-mechanism branches. The
+mechanical route topology and byte installation are not copied into any engine.
 
 Most of this mechanism is currently reached through `lower_consan` inside
 `TransformResult` construction. That implementation is the sole place allowed

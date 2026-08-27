@@ -25,6 +25,7 @@ struct MoiLocalNopIsland {
 
 constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+constexpr uint32_t kMoiInlineShadowIndirectIslandWords = 8u;
 // A branch-only Record/Replay access layout retains a two-word relay pair
 // after every reserved barrier island. The seven-word island remains
 // available to the later barrier pass, while the dedicated pair forms a

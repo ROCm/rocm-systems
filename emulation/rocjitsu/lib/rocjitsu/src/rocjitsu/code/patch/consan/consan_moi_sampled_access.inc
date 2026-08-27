@@ -977,11 +977,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (!apply_moi_transient_sgpr_assignment(
               group_options, group.front()->resources.owner_descriptor_file_offsets))
         continue;
-      if (!emit_moi_dense_recording_access_group(
-              std::span<const PlannedSampledPatch *const>(group), dispatcher_offset,
-              dense_entry_hosts, group_options, arch, access_relay_words,
-              /*collapse_spill_router_for_explicit_key=*/true, "sampled probe", new_text, patches,
-              result.errors)) {
+      if (!emit_moi_dense_access_group(std::span<const PlannedSampledPatch *const>(group),
+                                       dispatcher_offset, dense_entry_hosts, group_options, arch,
+                                       access_relay_words,
+                                       /*collapse_spill_router_for_explicit_key=*/true,
+                                       "sampled probe", new_text, patches, result.errors)) {
         return;
       }
     }

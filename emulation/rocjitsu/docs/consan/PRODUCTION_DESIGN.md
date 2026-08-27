@@ -5517,7 +5517,7 @@ analysis completed.
 ### Slice 5CD: share dense access route emission
 
 - **One route emitter:** Record/Replay and Sampled access groups now call
-  `emit_moi_dense_recording_access_group` for entry-island construction,
+  `emit_moi_dense_access_group` for entry-island construction,
   optional relocated-entry-host routing, dispatcher comparisons and targets,
   SCC restoration, dispatcher telemetry, host entry rewriting, and original
   call-anchor rewriting. Evidence construction and engine admission remain
@@ -5536,6 +5536,33 @@ analysis completed.
   physical lines, a net deletion of 291. No tests are added because the
   existing focused matrix already directly exercises every shared-route branch
   and both engine policy inputs.
+- **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
+### Slice 5CE: fold Inline Shadow into dense access route emission
+
+- **All access engines share the mechanism:** Inline Shadow now joins
+  Record/Replay and Sampled in `emit_moi_dense_access_group`. Entry-island and
+  optional relocated-host installation, dispatcher-arm ordering and storage,
+  SCC-preserving direct or indirect targets, dispatcher telemetry, host-entry
+  rewriting, and original-anchor rewriting have one implementation.
+- **Real ABI differences remain visible:** Inline Shadow retains its own
+  scalar-ABI selection, SCC-tagged explicit route key, indirect-PC dependency
+  wait, eight-word return island, and dispatcher-to-barrier reuse telemetry.
+  Record/Replay and Sampled retain their seven-or-eight-word spill layout and
+  explicit collapsed-spill policy. These are named branches in the shared
+  route mechanism rather than copied engine bodies; evidence emission and
+  admission remain engine-owned.
+- **Focused route coverage:** Existing RDNA4, CDNA4, and CDNA5 tests cover
+  one-word call relays, relocated entry hosts, ordinary and tagged explicit
+  keys, aliased key/SCC state, SCC restoration before the evidence body,
+  called-function hosts, and large composed layouts. The complete focused
+  Record/Replay and Sampled route matrix remains green as well.
+- **Deletion accounting:** Implementation files add 171 and delete 406
+  physical lines, a net deletion of 235. The 329-line Inline Shadow emission
+  copy is deleted without a compatibility wrapper or fallback.
 - **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
   pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
