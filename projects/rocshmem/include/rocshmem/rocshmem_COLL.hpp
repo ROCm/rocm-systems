@@ -328,82 +328,70 @@ __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
  */
 
 __device__ ATTR_NO_INLINE void rocshmem_float_alltoallv_wg(rocshmem_team_t team,
-                                                           float *dest, const size_t dest_nelems[],
-                                                           const size_t dest_displs[],
-                                                           float *source, const size_t source_nelems[],
-                                                           const size_t source_displs[]);
-
+                                                             float *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             float *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_double_alltoallv_wg(rocshmem_team_t team,
-                                                            double *dest, const size_t dest_nelems[],
-                                                            const size_t dest_displs[],
-                                                            double *source, const size_t source_nelems[],
-                                                            const size_t source_displs[]);
-
+                                                             double *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             double *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_char_alltoallv_wg(rocshmem_team_t team,
-                                                          char *dest, const size_t dest_nelems[],
-                                                          const size_t dest_displs[],
-                                                          char *source, const size_t source_nelems[],
-                                                          const size_t source_displs[]);
-
+                                                             char *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             char *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_schar_alltoallv_wg(rocshmem_team_t team,
-                                                           signed char *dest, const size_t dest_nelems[],
-                                                           const size_t dest_displs[],
-                                                           signed char *source, const size_t source_nelems[],
-                                                           const size_t source_displs[]);
-
+                                                             signed char *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             signed char *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_short_alltoallv_wg(rocshmem_team_t team,
-                                                           short *dest, const size_t dest_nelems[],
-                                                           const size_t dest_displs[],
-                                                           short *source, const size_t source_nelems[],
-                                                           const size_t source_displs[]);
-
+                                                             short *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             short *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_int_alltoallv_wg(rocshmem_team_t team,
-                                                         int *dest, const size_t dest_nelems[],
-                                                         const size_t dest_displs[],
-                                                         int *source, const size_t source_nelems[],
-                                                         const size_t source_displs[]);
-
+                                                             int *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             int *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_long_alltoallv_wg(rocshmem_team_t team,
-                                                          long *dest, const size_t dest_nelems[],
-                                                          const size_t dest_displs[],
-                                                          long *source, const size_t source_nelems[],
-                                                          const size_t source_displs[]);
-
+                                                             long *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             long *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_longlong_alltoallv_wg(rocshmem_team_t team,
-                                                              long long *dest, const size_t dest_nelems[],
-                                                              const size_t dest_displs[],
-                                                              long long *source, const size_t source_nelems[],
-                                                              const size_t source_displs[]);
-
+                                                             long long *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             long long *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_uchar_alltoallv_wg(rocshmem_team_t team,
-                                                           unsigned char *dest, const size_t dest_nelems[],
-                                                           const size_t dest_displs[],
-                                                           unsigned char *source, const size_t source_nelems[],
-                                                           const size_t source_displs[]);
-
+                                                             unsigned char *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             unsigned char *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_ushort_alltoallv_wg(rocshmem_team_t team,
-                                                            unsigned short *dest, const size_t dest_nelems[],
-                                                            const size_t dest_displs[],
-                                                            unsigned short *source, const size_t source_nelems[],
-                                                            const size_t source_displs[]);
-
+                                                             unsigned short *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             unsigned short *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_uint_alltoallv_wg(rocshmem_team_t team,
-                                                          unsigned int *dest, const size_t dest_nelems[],
-                                                          const size_t dest_displs[],
-                                                          unsigned int *source, const size_t source_nelems[],
-                                                          const size_t source_displs[]);
-
+                                                             unsigned int *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             unsigned int *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_ulong_alltoallv_wg(rocshmem_team_t team,
-                                                           unsigned long *dest, const size_t dest_nelems[],
-                                                           const size_t dest_displs[],
-                                                           unsigned long *source, const size_t source_nelems[],
-                                                           const size_t source_displs[]);
-
+                                                             unsigned long *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             unsigned long *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoallv_wg(rocshmem_team_t team,
-                                                               unsigned long long *dest, const size_t dest_nelems[],
-                                                               const size_t dest_displs[],
-                                                               unsigned long long *source, const size_t source_nelems[],
-                                                               const size_t source_displs[]);
+                                                             unsigned long long *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             unsigned long long *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 
 __device__ ATTR_NO_INLINE void rocshmem_half_alltoallv_wg(rocshmem_team_t team,
                                                           __half *dest, const size_t dest_nelems[],
@@ -1160,195 +1148,6 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_and_reduce_scatter_wg(
     int nreduce);
 __device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_xor_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest, const long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest, const unsigned char *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest, const unsigned short *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest, const unsigned int *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest, const unsigned long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int8_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int8_t *dest, const int8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int16_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, int16_t *dest, const int16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint8_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint8_t *dest, const uint8_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_sum_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_min_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_max_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_prod_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_or_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_and_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
-    int nreduce);
-__device__ ATTR_NO_INLINE int rocshmem_ctx_uint16_xor_reduce_scatter_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, uint16_t *dest, const uint16_t *source,
     int nreduce);
 __device__ ATTR_NO_INLINE int rocshmem_ctx_float_sum_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest, const float *source,
