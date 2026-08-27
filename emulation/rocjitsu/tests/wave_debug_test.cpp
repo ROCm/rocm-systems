@@ -263,7 +263,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
 
-  fx.gpu_mem.write32(kKernelAddr, 0xC0000000u, kProcessId);     // s_load_dword s0, s[0:1]
+  fx.gpu_mem.write32(kKernelAddr, 0xC0020000u, kProcessId);     // s_load_dword s0, s[0:1]
   fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
   fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
   auto *wave = fx.dispatch(kKernelAddr);
@@ -701,7 +701,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
 
-  fx.gpu_mem.write32(kKernelAddr, 0xC0000000u, kProcessId);     // s_load_dword s0, s[0:1]
+  fx.gpu_mem.write32(kKernelAddr, 0xC0020000u, kProcessId);     // s_load_dword s0, s[0:1]
   fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
   fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
   auto *wave = fx.dispatch(kKernelAddr);
@@ -758,7 +758,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   page_table[kDataAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(), amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
 
-  fx.gpu_mem.write32(kKernelAddr, 0xC0040000u, kProcessId);     // s_load_dwordx2 s[0:1], s[0:1]
+  fx.gpu_mem.write32(kKernelAddr, 0xC0060000u, kProcessId);     // s_load_dwordx2 s[0:1], s[0:1]
   fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
   fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
   auto *wave = fx.dispatch(kKernelAddr);

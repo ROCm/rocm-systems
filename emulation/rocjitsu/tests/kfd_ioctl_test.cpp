@@ -4495,7 +4495,7 @@ rocjitsu::amdgpu::Wavefront *fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc,
   if (memory == nullptr)
     return nullptr;
   const uint32_t pid = driver->local_process_id();
-  memory->write32(kernel_pc, 0xC0000000u, pid);     // s_load_dword s0, s[0:1], 0x0
+  memory->write32(kernel_pc, 0xC0020000u, pid);     // s_load_dword s0, s[0:1], 0x0
   memory->write32(kernel_pc + 4, 0u, pid);          // ... its immediate offset
   memory->write32(kernel_pc + 8, 0xBF800000u, pid); // s_nop 0
 
