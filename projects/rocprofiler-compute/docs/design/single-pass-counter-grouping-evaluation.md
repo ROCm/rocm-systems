@@ -74,7 +74,7 @@ On gfx942 full panel, adding `same_bucket_priority_metric_ids` **typically incre
 |--------|-------------------|---------------------|
 | `{}` (today) | 12 | — |
 | `17.2.1` (HBM Read Traffic) | **17** | **+5 (+42%)** |
-| `6.1.2` (Workgroup Manager Util.) | 17 | +5 |
+| `6.1.2` (Workgroup Manager Utilization) | 17 | +5 |
 | All cap metrics (`17.2.1`, `6.1.2`, `5.1.0`, `15.4.0`) | 17 | +5 |
 
 Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. gfx1250 is a documented exception where priority metrics can steer packing **without** increasing pass count — behavior is **arch- and counter-set-specific**.
@@ -108,7 +108,7 @@ Simulated counter → pass bucket (full panel):
 | Does adding policy increase passes? | **Typically yes** on gfx942 full panel — simulated **+42%** for priority metrics |
 | Does `--block 17` help HBM validation? | **Yes** — partners already co-locate; **8 passes** vs ~12–13 |
 | Does policy help block-only HBM? | **No extra benefit** in simulation (already co-located) |
-| Can policy fix WGM on full panel? | **Simulated co-location** with `6.1.2`, same pass-count penalty |
+| Can policy fix Workgroup Manager Utilization on full panel? | **Simulated co-location** with `6.1.2`, same pass-count penalty |
 
 ---
 

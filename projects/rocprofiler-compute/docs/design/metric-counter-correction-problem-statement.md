@@ -48,10 +48,10 @@ Data path: `/home/feizheng/Downloads/aiprofcomp78-cpx-data/` (also summarized in
 |----------|--------|-----|-----|-----|-------|
 | occupancy CPX | HBM Read Traffic | **103.23%** | — | — | Matches classic avg inflation case |
 | mat_exp CPX | HBM Read Traffic | 99.11% | 36.56% | **188.24%** | Avg OK; max exploded |
-| mat_exp CPX | Workgroup Manager Util. | 39.91% | 8.76% | **739.60%** | Extreme max on short dispatch |
+| mat_exp CPX | Workgroup Manager Utilization | 39.91% | 8.76% | **739.60%** | Extreme max on short dispatch |
 | mat_exp CPX | Data-Return Busy | 2.59% | 0.05% | **345.38%** | Extreme max |
 | mat_exp CPX | CPF Utilization | **101.05%** | 100% | 100% | Avg inflation |
-| rocflop CPX | HBM / WGM | ≤100.08% | — | ≤100.5% | Mild or no violation |
+| rocflop CPX | HBM Read Traffic / Workgroup Manager Utilization | ≤100.08% | — | ≤100.5% | Mild or no violation |
 
 Violations are **workload-dependent** and **sporadic** (minority of dispatches), not uniform across every kernel.
 
@@ -90,7 +90,7 @@ Example HBM outlier (dispatch 13): `a=192`, `b=102` → 188% (GEMM kernel).
 |------|---------|---------------------|---------------|
 | **Partition ratio** | HBM Read = DRAM reads / total reads | Yes (`a ⊆ b`) | Multi-pass stitching → avg >100% or sporadic max |
 | **Partition utilization** | CPF busy / (busy+idle) | Yes | Same |
-| **Non-partition ratio** | WGM = SPI busy / GUI active | No | Max spikes; avg cap misleading |
+| **Non-partition ratio** | Workgroup Manager Utilization (SPI busy / GUI active) | No | Max spikes; avg cap misleading |
 | **Subtraction split** | Remote = total − DRAM | Yes (≥ 0) | Shipped `NOISE_CLAMP` |
 | **Dual-issue VALU** | VALU Utilization | Can exceed 100% | Documented exception |
 
@@ -112,7 +112,7 @@ Example HBM outlier (dispatch 13): `a=192`, `b=102` → 188% (GEMM kernel).
 
 1. Do we require all Percent metrics ≤ 100% in product UI, or allow documented exceptions (VALU) plus optional warnings?
 2. What single-pass evidence bar is required before merging formula caps (qualitative today — see methods doc §5.4)?
-3. Should gfx942 `profiling_counter_grouping_policy.yaml` gain entries for HBM / WGM / CPF metrics despite full-panel pass-count cost?
+3. Should gfx942 `profiling_counter_grouping_policy.yaml` gain entries for HBM Read Traffic, Workgroup Manager Utilization, and CPF Utilization despite full-panel pass-count cost?
 4. When single-pass validation still shows violations, what is the escalation path to driver/HW?
 
 ---

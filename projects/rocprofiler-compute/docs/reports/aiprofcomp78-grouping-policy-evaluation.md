@@ -61,7 +61,7 @@ Adding `same_bucket_priority_metric_ids` on gfx942 full panel **typically increa
 |-----------------------------------|------------------|---|
 | `{}` (current) | 12 | — |
 | `17.2.1` (HBM Read Traffic) | **17** | **+42%** |
-| `6.1.2` (WGM Utilization) | 17 | +42% |
+| `6.1.2` (Workgroup Manager Utilization) | 17 | +42% |
 | `17.2.1`, `6.1.2`, `5.1.0`, `15.4.0` | 17 | +42% |
 
 Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. The trade-off is co-location accuracy vs longer profile time.

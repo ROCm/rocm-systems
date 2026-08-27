@@ -43,11 +43,11 @@ Values from **uncapped** analyze (pre-#10717) logs:
 |----------|--------|-----|-----|-----------|
 | **occupancy_cpx** | HBM Read Traffic | **103.23%** | — | Avg >100% |
 | **mat_exp** | HBM Read Traffic | 99.11% | **188.24%** | Max >100% |
-| **mat_exp** | Workgroup Manager Util. | 39.91% | **739.60%** | Max >100% |
+| **mat_exp** | Workgroup Manager Utilization | 39.91% | **739.60%** | Max >100% |
 | **mat_exp** | Data-Return Busy | 2.59% | **345.38%** | Max >100% |
 | **mat_exp** | CPF Utilization | **101.05%** | 100% | Avg >100% |
 | rocflop | HBM Read Traffic | 99.70% | 100% | None |
-| rocflop | Workgroup Manager Util. | 100.08% | 100.52% | Mild avg |
+| rocflop | Workgroup Manager Utilization | 100.08% | 100.52% | Mild avg |
 
 **Conclusion:** Violations are **sporadic** (not every workload/metric) and **worst on mat_exp** (many short dispatches).
 
@@ -60,11 +60,11 @@ Computed from `pmc_perf.csv` (stitched multi-pass table):
 | Workload | Metric | Dispatches | `a > b` rows | % rows | Max `100×a/b` | `100×SUM(a)/SUM(b)` |
 |----------|--------|------------|--------------|--------|---------------|---------------------|
 | mat_exp | HBM Read | 208 | 15 | 7.2% | 188.2% | 99.11% |
-| mat_exp | WGM (`GRBM_SPI/GUI`) | 206 | 2 | 1.0% | **739.6%** | 40.06% |
+| mat_exp | Workgroup Manager Utilization (`GRBM_SPI/GUI`) | 206 | 2 | 1.0% | **739.6%** | 40.06% |
 | occupancy | HBM Read | 8 | 2 | 25.0% | 103.9% | **103.23%** |
-| occupancy | WGM | 8 | 1 | 12.5% | 100.0% | 99.99% |
+| occupancy | Workgroup Manager Utilization | 8 | 1 | 12.5% | 100.0% | 99.99% |
 | rocflop | HBM Read | 7 | 0 | 0% | 100.0% | 99.70% |
-| rocflop | WGM | 7 | 1 | 14.3% | 100.5% | 100.08% |
+| rocflop | Workgroup Manager Utilization | 7 | 1 | 14.3% | 100.5% | 100.08% |
 
 **occupancy** HBM avg inflation (103.23%) matches `SUM(a)/SUM(b)` on merged data with a minority of bad rows.
 
@@ -75,7 +75,7 @@ Computed from `pmc_perf.csv` (stitched multi-pass table):
 | Metric | Numerator | Denominator | Numerator pass | Denominator pass |
 |--------|-----------|-------------|----------------|------------------|
 | HBM Read | `TCC_EA0_RDREQ_DRAM_sum` | `TCC_EA0_RDREQ_sum` | `SQ_INST_LEVEL_LDS_ACCUM` | `SQ_INST_LEVEL_SMEM_ACCUM` |
-| WGM | `GRBM_SPI_BUSY` | `GRBM_GUI_ACTIVE` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` |
+| Workgroup Manager Utilization | `GRBM_SPI_BUSY` | `GRBM_GUI_ACTIVE` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` |
 | CPF Util | `CPF_CPF_STAT_BUSY` | `CPF_CPF_STAT_IDLE` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` |
 
 No single perfmon pass contains **both** partners for these metrics. Analyze merges them by `Dispatch_ID`, so per-dispatch ratios can exceed 100% even when each counter is valid in its own pass.
