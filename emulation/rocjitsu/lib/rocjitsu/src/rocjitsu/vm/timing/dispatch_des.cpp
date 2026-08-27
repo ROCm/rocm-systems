@@ -342,9 +342,16 @@ void DispatchDes::end() {
   // there are, and that is what the measurements show: a launch-dominated
   // kernel costs about the same extra per doubling of its wavefront count,
   // from four wavefronts to a thousand.
-  if (tuning_.straggler_cycles != 0 && waves_ > 1)
-    terms_.straggler = static_cast<std::uint64_t>(static_cast<double>(tuning_.straggler_cycles) *
-                                                  std::log2(static_cast<double>(waves_)));
+  //
+  // Counted over workgroups rather than wavefronts, because the spread is
+  // between *independent* units and the wavefronts of one workgroup are not
+  // independent: they share a compute unit and a barrier. Counting wavefronts
+  // charged a single-workgroup kernel a straggler it cannot have, and those
+  // were the most over-charged cases in the corpus.
+  if (tuning_.straggler_cycles != 0 && shape_.workgroup_count > 1)
+    terms_.straggler =
+        static_cast<std::uint64_t>(static_cast<double>(tuning_.straggler_cycles) *
+                                   std::log2(static_cast<double>(shape_.workgroup_count)));
   latency_bound += terms_.straggler;
 
   const std::uint64_t placement =

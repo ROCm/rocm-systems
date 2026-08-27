@@ -385,7 +385,7 @@ TEST(TimingDispatch, ASlowerFrontEndNeverMakesADispatchFaster) {
   EXPECT_GE(run_dispatch(slow, shape, 256), run_dispatch(quick, shape, 256));
 }
 
-TEST(TimingDispatch, TheStragglerTermGrowsWithTheWavefrontCountAndIsOffByDefault) {
+TEST(TimingDispatch, TheStragglerTermGrowsWithTheWorkgroupCountAndIsOffByDefault) {
   const std::string with = R"(,
         "straggler_cycles": 64)";
   TimingPlane without{Tuning::parse(tiny_config())};
@@ -399,10 +399,20 @@ TEST(TimingDispatch, TheStragglerTermGrowsWithTheWavefrontCountAndIsOffByDefault
   const std::uint64_t straggling_small = run_dispatch(charged, small, 4);
   const std::uint64_t straggling_large = run_dispatch(charged, large, 4);
 
-  // One wavefront has no straggler; many wavefronts do, and it grows.
+  // One workgroup has no straggler -- there is nothing for it to straggle
+  // against -- and many workgroups do, and it grows with how many.
   EXPECT_EQ(plain_small, straggling_small);
   EXPECT_GT(straggling_large, plain_large);
   EXPECT_GT(straggling_large - plain_large, straggling_small - plain_small);
+
+  // And it is the workgroup count that matters, not the wavefront count: one
+  // workgroup of many wavefronts still has nothing to straggle against,
+  // because they share a compute unit and a barrier.
+  TimingPlane wide{Tuning::parse(tiny_config())};
+  TimingPlane wide_charged{Tuning::parse(tiny_config(with))};
+  DispatchShape one_group = shape_for(1, 8);
+  one_group.dispatch_id = 3;
+  EXPECT_EQ(run_dispatch(wide, one_group, 4), run_dispatch(wide_charged, one_group, 4));
 }
 
 TEST(TimingDispatch, ExposingLessOfAStallNeverCostsMore) {

@@ -144,7 +144,10 @@ struct Tuning {
   /// missing entirely. The expected maximum of many independent noisy
   /// durations grows with the logarithm of how many there are, and the
   /// measurements agree: a launch-dominated kernel costs about the same extra
-  /// per doubling of its wavefront count, from four wavefronts to a thousand.
+  /// per doubling of its workgroup count.
+  ///
+  /// Over workgroups, not wavefronts: the spread is between independent units,
+  /// and the wavefronts of one workgroup share a compute unit and a barrier.
   std::uint64_t straggler_cycles = 0;
 
   /// @brief Calibration factors, not measurements.

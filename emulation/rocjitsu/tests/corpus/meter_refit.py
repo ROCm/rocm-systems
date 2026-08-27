@@ -107,6 +107,7 @@ def config_defaults(config: dict[str, float]) -> dict[str, float]:
     tuning["straggler_base"] = lookup("straggler_cycles", 0.0)
     tuning["gamma_base"] = lookup("issue_occupancy_exponent", 0.0)
     tuning["barrier_base"] = lookup("barrier_cycles", 0.0)
+    tuning["barrier_lockstep"] = lookup("barrier_lockstep", 0.0)
     tuning["issue_occupancy_exponent"] = tuning["gamma_base"]
     tuning["barrier_cycles"] = tuning["barrier_base"]
     return tuning
@@ -402,7 +403,17 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     # many there are, which is what the measurements show: a launch-dominated
     # kernel costs about the same extra per doubling of its wavefront count,
     # from four wavefronts up to a thousand.
-    latency += dispatch.get("straggler", 0.0) * tuning.get("straggler_scale", 1.0)
+    # The straggler is the spread between *independent* scheduling units. The
+    # emulator counts wavefronts; wavefronts inside one workgroup are not
+    # independent -- they share a compute unit and a barrier -- so a
+    # single-workgroup kernel should carry no straggler at all and the model
+    # was charging it log2 of its wavefront count.
+    if tuning.get("straggler_over_workgroups", 0.0) > 0.0:
+        base = tuning.get("straggler_base", 0.0) * tuning.get("straggler_scale", 1.0)
+        groups = max(1.0, float(dispatch["workgroups"]))
+        latency += base * math.log2(groups) if groups > 1 else 0.0
+    else:
+        latency += dispatch.get("straggler", 0.0) * tuning.get("straggler_scale", 1.0)
 
     # A workgroup barrier costs the spread between its wavefronts, and this
     # model gives every wavefront the same instruction stream, so the modelled
