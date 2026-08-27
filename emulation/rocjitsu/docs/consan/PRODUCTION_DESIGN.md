@@ -4932,6 +4932,38 @@ analysis completed.
   Slice 5BF remains the latest physical-gfx950 gate, with all 593 tests passing;
   E2E validation remains outside this work.
 
+### Slice 5BI: delete the duplicate fault-retry request
+
+- **One mutation vocabulary through retry:** `ConSanMoiInventoryRetryConfig`
+  now carries the production `MutationRequest` directly. The deleted
+  `ConSanFaultMutationRetryConfig` repeated nearly every fault switch,
+  selection identity, index, proof opt-in, and address operand under shorter
+  names, then maintained full conversions both from and back into the lowerer
+  state.
+- **Typed behavior replaces projection mechanics:** Retry asks the existing
+  `MutationRequest::has_fault_mutation()` predicate whether a late fault is
+  active, rejects its typed `fault_dry_run`, and assigns the complete mutation
+  subobject only when applying a live late fault. The existing behavioral tests
+  cover dry-run rejection, live atomic-fault equivalence to a fresh transform,
+  unsatisfied exact selection, disabled and absent report-only paths, report
+  rebinding, synchronization inventory, and malformed inventory. The removed
+  projection-only test merely restated the deleted conversion code.
+- **Fixed private marker protocol:** The markerless barrier-move fallback uses
+  its private fixed `s_nop 42/43` protocol locally. Its mutable test-only option
+  and retry field had no parser, hook, or supported request path and are
+  deleted.
+- **Deletion accounting:** Production adds fifteen and deletes 144 physical
+  lines, a net deletion of 129; tests add four and delete sixty, a net deletion
+  of 56. No production or test source names the deleted retry type or marker
+  option.
+- **Checked-in gate:** All thirteen focused mutation-contract and MOI-retry
+  tests pass. The host gate passes all 1,512 runnable tests with the two
+  expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests
+  pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 66.15 seconds. Slice 5BF remains
+  the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

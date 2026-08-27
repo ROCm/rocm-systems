@@ -827,8 +827,6 @@ struct ConSanOptions : ConSanRequest,
   /// unrelated tail function merely because that FUNC covers the cave bytes.
   std::vector<ConSanPreappliedCodeRange> preapplied_code_ranges;
   std::vector<ConSanPreappliedReservedRange> preapplied_reserved_ranges;
-  /// Test-only s_nop immediate used as the destination of a moved barrier.
-  uint16_t fault_barrier_marker_imm = 42;
   /// Internal recursion guard: faults have already been applied to this ELF.
   bool faults_preapplied = false;
   /// Scalar state kept outside a spill-backed Inline transient window.
@@ -889,142 +887,12 @@ struct ConSanMoiReportRetryConfig {
   uint64_t dispatch_id = 0;
 };
 
-/// Fault-selection state that may be bound after an immutable MOI semantic
-/// inventory has been built. The report-buffer retry accepts this narrow
-/// projection instead of another full ConSanOptions object, so unrelated
-/// parser, CFG, ownership, and admission semantics cannot drift.
-struct ConSanFaultMutationRetryConfig {
-  bool dry_run = false;
-  bool drop_barrier = false;
-  bool allow_destructive_incomplete_barrier_drop = false;
-  bool move_barrier = false;
-  bool allow_completing_conditional_barrier_move = false;
-  bool allow_destructive_divergent_barrier_move = false;
-  bool mutate_barrier_id_scope = false;
-  bool mutate_barrier_participants = false;
-  bool atomic_wrong_address = false;
-  bool atomic_weaken_order = false;
-  ConSanAtomicOrderEdge atomic_order_edge = ConSanAtomicOrderEdge::Any;
-  bool atomic_weaken_scope = false;
-  bool lds_wrong_address = false;
-  bool ordinary_wrong_address = false;
-  bool ordinary_weaken_order = false;
-  bool ordinary_weaken_scope = false;
-  uint32_t atomic_address_delta = 4;
-  std::optional<uint16_t> lds_address_vgpr;
-  uint32_t ordinary_address_delta = 4;
-  bool require_exactly_one = false;
-  uint32_t barrier_index = 0;
-  uint32_t atomic_index = 0;
-  uint32_t lds_index = 0;
-  uint32_t ordinary_index = 0;
-  std::string site_identity;
-  std::string barrier_destination_identity;
-  std::string barrier_sequence_identity;
-  std::string barrier_companion_site_identity;
-  std::string barrier_companion_sequence_identity;
-  std::optional<int32_t> barrier_target_id;
-  std::optional<uint32_t> barrier_target_participant_count;
-  std::optional<uint64_t> barrier_target_participant_mask;
-  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
-  uint16_t barrier_marker_imm = 42;
-
-  auto operator<=>(const ConSanFaultMutationRetryConfig &) const = default;
-
-  [[nodiscard]] bool enabled() const {
-    return drop_barrier || move_barrier || mutate_barrier_id_scope || mutate_barrier_participants ||
-           atomic_wrong_address || atomic_weaken_order || atomic_weaken_scope ||
-           lds_wrong_address || ordinary_wrong_address || ordinary_weaken_order ||
-           ordinary_weaken_scope;
-  }
-
-  [[nodiscard]] static ConSanFaultMutationRetryConfig from_options(const ConSanOptions &options) {
-    return {
-        .dry_run = options.fault_dry_run,
-        .drop_barrier = options.fault_drop_barrier,
-        .allow_destructive_incomplete_barrier_drop =
-            options.fault_allow_destructive_incomplete_barrier_drop,
-        .move_barrier = options.fault_move_barrier,
-        .allow_completing_conditional_barrier_move =
-            options.fault_allow_completing_conditional_barrier_move,
-        .allow_destructive_divergent_barrier_move =
-            options.fault_allow_destructive_divergent_barrier_move,
-        .mutate_barrier_id_scope = options.fault_mutate_barrier_id_scope,
-        .mutate_barrier_participants = options.fault_mutate_barrier_participants,
-        .atomic_wrong_address = options.fault_atomic_wrong_address,
-        .atomic_weaken_order = options.fault_atomic_weaken_order,
-        .atomic_order_edge = options.fault_atomic_order_edge,
-        .atomic_weaken_scope = options.fault_atomic_weaken_scope,
-        .lds_wrong_address = options.fault_lds_wrong_address,
-        .ordinary_wrong_address = options.fault_ordinary_wrong_address,
-        .ordinary_weaken_order = options.fault_ordinary_weaken_order,
-        .ordinary_weaken_scope = options.fault_ordinary_weaken_scope,
-        .atomic_address_delta = options.fault_atomic_address_delta,
-        .lds_address_vgpr = options.fault_lds_address_vgpr,
-        .ordinary_address_delta = options.fault_ordinary_address_delta,
-        .require_exactly_one = options.fault_require_exactly_one,
-        .barrier_index = options.fault_barrier_index,
-        .atomic_index = options.fault_atomic_index,
-        .lds_index = options.fault_lds_index,
-        .ordinary_index = options.fault_ordinary_index,
-        .site_identity = options.fault_site_identity,
-        .barrier_destination_identity = options.fault_barrier_destination_identity,
-        .barrier_sequence_identity = options.fault_barrier_sequence_identity,
-        .barrier_companion_site_identity = options.fault_barrier_companion_site_identity,
-        .barrier_companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
-        .barrier_target_id = options.fault_barrier_target_id,
-        .barrier_target_participant_count = options.fault_barrier_target_participant_count,
-        .barrier_target_participant_mask = options.fault_barrier_target_participant_mask,
-        .barrier_move_direction = options.fault_barrier_move_direction,
-        .barrier_marker_imm = options.fault_barrier_marker_imm,
-    };
-  }
-
-  void apply_to(ConSanOptions &options) const {
-    options.fault_dry_run = dry_run;
-    options.fault_drop_barrier = drop_barrier;
-    options.fault_allow_destructive_incomplete_barrier_drop =
-        allow_destructive_incomplete_barrier_drop;
-    options.fault_move_barrier = move_barrier;
-    options.fault_allow_completing_conditional_barrier_move =
-        allow_completing_conditional_barrier_move;
-    options.fault_allow_destructive_divergent_barrier_move =
-        allow_destructive_divergent_barrier_move;
-    options.fault_mutate_barrier_id_scope = mutate_barrier_id_scope;
-    options.fault_mutate_barrier_participants = mutate_barrier_participants;
-    options.fault_atomic_wrong_address = atomic_wrong_address;
-    options.fault_atomic_weaken_order = atomic_weaken_order;
-    options.fault_atomic_order_edge = atomic_order_edge;
-    options.fault_atomic_weaken_scope = atomic_weaken_scope;
-    options.fault_lds_wrong_address = lds_wrong_address;
-    options.fault_ordinary_wrong_address = ordinary_wrong_address;
-    options.fault_ordinary_weaken_order = ordinary_weaken_order;
-    options.fault_ordinary_weaken_scope = ordinary_weaken_scope;
-    options.fault_atomic_address_delta = atomic_address_delta;
-    options.fault_lds_address_vgpr = lds_address_vgpr;
-    options.fault_ordinary_address_delta = ordinary_address_delta;
-    options.fault_require_exactly_one = require_exactly_one;
-    options.fault_barrier_index = barrier_index;
-    options.fault_atomic_index = atomic_index;
-    options.fault_lds_index = lds_index;
-    options.fault_ordinary_index = ordinary_index;
-    options.fault_site_identity = site_identity;
-    options.fault_barrier_destination_identity = barrier_destination_identity;
-    options.fault_barrier_sequence_identity = barrier_sequence_identity;
-    options.fault_barrier_companion_site_identity = barrier_companion_site_identity;
-    options.fault_barrier_companion_sequence_identity = barrier_companion_sequence_identity;
-    options.fault_barrier_target_id = barrier_target_id;
-    options.fault_barrier_target_participant_count = barrier_target_participant_count;
-    options.fault_barrier_target_participant_mask = barrier_target_participant_mask;
-    options.fault_barrier_move_direction = barrier_move_direction;
-    options.fault_barrier_marker_imm = barrier_marker_imm;
-    options.faults_preapplied = false;
-  }
-};
-
 struct ConSanMoiInventoryRetryConfig {
   ConSanMoiReportRetryConfig report;
-  std::optional<ConSanFaultMutationRetryConfig> fault;
+  /// Complete typed mutation selected after the pristine inventory pass. A
+  /// disengaged value and a value with no fault mutation both select the
+  /// report-only retry path.
+  std::optional<MutationRequest> fault;
 };
 
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {

@@ -1489,8 +1489,9 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     return;
   }
 
-  const uint32_t marker = build_s_nop(options.fault_barrier_marker_imm, arch);
-  const uint32_t second_marker = build_s_nop(options.fault_barrier_marker_imm + 1u, arch);
+  constexpr uint16_t marker_imm = 42;
+  const uint32_t marker = build_s_nop(marker_imm, arch);
+  const uint32_t second_marker = build_s_nop(marker_imm + 1u, arch);
   std::optional<uint64_t> marker_file_offset;
   std::optional<uint64_t> marker_text_offset;
   std::optional<uint64_t> second_marker_file_offset;
@@ -1523,7 +1524,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   if (!marker_file_offset || !second_marker_file_offset) {
     result.warnings.emplace_back(
         "ConSan barrier move fault found no s_nop marker pair starting at " +
-        std::to_string(options.fault_barrier_marker_imm));
+        std::to_string(marker_imm));
     return;
   }
   if (*marker_file_offset <= second_site->file_offset ||

@@ -338,8 +338,8 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
     options.moi_report_layout = retry.report.layout;
     options.moi_report_generation = retry.report.generation;
     options.moi_report_dispatch_id = retry.report.dispatch_id;
-    const bool has_late_fault = retry.fault && retry.fault->enabled();
-    if (has_late_fault && retry.fault->dry_run) {
+    const bool has_late_fault = retry.fault && retry.fault->has_fault_mutation();
+    if (has_late_fault && retry.fault->fault_dry_run) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry accepts only a live late-bound fault selection");
       inventory.outcome = ConSanTransformOutcome::Invalid;
@@ -348,8 +348,10 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
     const bool inventory_has_extended_barrier_pairs =
         consan_qualifies_extended_barrier_pairs(options);
     const bool inventory_has_barrier_move_destinations = options.collect_barrier_move_destinations;
-    if (has_late_fault)
-      retry.fault->apply_to(options);
+    if (has_late_fault) {
+      static_cast<MutationRequest &>(options) = *retry.fault;
+      options.faults_preapplied = false;
+    }
     const bool inventory_shape_mismatch =
         has_late_fault &&
         (inventory_has_extended_barrier_pairs != consan_qualifies_extended_barrier_pairs(options) ||

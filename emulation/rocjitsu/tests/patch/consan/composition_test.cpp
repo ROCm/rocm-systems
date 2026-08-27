@@ -43,65 +43,9 @@ namespace {
               .generation = options.moi_report_generation,
               .dispatch_id = options.moi_report_dispatch_id,
           },
-      .fault = bind_fault ? std::optional{ConSanFaultMutationRetryConfig::from_options(options)}
-                          : std::nullopt,
+      .fault =
+          bind_fault ? std::optional{static_cast<const MutationRequest &>(options)} : std::nullopt,
   };
-}
-
-TEST(ConSanMoi, FaultRetryConfigProjectsOnlyLateBoundMutationState) {
-  ConSanOptions live;
-  live.fault_dry_run = true;
-  live.fault_drop_barrier = true;
-  live.fault_allow_destructive_incomplete_barrier_drop = true;
-  live.fault_move_barrier = false;
-  live.fault_allow_completing_conditional_barrier_move = true;
-  live.fault_allow_destructive_divergent_barrier_move = false;
-  live.fault_mutate_barrier_id_scope = true;
-  live.fault_mutate_barrier_participants = false;
-  live.fault_atomic_wrong_address = true;
-  live.fault_atomic_weaken_order = false;
-  live.fault_atomic_order_edge = ConSanAtomicOrderEdge::Acquire;
-  live.fault_atomic_weaken_scope = true;
-  live.fault_lds_wrong_address = true;
-  live.fault_ordinary_wrong_address = false;
-  live.fault_ordinary_weaken_order = true;
-  live.fault_ordinary_weaken_scope = false;
-  live.fault_atomic_address_delta = 16;
-  live.fault_lds_address_vgpr = 24;
-  live.fault_ordinary_address_delta = 32;
-  live.fault_require_exactly_one = true;
-  live.fault_barrier_index = 3;
-  live.fault_atomic_index = 5;
-  live.fault_lds_index = 6;
-  live.fault_ordinary_index = 7;
-  live.fault_site_identity = "site";
-  live.fault_barrier_destination_identity = "destination";
-  live.fault_barrier_sequence_identity = "sequence";
-  live.fault_barrier_companion_site_identity = "companion-site";
-  live.fault_barrier_companion_sequence_identity = "companion-sequence";
-  live.fault_barrier_target_id = 11;
-  live.fault_barrier_target_participant_count = 64;
-  live.fault_barrier_target_participant_mask = 0x55aa;
-  live.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
-  live.fault_barrier_marker_imm = 17;
-  const ConSanFaultMutationRetryConfig retry = ConSanFaultMutationRetryConfig::from_options(live);
-
-  ConSanOptions target;
-  target.flavor = ConSanFlavor::Moi;
-  target.moi_engine = ConSanMoiEngine::InlineShadow;
-  target.moi_report_buffer_address = 0x123456780000ull;
-  target.collect_barrier_move_destinations = false;
-  target.fault_dry_run = true;
-  target.faults_preapplied = true;
-  retry.apply_to(target);
-
-  EXPECT_EQ(ConSanFaultMutationRetryConfig::from_options(target), retry);
-  EXPECT_EQ(target.flavor, ConSanFlavor::Moi);
-  EXPECT_EQ(target.moi_engine, ConSanMoiEngine::InlineShadow);
-  EXPECT_EQ(target.moi_report_buffer_address, 0x123456780000ull);
-  EXPECT_FALSE(target.collect_barrier_move_destinations);
-  EXPECT_TRUE(target.fault_dry_run);
-  EXPECT_FALSE(target.faults_preapplied);
 }
 
 TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
@@ -181,7 +125,7 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
   EXPECT_EQ(retried.warnings, fresh.warnings);
 }
 
-TEST(ConSanMoi, DisabledFaultProjectionUsesReportOnlyRetryPath) {
+TEST(ConSanMoi, DisabledTypedFaultUsesReportOnlyRetryPath) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
@@ -634,7 +578,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
               .generation = live_options.moi_report_generation,
               .dispatch_id = live_options.moi_report_dispatch_id,
           },
-      .fault = ConSanFaultMutationRetryConfig::from_options(live_options),
+      .fault = static_cast<const MutationRequest &>(live_options),
   };
   const ConSanResult retried =
       retry_patch_consan_moi_from_inventory(pristine, pristine_options, retry, bytes);

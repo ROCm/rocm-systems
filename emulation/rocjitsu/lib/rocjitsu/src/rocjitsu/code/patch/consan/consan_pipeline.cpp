@@ -357,7 +357,7 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
               .generation = options.moi_report_generation,
               .dispatch_id = options.moi_report_dispatch_id,
           },
-      .fault = ConSanFaultMutationRetryConfig::from_options(options),
+      .fault = mutation,
   };
   ConSanResult retry_inventory;
   retry_inventory.program_inventory = inventory.program_inventory;
