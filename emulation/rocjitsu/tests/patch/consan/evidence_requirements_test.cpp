@@ -152,30 +152,32 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
   kernel.declared_group_segment_bytes = declared_lds_bytes;
   kernel.has_dynamic_lds = dynamic_lds;
   if (flat) {
-    ConSanFlatSite site;
+    ConSanAccessInventorySite site;
+    site.origin = ConSanAccessOrigin::Flat;
     site.kind = ConSanLdsAccessKind::Write;
-    site.text_offset = 16;
+    site.physical_id.original_text_offset = 16;
     site.file_offset = 0;
-    site.size = 8;
-    site.width_bits = 32;
-    site.addr_vgpr = 2;
-    site.data_vgpr = 3;
-    site.raw_ioffset = 0;
-    site.address_space_hint = ConSanFlatAddressSpaceHint::Group;
+    site.instruction_size = 8;
+    site.decoded_width_bits = 32;
+    site.operands.address_vgpr = 2;
+    site.operands.data_vgpr = 3;
+    site.operands.raw_ioffset = 0;
+    site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Group;
     site.mnemonic = "flat_store_b32";
-    kernel.flat_sites.push_back(std::move(site));
+    kernel.access_sites.push_back(std::move(site));
   } else {
-    ConSanLdsSite site;
+    ConSanAccessInventorySite site;
+    site.origin = ConSanAccessOrigin::NativeLds;
     site.kind = ConSanLdsAccessKind::Write;
     site.supported_mvp = true;
-    site.text_offset = 16;
+    site.physical_id.original_text_offset = 16;
     site.file_offset = 0;
-    site.size = 8;
-    site.width_bits = 32;
-    site.addr_vgpr = 2;
-    site.data_vgpr = 3;
+    site.instruction_size = 8;
+    site.decoded_width_bits = 32;
+    site.operands.address_vgpr = 2;
+    site.operands.data_vgpr = 3;
     site.mnemonic = "ds_store_b32";
-    kernel.lds_sites.push_back(std::move(site));
+    kernel.access_sites.push_back(std::move(site));
   }
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory(bytes);

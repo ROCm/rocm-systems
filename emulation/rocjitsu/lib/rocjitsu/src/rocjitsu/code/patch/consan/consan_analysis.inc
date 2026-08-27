@@ -1641,29 +1641,30 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   if (!mnemonic.starts_with("ds_") || is_ds_register_lane_operation(mnemonic))
     return;
 
-  ConSanLdsSite site;
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = lds_access_kind(mnemonic);
-  site.text_offset = instruction_text_offset;
+  site.physical_id.original_text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.size = static_cast<uint32_t>(inst.size());
-  site.width_bits = lds_width_bits(mnemonic);
-  site.supported_mvp = is_supported_mvp_lds_site(site.kind, site.width_bits, mnemonic);
+  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_width_bits = lds_width_bits(mnemonic);
+  site.supported_mvp = is_supported_mvp_lds_site(site.kind, site.decoded_width_bits, mnemonic);
   if (site.kind == ConSanLdsAccessKind::Read) {
-    site.dst_vgpr = vgpr_index(inst.dst_operand(0));
-    site.dst_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
+    site.operands.destination_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
   } else if (site.kind == ConSanLdsAccessKind::Write) {
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
-    site.data_vgpr = vgpr_index(inst.src_operand(1));
-    site.second_data_vgpr = vgpr_index(inst.src_operand(2));
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
+    site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
   } else if (site.kind == ConSanLdsAccessKind::Atomic) {
-    site.dst_vgpr = vgpr_index(inst.dst_operand(0));
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
-    site.data_vgpr = vgpr_index(inst.src_operand(1));
-    site.second_data_vgpr = vgpr_index(inst.src_operand(2));
+    site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
+    site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
   }
   site.mnemonic = std::string(mnemonic);
-  kernel.lds_sites.push_back(std::move(site));
+  kernel.access_sites.push_back(std::move(site));
 }
 
 [[nodiscard]] std::optional<ConSanLdsAccessKind>
@@ -1687,20 +1688,20 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
     if (sign_extend_24(static_cast<uint32_t>(raw.ioffset)) != 0)
       return std::nullopt;
 
-    ConSanLdsSite site;
+    ConSanAccessInventorySite site;
     site.kind = gfx1250_async_load ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
-    site.direct_to_lds = true;
-    site.text_offset = instruction_text_offset;
+    site.origin = ConSanAccessOrigin::DirectToLds;
+    site.physical_id.original_text_offset = instruction_text_offset;
     site.file_offset = kernel.text_file_offset + instruction_text_offset;
-    site.size = static_cast<uint32_t>(inst.size());
-    site.width_bits = lds_width_bits(mnemonic);
+    site.instruction_size = static_cast<uint32_t>(inst.size());
+    site.decoded_width_bits = lds_width_bits(mnemonic);
     // CDNA5 names the LDS byte address explicitly: the async-load destination
     // is its first source operand, while the async-store source is its second.
-    site.addr_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
-    site.supported_mvp = site.addr_vgpr.has_value();
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
+    site.supported_mvp = site.operands.address_vgpr.has_value();
     site.mnemonic = std::string(mnemonic);
-    kernel.lds_sites.push_back(std::move(site));
-    return kernel.lds_sites.back().kind;
+    kernel.access_sites.push_back(std::move(site));
+    return kernel.access_sites.back().kind;
   }
 
   const bool is_supported_load =
@@ -1719,18 +1720,18 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
     return std::nullopt;
 
-  ConSanLdsSite site;
+  ConSanAccessInventorySite site;
   site.kind = ConSanLdsAccessKind::Write;
+  site.origin = ConSanAccessOrigin::DirectToLds;
   site.supported_mvp = true;
-  site.direct_to_lds = true;
-  site.text_offset = instruction_text_offset;
+  site.physical_id.original_text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.size = static_cast<uint32_t>(inst.size());
-  site.width_bits = lds_width_bits(mnemonic);
+  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_width_bits = lds_width_bits(mnemonic);
   // The destination is M0 plus an implicit physical-lane slot: four bytes for
   // DWORD, sixteen for DWORDX3/DWORDX4. No address or payload VGPR is defined.
   site.mnemonic = std::string(mnemonic);
-  kernel.lds_sites.push_back(std::move(site));
+  kernel.access_sites.push_back(std::move(site));
   return ConSanLdsAccessKind::Write;
 }
 
@@ -1903,104 +1904,105 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   if (!mnemonic.starts_with("flat_"))
     return;
 
-  ConSanFlatSite site;
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::Flat;
   site.kind = flat_access_kind(mnemonic);
-  site.text_offset = instruction_text_offset;
+  site.physical_id.original_text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
-  site.size = static_cast<uint32_t>(inst.size());
-  site.width_bits = lds_width_bits(mnemonic);
+  site.instruction_size = static_cast<uint32_t>(inst.size());
+  site.decoded_width_bits = lds_width_bits(mnemonic);
   if ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
-      mnemonic.starts_with("flat_atomic") && site.width_bits == 0u) {
-    site.width_bits = 32u;
+      mnemonic.starts_with("flat_atomic") && site.decoded_width_bits == 0u) {
+    site.decoded_width_bits = 32u;
   }
-  site.address_space_hint = flat_address_space_hint(inst, tracker);
+  site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
   if (site.kind == ConSanLdsAccessKind::Read) {
-    site.dst_vgpr = vgpr_index(inst.dst_operand(0));
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
   } else if (site.kind == ConSanLdsAccessKind::Write) {
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
-    site.data_vgpr = vgpr_index(inst.src_operand(1));
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
   } else if (site.kind == ConSanLdsAccessKind::Atomic) {
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
-    site.data_vgpr = vgpr_index(inst.src_operand(1));
+    site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
+    site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
   }
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 &&
       instruction_bytes.size() >= sizeof(rdna3::FlatMachineInst)) {
     rdna3::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    site.raw_op = static_cast<uint32_t>(raw.op);
-    site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-    site.raw_vaddr = static_cast<uint32_t>(raw.addr);
-    site.raw_vsrc = static_cast<uint32_t>(raw.data);
-    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-    site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
-    site.raw_segment = static_cast<uint32_t>(raw.seg);
-    site.raw_scope = 0u;
-    site.raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u);
+    site.operands.raw_op = static_cast<uint32_t>(raw.op);
+    site.operands.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.operands.raw_vaddr = static_cast<uint32_t>(raw.addr);
+    site.operands.raw_vsrc = static_cast<uint32_t>(raw.data);
+    site.operands.raw_vdst = static_cast<uint32_t>(raw.vdst);
+    site.operands.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
+    site.operands.raw_segment = static_cast<uint32_t>(raw.seg);
+    site.operands.raw_scope = 0u;
+    site.operands.raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u);
     if (raw.seg == 1u)
-      site.address_space_hint = ConSanFlatAddressSpaceHint::Private;
+      site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Private;
     else if (raw.seg == 2u)
-      site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
+      site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Global;
   } else if ((consan_uses_gfx9_cdna_encoding(arch)) &&
              instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
     // CDNA3 and CDNA4 use an identical FLAT bit layout.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    site.raw_op = static_cast<uint32_t>(raw.op);
-    site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-    site.raw_vaddr = static_cast<uint32_t>(raw.addr);
-    site.raw_vsrc = static_cast<uint32_t>(raw.data);
-    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-    site.raw_ioffset = static_cast<int32_t>(raw.offset);
-    site.raw_segment = static_cast<uint32_t>(raw.seg);
-    site.raw_scope = 0u;
-    site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
+    site.operands.raw_op = static_cast<uint32_t>(raw.op);
+    site.operands.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.operands.raw_vaddr = static_cast<uint32_t>(raw.addr);
+    site.operands.raw_vsrc = static_cast<uint32_t>(raw.data);
+    site.operands.raw_vdst = static_cast<uint32_t>(raw.vdst);
+    site.operands.raw_ioffset = static_cast<int32_t>(raw.offset);
+    site.operands.raw_segment = static_cast<uint32_t>(raw.seg);
+    site.operands.raw_scope = 0u;
+    site.operands.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
     if (raw.seg == 1u)
-      site.address_space_hint = ConSanFlatAddressSpaceHint::Private;
+      site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Private;
     else if (raw.seg == 2u)
-      site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
+      site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Global;
   } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
              instruction_bytes.size() >= sizeof(cdna5::VflatMachineInst)) {
     cdna5::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    site.raw_op = static_cast<uint32_t>(raw.op);
-    site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-    site.raw_scale_offset = raw.scale_offset != 0u;
-    site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
-    site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
-    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-    site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
-    site.raw_scope = static_cast<uint32_t>(raw.scope);
-    site.raw_th = static_cast<uint32_t>(raw.th);
+    site.operands.raw_op = static_cast<uint32_t>(raw.op);
+    site.operands.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.operands.raw_scale_offset = raw.scale_offset != 0u;
+    site.operands.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
+    site.operands.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
+    site.operands.raw_vdst = static_cast<uint32_t>(raw.vdst);
+    site.operands.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
+    site.operands.raw_scope = static_cast<uint32_t>(raw.scope);
+    site.operands.raw_th = static_cast<uint32_t>(raw.th);
     if (raw.saddr != cdna5::OPR_SREG_NULL) {
       if (const auto hint = pair_hint_at(tracker.sgprs, static_cast<uint16_t>(raw.saddr)))
-        site.address_space_hint = flat_pair_hint_to_public(*hint);
+        site.flat_address_space_hint = flat_pair_hint_to_public(*hint);
     }
   } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
              instruction_bytes.size() >= sizeof(rdna4::VflatMachineInst)) {
     rdna4::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    site.raw_op = static_cast<uint32_t>(raw.op);
-    site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.operands.raw_op = static_cast<uint32_t>(raw.op);
+    site.operands.raw_saddr = static_cast<uint32_t>(raw.saddr);
     // RDNA4 reserves this bit in VFLAT; unlike CDNA5, its effective vector
     // offset is always byte-scaled by one.
-    site.raw_scale_offset = false;
-    site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
-    site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
-    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-    site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
-    site.raw_scope = static_cast<uint32_t>(raw.scope);
-    site.raw_th = static_cast<uint32_t>(raw.th);
+    site.operands.raw_scale_offset = false;
+    site.operands.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
+    site.operands.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
+    site.operands.raw_vdst = static_cast<uint32_t>(raw.vdst);
+    site.operands.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
+    site.operands.raw_scope = static_cast<uint32_t>(raw.scope);
+    site.operands.raw_th = static_cast<uint32_t>(raw.th);
     // The RDNA4 decoder's generic operand list does not expose SADDR. Recover
     // its aperture provenance from the authoritative encoded scalar pair.
     if (raw.saddr != rdna4::OPR_SREG_NULL) {
       if (const auto hint = pair_hint_at(tracker.sgprs, static_cast<uint16_t>(raw.saddr)))
-        site.address_space_hint = flat_pair_hint_to_public(*hint);
+        site.flat_address_space_hint = flat_pair_hint_to_public(*hint);
     }
   }
-  count_flat_address_space_hint(kernel.stats, site.address_space_hint);
+  count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
   site.mnemonic = std::string(mnemonic);
-  kernel.flat_sites.push_back(std::move(site));
+  kernel.access_sites.push_back(std::move(site));
 }
 
 [[nodiscard]] bool is_bounded_ordinary_memory_instruction(std::string_view mnemonic) {
@@ -2602,8 +2604,7 @@ void decode_function_stats(
   function.decoded = range.decoded;
   function.uses_gfx1250_cluster_workgroup_id = range.uses_gfx1250_cluster_workgroup_id;
   function.stats = range.stats;
-  function.lds_sites = std::move(range.lds_sites);
-  function.flat_sites = std::move(range.flat_sites);
+  function.access_sites = std::move(range.access_sites);
   function.ordinary_memory_sites = std::move(range.ordinary_memory_sites);
   function.barrier_sites = std::move(range.barrier_sites);
   function.fence_sites = std::move(range.fence_sites);
@@ -2615,19 +2616,20 @@ void decode_function_stats(
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
-        function.flat_sites.rbegin(), function.flat_sites.rend(),
-        [&](const ConSanFlatSite &site) { return site.kind == expected_kind; });
-    if (terminal != function.flat_sites.rend() &&
-        (terminal->address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
-         terminal->address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
-      if (terminal->address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
+        function.access_sites.rbegin(), function.access_sites.rend(), [&](const auto &site) {
+          return site.origin == ConSanAccessOrigin::Flat && site.kind == expected_kind;
+        });
+    if (terminal != function.access_sites.rend() &&
+        (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
+         terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
+      if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
         --function.stats.flat_unknown_hint_count;
       else
         --function.stats.flat_maybe_private_hint_count;
       // Symbolized hip-moi helpers carry an explicit API contract: their
       // terminal load/store is the source-level `*ptr` LDS access. Treat only
       // that dereference as likely-group; strict provenance still excludes it.
-      terminal->address_space_hint = ConSanFlatAddressSpaceHint::MaybeGroup;
+      terminal->flat_address_space_hint = ConSanFlatAddressSpaceHint::MaybeGroup;
       ++function.stats.flat_maybe_group_hint_count;
     }
   }

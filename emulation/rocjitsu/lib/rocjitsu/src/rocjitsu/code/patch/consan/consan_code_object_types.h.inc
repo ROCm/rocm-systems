@@ -152,47 +152,6 @@ enum class ConSanPatchPhase : uint8_t {
   Instrumentation,
 };
 
-struct ConSanLdsSite {
-  ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
-  bool supported_mvp = false;
-  /// A MUBUF load whose LDS modifier redirects the global payload to a
-  /// physical-lane slot at M0 rather than defining an ordinary VGPR result.
-  bool direct_to_lds = false;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  std::optional<uint16_t> dst_vgpr;
-  std::optional<uint16_t> dst_accvgpr;
-  std::optional<uint16_t> addr_vgpr;
-  std::optional<uint16_t> data_vgpr;
-  std::optional<uint16_t> second_data_vgpr;
-  std::string mnemonic;
-};
-
-struct ConSanFlatSite {
-  ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  std::optional<uint16_t> dst_vgpr;
-  std::optional<uint16_t> addr_vgpr;
-  std::optional<uint16_t> data_vgpr;
-  std::optional<uint32_t> raw_op;
-  std::optional<uint32_t> raw_saddr;
-  std::optional<bool> raw_scale_offset;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<int32_t> raw_ioffset;
-  std::optional<uint32_t> raw_segment;
-  std::optional<uint32_t> raw_scope;
-  std::optional<uint32_t> raw_th;
-  ConSanFlatAddressSpaceHint address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
-  std::string mnemonic;
-};
-
 enum class ConSanOrdinaryMemoryOperation : uint8_t {
   Load,
   Store,
@@ -454,6 +413,15 @@ struct ConSanAccessOperandFacts {
   bool operator==(const ConSanAccessOperandFacts &) const = default;
 };
 
+/// Shared access-stage record, completed by `ProgramInventoryBuilder` after
+/// instruction decode and cross-function provenance relay.
+///
+/// The forward declaration permits kernel and function analysis records to
+/// stage accesses without reviving separate LDS and FLAT representations. The
+/// complete type and its construction-state contract are declared by the
+/// program-inventory layer later in `consan.h`.
+struct ConSanAccessInventorySite;
+
 /// Immutable original-program facts and decoded semantic inventory for one
 /// dispatchable kernel.
 ///
@@ -484,8 +452,10 @@ struct ConSanKernelInfo {
   bool decoded = false;
   bool uses_gfx1250_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  std::vector<ConSanLdsSite> lds_sites;
-  std::vector<ConSanFlatSite> flat_sites;
+  /// Builder-only access records awaiting stable identity, attribution,
+  /// normalized ranges, and typed limitation completion. Consumers use the
+  /// completed `ProgramInventory::access_sites()` projection.
+  std::vector<ConSanAccessInventorySite> access_sites;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
   std::vector<ConSanFenceSite> fence_sites;
@@ -503,8 +473,10 @@ struct ConSanFunctionInfo {
   bool decoded = false;
   bool uses_gfx1250_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  std::vector<ConSanLdsSite> lds_sites;
-  std::vector<ConSanFlatSite> flat_sites;
+  /// Builder-only access records awaiting the same completion as kernel
+  /// accesses; bounded call-provenance relay may replace this vector before
+  /// immutable inventory is published.
+  std::vector<ConSanAccessInventorySite> access_sites;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
   std::vector<ConSanFenceSite> fence_sites;

@@ -4605,11 +4605,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       case rocjitsu::ConSanPreflightAction::NotRun:
         break;
       }
-      for (const rocjitsu::ConSanLdsSite &site : kernel.lds_sites) {
-        if (site.supported_mvp)
+      for (const rocjitsu::ConSanAccessInventorySite &site : kernel.access_sites) {
+        if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
+          ++flat_site_count;
+        } else if (site.supported_mvp) {
           ++supported_lds_site_count;
+        }
       }
-      flat_site_count += kernel.flat_sites.size();
       flat_group_hint_count += kernel.stats.flat_group_hint_count;
       flat_private_hint_count += kernel.stats.flat_private_hint_count;
       flat_maybe_group_hint_count += kernel.stats.flat_maybe_group_hint_count;
@@ -4619,12 +4621,15 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     for (const rocjitsu::ConSanFunctionInfo &function :
          transform_result.program_inventory.functions()) {
-      function_lds_site_count += function.lds_sites.size();
-      for (const rocjitsu::ConSanLdsSite &site : function.lds_sites) {
-        if (site.supported_mvp)
+      for (const rocjitsu::ConSanAccessInventorySite &site : function.access_sites) {
+        if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
+          ++function_flat_site_count;
+        } else {
+          ++function_lds_site_count;
+        }
+        if (site.origin != rocjitsu::ConSanAccessOrigin::Flat && site.supported_mvp)
           ++function_supported_lds_site_count;
       }
-      function_flat_site_count += function.flat_sites.size();
       function_flat_group_hint_count += function.stats.flat_group_hint_count;
       function_flat_private_hint_count += function.stats.flat_private_hint_count;
       function_flat_maybe_group_hint_count += function.stats.flat_maybe_group_hint_count;

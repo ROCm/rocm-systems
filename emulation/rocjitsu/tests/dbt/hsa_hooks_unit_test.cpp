@@ -5236,17 +5236,18 @@ rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
   kernel.name = "auto_report_inline_shadow";
   kernel.descriptor_file_offset = owner_descriptor_offset;
   kernel.declared_group_segment_bytes = 256u;
-  rocjitsu::ConSanLdsSite access;
+  rocjitsu::ConSanAccessInventorySite access;
+  access.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
   access.kind = rocjitsu::ConSanLdsAccessKind::Write;
   access.supported_mvp = true;
-  access.text_offset = 0u;
+  access.physical_id.original_text_offset = 0u;
   access.file_offset = 0u;
-  access.size = sizeof(uint32_t);
-  access.width_bits = 32u;
-  access.addr_vgpr = 0u;
-  access.data_vgpr = 1u;
+  access.instruction_size = sizeof(uint32_t);
+  access.decoded_width_bits = 32u;
+  access.operands.address_vgpr = 0u;
+  access.operands.data_vgpr = 1u;
   access.mnemonic = "ds_store_b32";
-  kernel.lds_sites.push_back(std::move(access));
+  kernel.access_sites.push_back(std::move(access));
   inventory.kernels().push_back(std::move(kernel));
   inventory.rebuild_access_inventory(instruction_bytes);
   inventory.access_sites().front().execution_owner_descriptor_file_offsets = {

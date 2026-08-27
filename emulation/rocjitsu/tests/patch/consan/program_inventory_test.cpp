@@ -25,32 +25,35 @@ void expect_complete_enum_contract(const std::array<Enum, N> &values, Enum count
   EXPECT_EQ(name(static_cast<Enum>(255)), invalid_name);
 }
 
-ConSanLdsSite make_inventory_lds_site(std::string mnemonic, uint64_t text_offset = 16,
-                                      uint64_t file_offset = 0, uint32_t width_bits = 32) {
-  ConSanLdsSite site;
+ConSanAccessInventorySite make_inventory_lds_site(std::string mnemonic, uint64_t text_offset = 16,
+                                                  uint64_t file_offset = 0,
+                                                  uint32_t width_bits = 32) {
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
   site.supported_mvp = true;
-  site.text_offset = text_offset;
+  site.physical_id.original_text_offset = text_offset;
   site.file_offset = file_offset;
-  site.size = 8;
-  site.width_bits = width_bits;
-  site.addr_vgpr = 3;
-  site.data_vgpr = 7;
+  site.instruction_size = 8;
+  site.decoded_width_bits = width_bits;
+  site.operands.address_vgpr = 3;
+  site.operands.data_vgpr = 7;
   site.mnemonic = std::move(mnemonic);
   return site;
 }
 
-ConSanFlatSite make_inventory_flat_site(ConSanFlatAddressSpaceHint hint,
-                                        uint64_t text_offset = 16) {
-  ConSanFlatSite site;
+ConSanAccessInventorySite make_inventory_flat_site(ConSanFlatAddressSpaceHint hint,
+                                                   uint64_t text_offset = 16) {
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::Flat;
   site.kind = ConSanLdsAccessKind::Read;
-  site.text_offset = text_offset;
-  site.size = 8;
-  site.width_bits = 32;
-  site.dst_vgpr = 4;
-  site.addr_vgpr = 6;
-  site.raw_ioffset = -8;
-  site.address_space_hint = hint;
+  site.physical_id.original_text_offset = text_offset;
+  site.instruction_size = 8;
+  site.decoded_width_bits = 32;
+  site.operands.destination_vgpr = 4;
+  site.operands.address_vgpr = 6;
+  site.operands.raw_ioffset = -8;
+  site.flat_address_space_hint = hint;
   site.mnemonic = "flat_load_b32";
   return site;
 }
@@ -233,7 +236,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
     section.name = ".text";
     builder.text_sections().push_back(section);
     ConSanKernelInfo kernel = make_inventory_kernel();
-    kernel.lds_sites.push_back(make_inventory_lds_site("ds_store_b32"));
+    kernel.access_sites.push_back(make_inventory_lds_site("ds_store_b32"));
     builder.kernels().push_back(std::move(kernel));
     ConSanFunctionInfo function;
     function.name = "helper";
@@ -464,16 +467,17 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   ConSanKernelInfo kernel = make_inventory_kernel();
-  ConSanLdsSite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
-  byte_site.dst_vgpr = 2;
-  byte_site.dst_accvgpr = 4;
-  byte_site.second_data_vgpr = 8;
-  kernel.lds_sites.push_back(byte_site);
-  kernel.lds_sites.push_back(make_inventory_lds_site("ds_store_b16", 24, 0, 16));
-  ConSanLdsSite direct_to_lds = make_inventory_lds_site("global_load_lds_b32", 32, 0, 32);
-  direct_to_lds.direct_to_lds = true;
-  direct_to_lds.addr_vgpr.reset();
-  kernel.lds_sites.push_back(std::move(direct_to_lds));
+  ConSanAccessInventorySite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
+  byte_site.operands.destination_vgpr = 2;
+  byte_site.operands.destination_accvgpr = 4;
+  byte_site.operands.second_data_vgpr = 8;
+  kernel.access_sites.push_back(byte_site);
+  kernel.access_sites.push_back(make_inventory_lds_site("ds_store_b16", 24, 0, 16));
+  ConSanAccessInventorySite direct_to_lds =
+      make_inventory_lds_site("global_load_lds_b32", 32, 0, 32);
+  direct_to_lds.origin = ConSanAccessOrigin::DirectToLds;
+  direct_to_lds.operands.address_vgpr.reset();
+  kernel.access_sites.push_back(std::move(direct_to_lds));
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory(bytes);
   builder.rebuild_access_inventory(bytes);
@@ -522,18 +526,19 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
   builder.kernels().push_back(std::move(owner));
   ConSanKernelInfo overlapping = make_inventory_kernel("overlapping");
   overlapping.descriptor_file_offset = 768;
-  overlapping.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
-  overlapping.flat_sites.push_back(make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
-  overlapping.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 120));
+  overlapping.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  overlapping.access_sites.push_back(
+      make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
+  overlapping.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 120));
   builder.kernels().push_back(std::move(overlapping));
   builder.rebuild_access_inventory(bytes);
 
   ConSanKernelInfo decoded_range = make_inventory_kernel("temporary_range");
-  decoded_range.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
-  decoded_range.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 96));
-  decoded_range.flat_sites.push_back(
+  decoded_range.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  decoded_range.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 96));
+  decoded_range.access_sites.push_back(
       make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
-  decoded_range.flat_sites.push_back(
+  decoded_range.access_sites.push_back(
       make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 104));
   builder.reattribute_access_range(80, 32, builder.kernels().front(), decoded_range, bytes);
 
@@ -572,9 +577,9 @@ TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecifi
     ProgramInventoryBuilder builder(bytes);
     builder.set_code_object_facts(true, 0, arch, ROCJITSU_CODE_TARGET_INVALID);
     ConSanKernelInfo kernel = make_inventory_kernel();
-    ConSanLdsSite site = make_inventory_lds_site("ds_single", 16, 0, 32);
+    ConSanAccessInventorySite site = make_inventory_lds_site("ds_single", 16, 0, 32);
     site.kind = kind;
-    kernel.lds_sites.push_back(std::move(site));
+    kernel.access_sites.push_back(std::move(site));
     builder.kernels().push_back(std::move(kernel));
     builder.rebuild_access_inventory(bytes);
     ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
@@ -587,8 +592,8 @@ TEST(ConSanProgramInventory, UnreadableSingleRangeNativeOffsetRemainsAnExplicitM
   ProgramInventoryBuilder builder(truncated_bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
   ConSanKernelInfo kernel = make_inventory_kernel();
-  ConSanLdsSite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
-  kernel.lds_sites.push_back(std::move(site));
+  ConSanAccessInventorySite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
+  kernel.access_sites.push_back(std::move(site));
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory(truncated_bytes);
 
@@ -626,7 +631,7 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
     const std::array<uint8_t, 8> bytes = {3, 5, 0, 0, 0, 0, 0, 0};
     ProgramInventoryBuilder builder(bytes);
     ConSanKernelInfo kernel = make_inventory_kernel();
-    kernel.lds_sites.push_back(
+    kernel.access_sites.push_back(
         make_inventory_lds_site(std::string(test.mnemonic), 40, 0, 2 * test.width_bits));
     builder.kernels().push_back(std::move(kernel));
     builder.rebuild_access_inventory(bytes);
@@ -673,16 +678,16 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
   ProgramInventoryBuilder builder;
   ConSanKernelInfo kernel = make_inventory_kernel();
   for (size_t index = 0; index < cases.size(); ++index)
-    kernel.flat_sites.push_back(make_inventory_flat_site(cases[index].hint, 64 + index * 8));
-  kernel.flat_sites.front().raw_op = 1;
-  kernel.flat_sites.front().raw_saddr = 2;
-  kernel.flat_sites.front().raw_scale_offset = true;
-  kernel.flat_sites.front().raw_vaddr = 3;
-  kernel.flat_sites.front().raw_vsrc = 4;
-  kernel.flat_sites.front().raw_vdst = 5;
-  kernel.flat_sites.front().raw_segment = 6;
-  kernel.flat_sites.front().raw_scope = 7;
-  kernel.flat_sites.front().raw_th = 8;
+    kernel.access_sites.push_back(make_inventory_flat_site(cases[index].hint, 64 + index * 8));
+  kernel.access_sites.front().operands.raw_op = 1;
+  kernel.access_sites.front().operands.raw_saddr = 2;
+  kernel.access_sites.front().operands.raw_scale_offset = true;
+  kernel.access_sites.front().operands.raw_vaddr = 3;
+  kernel.access_sites.front().operands.raw_vsrc = 4;
+  kernel.access_sites.front().operands.raw_vdst = 5;
+  kernel.access_sites.front().operands.raw_segment = 6;
+  kernel.access_sites.front().operands.raw_scope = 7;
+  kernel.access_sites.front().operands.raw_th = 8;
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory({});
 
@@ -715,18 +720,20 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
   ProgramInventoryBuilder builder;
   ConSanKernelInfo kernel = make_inventory_kernel();
 
-  ConSanLdsSite malformed;
+  ConSanAccessInventorySite malformed;
+  malformed.origin = ConSanAccessOrigin::NativeLds;
   malformed.kind = ConSanLdsAccessKind::Other;
-  malformed.text_offset = 8;
+  malformed.physical_id.original_text_offset = 8;
   malformed.mnemonic = "ds_other";
-  kernel.lds_sites.push_back(malformed);
+  kernel.access_sites.push_back(malformed);
 
-  ConSanLdsSite missing_address = make_inventory_lds_site("ds_store_b32", 16);
-  missing_address.addr_vgpr.reset();
-  kernel.lds_sites.push_back(missing_address);
+  ConSanAccessInventorySite missing_address = make_inventory_lds_site("ds_store_b32", 16);
+  missing_address.operands.address_vgpr.reset();
+  kernel.access_sites.push_back(missing_address);
 
-  ConSanLdsSite unavailable_range = make_inventory_lds_site("ds_store_2addr_b32", 24, 128, 64);
-  kernel.lds_sites.push_back(unavailable_range);
+  ConSanAccessInventorySite unavailable_range =
+      make_inventory_lds_site("ds_store_2addr_b32", 24, 128, 64);
+  kernel.access_sites.push_back(unavailable_range);
   builder.kernels().push_back(std::move(kernel));
   builder.rebuild_access_inventory({});
 
@@ -754,12 +761,12 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   ConSanKernelInfo kernel = make_inventory_kernel("kernel_alias");
-  kernel.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  kernel.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
   builder.kernels().push_back(std::move(kernel));
   ConSanFunctionInfo function;
   function.name = "function_alias";
   function.entry_text_offset = 72;
-  function.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  function.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
   builder.functions().push_back(std::move(function));
   builder.rebuild_access_inventory(bytes);
 
@@ -795,28 +802,30 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
 
   size_t decoded_access_count = 0;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    decoded_access_count += kernel.lds_sites.size() + kernel.flat_sites.size();
+    decoded_access_count += kernel.access_sites.size();
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    decoded_access_count += function.lds_sites.size() + function.flat_sites.size();
+    decoded_access_count += function.access_sites.size();
   EXPECT_EQ(result.program_inventory.access_sites().size(), decoded_access_count);
 
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().declared_group_segment_bytes, 1234u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
-    const auto decoded_site = std::ranges::find_if(
-        result.program_inventory.kernels().front().lds_sites, [&](const ConSanLdsSite &candidate) {
-          return candidate.text_offset == site.physical_id.original_text_offset;
-        });
-    ASSERT_NE(decoded_site, result.program_inventory.kernels().front().lds_sites.end());
+    const auto decoded_site =
+        std::ranges::find_if(result.program_inventory.kernels().front().access_sites,
+                             [&](const ConSanAccessInventorySite &candidate) {
+                               return candidate.physical_id.original_text_offset ==
+                                      site.physical_id.original_text_offset;
+                             });
+    ASSERT_NE(decoded_site, result.program_inventory.kernels().front().access_sites.end());
     EXPECT_EQ(site.file_offset, decoded_site->file_offset);
-    EXPECT_EQ(site.instruction_size, decoded_site->size);
-    EXPECT_EQ(site.decoded_width_bits, decoded_site->width_bits);
+    EXPECT_EQ(site.instruction_size, decoded_site->instruction_size);
+    EXPECT_EQ(site.decoded_width_bits, decoded_site->decoded_width_bits);
     EXPECT_EQ(site.kind, decoded_site->kind);
     EXPECT_EQ(site.mnemonic, decoded_site->mnemonic);
-    EXPECT_EQ(site.operands.destination_vgpr, decoded_site->dst_vgpr);
-    EXPECT_EQ(site.operands.address_vgpr, decoded_site->addr_vgpr);
-    EXPECT_EQ(site.operands.data_vgpr, decoded_site->data_vgpr);
+    EXPECT_EQ(site.operands.destination_vgpr, decoded_site->operands.destination_vgpr);
+    EXPECT_EQ(site.operands.address_vgpr, decoded_site->operands.address_vgpr);
+    EXPECT_EQ(site.operands.data_vgpr, decoded_site->operands.data_vgpr);
     EXPECT_EQ(
         site.execution_owner_descriptor_file_offsets,
         (std::vector<uint64_t>{result.program_inventory.kernels().front().descriptor_file_offset}));

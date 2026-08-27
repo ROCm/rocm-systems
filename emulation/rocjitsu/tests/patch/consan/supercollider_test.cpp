@@ -1527,8 +1527,8 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().flat_sites.size(), 1u);
-  EXPECT_EQ(result.program_inventory.kernels().front().flat_sites.front().address_space_hint,
+  ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 1u);
+  EXPECT_EQ(result.program_inventory.kernels().front().access_sites.front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
@@ -3233,8 +3233,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
-  EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
+  ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().access_sites.front().supported_mvp);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   constexpr auto duplicate = cdna5::build_vds(cdna5::kDsLoadB96Vds, {.addr = 10, .vdst = 6});
@@ -3519,8 +3519,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-    ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
-    EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
+    ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 1u);
+    EXPECT_TRUE(result.program_inventory.kernels().front().access_sites.front().supported_mvp);
     if (!result.modified)
       return;
     const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
@@ -3802,9 +3802,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-    ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
-    EXPECT_FALSE(result.program_inventory.kernels().front().lds_sites.front().dst_vgpr);
-    EXPECT_EQ(result.program_inventory.kernels().front().lds_sites.front().dst_accvgpr,
+    ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 1u);
+    EXPECT_FALSE(
+        result.program_inventory.kernels().front().access_sites.front().operands.destination_vgpr);
+    EXPECT_EQ(result.program_inventory.kernels()
+                  .front()
+                  .access_sites.front()
+                  .operands.destination_accvgpr,
               test_case.acc_base);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -4140,8 +4144,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
-  EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
+  ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().access_sites.front().supported_mvp);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);

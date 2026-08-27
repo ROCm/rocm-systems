@@ -4401,6 +4401,38 @@ analysis completed.
   supported targets pass in 69.01 seconds. Slice 5AC completed the periodic
   physical-gfx950 gate. E2E validation remains outside this work.
 
+### Slice 5AP: collapse legacy decoded access records
+
+- **One access vocabulary:** The separate `ConSanLdsSite` and
+  `ConSanFlatSite` records are deleted. Decode/provenance analysis now stages
+  the same typed `ConSanAccessInventorySite` record that immutable inventory
+  publishes, distinguished by its explicit origin and nested operand facts.
+- **One container vector:** Kernel and function records each have one decoded
+  access vector instead of parallel LDS and FLAT vectors. All decoder,
+  provenance-relay, hook-summary, and test consumers use origin and normalized
+  fields rather than selecting a representation by vector name.
+- **Smaller completion boundary:** Inventory publication now completes one
+  staged access shape with stable code-object identity, container attribution,
+  address-space provenance, logical ranges, and typed exclusions. The two
+  legacy conversion overloads and their field-by-field copies are gone.
+- **Contract coverage:** Decoder tests now assert the shared typed fields
+  directly, and the real-code-object inventory test checks that staged decoder
+  facts survive completion into the immutable inventory. Existing range,
+  provenance, exclusion, alias, direct-to-LDS, and policy tests continue to
+  cover the completed record.
+- **Deletion accounting:** This step deletes 54 net physical production lines,
+  or 69 net non-comment code lines; the difference is the expanded construction
+  contract on the shared type. The Slice 5AM--5AP series has therefore repaid
+  its 65-line code scaffolding and is four non-comment code lines smaller than
+  its starting point. It remains 11 physical lines larger while the two
+  container staging vectors are still published alongside the completed
+  inventory; consuming and deleting that staging seam is the next payoff.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,908 simulator-device tests across the five supported targets pass in 63.60
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

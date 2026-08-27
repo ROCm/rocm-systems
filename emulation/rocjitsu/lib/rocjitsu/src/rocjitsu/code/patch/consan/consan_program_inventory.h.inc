@@ -178,14 +178,19 @@ struct ConSanAccessRange {
   bool operator==(const ConSanAccessRange &) const = default;
 };
 
-/// Immutable normalized access fact for one container interpretation of a
-/// physical instruction.
+/// Shared decode-to-inventory access fact for one container interpretation of
+/// a physical instruction.
 ///
-/// Aliasing symbol ranges can produce several records with the same
-/// `physical_id`; later policy canonicalizes them before placement. The record
-/// preserves original decoder facts, normalized logical ranges, execution
-/// owners, confidence, and typed limitations. It contains no selected engine,
-/// register, report address, patch kind, or lowering outcome.
+/// During builder-owned decode, `origin`, instruction facts, operands, and the
+/// original text offset are populated while code-object identity, container
+/// attribution, logical ranges, exclusions, and execution owners can remain
+/// incomplete. `ProgramInventoryBuilder::rebuild_access_inventory` completes
+/// those fields after bounded cross-function provenance relay. Every record
+/// reachable through immutable `ProgramInventory::access_sites()` is in that
+/// completed state. Aliasing symbol ranges can produce several completed
+/// records with the same `physical_id`; later policy canonicalizes them before
+/// placement. The record contains no selected engine, scratch-register or
+/// report address, patch kind, or lowering outcome.
 struct ConSanAccessInventorySite {
   PhysicalSiteId physical_id;
   ConSanProgramContainerRef container;
@@ -520,9 +525,9 @@ private:
   /// displacement. Returning absence preserves unreadable pristine bytes as a
   /// typed inventory gap instead of silently treating them as offset zero.
   [[nodiscard]] std::optional<int64_t>
-  single_range_native_static_byte_offset(const ConSanLdsSite &site,
+  single_range_native_static_byte_offset(const ConSanAccessInventorySite &site,
                                          std::span<const uint8_t> bytes) const {
-    if (site.direct_to_lds)
+    if (site.origin == ConSanAccessOrigin::DirectToLds)
       return 0;
     const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.file_offset);
     if (!word0)
@@ -561,40 +566,46 @@ private:
   }
 
   [[nodiscard]] ConSanAccessInventorySite
-  make_access_site(const ConSanProgramContainerRef &container, const ConSanLdsSite &site,
-                   std::span<const uint8_t> bytes) const {
-    ConSanAccessInventorySite result;
+  complete_access_site(const ConSanProgramContainerRef &container,
+                       const ConSanAccessInventorySite &site,
+                       std::span<const uint8_t> bytes) const {
+    ConSanAccessInventorySite result = site;
     result.physical_id = {
         .code_object = storage_->code_object_id,
-        .original_text_offset = site.text_offset,
+        .original_text_offset = site.physical_id.original_text_offset,
     };
     result.container = container;
-    result.origin =
-        site.direct_to_lds ? ConSanAccessOrigin::DirectToLds : ConSanAccessOrigin::NativeLds;
-    result.kind = site.kind;
+    result.execution_owner_descriptor_file_offsets.clear();
+    result.ranges.clear();
+    result.exclusions.clear();
+    if (site.origin == ConSanAccessOrigin::Flat) {
+      const auto [address_space, provenance, confidence] =
+          flat_provenance(site.flat_address_space_hint);
+      result.address_space = address_space;
+      result.provenance = provenance;
+      result.confidence = confidence;
+      append_common_exclusions(result, false);
+      if (site.decoded_width_bits != 0 && site.decoded_width_bits % 8u == 0) {
+        result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),
+                                 .static_byte_offset = site.operands.raw_ioffset,
+                                 .byte_width = site.decoded_width_bits / 8u});
+      }
+      return result;
+    }
+
     result.address_space = ConSanAccessAddressSpace::Group;
     result.provenance = ConSanAccessProvenance::NativeLdsOpcode;
     result.confidence = ConSanSemanticConfidence::Exact;
-    result.supported_mvp = site.supported_mvp;
-    result.file_offset = site.file_offset;
-    result.instruction_size = site.size;
-    result.decoded_width_bits = site.width_bits;
-    result.mnemonic = site.mnemonic;
-    result.operands.destination_vgpr = site.dst_vgpr;
-    result.operands.destination_accvgpr = site.dst_accvgpr;
-    result.operands.address_vgpr = site.addr_vgpr;
-    result.operands.data_vgpr = site.data_vgpr;
-    result.operands.second_data_vgpr = site.second_data_vgpr;
-    append_common_exclusions(result, site.direct_to_lds);
+    append_common_exclusions(result, site.origin == ConSanAccessOrigin::DirectToLds);
     if (is_two_address_lds(site.mnemonic)) {
       const auto width = two_address_element_width_bits(site.mnemonic);
       const auto scale = two_address_offset_scale_bytes(site.mnemonic);
       const auto word0 = read_little_endian_u32(bytes, site.file_offset);
       if (width && scale && word0) {
-        result.ranges.push_back({.id = access_range_id(site.text_offset, 0),
+        result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),
                                  .static_byte_offset = (*word0 & 0xffu) * *scale,
                                  .byte_width = *width / 8u});
-        result.ranges.push_back({.id = access_range_id(site.text_offset, 1),
+        result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 1),
                                  .static_byte_offset = ((*word0 >> 8u) & 0xffu) * *scale,
                                  .byte_width = *width / 8u});
       } else {
@@ -603,52 +614,11 @@ private:
             .detail = "two-address LDS offsets could not be decoded",
         });
       }
-    } else if (site.width_bits != 0 && site.width_bits % 8u == 0) {
+    } else if (site.decoded_width_bits != 0 && site.decoded_width_bits % 8u == 0) {
       result.ranges.push_back(
-          {.id = access_range_id(site.text_offset, 0),
+          {.id = access_range_id(site.physical_id.original_text_offset, 0),
            .static_byte_offset = single_range_native_static_byte_offset(site, bytes),
-           .byte_width = site.width_bits / 8u});
-    }
-    return result;
-  }
-
-  [[nodiscard]] ConSanAccessInventorySite
-  make_access_site(const ConSanProgramContainerRef &container, const ConSanFlatSite &site) const {
-    const auto [address_space, provenance, confidence] = flat_provenance(site.address_space_hint);
-    ConSanAccessInventorySite result;
-    result.physical_id = {
-        .code_object = storage_->code_object_id,
-        .original_text_offset = site.text_offset,
-    };
-    result.container = container;
-    result.origin = ConSanAccessOrigin::Flat;
-    result.kind = site.kind;
-    result.address_space = address_space;
-    result.provenance = provenance;
-    result.confidence = confidence;
-    result.file_offset = site.file_offset;
-    result.instruction_size = site.size;
-    result.decoded_width_bits = site.width_bits;
-    result.mnemonic = site.mnemonic;
-    result.flat_address_space_hint = site.address_space_hint;
-    result.operands.destination_vgpr = site.dst_vgpr;
-    result.operands.address_vgpr = site.addr_vgpr;
-    result.operands.data_vgpr = site.data_vgpr;
-    result.operands.raw_op = site.raw_op;
-    result.operands.raw_saddr = site.raw_saddr;
-    result.operands.raw_scale_offset = site.raw_scale_offset;
-    result.operands.raw_vaddr = site.raw_vaddr;
-    result.operands.raw_vsrc = site.raw_vsrc;
-    result.operands.raw_vdst = site.raw_vdst;
-    result.operands.raw_ioffset = site.raw_ioffset;
-    result.operands.raw_segment = site.raw_segment;
-    result.operands.raw_scope = site.raw_scope;
-    result.operands.raw_th = site.raw_th;
-    append_common_exclusions(result, false);
-    if (site.width_bits != 0 && site.width_bits % 8u == 0) {
-      result.ranges.push_back({.id = access_range_id(site.text_offset, 0),
-                               .static_byte_offset = site.raw_ioffset,
-                               .byte_width = site.width_bits / 8u});
+           .byte_width = site.decoded_width_bits / 8u});
     }
     return result;
   }
@@ -724,8 +694,7 @@ private:
   void append_container_accesses(const Container &container,
                                  const ConSanProgramContainerRef &reference,
                                  std::span<const uint8_t> code_object_bytes, bool unique) {
-    storage_->access_sites.reserve(storage_->access_sites.size() + container.lds_sites.size() +
-                                   container.flat_sites.size());
+    storage_->access_sites.reserve(storage_->access_sites.size() + container.access_sites.size());
     const auto append = [&](ConSanAccessInventorySite access) {
       const bool duplicate =
           unique && std::ranges::any_of(storage_->access_sites, [&](const auto &existing) {
@@ -736,10 +705,8 @@ private:
       if (!duplicate)
         storage_->access_sites.push_back(std::move(access));
     };
-    for (const ConSanLdsSite &site : container.lds_sites)
-      append(make_access_site(reference, site, code_object_bytes));
-    for (const ConSanFlatSite &site : container.flat_sites)
-      append(make_access_site(reference, site));
+    for (const ConSanAccessInventorySite &site : container.access_sites)
+      append(complete_access_site(reference, site, code_object_bytes));
   }
 
   std::shared_ptr<ConSanProgramInventoryStorage> storage_;
