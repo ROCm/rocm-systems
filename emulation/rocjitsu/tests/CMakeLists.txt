@@ -1418,9 +1418,7 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
 )
 target_link_libraries(
     interposer_dup_test
