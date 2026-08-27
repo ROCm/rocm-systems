@@ -293,6 +293,7 @@ if(BUILD_TESTS)
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
+    RmaSegmentMathTests.cpp
     ScatterTests.cpp
     TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
