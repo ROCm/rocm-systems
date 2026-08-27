@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -98,6 +99,13 @@ def _find_flamegraph_dir(override: Optional[Path]) -> Path:
     )
 
 
+def _report_failed_step(step: str, result: "subprocess.CompletedProcess[str]") -> None:
+    """Explain a failed flamegraph step, whose own stderr says what went wrong."""
+    print(f"WARNING: {step} failed (exit {result.returncode}).", file=sys.stderr)
+    if result.stderr.strip():
+        print(result.stderr.rstrip(), file=sys.stderr)
+
+
 @dataclass
 class PerfCollector:
     """Wraps kernel runs with ``perf record`` and generates a cumulative flamegraph.
@@ -183,12 +191,20 @@ class PerfCollector:
                 capture_output=True,
                 text=True,
             )
+            if script.returncode != 0:
+                _report_failed_step(f"perf script on {data_file.name}", script)
+                continue
             fold = subprocess.run(
                 ["perl", str(self.stackcollapse)],
                 input=script.stdout,
                 capture_output=True,
                 text=True,
             )
+            if fold.returncode != 0:
+                _report_failed_step(
+                    f"{self.stackcollapse.name} on {data_file.name}", fold
+                )
+                continue
             if fold.stdout.strip():
                 folded_parts.append(fold.stdout)
 
@@ -214,5 +230,18 @@ class PerfCollector:
             capture_output=True,
             text=True,
         )
+        # An SVG assembled from a failed run is worse than none at all: it looks
+        # like a profile in CI artifacts while being empty or truncated.
+        if svg.returncode != 0:
+            _report_failed_step(self.flamegraph_pl.name, svg)
+            return
+        if not svg.stdout.strip():
+            print(
+                f"WARNING: {self.flamegraph_pl.name} produced no output; "
+                f"{output_svg} not written.",
+                file=sys.stderr,
+            )
+            return
+
         output_svg.write_text(svg.stdout)
         print(f"Flamegraph written to {output_svg}")
