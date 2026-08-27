@@ -1528,9 +1528,11 @@ TEST(Memory, VMemUnmapRemapCycle) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-// Repeats the unmap/remap cycle so that a leak or a premature release shows up as a failure
-// rather than as a single cycle that happens to survive. The allocation is owned by the AIE
-// agent that is granted access, so every set_access re-imports a bo XdnaDriver already owns.
+// Repeats the unmap/remap cycle so that a premature release shows up as a failure rather than
+// as a single cycle that happens to survive. The allocation is owned by the AIE agent that is
+// granted access, so every set_access re-imports a bo XdnaDriver already owns. Note this
+// detects only releasing too early; leaking a handle per cycle would still pass, as nothing
+// here accounts for the bo handles the driver holds.
 TEST(Memory, VMemRepeatedUnmapRemapCycles) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
