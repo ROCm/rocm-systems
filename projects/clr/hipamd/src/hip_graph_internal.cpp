@@ -1121,8 +1121,9 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
 }
 
 // ================================================================================================
-// Creates the capture-device stream that serves as stream slot 0 when the launch
-// stream is on another device. Deferred to first use: a stream is not free.
+// Creates the capture-device stream needed for cross-device launches (restores
+// the full internal pool; CreateStreams() holds one slot back for same-device
+// launches where the user stream fills it). Deferred to first cross-device use.
 hipError_t GraphExecBase::EnsureCrossDeviceStream() {
   std::scoped_lock lock(graphExecStreamCreateLock_);
 

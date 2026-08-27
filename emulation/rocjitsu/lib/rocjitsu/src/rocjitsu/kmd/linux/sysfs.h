@@ -150,9 +150,6 @@ public:
   /// @brief Remove the generated directories.
   void cleanup();
 
-  /// @brief Drop ownership of inherited paths without removing them.
-  void release_after_fork();
-
 private:
   std::string topology_dir_;
   std::string drm_dir_;

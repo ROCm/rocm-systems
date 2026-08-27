@@ -75,7 +75,6 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
 }
 
 int64_t logical_buffer_offset(uint32_t index, uint32_t stride, uint32_t voffset, int32_t ioffset) {
@@ -126,8 +125,12 @@ bool decode_flat_private_address(amdgpu::Wavefront &wf, uint64_t addr, uint64_t 
     return false;
 
   if (translated != nullptr) {
+    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
     uint32_t encoded_lane = static_cast<uint32_t>((addr & lane_mask) >> lane_shift);
-    *translated = scratch_base + static_cast<uint64_t>(encoded_lane) * lane_stride + private_offset;
+    *translated = scratch_base +
+                  (private_offset / kScratchInterleave) * wf_size * kScratchInterleave +
+                  static_cast<uint64_t>(encoded_lane) * kScratchInterleave +
+                  (private_offset % kScratchInterleave);
   }
   return true;
 }
@@ -158,8 +161,12 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
       uint64_t translated = 0;
-      if (decode_flat_private_address(wf, addr, &translated))
+      if (decode_flat_private_address(wf, addr, &translated)) {
         addr = translated;
+        d.scratch_swizzle = true;
+        d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
+        d.scratch_lane_mask |= uint64_t{1} << lane;
+      }
     } else {
       assert(!decode_flat_private_address(wf, addr, nullptr) &&
              "gfx1250 global memory address must not use flat private scratch encoding");
@@ -211,8 +218,10 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 
 uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
                                 uint32_t lds_operand, uint32_t access_size_bytes) {
-  int64_t relative_addr = static_cast<int64_t>(lds_operand) + signed_ioffset(inst.ioffset);
-  if (relative_addr < 0 || static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
+  // The VGPR operand is 32 bits, so adding IOFFSET wraps before the LDS bounds check. This
+  // matters when code materializes (address - IOFFSET) in the VGPR, for example -64 + 64.
+  uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
+  if (static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
     return amdgpu::kInvalidLdsAddress;
 
   uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
@@ -242,16 +251,24 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.sve)
     vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+  constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
+  const uint32_t lane_count = wf.wf_size();
+  d.scratch_swizzle = true;
+  d.scratch_lane_mask = exec;
+  d.scratch_addr_stride = lane_count * kScratchInterleave;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t lane_base = scratch_base + static_cast<uint64_t>(lane) * wf.scratch_lane_size();
     uint32_t vaddr = 0;
     if (inst.sve) {
       vaddr = vaddr_region->lane(0, lane);
       vaddr *= scale;
     }
-    d.per_lane_addr[lane] = lane_base + vaddr + saddr_val + offset;
+    const uint64_t private_offset =
+        static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
+    d.per_lane_addr[lane] =
+        scratch_base + (private_offset / kScratchInterleave) * lane_count * kScratchInterleave +
+        static_cast<uint64_t>(lane) * kScratchInterleave + (private_offset % kScratchInterleave);
   }
 }
 
