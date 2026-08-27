@@ -1408,10 +1408,21 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       warning.finding.instruction.raw_isa = other.raw_isa;
       warning.finding.address = overlap_addr;
       warning.finding.size_bytes = other.size;
+      warning.finding.has_source_instruction = true;
+      warning.finding.source_instruction.instruction_id = writer.instruction_id;
+      warning.finding.source_instruction.execution.dispatch_id = key.dispatch_id;
+      warning.finding.source_instruction.execution.cluster_id = key.cluster_id;
+      warning.finding.source_instruction.execution.workgroup_id = key.workgroup_id;
+      warning.finding.source_instruction.execution.wave_id = writer.wave_id;
+      warning.finding.source_instruction.pc = writer.pc;
+      warning.finding.source_instruction.raw_isa = writer.raw_isa;
       warning.finding.message_template = msg.str();
       warning.finding.suggestion_template = kSuggestion;
       warning.message = msg.str();
       warning.suggestion = kSuggestion;
+      warning.source_raw_isa = writer.raw_isa;
+      warning.source_pc = writer.pc;
+      warning.has_source = true;
       {
         std::lock_guard<std::shared_mutex> lock(state_.mutex);
         state_.warnings.push_back(warning);
