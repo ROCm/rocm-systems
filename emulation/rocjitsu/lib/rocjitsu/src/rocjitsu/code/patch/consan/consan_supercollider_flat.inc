@@ -961,7 +961,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!branch_router.plan_direct_reservoirs(
             block_ptrs, pristine_text, protected_ranges, arch, route_frontier_source,
             2u * reservoir_demand_count, placement_planner, direct_branch_reservoirs, &relay_error,
-            &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
       return false;

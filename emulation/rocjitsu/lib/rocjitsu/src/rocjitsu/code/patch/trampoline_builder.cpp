@@ -512,10 +512,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 class SoppRelayPlanningWorkContext {
 public:
   SoppRelayPlanningWorkContext(size_t input_count, const SoppBranchRelayPlanningWorkLimits &limits,
-                               SoppBranchRelayPlanningWorkTelemetry *telemetry)
+                               PlanningWorkMeasurement *measurement)
       : meter_(limits.total.for_inputs(input_count),
-               telemetry == nullptr ? nullptr : &telemetry->work_count,
-               telemetry == nullptr ? nullptr : &telemetry->exhaustion_count) {}
+               measurement == nullptr ? nullptr : &measurement->work_count,
+               measurement == nullptr ? nullptr : &measurement->exhaustion_count) {}
 
   [[nodiscard]] bool consume(size_t amount = 1u) { return meter_.consume(amount); }
   [[nodiscard]] bool exhausted() const { return meter_.exhausted(); }
@@ -1138,11 +1138,11 @@ std::optional<SoppBranchRelayPlan>
 plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                                 std::span<const uint64_t> relay_offsets,
                                 std::span<const uint64_t> island_offsets, std::string *error_out,
-                                SoppBranchRelayPlanningWorkTelemetry *work_telemetry,
+                                PlanningWorkMeasurement *work_measurement,
                                 const SoppBranchRelayPlanningWorkLimits &work_limits) {
   const size_t input_count = saturated_add(
       saturated_add(source_offsets.size(), relay_offsets.size()), island_offsets.size());
-  SoppRelayPlanningWorkContext work(input_count, work_limits, work_telemetry);
+  SoppRelayPlanningWorkContext work(input_count, work_limits, work_measurement);
   return plan_monotonic_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
                                            kSoppBranchMaximumForwardReachBytes, work, error_out);
 }
@@ -1151,11 +1151,11 @@ std::optional<SoppBranchRelayPlan>
 plan_backward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                                  std::span<const uint64_t> relay_offsets,
                                  std::span<const uint64_t> island_offsets, std::string *error_out,
-                                 SoppBranchRelayPlanningWorkTelemetry *work_telemetry,
+                                 PlanningWorkMeasurement *work_measurement,
                                  const SoppBranchRelayPlanningWorkLimits &work_limits) {
   const size_t input_count = saturated_add(
       saturated_add(source_offsets.size(), relay_offsets.size()), island_offsets.size());
-  SoppRelayPlanningWorkContext work(input_count, work_limits, work_telemetry);
+  SoppRelayPlanningWorkContext work(input_count, work_limits, work_measurement);
   if (!work.consume(saturated_multiply(3u, input_count))) {
     report(error_out, "SOPP backward relay planner exhausted its work allowance while mirroring");
     return std::nullopt;

@@ -35,25 +35,6 @@ struct ConSanPerturbationPlan {
   bool removed_cache_boundary = false;
 };
 
-/// Work consumed outside the fixed-pair branch router. Counts are measured
-/// units charged by the shared bounded-planning meter; exhaustion counts are
-/// call- or convergence-scope events, not elapsed-time samples.
-struct ConSanPlanningWorkTelemetry {
-  size_t sopp_relay_work_count = 0;
-  size_t sopp_relay_exhaustion_count = 0;
-  size_t direct_reservoir_work_count = 0;
-  size_t direct_reservoir_exhaustion_count = 0;
-  size_t lds_relay_layout_work_count = 0;
-  size_t lds_relay_layout_exhaustion_count = 0;
-  size_t lds_convergence_work_count = 0;
-  size_t lds_convergence_exhaustion_count = 0;
-
-  bool operator==(const ConSanPlanningWorkTelemetry &) const = default;
-};
-
-static_assert(sizeof(ConSanPlanningWorkTelemetry) == 8u * sizeof(size_t),
-              "update the planning-work telemetry schema tests");
-
 /// Counts one validation-only mutation domain as it moves from a user request
 /// through semantic selection to emitted replacement bytes.
 ///
@@ -106,7 +87,6 @@ struct ConSanMutationOutcome {
 
 struct ConSanResult {
   bool modified = false;
-  ConSanPlanningWorkTelemetry planning_work_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;

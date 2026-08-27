@@ -238,15 +238,6 @@ struct SoppBranchRelayPlanningWorkLimits {
   PlanningWorkLimit total = kDefaultSoppRelayPlanningWorkLimit;
 };
 
-struct SoppBranchRelayPlanningWorkTelemetry {
-  /// Callers may reuse one telemetry object across calls; counters accumulate
-  /// with saturation rather than being reset by the planner.
-  size_t work_count = 0u;
-  size_t exhaustion_count = 0u;
-
-  bool operator==(const SoppBranchRelayPlanningWorkTelemetry &) const = default;
-};
-
 /// @brief Plan forward-only s_branch routes through one-word relay slots.
 ///
 /// Sources and islands are interchangeable only on the island side: every
@@ -259,7 +250,7 @@ struct SoppBranchRelayPlanningWorkTelemetry {
 /// coordinates are considered in ascending order, then original input order.
 /// Invalid coordinate sets return std::nullopt without a partial plan.
 /// Reaching the configured work allowance also returns std::nullopt and marks
-/// the optional work telemetry, so callers never mistake a bounded prefix for
+/// the optional work measurement, so callers never mistake a bounded prefix for
 /// a maximum-cardinality assignment.
 ///
 /// Island offsets are interchangeable destinations. Use
@@ -267,7 +258,7 @@ struct SoppBranchRelayPlanningWorkTelemetry {
 [[nodiscard]] std::optional<SoppBranchRelayPlan> plan_forward_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, std::string *error_out = nullptr,
-    SoppBranchRelayPlanningWorkTelemetry *work_telemetry = nullptr,
+    PlanningWorkMeasurement *work_measurement = nullptr,
     const SoppBranchRelayPlanningWorkLimits &work_limits = {});
 
 /// @brief Plan backward-only s_branch routes through one-word relay slots.
@@ -285,7 +276,7 @@ struct SoppBranchRelayPlanningWorkTelemetry {
 [[nodiscard]] std::optional<SoppBranchRelayPlan> plan_backward_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, std::string *error_out = nullptr,
-    SoppBranchRelayPlanningWorkTelemetry *work_telemetry = nullptr,
+    PlanningWorkMeasurement *work_measurement = nullptr,
     const SoppBranchRelayPlanningWorkLimits &work_limits = {});
 
 /// @brief Physical placement selected for one DBI patch body.

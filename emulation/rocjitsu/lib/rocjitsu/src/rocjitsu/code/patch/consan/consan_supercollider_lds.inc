@@ -2241,9 +2241,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     const size_t relay_layout_inputs =
         saturated_add(required_relay_routed_sites.size(), relay_reservoir_candidates.size());
     MeteredPlanningWork relay_layout_work(
-        options.lds_relay_layout_planning_work_limit.for_inputs(relay_layout_inputs),
-        &result.planning_work_telemetry.lds_relay_layout_work_count,
-        &result.planning_work_telemetry.lds_relay_layout_exhaustion_count);
+        options.lds_relay_layout_planning_work_limit.for_inputs(relay_layout_inputs));
     bool relay_layout_exhausted = false;
     const auto charge_relay_layout = [&]() {
       const bool available = relay_layout_work.consume();
@@ -2361,14 +2359,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                    kScRelayTailRestoreWords * sizeof(uint32_t);
         reservoir.placement = *placement;
       }
-      SoppBranchRelayPlanningWorkTelemetry relay_work;
       auto plan = plan_forward_sopp_branch_relays(
-          source_offsets, relay_offsets, island_offsets, error_out, &relay_work,
+          source_offsets, relay_offsets, island_offsets, error_out, nullptr,
           {.total = options.sopp_relay_planning_work_limit});
-      accumulate_saturated(result.planning_work_telemetry.sopp_relay_work_count,
-                           relay_work.work_count);
-      accumulate_saturated(result.planning_work_telemetry.sopp_relay_exhaustion_count,
-                           relay_work.exhaustion_count);
       if (!plan)
         return std::nullopt;
       return RelayLayoutAttempt{std::move(routed_sites), std::move(body_relay_slots),
@@ -2956,9 +2949,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     // finite candidate, and one final materialized-only replay; correct
     // progress never reaches it.
     MeteredPlanningWork convergence_work(
-        options.lds_convergence_planning_work_limit.for_inputs(branch_reservoir_candidates.size()),
-        &result.planning_work_telemetry.lds_convergence_work_count,
-        &result.planning_work_telemetry.lds_convergence_exhaustion_count);
+        options.lds_convergence_planning_work_limit.for_inputs(branch_reservoir_candidates.size()));
     const auto charge_convergence = [&]() { return convergence_work.consume(); };
     bool convergence_terminated = false;
     for (size_t iteration = 0u; charge_convergence(); ++iteration) {

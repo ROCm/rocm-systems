@@ -449,8 +449,8 @@ public:
       std::span<const std::pair<uint64_t, uint64_t>> protected_ranges, rj_code_arch_t arch,
       uint64_t route_frontier_source, size_t target_relay_count,
       DbiPatchPlacementPlanner &placement_planner, BranchOnlyDirectRelayReservoirSet &reservoirs,
-      std::string *error_out = nullptr, ConSanPlanningWorkTelemetry *work_telemetry = nullptr,
-      const BranchOnlyDirectReservoirWorkLimits &work_limits = {});
+      std::string *error_out = nullptr, const BranchOnlyDirectReservoirWorkLimits &work_limits = {},
+      PlanningWorkMeasurement *work_measurement = nullptr);
 
   [[nodiscard]] static bool
   emit_and_record(std::span<uint8_t> text, const BranchOnlyRelayRoute &route, uint64_t entry_target,

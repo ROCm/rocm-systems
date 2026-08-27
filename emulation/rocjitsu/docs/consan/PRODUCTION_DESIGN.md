@@ -3793,6 +3793,37 @@ analysis completed.
   simulator-device tests across the five supported targets pass in 63.80
   seconds. E2E validation remains outside this work.
 
+### Slice 5V: keep bounded-work measurements at planner boundaries
+
+- **Semantic boundary:** Planning allowances remain explicit transform policy,
+  and every bounded planner still fails without publishing a partial result
+  when it exhausts that allowance. Exact units consumed are component-local
+  algorithm measurements, not semantic facts about a completed ConSan
+  transform.
+- **Completed compatibility deletion:** `ConSanResult` no longer carries an
+  eight-counter aggregate for direct-reservoir discovery, SOPP routing, LDS
+  relay-layout replay, and LDS convergence. Lowering no longer threads that
+  aggregate through four engines or accumulates measurements across nested
+  planner calls.
+- **Shared component contract:** The prior two-counter SOPP-specific telemetry
+  shape is now the target-neutral `PlanningWorkMeasurement`. SOPP routing and
+  direct-reservoir discovery expose that one shared type only at their focused
+  planner APIs. Their unit tests still prove exact charging, saturation,
+  exhaustion, accumulation, and exact-limit rollback without exporting those
+  mechanics through the transform result.
+- **Integration contract:** ConSan integration tests continue to require the
+  observable consequences of bounded planning: explicit exhaustion errors, no
+  partial patches, transactional rollback, deterministic replacement bytes,
+  selected reservoir topology, and successful operation with normal limits.
+- **Deletion result:** Production source is 24 physical lines smaller despite
+  adding the documented shared measurement type; tests are 14 physical lines
+  smaller. No replacement result field or cross-planner aggregator was added.
+- **Completed checked-in gate:** The focused bounded-planning gate passes all
+  30 tests. The complete host gate passes 1,510 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 68.62
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

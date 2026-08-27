@@ -2916,17 +2916,17 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningScalesWithLargeRelayInv
   ASSERT_TRUE(planner.reserve_appended_prefix(kExistingRelayCount * sizeof(uint32_t), &error))
       << error;
   BranchOnlyDirectRelayReservoirSet reservoirs;
-  ConSanPlanningWorkTelemetry telemetry;
+  PlanningWorkMeasurement measurement;
 
   ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
                                             /*route_frontier_source=*/0u, kTargetRelayCount,
-                                            planner, reservoirs, &error, &telemetry))
+                                            planner, reservoirs, &error, {}, &measurement))
       << error;
   EXPECT_GE(reservoirs.reservoir_by_relay.size(), kTargetRelayCount);
   EXPECT_TRUE(std::ranges::any_of(
       reservoirs.reservoirs, [](const auto &reservoir) { return reservoir.route.has_value(); }));
-  EXPECT_GT(telemetry.direct_reservoir_work_count, 0u);
-  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 0u);
+  EXPECT_GT(measurement.work_count, 0u);
+  EXPECT_EQ(measurement.exhaustion_count, 0u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, SplitsReservoirRunsAtProtectedAndClauseRanges) {
@@ -3029,17 +3029,17 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirDiscoveryReportsBoundedWorkExha
   DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
   BranchOnlyRelayRouter router;
   BranchOnlyDirectRelayReservoirSet reservoirs;
-  ConSanPlanningWorkTelemetry telemetry;
+  PlanningWorkMeasurement measurement;
   BranchOnlyDirectReservoirWorkLimits limits;
   limits.discovery = {1u, 0u};
   std::string error;
 
   EXPECT_FALSE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
                                              relay_test_text(object).size() / 2u, 1u, planner,
-                                             reservoirs, &error, &telemetry, limits));
+                                             reservoirs, &error, limits, &measurement));
   EXPECT_NE(error.find("work allowance"), std::string::npos);
-  EXPECT_EQ(telemetry.direct_reservoir_work_count, 1u);
-  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 1u);
+  EXPECT_EQ(measurement.work_count, 1u);
+  EXPECT_EQ(measurement.exhaustion_count, 1u);
   EXPECT_TRUE(reservoirs.reservoirs.empty());
   EXPECT_EQ(router.available_count(), 0u);
   EXPECT_TRUE(planner.occupied_ranges().empty());
@@ -3058,36 +3058,36 @@ TEST(ConSanBranchOnlyRelayRouter,
   DbiPatchPlacementPlanner first_planner(kArch, relay_test_text(object).size());
   BranchOnlyRelayRouter first_router;
   BranchOnlyDirectRelayReservoirSet first_reservoirs;
-  ConSanPlanningWorkTelemetry first_telemetry;
+  PlanningWorkMeasurement first_measurement;
   std::string first_error;
   ASSERT_TRUE(first_router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
                                                   0u, 1u, first_planner, first_reservoirs,
-                                                  &first_error, &first_telemetry))
+                                                  &first_error, {}, &first_measurement))
       << first_error;
   ASSERT_EQ(first_reservoirs.reservoirs.size(), 1u);
-  ASSERT_GT(first_telemetry.direct_reservoir_work_count, 0u);
+  ASSERT_GT(first_measurement.work_count, 0u);
   const size_t text_words =
       (relay_test_text(object).size() + sizeof(uint32_t) - 1u) / sizeof(uint32_t);
   const size_t raw_inputs = text_words + block_ptrs.size();
   const size_t complexity_units = raw_inputs * std::bit_width(raw_inputs);
-  EXPECT_LT(first_telemetry.direct_reservoir_work_count,
+  EXPECT_LT(first_measurement.work_count,
             kDefaultDirectReservoirPlanningWorkLimit.for_inputs(complexity_units));
 
   DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
   BranchOnlyRelayRouter router;
   BranchOnlyDirectRelayReservoirSet reservoirs;
-  ConSanPlanningWorkTelemetry telemetry;
+  PlanningWorkMeasurement measurement;
   BranchOnlyDirectReservoirWorkLimits limits;
-  limits.discovery = {first_telemetry.direct_reservoir_work_count, 0u};
+  limits.discovery = {first_measurement.work_count, 0u};
   std::string error;
 
   EXPECT_FALSE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u,
                                              std::numeric_limits<size_t>::max(), planner,
-                                             reservoirs, &error, &telemetry, limits));
+                                             reservoirs, &error, limits, &measurement));
 
   EXPECT_NE(error.find("work allowance"), std::string::npos);
-  EXPECT_EQ(telemetry.direct_reservoir_work_count, first_telemetry.direct_reservoir_work_count);
-  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 1u);
+  EXPECT_EQ(measurement.work_count, first_measurement.work_count);
+  EXPECT_EQ(measurement.exhaustion_count, 1u);
   EXPECT_TRUE(reservoirs.reservoirs.empty());
   EXPECT_TRUE(reservoirs.reservoir_by_relay.empty());
   EXPECT_EQ(router.available_count(), 0u);

@@ -2062,8 +2062,8 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
     std::span<const std::pair<uint64_t, uint64_t>> protected_ranges, rj_code_arch_t arch,
     uint64_t route_frontier_source, size_t target_relay_count,
     DbiPatchPlacementPlanner &placement_planner, BranchOnlyDirectRelayReservoirSet &reservoirs,
-    std::string *error_out, ConSanPlanningWorkTelemetry *work_telemetry,
-    const BranchOnlyDirectReservoirWorkLimits &work_limits) {
+    std::string *error_out, const BranchOnlyDirectReservoirWorkLimits &work_limits,
+    PlanningWorkMeasurement *work_measurement) {
   if (target_relay_count == 0u)
     return true;
   if (pristine_text.empty()) {
@@ -2080,8 +2080,8 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
       saturated_multiply(raw_input_count, std::max<size_t>(std::bit_width(raw_input_count), 1u));
   MeteredPlanningWork discovery_work(
       work_limits.discovery.for_inputs(complexity_units),
-      work_telemetry == nullptr ? nullptr : &work_telemetry->direct_reservoir_work_count,
-      work_telemetry == nullptr ? nullptr : &work_telemetry->direct_reservoir_exhaustion_count);
+      work_measurement == nullptr ? nullptr : &work_measurement->work_count,
+      work_measurement == nullptr ? nullptr : &work_measurement->exhaustion_count);
   const auto charge_discovery = [&](size_t amount = 1u) { return discovery_work.consume(amount); };
   const auto report_exhaustion = [&]() {
     report(error_out, "branch-only direct-reservoir discovery exhausted its work allowance");

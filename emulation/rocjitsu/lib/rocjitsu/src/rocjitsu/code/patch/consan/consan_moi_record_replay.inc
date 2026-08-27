@@ -699,7 +699,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (!branch_router.plan_direct_reservoirs(
             reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
             saturated_multiply(2u, branch_only_routing_demand_count), branch_only_placement_planner,
-            direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
+            direct_branch_reservoirs, &relay_error,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan MOI first-light probe " + relay_error);
       return;

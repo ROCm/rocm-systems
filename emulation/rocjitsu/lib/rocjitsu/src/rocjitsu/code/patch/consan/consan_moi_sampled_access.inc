@@ -559,7 +559,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (!branch_router.plan_direct_reservoirs(
             reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
             2u * branch_only_candidate_count, branch_only_placement_planner,
-            direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
+            direct_branch_reservoirs, &relay_error,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan MOI sampled probe " + relay_error);
       return;

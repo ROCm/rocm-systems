@@ -41,6 +41,22 @@ inline constexpr PlanningWorkLimit kDefaultDirectReservoirPlanningWorkLimit{4'09
 inline constexpr PlanningWorkLimit kDefaultLdsRelayLayoutPlanningWorkLimit{16u, 24u};
 inline constexpr PlanningWorkLimit kDefaultLdsConvergencePlanningWorkLimit{2u, 1u};
 
+/// Accumulated work charged by one or more calls to a bounded planner.
+///
+/// This measurement belongs at the planner API whose work it describes. It is
+/// useful for focused complexity-bound tests and diagnostics, but it is not a
+/// semantic transform result and should not be copied into a broader pipeline
+/// result. Callers may reuse one value across calls; both counters accumulate
+/// with saturation.
+struct PlanningWorkMeasurement {
+  /// Units accepted by the bounded meter.
+  size_t work_count = 0u;
+  /// Planner calls or phases whose first rejected charge exhausted the meter.
+  size_t exhaustion_count = 0u;
+
+  bool operator==(const PlanningWorkMeasurement &) const = default;
+};
+
 /// A saturating, fail-closed work meter. A zero configured allowance still
 /// permits one unit so callers cannot accidentally create a non-runnable
 /// planner; consuming beyond the allowance permanently marks it exhausted.
