@@ -107,7 +107,7 @@ if(ROCPROFILER_BUILD_FMT)
         RELATIVE_PATH external/fmt
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/fmtlib/fmt.git
-        REPO_BRANCH "master")
+        REPO_BRANCH "main")
 
     set(FMT_TEST OFF)
     set(FMT_DEBUG_POSTFIX "")
