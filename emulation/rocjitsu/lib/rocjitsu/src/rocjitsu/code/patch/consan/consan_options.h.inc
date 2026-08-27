@@ -445,6 +445,79 @@ struct ConSanDebugOverrides {
   bool operator==(const ConSanDebugOverrides &) const = default;
 };
 
+/// Explicit request to corrupt or perturb a program for validation.
+///
+/// Mutation is transformational and is never implied by ordinary sanitizer
+/// activation. Exact site identities and selection indices live here so they
+/// cannot accidentally alter semantic inventory or report planning for a
+/// normal request.
+struct MutationRequest {
+  bool fault_drop_barrier = false;
+  bool fault_allow_destructive_incomplete_barrier_drop = false;
+  bool fault_move_barrier = false;
+  bool fault_allow_completing_conditional_barrier_move = false;
+  bool fault_allow_destructive_divergent_barrier_move = false;
+  bool fault_mutate_barrier_id_scope = false;
+  bool fault_mutate_barrier_participants = false;
+  bool fault_atomic_wrong_address = false;
+  bool fault_atomic_weaken_order = false;
+  ConSanAtomicOrderEdge fault_atomic_order_edge = ConSanAtomicOrderEdge::Any;
+  bool fault_atomic_weaken_scope = false;
+  bool fault_lds_wrong_address = false;
+  bool fault_ordinary_wrong_address = false;
+  bool fault_ordinary_weaken_order = false;
+  bool fault_ordinary_weaken_scope = false;
+
+  uint32_t fault_atomic_address_delta = 4;
+  std::optional<uint16_t> fault_lds_address_vgpr;
+  uint32_t fault_ordinary_address_delta = 4;
+  bool fault_dry_run = false;
+  bool fault_require_exactly_one = false;
+  uint32_t fault_reservation_timeout_ms = 30000;
+  std::optional<uint32_t> fault_load_occurrence;
+
+  uint32_t fault_barrier_index = 0;
+  uint32_t fault_atomic_index = 0;
+  uint32_t fault_lds_index = 0;
+  uint32_t fault_ordinary_index = 0;
+  std::string fault_site_identity;
+  std::string fault_barrier_destination_identity;
+  std::string fault_barrier_sequence_identity;
+  std::string fault_barrier_companion_site_identity;
+  std::string fault_barrier_companion_sequence_identity;
+  std::optional<int32_t> fault_barrier_target_id;
+  std::optional<uint32_t> fault_barrier_target_participant_count;
+  std::optional<uint64_t> fault_barrier_target_participant_mask;
+  ConSanBarrierMoveDirection fault_barrier_move_direction =
+      ConSanBarrierMoveDirection::LegacyMarker;
+
+  ConSanPerturbationKind sc_perturb_kind = ConSanPerturbationKind::None;
+  ConSanPerturbationEdge sc_perturb_edge = ConSanPerturbationEdge::Release;
+  std::string sc_perturb_identity;
+  uint32_t sc_perturb_index = 0;
+  uint32_t sc_perturb_max = 1;
+  uint32_t sc_perturb_sleep = 1;
+  uint32_t sc_perturb_required_count = 0;
+
+  /// Return whether a fault transform (as opposed to timing perturbation) was
+  /// requested.
+  [[nodiscard]] bool has_fault_mutation() const {
+    return fault_drop_barrier || fault_move_barrier || fault_mutate_barrier_id_scope ||
+           fault_mutate_barrier_participants || fault_atomic_wrong_address ||
+           fault_atomic_weaken_order || fault_atomic_weaken_scope || fault_lds_wrong_address ||
+           fault_ordinary_wrong_address || fault_ordinary_weaken_order ||
+           fault_ordinary_weaken_scope;
+  }
+
+  /// Return whether either a fault transform or SuperCollider perturbation was
+  /// requested.
+  [[nodiscard]] bool has_mutation() const {
+    return has_fault_mutation() || sc_perturb_kind != ConSanPerturbationKind::None;
+  }
+
+  bool operator==(const MutationRequest &) const = default;
+};
+
 /// Limits on the amount of transformation and placement work one code object
 /// may consume.
 ///
@@ -487,19 +560,14 @@ struct TransformPolicy {
 
 /// Mutable lowerer state retained while the prototype mechanism is migrated.
 ///
-/// The inherited request, debug-override, and transform-policy subobjects are
-/// the sole representations of those caller-owned inputs, except for the
-/// temporary non-optional `flavor` lowering sentinel and two renamed test-path
-/// selectors. Members declared here are state selected and mutated during
-/// lowering or input families that have not yet crossed the compatibility
-/// boundary.
-struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, TransformPolicy {
+/// The inherited request, debug-override, mutation, and transform-policy
+/// subobjects are the sole representations of those caller-owned inputs,
+/// except for the temporary non-optional `flavor` lowering sentinel and a few
+/// explicitly derived lowerer controls. Members declared here are state
+/// selected and mutated during lowering or input families that have not yet
+/// crossed the compatibility boundary.
+struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, MutationRequest, TransformPolicy {
   ConSanFlavor flavor = ConSanFlavor::None;
-  bool fault_drop_barrier = false;
-  /// Explicit destructive-test opt-in for dropping only one instruction from
-  /// an otherwise qualified logical barrier pair.
-  bool fault_allow_destructive_incomplete_barrier_drop = false;
-  bool fault_move_barrier = false;
   /// Build the potentially expensive all-instruction destination inventory
   /// used only by markerless barrier movement. Direct library callers retain
   /// the complete analysis by default; production hooks may disable it when
@@ -510,39 +578,6 @@ struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, TransformPolicy {
   /// immutable MOI sizing pass. Retry checks this inventory-shaping predicate
   /// before reusing the result.
   bool qualify_extended_barrier_pairs = false;
-  /// Explicit non-destructive-test opt-in for moving a reconverged barrier
-  /// earlier into the guard of a narrowly proven completing CFG diamond.
-  bool fault_allow_completing_conditional_barrier_move = false;
-  /// Explicit destructive-test opt-in for moving a uniform barrier pair into
-  /// one arm of a narrowly proven structured EXEC diamond.
-  bool fault_allow_destructive_divergent_barrier_move = false;
-  bool fault_mutate_barrier_id_scope = false;
-  bool fault_mutate_barrier_participants = false;
-  bool fault_atomic_wrong_address = false;
-  bool fault_atomic_weaken_order = false;
-  ConSanAtomicOrderEdge fault_atomic_order_edge = ConSanAtomicOrderEdge::Any;
-  bool fault_atomic_weaken_scope = false;
-  bool fault_lds_wrong_address = false;
-  bool fault_ordinary_wrong_address = false;
-  bool fault_ordinary_weaken_order = false;
-  bool fault_ordinary_weaken_scope = false;
-  /// Caller-validated, aligned byte delta to a distinct valid atomic target.
-  uint32_t fault_atomic_address_delta = 4;
-  /// Explicit replacement for the decoded VGPR address operand of one LDS access.
-  std::optional<uint16_t> fault_lds_address_vgpr;
-  /// Caller-validated, aligned byte delta to a distinct valid ordinary-load target.
-  uint32_t fault_ordinary_address_delta = 4;
-  bool fault_dry_run = false;
-  bool fault_require_exactly_one = false;
-  /// SuperCollider-only bounded synchronization-edge perturbation request.
-  /// SC2A1 inventories and plans the request but does not emit code.
-  ConSanPerturbationKind sc_perturb_kind = ConSanPerturbationKind::None;
-  ConSanPerturbationEdge sc_perturb_edge = ConSanPerturbationEdge::Release;
-  std::string sc_perturb_identity;
-  uint32_t sc_perturb_index = 0;
-  uint32_t sc_perturb_max = 1;
-  uint32_t sc_perturb_sleep = 1;
-  uint32_t sc_perturb_required_count = 0;
   /// Internal rollout marker for the collision-free per-workgroup Inline
   /// shadow. The hook enables this for InlineShadow; direct patcher tests may
   /// leave it disabled while exercising the legacy global layout.
@@ -616,27 +651,6 @@ struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, TransformPolicy {
   /// unrelated tail function merely because that FUNC covers the cave bytes.
   std::vector<ConSanPreappliedCodeRange> preapplied_code_ranges;
   std::vector<ConSanPreappliedReservedRange> preapplied_reserved_ranges;
-  uint32_t fault_barrier_index = 0;
-  uint32_t fault_atomic_index = 0;
-  uint32_t fault_lds_index = 0;
-  uint32_t fault_ordinary_index = 0;
-  /// Exact stable identity from ConSanResult::fault_sites. When set, this
-  /// supersedes the legacy per-kind global index.
-  std::string fault_site_identity;
-  /// Exact stable real-instruction destination for markerless barrier movement.
-  std::string fault_barrier_destination_identity;
-  /// Exact logical barrier sequence selected for a whole-pair ID/scope dry run.
-  std::string fault_barrier_sequence_identity;
-  /// Optional independently resolved second complete barrier pair. When both
-  /// fields are set, a drop-barrier request is one bounded all-or-nothing
-  /// logical mutation over the two exact physical pairs.
-  std::string fault_barrier_companion_site_identity;
-  std::string fault_barrier_companion_sequence_identity;
-  std::optional<int32_t> fault_barrier_target_id;
-  std::optional<uint32_t> fault_barrier_target_participant_count;
-  std::optional<uint64_t> fault_barrier_target_participant_mask;
-  ConSanBarrierMoveDirection fault_barrier_move_direction =
-      ConSanBarrierMoveDirection::LegacyMarker;
   /// Test-only s_nop immediate used as the destination of a moved barrier.
   uint16_t fault_barrier_marker_imm = 42;
   /// Internal recursion guard: faults have already been applied to this ELF.

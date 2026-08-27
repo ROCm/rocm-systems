@@ -26,79 +26,6 @@ struct RuntimePolicy {
   bool operator==(const RuntimePolicy &) const = default;
 };
 
-/// Explicit request to corrupt or perturb a program for validation.
-///
-/// Mutation is transformational and is never implied by ordinary sanitizer
-/// activation. Exact site identities and selection indices live here so they
-/// cannot accidentally alter semantic inventory or report planning for a
-/// normal request.
-struct MutationRequest {
-  bool fault_drop_barrier = false;
-  bool fault_allow_destructive_incomplete_barrier_drop = false;
-  bool fault_move_barrier = false;
-  bool fault_allow_completing_conditional_barrier_move = false;
-  bool fault_allow_destructive_divergent_barrier_move = false;
-  bool fault_mutate_barrier_id_scope = false;
-  bool fault_mutate_barrier_participants = false;
-  bool fault_atomic_wrong_address = false;
-  bool fault_atomic_weaken_order = false;
-  ConSanAtomicOrderEdge fault_atomic_order_edge = ConSanAtomicOrderEdge::Any;
-  bool fault_atomic_weaken_scope = false;
-  bool fault_lds_wrong_address = false;
-  bool fault_ordinary_wrong_address = false;
-  bool fault_ordinary_weaken_order = false;
-  bool fault_ordinary_weaken_scope = false;
-
-  uint32_t fault_atomic_address_delta = 4;
-  std::optional<uint16_t> fault_lds_address_vgpr;
-  uint32_t fault_ordinary_address_delta = 4;
-  bool fault_dry_run = false;
-  bool fault_require_exactly_one = false;
-  uint32_t fault_reservation_timeout_ms = 30000;
-  std::optional<uint32_t> fault_load_occurrence;
-
-  uint32_t fault_barrier_index = 0;
-  uint32_t fault_atomic_index = 0;
-  uint32_t fault_lds_index = 0;
-  uint32_t fault_ordinary_index = 0;
-  std::string fault_site_identity;
-  std::string fault_barrier_destination_identity;
-  std::string fault_barrier_sequence_identity;
-  std::string fault_barrier_companion_site_identity;
-  std::string fault_barrier_companion_sequence_identity;
-  std::optional<int32_t> fault_barrier_target_id;
-  std::optional<uint32_t> fault_barrier_target_participant_count;
-  std::optional<uint64_t> fault_barrier_target_participant_mask;
-  ConSanBarrierMoveDirection fault_barrier_move_direction =
-      ConSanBarrierMoveDirection::LegacyMarker;
-
-  ConSanPerturbationKind sc_perturb_kind = ConSanPerturbationKind::None;
-  ConSanPerturbationEdge sc_perturb_edge = ConSanPerturbationEdge::Release;
-  std::string sc_perturb_identity;
-  uint32_t sc_perturb_index = 0;
-  uint32_t sc_perturb_max = 1;
-  uint32_t sc_perturb_sleep = 1;
-  uint32_t sc_perturb_required_count = 0;
-
-  /// Return whether a fault transform (as opposed to timing perturbation) was
-  /// requested.
-  [[nodiscard]] bool has_fault_mutation() const {
-    return fault_drop_barrier || fault_move_barrier || fault_mutate_barrier_id_scope ||
-           fault_mutate_barrier_participants || fault_atomic_wrong_address ||
-           fault_atomic_weaken_order || fault_atomic_weaken_scope || fault_lds_wrong_address ||
-           fault_ordinary_wrong_address || fault_ordinary_weaken_order ||
-           fault_ordinary_weaken_scope;
-  }
-
-  /// Return whether either a fault transform or SuperCollider perturbation was
-  /// requested.
-  [[nodiscard]] bool has_mutation() const {
-    return has_fault_mutation() || sc_perturb_kind != ConSanPerturbationKind::None;
-  }
-
-  bool operator==(const MutationRequest &) const = default;
-};
-
 /// Return a copy retaining selection/proof and perturbation data but with every
 /// live fault-transform switch disabled. Inventory sizing uses this operation
 /// to analyze pristine sanitizer semantics without losing the caller's exact
@@ -669,52 +596,8 @@ public:
     options.force_vgpr_spill = debug.test_force_vgpr_spill;
     options.force_private_epoch = debug.test_force_private_epoch;
 
-    options.fault_drop_barrier = mutation.fault_drop_barrier;
-    options.fault_allow_destructive_incomplete_barrier_drop =
-        mutation.fault_allow_destructive_incomplete_barrier_drop;
-    options.fault_move_barrier = mutation.fault_move_barrier;
+    static_cast<MutationRequest &>(options) = mutation;
     options.collect_barrier_move_destinations = mutation.fault_move_barrier;
-    options.fault_allow_completing_conditional_barrier_move =
-        mutation.fault_allow_completing_conditional_barrier_move;
-    options.fault_allow_destructive_divergent_barrier_move =
-        mutation.fault_allow_destructive_divergent_barrier_move;
-    options.fault_mutate_barrier_id_scope = mutation.fault_mutate_barrier_id_scope;
-    options.fault_mutate_barrier_participants = mutation.fault_mutate_barrier_participants;
-    options.fault_atomic_wrong_address = mutation.fault_atomic_wrong_address;
-    options.fault_atomic_weaken_order = mutation.fault_atomic_weaken_order;
-    options.fault_atomic_order_edge = mutation.fault_atomic_order_edge;
-    options.fault_atomic_weaken_scope = mutation.fault_atomic_weaken_scope;
-    options.fault_lds_wrong_address = mutation.fault_lds_wrong_address;
-    options.fault_ordinary_wrong_address = mutation.fault_ordinary_wrong_address;
-    options.fault_ordinary_weaken_order = mutation.fault_ordinary_weaken_order;
-    options.fault_ordinary_weaken_scope = mutation.fault_ordinary_weaken_scope;
-    options.fault_atomic_address_delta = mutation.fault_atomic_address_delta;
-    options.fault_lds_address_vgpr = mutation.fault_lds_address_vgpr;
-    options.fault_ordinary_address_delta = mutation.fault_ordinary_address_delta;
-    options.fault_dry_run = mutation.fault_dry_run;
-    options.fault_require_exactly_one = mutation.fault_require_exactly_one;
-    options.fault_barrier_index = mutation.fault_barrier_index;
-    options.fault_atomic_index = mutation.fault_atomic_index;
-    options.fault_lds_index = mutation.fault_lds_index;
-    options.fault_ordinary_index = mutation.fault_ordinary_index;
-    options.fault_site_identity = mutation.fault_site_identity;
-    options.fault_barrier_destination_identity = mutation.fault_barrier_destination_identity;
-    options.fault_barrier_sequence_identity = mutation.fault_barrier_sequence_identity;
-    options.fault_barrier_companion_site_identity = mutation.fault_barrier_companion_site_identity;
-    options.fault_barrier_companion_sequence_identity =
-        mutation.fault_barrier_companion_sequence_identity;
-    options.fault_barrier_target_id = mutation.fault_barrier_target_id;
-    options.fault_barrier_target_participant_count =
-        mutation.fault_barrier_target_participant_count;
-    options.fault_barrier_target_participant_mask = mutation.fault_barrier_target_participant_mask;
-    options.fault_barrier_move_direction = mutation.fault_barrier_move_direction;
-    options.sc_perturb_kind = mutation.sc_perturb_kind;
-    options.sc_perturb_edge = mutation.sc_perturb_edge;
-    options.sc_perturb_identity = mutation.sc_perturb_identity;
-    options.sc_perturb_index = mutation.sc_perturb_index;
-    options.sc_perturb_max = mutation.sc_perturb_max;
-    options.sc_perturb_sleep = mutation.sc_perturb_sleep;
-    options.sc_perturb_required_count = mutation.sc_perturb_required_count;
 
     options.report_buffer_address = resources.report_buffer_address;
     options.moi_report_buffer_address = resources.moi_report_buffer_address;

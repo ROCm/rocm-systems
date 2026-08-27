@@ -4851,6 +4851,34 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 74.07 seconds. Slice 5AS remains the latest
   periodic physical-gfx950 gate; E2E validation remains outside this work.
 
+### Slice 5BF: share the typed mutation request with lowering
+
+- **One mutation representation:** The temporary mutable `ConSanOptions` now
+  inherits the production `MutationRequest` instead of redeclaring fault,
+  selection, proof, and SuperCollider-perturbation controls. The typed helper
+  predicates and pristine-inventory projection remain attached to that single
+  representation, so lowerer storage cannot drift from the behavior validated
+  at the public boundary.
+- **Only derived lowerer state remains:** `LegacyOptionsAdapter` copies the
+  complete mutation subobject in one value-semantic assignment and derives
+  only the expensive barrier-move destination-inventory switch. Internal retry
+  guards, inventory-shaping state, and the marker immediate remain ordinary
+  lowerer state because they are not caller mutation semantics.
+- **Deletion accounting:** Production adds 81 and deletes 184 physical lines,
+  a net deletion of 103. Most additions relocate the existing documented
+  `MutationRequest` definition before its temporary derived lowerer state; no
+  second mutation type, accessor layer, or fallback remains. The adapter test
+  adds three and deletes forty lines: one complete typed-value comparison now
+  covers every mutation field, including reservation timeout and load
+  occurrence, while one separate assertion proves the derived inventory flag.
+- **Checked-in gate:** All eleven focused mutation-contract and adapter tests
+  pass. The host gate passes all 1,508 runnable tests with the two expected
+  benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests pass; and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 72.87 seconds. The periodic physical-gfx950
+  gate passes all 593 tests in 486.24 seconds. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
