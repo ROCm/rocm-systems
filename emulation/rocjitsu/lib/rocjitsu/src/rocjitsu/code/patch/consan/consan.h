@@ -76,14 +76,12 @@ consan_capability_engine(ConSanFlavor flavor, ConSanMoiEngine moi_engine) {
 consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes, uint64_t text_file_offset,
                                 uint64_t container_entry_text_offset, uint64_t site_file_offset);
 
-/// Return whether SuperCollider can instrument this decoded FLAT LDS site
-/// under the requested provenance policy.
-[[nodiscard]] bool consan_supercollider_supports_flat_site(const ConSanFlatSite &site,
-                                                           ConSanFlatProvenanceMode mode);
-
-/// Return whether SuperCollider can instrument this decoded native-LDS site
-/// on the requested architecture.
-[[nodiscard]] bool consan_supercollider_supports_lds_site(const ConSanLdsSite &site,
-                                                          rj_code_arch_t arch);
+/// Return whether SuperCollider's current lowerer can implement one normalized
+/// access selected from the shared program inventory. This is a lowering
+/// capability query, not semantic policy: callers still decide address-space
+/// provenance, aliasing, and whether the access family was requested.
+[[nodiscard]] bool consan_supercollider_supports_access(const ConSanAccessInventorySite &access,
+                                                        ConSanFlatProvenanceMode mode,
+                                                        rj_code_arch_t arch);
 
 } // namespace rocjitsu

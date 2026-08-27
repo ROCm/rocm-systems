@@ -2134,7 +2134,10 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       ASSERT_TRUE(semantics);
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
-      EXPECT_TRUE(consan_supercollider_supports_flat_site(site, ConSanFlatProvenanceMode::Strict));
+      ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+      EXPECT_TRUE(consan_supercollider_supports_access(
+          result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
+          result.program_inventory.arch()));
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
@@ -2260,7 +2263,10 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       ASSERT_TRUE(semantics);
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
-      EXPECT_TRUE(consan_supercollider_supports_flat_site(site, ConSanFlatProvenanceMode::Strict));
+      ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+      EXPECT_TRUE(consan_supercollider_supports_access(
+          result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
+          result.program_inventory.arch()));
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(

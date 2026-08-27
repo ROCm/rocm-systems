@@ -251,51 +251,6 @@ classify_moi_access_support(const ConSanAccessInventorySite &access, rj_code_arc
                                                    : ConSanAccessPolicyReason::UnsupportedMnemonic;
 }
 
-[[nodiscard]] ConSanLdsSite legacy_lds_site(const ConSanAccessInventorySite &access) {
-  ConSanLdsSite site;
-  site.kind = access.kind;
-  site.supported_mvp = access.supported_mvp;
-  site.direct_to_lds = access.origin == ConSanAccessOrigin::DirectToLds;
-  site.text_offset = access.physical_id.original_text_offset;
-  site.file_offset = access.file_offset;
-  site.size = access.instruction_size;
-  site.width_bits = access.decoded_width_bits;
-  site.dst_vgpr = access.operands.destination_vgpr;
-  site.dst_accvgpr = access.operands.destination_accvgpr;
-  site.addr_vgpr = access.operands.address_vgpr;
-  site.data_vgpr = access.operands.data_vgpr;
-  site.second_data_vgpr = access.operands.second_data_vgpr;
-  site.mnemonic = access.mnemonic;
-  site.owner_descriptor_file_offsets = access.execution_owner_descriptor_file_offsets;
-  return site;
-}
-
-[[nodiscard]] ConSanFlatSite legacy_flat_site(const ConSanAccessInventorySite &access) {
-  ConSanFlatSite site;
-  site.kind = access.kind;
-  site.text_offset = access.physical_id.original_text_offset;
-  site.file_offset = access.file_offset;
-  site.size = access.instruction_size;
-  site.width_bits = access.decoded_width_bits;
-  site.dst_vgpr = access.operands.destination_vgpr;
-  site.addr_vgpr = access.operands.address_vgpr;
-  site.data_vgpr = access.operands.data_vgpr;
-  site.raw_op = access.operands.raw_op;
-  site.raw_saddr = access.operands.raw_saddr;
-  site.raw_scale_offset = access.operands.raw_scale_offset;
-  site.raw_vaddr = access.operands.raw_vaddr;
-  site.raw_vsrc = access.operands.raw_vsrc;
-  site.raw_vdst = access.operands.raw_vdst;
-  site.raw_ioffset = access.operands.raw_ioffset;
-  site.raw_segment = access.operands.raw_segment;
-  site.raw_scope = access.operands.raw_scope;
-  site.raw_th = access.operands.raw_th;
-  site.address_space_hint = access.flat_address_space_hint;
-  site.owner_descriptor_file_offsets = access.execution_owner_descriptor_file_offsets;
-  site.mnemonic = access.mnemonic;
-  return site;
-}
-
 [[nodiscard]] ConSanAccessPolicyReason
 classify_supercollider_access_support(const ConSanAccessInventorySite &access,
                                       ConSanFlatProvenanceMode provenance_mode,
@@ -306,10 +261,7 @@ classify_supercollider_access_support(const ConSanAccessInventorySite &access,
   if (access.file_offset > access.physical_id.code_object.byte_size ||
       access.instruction_size > access.physical_id.code_object.byte_size - access.file_offset)
     return ConSanAccessPolicyReason::InstructionOutOfBounds;
-  const bool supported =
-      access.origin == ConSanAccessOrigin::Flat
-          ? consan_supercollider_supports_flat_site(legacy_flat_site(access), provenance_mode)
-          : consan_supercollider_supports_lds_site(legacy_lds_site(access), arch);
+  const bool supported = consan_supercollider_supports_access(access, provenance_mode, arch);
   return supported ? ConSanAccessPolicyReason::None : ConSanAccessPolicyReason::UnsupportedMnemonic;
 }
 

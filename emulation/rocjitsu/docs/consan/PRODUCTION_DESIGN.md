@@ -4123,6 +4123,33 @@ analysis completed.
   emits the same normalized byte widths and lowering displacements. E2E
   validation remains outside this work.
 
+### Slice 5AG: delete SuperCollider's reverse access projection
+
+- **One policy input:** SuperCollider support policy now asks whether the
+  normalized `ConSanAccessInventorySite` can be lowered. It no longer rebuilds
+  a `ConSanLdsSite` or `ConSanFlatSite`—including raw encoding, ownership, and
+  identity fields that the yes/no query never consumed—after shared inventory
+  has already normalized the same instruction.
+- **Narrow remaining seam:** The support implementation is expressed in terms
+  of semantic access shape and operands. The still-unmigrated SuperCollider
+  emitters retain internal legacy-site forwarding overloads, but policy and its
+  tests can no longer reach the legacy-site API. A later complete emitter
+  cutover can delete those overloads with the legacy container vectors.
+- **Contract coverage:** The cross-target D16 load and subword-store tests now
+  query support through normalized inventory and still require valid emitted
+  SuperCollider patches. The access-policy suite covers all four engines,
+  multi-range admission, typed exclusions, alias coalescing, provenance,
+  target capability, and deterministic non-mutation of inventory.
+- **Deletion result:** Production source is nine physical lines smaller and
+  source plus tests is three lines smaller. Forty-eight lines of reverse
+  projection and the two public legacy-site queries are gone; no replacement
+  access record or copied field set was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 65.50
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

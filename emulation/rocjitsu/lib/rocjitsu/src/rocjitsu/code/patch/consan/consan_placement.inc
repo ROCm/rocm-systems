@@ -494,29 +494,40 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return static_cast<uint32_t>(addr_vgpr) | (static_cast<uint32_t>(dst_vgpr) << 24u);
 }
 
+[[nodiscard]] bool is_two_address_lds_store(std::string_view mnemonic) {
+  return mnemonic == "ds_store_2addr_b32" || mnemonic == "ds_store_2addr_b64" ||
+         mnemonic == "ds_store_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b64" ||
+         mnemonic == "ds_write2_b32" || mnemonic == "ds_write2st64_b32" ||
+         mnemonic == "ds_write2_b64" || mnemonic == "ds_write2st64_b64";
+}
+
 [[nodiscard]] bool is_two_address_lds_store(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_store_2addr_b32" || site.mnemonic == "ds_store_2addr_b64" ||
-         site.mnemonic == "ds_store_2addr_stride64_b32" ||
-         site.mnemonic == "ds_store_2addr_stride64_b64" || site.mnemonic == "ds_write2_b32" ||
-         site.mnemonic == "ds_write2st64_b32" || site.mnemonic == "ds_write2_b64" ||
-         site.mnemonic == "ds_write2st64_b64";
+  return is_two_address_lds_store(site.mnemonic);
+}
+
+[[nodiscard]] bool is_two_address_lds_load(std::string_view mnemonic) {
+  return mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_load_2addr_b64" ||
+         mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_load_2addr_stride64_b64" ||
+         mnemonic == "ds_read2_b32" || mnemonic == "ds_read2st64_b32" ||
+         mnemonic == "ds_read2_b64" || mnemonic == "ds_read2st64_b64";
 }
 
 [[nodiscard]] bool is_two_address_lds_load(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_load_2addr_b64" ||
-         site.mnemonic == "ds_load_2addr_stride64_b32" ||
-         site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_read2_b32" ||
-         site.mnemonic == "ds_read2st64_b32" || site.mnemonic == "ds_read2_b64" ||
-         site.mnemonic == "ds_read2st64_b64";
+  return is_two_address_lds_load(site.mnemonic);
+}
+
+[[nodiscard]] std::optional<uint32_t>
+two_address_lds_element_width_bits(std::string_view mnemonic) {
+  if (mnemonic.ends_with("b32"))
+    return 32u;
+  if (mnemonic.ends_with("b64"))
+    return 64u;
+  return std::nullopt;
 }
 
 [[nodiscard]] std::optional<uint32_t>
 two_address_lds_element_width_bits(const ConSanLdsSite &site) {
-  if (site.mnemonic.ends_with("b32"))
-    return 32u;
-  if (site.mnemonic.ends_with("b64"))
-    return 64u;
-  return std::nullopt;
+  return two_address_lds_element_width_bits(site.mnemonic);
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -554,32 +565,34 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
   };
 }
 
-[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanLdsSite &site) {
-  const bool is_two_addr_load = is_two_address_lds_load(site);
-  const bool is_two_addr_store = is_two_address_lds_store(site);
-  if (site.mnemonic == "ds_load_i8" || site.mnemonic == "ds_load_u8" ||
-      site.mnemonic == "ds_load_i16" || site.mnemonic == "ds_load_u16" ||
-      site.mnemonic == "ds_load_u8_d16" || site.mnemonic == "ds_load_u8_d16_hi" ||
-      site.mnemonic == "ds_load_i8_d16" || site.mnemonic == "ds_load_i8_d16_hi" ||
-      site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
-      site.mnemonic == "ds_read_u8_d16" || site.mnemonic == "ds_read_u8_d16_hi" ||
-      site.mnemonic == "ds_read_i8_d16" || site.mnemonic == "ds_read_i8_d16_hi" ||
-      site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi" ||
-      site.mnemonic == "ds_read_i16" || site.mnemonic == "ds_read_u16" ||
-      site.mnemonic == "ds_store_b8" || site.mnemonic == "ds_store_b8_d16_hi" ||
-      site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi" ||
-      site.mnemonic == "ds_write_b16")
+[[nodiscard]] std::optional<uint16_t> lds_dword_count(std::string_view mnemonic,
+                                                      uint32_t width_bits) {
+  const bool is_two_addr_load = is_two_address_lds_load(mnemonic);
+  const bool is_two_addr_store = is_two_address_lds_store(mnemonic);
+  if (mnemonic == "ds_load_i8" || mnemonic == "ds_load_u8" || mnemonic == "ds_load_i16" ||
+      mnemonic == "ds_load_u16" || mnemonic == "ds_load_u8_d16" ||
+      mnemonic == "ds_load_u8_d16_hi" || mnemonic == "ds_load_i8_d16" ||
+      mnemonic == "ds_load_i8_d16_hi" || mnemonic == "ds_load_u16_d16" ||
+      mnemonic == "ds_load_u16_d16_hi" || mnemonic == "ds_read_u8_d16" ||
+      mnemonic == "ds_read_u8_d16_hi" || mnemonic == "ds_read_i8_d16" ||
+      mnemonic == "ds_read_i8_d16_hi" || mnemonic == "ds_read_u16_d16" ||
+      mnemonic == "ds_read_u16_d16_hi" || mnemonic == "ds_read_i16" || mnemonic == "ds_read_u16" ||
+      mnemonic == "ds_store_b8" || mnemonic == "ds_store_b8_d16_hi" || mnemonic == "ds_store_b16" ||
+      mnemonic == "ds_store_b16_d16_hi" || mnemonic == "ds_write_b16")
     return 1;
   if (is_two_addr_load || is_two_addr_store) {
-    const auto element_width = two_address_lds_element_width_bits(site);
+    const auto element_width = two_address_lds_element_width_bits(mnemonic);
     if (!element_width)
       return std::nullopt;
     return static_cast<uint16_t>(2u * *element_width / 32u);
   }
-  if (site.width_bits == 32 || site.width_bits == 64 || site.width_bits == 96 ||
-      site.width_bits == 128)
-    return static_cast<uint16_t>(site.width_bits / 32u);
+  if (width_bits == 32 || width_bits == 64 || width_bits == 96 || width_bits == 128)
+    return static_cast<uint16_t>(width_bits / 32u);
   return std::nullopt;
+}
+
+[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanLdsSite &site) {
+  return lds_dword_count(site.mnemonic, site.width_bits);
 }
 
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,

@@ -2109,68 +2109,75 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   result.patches.push_back(info);
 }
 
-[[nodiscard]] bool is_supported_check_trap_site(const ConSanLdsSite &site, rj_code_arch_t arch) {
-  if (site.size != 2u * sizeof(uint32_t) || !site.addr_vgpr)
+[[nodiscard]] bool is_supported_lds_check_trap_access(
+    ConSanLdsAccessKind kind, uint32_t instruction_size, uint32_t width_bits,
+    std::string_view mnemonic, std::optional<uint16_t> destination_vgpr,
+    std::optional<uint16_t> destination_accvgpr, std::optional<uint16_t> address_vgpr,
+    std::optional<uint16_t> data_vgpr, std::optional<uint16_t> second_data_vgpr,
+    rj_code_arch_t arch) {
+  if (instruction_size != 2u * sizeof(uint32_t) || !address_vgpr)
     return false;
-  auto dword_count = lds_dword_count(site);
+  auto dword_count = lds_dword_count(mnemonic, width_bits);
   if (!dword_count)
     return false;
-  if (site.kind == ConSanLdsAccessKind::Read) {
-    if (site.mnemonic != "ds_load_i8" && site.mnemonic != "ds_load_u8" &&
-        site.mnemonic != "ds_load_i16" && site.mnemonic != "ds_load_b32" &&
-        site.mnemonic != "ds_load_b64" && site.mnemonic != "ds_load_b96" &&
-        site.mnemonic != "ds_load_b128" && site.mnemonic != "ds_load_tr8_b64" &&
-        site.mnemonic != "ds_load_tr16_b128" && site.mnemonic != "ds_load_2addr_b32" &&
-        site.mnemonic != "ds_load_2addr_b64" && site.mnemonic != "ds_load_2addr_stride64_b32" &&
-        site.mnemonic != "ds_load_2addr_stride64_b64" && site.mnemonic != "ds_load_u16" &&
-        site.mnemonic != "ds_load_u8_d16" && site.mnemonic != "ds_load_u8_d16_hi" &&
-        site.mnemonic != "ds_load_i8_d16" && site.mnemonic != "ds_load_i8_d16_hi" &&
-        site.mnemonic != "ds_load_u16_d16" && site.mnemonic != "ds_load_u16_d16_hi" &&
-        site.mnemonic != "ds_read_u8_d16" && site.mnemonic != "ds_read_u8_d16_hi" &&
-        site.mnemonic != "ds_read_i8_d16" && site.mnemonic != "ds_read_i8_d16_hi" &&
-        site.mnemonic != "ds_read_u16_d16" && site.mnemonic != "ds_read_u16_d16_hi" &&
-        site.mnemonic != "ds_read_b32" && site.mnemonic != "ds_read_b64" &&
-        site.mnemonic != "ds_read_b96" && site.mnemonic != "ds_read_b128" &&
-        site.mnemonic != "ds_read_i16" && site.mnemonic != "ds_read_u16" &&
-        site.mnemonic != "ds_read_b64_tr_b16" && site.mnemonic != "ds_read2_b32" &&
-        site.mnemonic != "ds_read2st64_b32" && site.mnemonic != "ds_read2_b64" &&
-        site.mnemonic != "ds_read2st64_b64")
+  if (kind == ConSanLdsAccessKind::Read) {
+    if (mnemonic != "ds_load_i8" && mnemonic != "ds_load_u8" && mnemonic != "ds_load_i16" &&
+        mnemonic != "ds_load_b32" && mnemonic != "ds_load_b64" && mnemonic != "ds_load_b96" &&
+        mnemonic != "ds_load_b128" && mnemonic != "ds_load_tr8_b64" &&
+        mnemonic != "ds_load_tr16_b128" && mnemonic != "ds_load_2addr_b32" &&
+        mnemonic != "ds_load_2addr_b64" && mnemonic != "ds_load_2addr_stride64_b32" &&
+        mnemonic != "ds_load_2addr_stride64_b64" && mnemonic != "ds_load_u16" &&
+        mnemonic != "ds_load_u8_d16" && mnemonic != "ds_load_u8_d16_hi" &&
+        mnemonic != "ds_load_i8_d16" && mnemonic != "ds_load_i8_d16_hi" &&
+        mnemonic != "ds_load_u16_d16" && mnemonic != "ds_load_u16_d16_hi" &&
+        mnemonic != "ds_read_u8_d16" && mnemonic != "ds_read_u8_d16_hi" &&
+        mnemonic != "ds_read_i8_d16" && mnemonic != "ds_read_i8_d16_hi" &&
+        mnemonic != "ds_read_u16_d16" && mnemonic != "ds_read_u16_d16_hi" &&
+        mnemonic != "ds_read_b32" && mnemonic != "ds_read_b64" && mnemonic != "ds_read_b96" &&
+        mnemonic != "ds_read_b128" && mnemonic != "ds_read_i16" && mnemonic != "ds_read_u16" &&
+        mnemonic != "ds_read_b64_tr_b16" && mnemonic != "ds_read2_b32" &&
+        mnemonic != "ds_read2st64_b32" && mnemonic != "ds_read2_b64" &&
+        mnemonic != "ds_read2st64_b64")
       return false;
-    if (site.dst_accvgpr) {
+    if (destination_accvgpr) {
       const ConSanTargetProfile *profile = consan_target_profile(arch);
       return profile &&
              profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
-             static_cast<uint32_t>(*site.dst_accvgpr) + *dword_count <= 256u;
+             static_cast<uint32_t>(*destination_accvgpr) + *dword_count <= 256u;
     }
     const uint32_t register_limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
-    return site.dst_vgpr.has_value() &&
-           static_cast<uint32_t>(*site.dst_vgpr) + *dword_count <= register_limit;
+    return destination_vgpr.has_value() &&
+           static_cast<uint32_t>(*destination_vgpr) + *dword_count <= register_limit;
   }
-  if (site.kind == ConSanLdsAccessKind::Write) {
-    if (site.mnemonic != "ds_store_b8" && site.mnemonic != "ds_store_b8_d16_hi" &&
-        site.mnemonic != "ds_store_b16" && site.mnemonic != "ds_store_b16_d16_hi" &&
-        site.mnemonic != "ds_store_b32" && site.mnemonic != "ds_store_b64" &&
-        site.mnemonic != "ds_store_b96" && site.mnemonic != "ds_store_b128" &&
-        site.mnemonic != "ds_store_2addr_b32" && site.mnemonic != "ds_store_2addr_b64" &&
-        site.mnemonic != "ds_store_2addr_stride64_b32" &&
-        site.mnemonic != "ds_store_2addr_stride64_b64" && site.mnemonic != "ds_write_b32" &&
-        site.mnemonic != "ds_write_b16" && site.mnemonic != "ds_write_b64" &&
-        site.mnemonic != "ds_write_b96" && site.mnemonic != "ds_write_b128" &&
-        site.mnemonic != "ds_write2_b32" && site.mnemonic != "ds_write2st64_b32" &&
-        site.mnemonic != "ds_write2_b64" && site.mnemonic != "ds_write2st64_b64")
+  if (kind == ConSanLdsAccessKind::Write) {
+    if (mnemonic != "ds_store_b8" && mnemonic != "ds_store_b8_d16_hi" &&
+        mnemonic != "ds_store_b16" && mnemonic != "ds_store_b16_d16_hi" &&
+        mnemonic != "ds_store_b32" && mnemonic != "ds_store_b64" && mnemonic != "ds_store_b96" &&
+        mnemonic != "ds_store_b128" && mnemonic != "ds_store_2addr_b32" &&
+        mnemonic != "ds_store_2addr_b64" && mnemonic != "ds_store_2addr_stride64_b32" &&
+        mnemonic != "ds_store_2addr_stride64_b64" && mnemonic != "ds_write_b32" &&
+        mnemonic != "ds_write_b16" && mnemonic != "ds_write_b64" && mnemonic != "ds_write_b96" &&
+        mnemonic != "ds_write_b128" && mnemonic != "ds_write2_b32" &&
+        mnemonic != "ds_write2st64_b32" && mnemonic != "ds_write2_b64" &&
+        mnemonic != "ds_write2st64_b64")
       return false;
-    const bool two_address = is_two_address_lds_store(site);
+    const bool two_address = is_two_address_lds_store(mnemonic);
     if (two_address) {
       const uint32_t dwords_per_address =
-          two_address_lds_element_width_bits(site).value_or(0u) / 32u;
-      return site.data_vgpr.has_value() && site.second_data_vgpr.has_value() &&
-             static_cast<uint32_t>(*site.data_vgpr) + dwords_per_address <= 256 &&
-             static_cast<uint32_t>(*site.second_data_vgpr) + dwords_per_address <= 256;
+          two_address_lds_element_width_bits(mnemonic).value_or(0u) / 32u;
+      return data_vgpr.has_value() && second_data_vgpr.has_value() &&
+             static_cast<uint32_t>(*data_vgpr) + dwords_per_address <= 256 &&
+             static_cast<uint32_t>(*second_data_vgpr) + dwords_per_address <= 256;
     }
-    return site.data_vgpr.has_value() &&
-           static_cast<uint32_t>(*site.data_vgpr) + *dword_count <= 256;
+    return data_vgpr.has_value() && static_cast<uint32_t>(*data_vgpr) + *dword_count <= 256;
   }
   return false;
+}
+
+[[nodiscard]] bool is_supported_check_trap_site(const ConSanLdsSite &site, rj_code_arch_t arch) {
+  return is_supported_lds_check_trap_access(site.kind, site.size, site.width_bits, site.mnemonic,
+                                            site.dst_vgpr, site.dst_accvgpr, site.addr_vgpr,
+                                            site.data_vgpr, site.second_data_vgpr, arch);
 }
 
 [[nodiscard]] bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
@@ -2189,15 +2196,19 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return is_instrumentable_group_flat_hint(site.address_space_hint, mode);
 }
 
-[[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
-  if (consan_flat_load_subword_semantics(site.mnemonic) ||
-      consan_flat_store_subword_semantics(site.mnemonic))
+[[nodiscard]] std::optional<uint16_t> flat_dword_count(std::string_view mnemonic,
+                                                       uint32_t width_bits) {
+  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
     return 1u;
-  if (site.width_bits == 16)
+  if (width_bits == 16)
     return 1u;
-  if (site.width_bits == 32 || site.width_bits == 64 || site.width_bits == 128)
-    return static_cast<uint16_t>(site.width_bits / 32u);
+  if (width_bits == 32 || width_bits == 64 || width_bits == 128)
+    return static_cast<uint16_t>(width_bits / 32u);
   return std::nullopt;
+}
+
+[[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
+  return flat_dword_count(site.mnemonic, site.width_bits);
 }
 
 [[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanFlatSite &site, rj_code_arch_t arch,
@@ -2207,35 +2218,46 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
          candidate % 2u == 0u;
 }
 
-[[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
-                                                     ConSanFlatProvenanceMode mode) {
-  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
+[[nodiscard]] bool is_supported_flat_check_trap_access(
+    ConSanLdsAccessKind kind, uint32_t instruction_size, uint32_t width_bits,
+    std::string_view mnemonic, std::optional<uint16_t> destination_vgpr,
+    std::optional<uint16_t> address_vgpr, std::optional<uint16_t> data_vgpr,
+    ConSanFlatAddressSpaceHint address_space_hint, ConSanFlatProvenanceMode mode) {
+  if (kind != ConSanLdsAccessKind::Read && kind != ConSanLdsAccessKind::Write)
     return false;
-  if ((site.size != 2u * sizeof(uint32_t) && site.size != 3u * sizeof(uint32_t)) || !site.addr_vgpr)
+  if ((instruction_size != 2u * sizeof(uint32_t) && instruction_size != 3u * sizeof(uint32_t)) ||
+      !address_vgpr)
     return false;
-  auto dword_count = flat_dword_count(site);
+  auto dword_count = flat_dword_count(mnemonic, width_bits);
   if (!dword_count)
     return false;
-  if (site.kind == ConSanLdsAccessKind::Read) {
-    if (!consan_flat_load_subword_semantics(site.mnemonic) && site.mnemonic != "flat_load_b32" &&
-        site.mnemonic != "flat_load_b64" && site.mnemonic != "flat_load_b128" &&
-        site.mnemonic != "flat_load_dword" && site.mnemonic != "flat_load_dwordx2" &&
-        site.mnemonic != "flat_load_dwordx4" && site.mnemonic != "flat_load_ushort" &&
-        site.mnemonic != "flat_load_u16")
+  if (kind == ConSanLdsAccessKind::Read) {
+    if (!consan_flat_load_subword_semantics(mnemonic) && mnemonic != "flat_load_b32" &&
+        mnemonic != "flat_load_b64" && mnemonic != "flat_load_b128" &&
+        mnemonic != "flat_load_dword" && mnemonic != "flat_load_dwordx2" &&
+        mnemonic != "flat_load_dwordx4" && mnemonic != "flat_load_ushort" &&
+        mnemonic != "flat_load_u16")
       return false;
-    if (!site.dst_vgpr || static_cast<uint32_t>(*site.dst_vgpr) + *dword_count > 256)
+    if (!destination_vgpr || static_cast<uint32_t>(*destination_vgpr) + *dword_count > 256)
       return false;
   } else {
-    if (!consan_flat_store_subword_semantics(site.mnemonic) && site.mnemonic != "flat_store_b32" &&
-        site.mnemonic != "flat_store_b64" && site.mnemonic != "flat_store_b128" &&
-        site.mnemonic != "flat_store_dword" && site.mnemonic != "flat_store_dwordx2" &&
-        site.mnemonic != "flat_store_dwordx4" && site.mnemonic != "flat_store_short" &&
-        site.mnemonic != "flat_store_b16")
+    if (!consan_flat_store_subword_semantics(mnemonic) && mnemonic != "flat_store_b32" &&
+        mnemonic != "flat_store_b64" && mnemonic != "flat_store_b128" &&
+        mnemonic != "flat_store_dword" && mnemonic != "flat_store_dwordx2" &&
+        mnemonic != "flat_store_dwordx4" && mnemonic != "flat_store_short" &&
+        mnemonic != "flat_store_b16")
       return false;
-    if (!site.data_vgpr || static_cast<uint32_t>(*site.data_vgpr) + *dword_count > 256)
+    if (!data_vgpr || static_cast<uint32_t>(*data_vgpr) + *dword_count > 256)
       return false;
   }
-  return is_instrumentable_group_flat_hint(site.address_space_hint, mode);
+  return is_instrumentable_group_flat_hint(address_space_hint, mode);
+}
+
+[[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
+                                                     ConSanFlatProvenanceMode mode) {
+  return is_supported_flat_check_trap_access(site.kind, site.size, site.width_bits, site.mnemonic,
+                                             site.dst_vgpr, site.addr_vgpr, site.data_vgpr,
+                                             site.address_space_hint, mode);
 }
 
 [[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanFlatSite &site,
