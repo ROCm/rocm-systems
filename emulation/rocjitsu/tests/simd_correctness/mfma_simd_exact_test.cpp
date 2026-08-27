@@ -203,6 +203,8 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
   };
+  spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 8, 1>, "spec_f32_16x16x8");
+  spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 4, 1>, "spec_f32_32x32x4");
   spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 2, 1>, "spec_f32_32x32x2");
   spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>, "spec_f32_16x16x4");
   spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>, "spec_f32_32x32x1x2");
@@ -211,8 +213,9 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 
 TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+  if (W <= 1 || 32 % W != 0)
+    GTEST_SKIP() << "test requires a supported native SIMD width";
   constexpr uint32_t source_b = 0;
   constexpr uint32_t destination_and_source_a = 64;
   constexpr uint32_t accumulator = 128;
