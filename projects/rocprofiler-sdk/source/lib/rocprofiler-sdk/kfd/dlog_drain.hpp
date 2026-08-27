@@ -202,6 +202,35 @@ struct pair_state
     uint64_t equal_tick_drops   = 0;  // EOP tick == retained START tick (fail-closed)
     uint64_t stale_eop_drops    = 0;  // EOP tick < retained START tick (belongs earlier)
     uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
+    uint64_t starts_cap_evicted = 0;  // retained STARTs dropped by the hard size cap
+
+    // Hard bound on pending_starts, mirroring D9's per-GPU hub cap (this map is
+    // per-GPU too, and a START is of the same order in size). evict_stale is only
+    // an AGE backstop -- at the 30-min default a sustained EOP loss exhausts memory
+    // long before it fires -- and D9's cap does not cover this map, because
+    // firmware emits records for signal-fallback dispatches the hub never saw.
+    // Overridden from ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS by the
+    // reader; the default stands for a unit test that never sets it.
+    size_t max_pending_starts = 2'000'000;
+
+    // Drop the single oldest retained START, counting its outstanding STARTs as
+    // lost (each is a dispatch that will now complete start-unknown -- coverage
+    // loss, not a wrong record). RESIDUAL, accepted: this is an O(live) scan, paid
+    // on every insert while the map sits AT the cap. Reaching the cap already means
+    // EOPs are being lost at a rate no sane workload produces, and the alternative
+    // there is memory exhaustion; a cheap victim lookup would need a second index
+    // ordered by seen_at_ns, the same secondary-index work D9 deferred.
+    void evict_oldest_start()
+    {
+        auto _oldest = pending_starts.end();
+        for(auto it = pending_starts.begin(); it != pending_starts.end(); ++it)
+            if(_oldest == pending_starts.end() ||
+               it->second.seen_at_ns < _oldest->second.seen_at_ns)
+                _oldest = it;
+        if(_oldest == pending_starts.end()) return;
+        starts_cap_evicted += _oldest->second.outstanding;
+        pending_starts.erase(_oldest);
+    }
 
     // Stream-driven eviction watermark: the copy timestamp of the last batch that
     // triggered an evict for this GPU. Compared against batch.now_ns,
@@ -424,6 +453,13 @@ pair_records(const copied_record* records,
         if(rec.record_type == kRecStart)
         {
             ++state.starts_seen;
+            // Hard size cap. Only an insert that GROWS the map can breach it, so a
+            // recurring key is exempt -- evicting there could pick the very key
+            // about to be touched and silently reset its `ambiguous` latch. The
+            // size test short-circuits, so the normal path pays no extra lookup.
+            if(state.pending_starts.size() >= state.max_pending_starts &&
+               state.pending_starts.find(key) == state.pending_starts.end())
+                state.evict_oldest_start();
             // dispatch_id is only low-32, so a raw key can recur. A second
             // outstanding START on one key makes it AMBIGUOUS: keep the first
             // START's ticks and age unchanged (so an unpairable key still ages out

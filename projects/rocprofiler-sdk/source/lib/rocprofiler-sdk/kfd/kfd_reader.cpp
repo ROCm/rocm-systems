@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/poll_reader.hpp"
@@ -125,6 +126,24 @@ start_max_age_ns()
     return _cached;
 }
 
+// Hard size cap on a GPU's retained-START map. start_max_age_ns() above is only
+// the slow age backstop, so this is the bound that actually holds under a
+// sustained EOP loss -- exactly the role D9's cap plays for the hub, sized the
+// same way and for the same reason (the map is per-GPU, and a workload's genuine
+// in-flight peak is hundreds of thousands of dispatches). The [1, 4194304] range
+// and the reject-and-default parse are D8/D9's shared contract; read once, forced
+// at reader start so no worker thread races a concurrent setenv.
+size_t
+pending_starts_cap()
+{
+    static const size_t _cached = []() -> size_t {
+        constexpr long _dflt = 2'000'000;
+        auto _v = env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS", 1, 4'194'304);
+        return static_cast<size_t>(_v.value_or(_dflt));
+    }();
+    return _cached;
+}
+
 // Overflow depth at which the processor is clearly not keeping up. Not a cap:
 // dropping here would lose records the ring already gave us.
 constexpr size_t kOverflowWarnDepth = 256;
@@ -157,7 +176,12 @@ struct processor_state
 {
     std::unordered_map<uint32_t, pair_state> by_gpu = {};
 
-    pair_state& for_gpu(uint32_t gpu_id) { return by_gpu[gpu_id]; }
+    pair_state& for_gpu(uint32_t gpu_id)
+    {
+        auto [it, ins] = by_gpu.try_emplace(gpu_id);
+        if(ins) it->second.max_pending_starts = pending_starts_cap();
+        return it->second;
+    }
 };
 
 // Validated before any sizing math uses it.
@@ -910,7 +934,8 @@ processor_loop()
             "KFD dispatch-log pairing census (gpu_id={}): {} START record(s) drained, {} EOP "
             "record(s) drained, {} EOP(s) unmatched, {} START(s) overwritten on a live key, {} "
             "ambiguous EOP(s) dropped, {} equal-tick EOP(s) dropped, {} stale EOP(s) dropped, {} "
-            "START(s) evicted stale, {} START(s) still retained at exit",
+            "START(s) evicted stale, {} START(s) evicted by the size cap, {} START(s) still "
+            "retained at exit",
             _gpu_itr.first,
             _p.starts_seen,
             _p.eops_seen,
@@ -920,6 +945,7 @@ processor_loop()
             _p.equal_tick_drops,
             _p.stale_eop_drops,
             _p.starts_evicted,
+            _p.starts_cap_evicted,
             _p.pending_starts.size());
     }
 }
