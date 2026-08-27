@@ -6436,10 +6436,10 @@ for nominal line-count reductions.
   lines fall from 22,273 to 22,225, nonblank lines from 21,452 to 21,413, and
   estimated comment-excluded code lines from 20,222 to 20,183. The slice adds
   26 and deletes 74 physical implementation lines, a net deletion of 48.
-- **Checked-in gate:** Pending the complete build, all 1,531 ConSan host tests,
-  all 172 HSA-hook tests, all 2,878 generated simulator-device tests across the
-  five supported targets, and the 26-case physical-gfx950 cross-engine smoke
-  pass. E2E validation remains outside this deletion work.
+- **Checked-in gate:** The complete build, all 1,534 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
 
 ### Slice 5DJ: give descriptor allocation counts one authority
 
@@ -6460,9 +6460,10 @@ for nominal line-count reductions.
   fall from 10,591 to 10,560, nonblank lines from 10,222 to 10,195, and
   estimated comment-excluded code lines from 9,339 to 9,312. The slice adds
   five and deletes 36 physical implementation lines, a net deletion of 31.
-- **Batched gate:** Compilation and the broader checked-in gate are deferred to
-  the current deletion tranche so several bisectable semantic-preserving
-  commits share one test run. E2E validation remains outside this work.
+- **Checked-in gate:** The complete build, all 1,534 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this work.
 
 ### Slice 5DK: delete the mutable inventory-shape rule
 
@@ -6481,8 +6482,10 @@ for nominal line-count reductions.
   fall from 1,827 to 1,824, nonblank lines from 1,703 to 1,701, and estimated
   comment-excluded code lines from 1,349 to 1,347. The slice adds six and
   deletes nine physical implementation lines, a net deletion of three.
-- **Batched gate:** Compilation and the broader checked-in gate are deferred to
-  the current deletion tranche. E2E validation remains outside this work.
+- **Checked-in gate:** The complete build, all 1,534 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this work.
 
 ### Slice 5DL: make descriptor resource facts genuinely shared
 
@@ -6513,9 +6516,11 @@ for nominal line-count reductions.
   the documented shared header while deleting nine executable/declarative code
   lines. Together with Slice 5DJ's initial consumer cutover, descriptor
   ownership is both smaller and singular.
-- **Batched gate:** The library and test binary compile, and the seven focused
-  descriptor tests pass. The broader checked-in gate is deferred to the current
-  deletion tranche. E2E validation remains outside this work.
+- **Checked-in gate:** The library and test binary compile, the seven focused
+  descriptor tests pass, and the tranche passes all 1,534 ConSan host tests,
+  all 172 HSA-hook tests, all 2,878 generated simulator-device tests across the
+  five supported targets, and the 26-case physical-gfx950 cross-engine smoke.
+  E2E validation remains outside this work.
 
 ### Slice 5DM: give SGPR descriptor growth one target-aware rule
 
@@ -6540,9 +6545,11 @@ for nominal line-count reductions.
   lines fall from 16,618 to 16,601, nonblank lines from 15,942 to 15,925, and
   estimated comment-excluded code lines from 14,779 to 14,761. The slice adds
   48 and deletes 65 physical implementation lines, a net deletion of 17.
-- **Batched gate:** The library and test binary compile and the five focused
-  component/integration tests pass. The broader checked-in gate is deferred to
-  the current deletion tranche. E2E validation remains outside this work.
+- **Checked-in gate:** The library and test binary compile, the five focused
+  component/integration tests pass, and the tranche passes all 1,534 ConSan
+  host tests, all 172 HSA-hook tests, all 2,878 generated simulator-device
+  tests across the five supported targets, and the 26-case physical-gfx950
+  cross-engine smoke. E2E validation remains outside this work.
 
 ### Slice 6: explicit pipeline and result cutover
 
