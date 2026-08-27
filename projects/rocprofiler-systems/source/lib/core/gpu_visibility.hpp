@@ -41,11 +41,14 @@ get_visible_gpu_bdfs();
  * not store a HIP ordinal on the agent, only @c runtime_visibility.hip, so this is the
  * k-th GPU agent with @c hip_visible set, in agent-manager order. That matches HIP when
  * @c HIP_VISIBLE_DEVICES / @c ROCR_VISIBLE_DEVICES is an increasing subset (e.g. "4,5").
- * A permutation (e.g. "5,4") or UUID list is warned about; the mapping may then be wrong.
+ * A permutation (e.g. "5,4") or UUID list cannot be mapped without mislabeling, so this
+ * returns empty and hipFile telemetry is skipped. AMD SMI GPU sampling is unaffected
+ * (@c get_visible_gpu_bdfs is order-independent).
  *
  * @return Empty when no GPU agents were found (same "unknown vs none" situation as
  *         @c get_visible_gpu_bdfs returning nullopt, collapsed to "no visible GPUs"
- *         because hipFile has nothing to index).
+ *         because hipFile has nothing to index), or when the visibility mask is not
+ *         an increasing integer subset.
  */
 std::vector<std::size_t>
 get_visible_gpu_type_indices();

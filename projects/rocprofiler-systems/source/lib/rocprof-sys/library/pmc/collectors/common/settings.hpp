@@ -122,7 +122,9 @@ struct settings_policy
      *        order.
      *
      * Element k is the device_type_index of HIP ordinal k, which is how hipFile indexes
-     * per_gpu_stats. See rocprofsys::gpu::get_visible_gpu_type_indices.
+     * per_gpu_stats. Empty when the visibility mask is a permutation or UUID list, so
+     * hipFile telemetry is not recorded under the wrong GPU. See
+     * rocprofsys::gpu::get_visible_gpu_type_indices.
      */
     static std::vector<std::size_t> get_visible_gpu_type_indices()
     {

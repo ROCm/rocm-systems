@@ -5,6 +5,7 @@
 
 #include "library/pmc/collectors/hipfile/types.hpp"
 
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -158,9 +159,10 @@ private:
             return 0.0;
         }
 
-        constexpr double NS_PER_SEC = 1e9;
-        return static_cast<double>(current - previous) * NS_PER_SEC /
-               static_cast<double>(elapsed_ns);
+        using elapsed_ns_t = std::chrono::duration<std::uint64_t, std::nano>;
+        const auto elapsed_s =
+            std::chrono::duration<double>(elapsed_ns_t{ elapsed_ns }).count();
+        return static_cast<double>(current - previous) / elapsed_s;
     }
 
     std::shared_ptr<Backend> m_backend;

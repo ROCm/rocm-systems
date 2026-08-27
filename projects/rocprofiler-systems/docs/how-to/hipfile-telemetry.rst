@@ -176,7 +176,11 @@ Details of the settings:
   the write track, in the same way ``ROCPROFSYS_AMD_SMI_METRICS`` treats ``power``
   and ``temp``. An unrecognized name is ignored with a warning.
 * **ROCPROFSYS_SAMPLING_GPUS**: Which GPUs to collect from. hipFile telemetry
-  honors the same GPU selection as the AMD SMI GPU metrics.
+  honors the same GPU selection as the AMD SMI GPU metrics. ``HIP_VISIBLE_DEVICES``
+  / ``ROCR_VISIBLE_DEVICES`` must be an increasing integer list (for example
+  ``4,5``). A permutation (``5,4``) or UUID list cannot be mapped from hipFile's
+  HIP ordinals to profiler GPU indices, so hipFile telemetry is disabled with a
+  warning. AMD SMI and rocprofiler-sdk GPU metrics are unaffected.
 
 hipFile's statistics collection is on by default (``HIPFILE_STATS_LEVEL``
 defaults to ``1``). The profiler does not overwrite that variable. If you set
