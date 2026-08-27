@@ -197,13 +197,16 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     for(size_t i = 0; i < worker_data->num_buffers; i++)
         worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
 
+    std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> mock_buffer{};
+    mock_buffer.emplace_back(std::move(buffer_packet));
+
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
     producer_data.submit_signal    = make_signal(*mock_queue);
     producer_data.control_packet   = std::move(control_packet);
     producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;
-    producer_data.buffer_packet    = std::move(buffer_packet);
+    producer_data.buffer_packets   = std::move(mock_buffer);
     producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
         return att_queue_submit_packets(*queue, packet->before_krn_pkt);
     };
