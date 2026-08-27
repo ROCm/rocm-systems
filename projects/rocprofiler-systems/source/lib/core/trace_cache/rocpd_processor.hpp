@@ -14,6 +14,8 @@
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
 
+#include <string_view>
+
 namespace rocprofsys
 {
 namespace trace_cache
@@ -45,6 +47,10 @@ public:
 
 private:
     void post_process_metadata();
+    void try_insert_pmc_event(
+        const profiler_hub::writer_types::pmc_event_data_t&     event_event,
+        const profiler_hub::writer_types::pmc_info_unique_id_t& unique_id,
+        std::string_view                                        context);
 
     std::shared_ptr<metadata_registry>      m_metadata;
     std::shared_ptr<agent_manager>          m_agent_manager;
