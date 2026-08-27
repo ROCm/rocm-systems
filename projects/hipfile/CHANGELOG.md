@@ -15,6 +15,7 @@
 ### Added
 
 * A KFD-based alternative check for P2P DMA support was added to `ais-check`. This inspects the `capability` property under `/sys/class/kfd/kfd/topology/nodes/*/properties`.
+* Added support for Logical Volume Manager (LVM) volumes with a maximum of 16 extents
 * Added guides for setting up storage targets to the documentation
 
 ### Changed
@@ -22,6 +23,7 @@
 * `ais-check` now lists the AIS-capable file system mounts detected on the system and fails if none are found.
 * Fastpath-only tests are now automatically skipped on systems that do not support the AIS fastpath instead of failing. Running ctest in verbose mode (`ctest -V`) will provide the reason why the test was skipped.
 * Updated INSTALL.md to point to official install docs
+* hipFileRead and hipFileWrite now return -1 with `errno` set to `EINVAL` for negative offsets instead of returning `-hipFileInternalError`
 
 ### Removed
 

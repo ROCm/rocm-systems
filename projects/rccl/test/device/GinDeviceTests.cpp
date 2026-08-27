@@ -163,6 +163,8 @@ TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
 
   // Header qword: flag, size (op now lives in the headerExt qword).
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL);
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+            static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
             static_cast<uint64_t>(ncclGinProxyOpPut));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), kSize);

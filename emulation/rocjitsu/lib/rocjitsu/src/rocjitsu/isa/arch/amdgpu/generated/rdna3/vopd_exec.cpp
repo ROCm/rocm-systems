@@ -147,6 +147,8 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 }
 
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.wf_size() != 32)
+    throw util::UnimplementedInst("VOPD requires Wave32");
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
