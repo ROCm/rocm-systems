@@ -69,7 +69,9 @@ signal_less_feature_enabled()
     // Read once: the answer must not change under a running process, and the
     // enqueue path cannot afford an env lookup per batch.
     static const bool _enabled = []() {
-        if(!common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS", false)) return false;
+        // Strict opt-in, fail-closed: only an explicit true value activates a
+        // feature that changes completion semantics process-wide.
+        if(!env_bool_opt_in("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS")) return false;
         // register the fork-child abandon handler HERE, where the feature
         // is decided -- every path that creates signal-less state passes this gate
         // first, so "state exists => a handler is registered" is a property of the

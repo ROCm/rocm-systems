@@ -955,3 +955,28 @@ TEST(EnvLongInRange, reject_and_default_never_clamp)
 
     ::unsetenv(var);
 }
+
+// The strict opt-in switch: ONLY an explicit true value enables. Everything else
+// -- unset, empty, a false word, a typo, a number -- is DISABLED (fail-closed),
+// and nothing throws or fatals.
+TEST(EnvBoolOptIn, only_explicit_true_enables)
+{
+    const char* var = "ROCPROFILER_KFD_DLOG_TEST_ENVBOOL";
+    auto        set = [&](const char* v) { ::setenv(var, v, 1); };
+
+    ::unsetenv(var);
+    EXPECT_FALSE(env_bool_opt_in(var)) << "unset -> off";
+
+    for(const char* _yes : {"1", "true", "yes", "on"})
+    {
+        set(_yes);
+        EXPECT_TRUE(env_bool_opt_in(var)) << _yes << " enables";
+    }
+    for(const char* _no : {"0", "false", "no", "off", "", "flase", "2", "TRUE", "99999999999999999"})
+    {
+        set(_no);
+        EXPECT_FALSE(env_bool_opt_in(var)) << "'" << _no << "' must not enable";
+    }
+
+    ::unsetenv(var);
+}
