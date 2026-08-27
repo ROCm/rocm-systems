@@ -94,7 +94,7 @@ plan_test_moi_evidence_inventory(const ConSanResult &result, const ConSanOptions
                result.program_inventory, result.observation_plan,
                {.caller_ceiling_bytes = caller_ceiling_bytes,
                 .maximum_access_probe_count = maximum_access_probe_count,
-                .maximum_workgroup_lds_bytes = options.moi_max_workgroup_lds_bytes})
+                .maximum_workgroup_lds_bytes = options.max_workgroup_lds_bytes})
         .sizing_inventory;
   }
   return {};

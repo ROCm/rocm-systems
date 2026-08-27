@@ -518,6 +518,157 @@ struct MutationRequest {
   bool operator==(const MutationRequest &) const = default;
 };
 
+/// Provenance of the runtime facts supplied to one ConSan transformation.
+///
+/// This identifies the query mechanism, not the GPU architecture and not the
+/// sanitizer engine. Keeping provenance explicit lets fixtures supply
+/// simulator facts without pretending that they came from HSA, while the
+/// construction-time `Unknown` state prevents an unqueried default object from
+/// being mistaken for a backend that lacks every optional facility.
+enum class ConSanRuntimeBackend : uint8_t {
+  /// No backend has supplied facts yet; validated production inputs reject
+  /// this construction-time sentinel.
+  Unknown,
+  /// Capabilities were queried from a physical HSA agent.
+  PhysicalHsa,
+  /// Capabilities were supplied by a RocJitsu simulation configuration.
+  RocJitsuSimulator,
+  /// One past the last declared value. This is an iteration bound and an
+  /// invalid runtime backend, not a backend that may supply capabilities.
+  Count,
+};
+
+/// Every declared runtime-backend value, including the construction sentinel
+/// but excluding the one-past-the-end iteration bound. Keeping this inventory
+/// beside the enum makes exhaustive tests and diagnostic rendering fail
+/// visibly when the backend vocabulary grows.
+inline constexpr std::array<ConSanRuntimeBackend, 3> kConSanRuntimeBackends = {
+    ConSanRuntimeBackend::Unknown,
+    ConSanRuntimeBackend::PhysicalHsa,
+    ConSanRuntimeBackend::RocJitsuSimulator,
+};
+
+/// Return the stable diagnostic spelling of a runtime-backend provenance.
+/// Invalid values, including `Count`, deliberately share an invalid spelling
+/// so they cannot masquerade as a queried backend in logs or test fixtures.
+[[nodiscard]] constexpr std::string_view consan_runtime_backend_name(ConSanRuntimeBackend backend) {
+  switch (backend) {
+  case ConSanRuntimeBackend::Unknown:
+    return "unknown";
+  case ConSanRuntimeBackend::PhysicalHsa:
+    return "physical-hsa";
+  case ConSanRuntimeBackend::RocJitsuSimulator:
+    return "rocjitsu-simulator";
+  case ConSanRuntimeBackend::Count:
+    break;
+  }
+  return "invalid-runtime-backend";
+}
+
+static_assert(kConSanRuntimeBackends.size() == static_cast<size_t>(ConSanRuntimeBackend::Count));
+
+/// Facts discovered from the selected execution backend and agent.
+///
+/// These are runtime facts, not implications of a `gfx*` name. Optional
+/// quantities distinguish an unavailable query from a genuine zero-sized
+/// facility. Consumers state their requirements explicitly and reject missing
+/// properties before allocating or lowering code that depends on them.
+struct RuntimeCapabilities {
+  ConSanRuntimeBackend backend = ConSanRuntimeBackend::Unknown;
+  /// A global allocation can be made visible to both host and selected agent.
+  bool host_device_visible_memory = false;
+  /// Host observations are coherent with committed device publications.
+  bool host_device_coherent_memory = false;
+  /// The report memory supports the atomic publication protocol required by
+  /// the selected evidence schema.
+  bool device_atomic_publication = false;
+  /// Maximum eligible report allocation exposed by the backend query.
+  std::optional<uint64_t> max_report_allocation_bytes;
+  /// Maximum effective group-segment aperture for a workgroup dispatch.
+  std::optional<uint32_t> max_workgroup_lds_bytes;
+  /// The backend can bind a replacement code object to an executable.
+  bool executable_binding = false;
+  /// The backend can apply planned private/group segment additions at dispatch.
+  bool dispatch_segment_binding = false;
+
+  bool operator==(const RuntimeCapabilities &) const = default;
+};
+
+/// Lifetime domain attached to addresses in `BoundRuntimeResources`.
+///
+/// The scope tells the runtime coordinator when an address must be rebound or
+/// retired; it does not transfer ownership to the transformer. `Unbound` is a
+/// construction-time state in which all addresses must be absent. Every other
+/// value states the narrowest runtime identity that keeps the binding valid.
+enum class ConSanRuntimeResourceScope : uint8_t {
+  /// The resource has not been bound; addresses must be absent.
+  Unbound,
+  /// The resource belongs to one code-object reader load.
+  CodeObject,
+  /// The resource remains valid for an executable lifetime.
+  Executable,
+  /// The resource is rebound for each dispatch generation.
+  Dispatch,
+  /// One past the last declared value. This is an iteration bound and never a
+  /// valid resource lifetime.
+  Count,
+};
+
+/// Every valid resource-scope value, including the explicitly unbound state
+/// but excluding the one-past-the-end iteration bound.
+inline constexpr std::array<ConSanRuntimeResourceScope, 4> kConSanRuntimeResourceScopes = {
+    ConSanRuntimeResourceScope::Unbound,
+    ConSanRuntimeResourceScope::CodeObject,
+    ConSanRuntimeResourceScope::Executable,
+    ConSanRuntimeResourceScope::Dispatch,
+};
+
+/// Return the stable diagnostic spelling of a runtime-resource lifetime.
+/// Invalid values never acquire a plausible lifetime name.
+[[nodiscard]] constexpr std::string_view
+consan_runtime_resource_scope_name(ConSanRuntimeResourceScope scope) {
+  switch (scope) {
+  case ConSanRuntimeResourceScope::Unbound:
+    return "unbound";
+  case ConSanRuntimeResourceScope::CodeObject:
+    return "code-object";
+  case ConSanRuntimeResourceScope::Executable:
+    return "executable";
+  case ConSanRuntimeResourceScope::Dispatch:
+    return "dispatch";
+  case ConSanRuntimeResourceScope::Count:
+    break;
+  }
+  return "invalid-runtime-resource-scope";
+}
+
+static_assert(kConSanRuntimeResourceScopes.size() ==
+              static_cast<size_t>(ConSanRuntimeResourceScope::Count));
+
+/// Concrete runtime allocations and identities bound after address-free
+/// planning.
+///
+/// This value may change when an inventory is retried with an automatic report
+/// allocation, but each individual value is immutable once handed to the
+/// transformer. It contains no sanitizer policy, mutation request, or test
+/// override. Lifetime ownership remains with the runtime coordinator; this
+/// projection carries only the identity needed by legacy lowering.
+struct BoundRuntimeResources {
+  ConSanRuntimeResourceScope scope = ConSanRuntimeResourceScope::Unbound;
+  std::optional<uint64_t> report_buffer_address;
+  std::optional<uint64_t> moi_report_buffer_address;
+  uint64_t moi_report_buffer_size = 0;
+  std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
+  uint64_t moi_report_generation = 0;
+  uint64_t moi_report_dispatch_id = 0;
+
+  [[nodiscard]] bool bound() const {
+    return report_buffer_address.has_value() || moi_report_buffer_address.has_value();
+  }
+
+  bool operator==(const BoundRuntimeResources &) const = default;
+};
+
 /// Limits on the amount of transformation and placement work one code object
 /// may consume.
 ///
@@ -560,13 +711,17 @@ struct TransformPolicy {
 
 /// Mutable lowerer state retained while the prototype mechanism is migrated.
 ///
-/// The inherited request, debug-override, mutation, and transform-policy
-/// subobjects are the sole representations of those caller-owned inputs,
-/// except for the temporary non-optional `flavor` lowering sentinel and a few
-/// explicitly derived lowerer controls. Members declared here are state
-/// selected and mutated during lowering or input families that have not yet
-/// crossed the compatibility boundary.
-struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, MutationRequest, TransformPolicy {
+/// The inherited request, debug-override, mutation, runtime-fact, binding, and
+/// transform-policy subobjects are the sole representations of caller-owned
+/// inputs, except for the temporary non-optional `flavor` lowering sentinel
+/// and a few explicitly derived lowerer controls. Members declared here are
+/// state selected and mutated during lowering.
+struct ConSanOptions : ConSanRequest,
+                       ConSanDebugOverrides,
+                       MutationRequest,
+                       RuntimeCapabilities,
+                       BoundRuntimeResources,
+                       TransformPolicy {
   ConSanFlavor flavor = ConSanFlavor::None;
   /// Build the potentially expensive all-instruction destination inventory
   /// used only by markerless barrier movement. Direct library callers retain
@@ -689,20 +844,6 @@ struct ConSanOptions : ConSanRequest, ConSanDebugOverrides, MutationRequest, Tra
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
-  std::optional<uint64_t> report_buffer_address;
-  std::optional<uint64_t> moi_report_buffer_address;
-  uint64_t moi_report_buffer_size = 0;
-  /// Effective per-workgroup LDS aperture supplied by the execution runtime.
-  /// Offline callers leave this unset and use the architecture's configured
-  /// default (gfx1250_mi455x.json for gfx1250).
-  std::optional<uint32_t> moi_max_workgroup_lds_bytes;
-  std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
-  /// Generation stored in direct sampled entries. Auto report buffers set
-  /// this from their versioned header; explicit buffers default to zero.
-  uint64_t moi_report_generation = 0;
-  /// Dispatch identity stored in direct sampled causal-window descriptors.
-  /// Auto report buffers use the stable code-object reader identity.
-  uint64_t moi_report_dispatch_id = 0;
   /// Internal immutable baseline set by the public transform entry point and
   /// retained by every staged composition pass.
   std::optional<size_t> patched_image_growth_input_bytes;

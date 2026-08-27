@@ -2244,10 +2244,10 @@ TEST(ConSanMoi, Gfx1250WorkgroupLdsMatchesSimulatorConfig) {
 
 TEST(ConSanMoi, RuntimeLdsApertureOverridesConfiguredDefault) {
   ConSanOptions options;
-  options.moi_max_workgroup_lds_bytes = 96u * 1024u;
+  options.max_workgroup_lds_bytes = 96u * 1024u;
 
   EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_CDNA5), 96u * 1024u);
-  options.moi_max_workgroup_lds_bytes.reset();
+  options.max_workgroup_lds_bytes.reset();
   EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_CDNA5),
             consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
 }
@@ -3971,7 +3971,7 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 68u * 1024u; });
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_inline_workgroup_shadow = true;
-  options.moi_max_workgroup_lds_bytes = 256u * 1024u;
+  options.max_workgroup_lds_bytes = 256u * 1024u;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 

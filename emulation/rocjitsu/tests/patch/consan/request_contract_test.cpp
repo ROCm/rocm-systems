@@ -760,11 +760,18 @@ TEST(LegacyOptionsAdapterTest, ProjectsTransformDebugAndRuntimeCapabilityFields)
   debug.moi_forbid_overflow = true;
   RuntimeCapabilities capabilities;
   capabilities.backend = ConSanRuntimeBackend::RocJitsuSimulator;
+  capabilities.host_device_visible_memory = true;
+  capabilities.host_device_coherent_memory = true;
+  capabilities.device_atomic_publication = true;
+  capabilities.max_report_allocation_bytes = 65536;
   capabilities.max_workgroup_lds_bytes = 327680;
+  capabilities.executable_binding = true;
+  capabilities.dispatch_segment_binding = true;
 
   const ConSanOptions options =
       LegacyOptionsAdapter::adapt(valid_moi_request(ConSanMoiEngine::RecordReplay), transform,
                                   debug, MutationRequest{}, capabilities, BoundRuntimeResources{});
+  EXPECT_EQ(static_cast<const RuntimeCapabilities &>(options), capabilities);
   EXPECT_EQ(static_cast<const ConSanDebugOverrides &>(options), debug);
   EXPECT_EQ(options.patched_image_growth_limit.absolute_bytes, 1234u);
   EXPECT_EQ(options.max_patches, 23u);
@@ -792,7 +799,7 @@ TEST(LegacyOptionsAdapterTest, ProjectsTransformDebugAndRuntimeCapabilityFields)
   EXPECT_EQ(options.moi_owner_sgpr, 3);
   EXPECT_EQ(options.moi_owner_vgpr, 4);
   EXPECT_EQ(options.moi_epoch_vgpr, 5);
-  EXPECT_EQ(options.moi_max_workgroup_lds_bytes, 327680u);
+  EXPECT_EQ(options.max_workgroup_lds_bytes, 327680u);
 }
 
 TEST(LegacyOptionsAdapterTest, ProjectsEveryMutationAndBoundResourceFamily) {
@@ -855,14 +862,8 @@ TEST(LegacyOptionsAdapterTest, ProjectsEveryMutationAndBoundResourceFamily) {
       valid_moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{}, ConSanDebugOverrides{},
       mutation, physical_runtime_capabilities(), resources);
   EXPECT_EQ(static_cast<const MutationRequest &>(options), mutation);
+  EXPECT_EQ(static_cast<const BoundRuntimeResources &>(options), resources);
   EXPECT_TRUE(options.collect_barrier_move_destinations);
-  EXPECT_EQ(options.report_buffer_address, 0x1000u);
-  EXPECT_EQ(options.moi_report_buffer_address, 0x2000u);
-  EXPECT_EQ(options.moi_report_buffer_size, 4096u);
-  ASSERT_TRUE(options.moi_report_layout);
-  EXPECT_EQ(options.moi_report_layout->required_bytes, 4096u);
-  EXPECT_EQ(options.moi_report_generation, 10u);
-  EXPECT_EQ(options.moi_report_dispatch_id, 11u);
 }
 
 TEST(LegacyOptionsAdapterTest, ProducesFreshValues) {

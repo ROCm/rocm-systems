@@ -48,7 +48,7 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
 
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const ConSanOptions &options,
                                                                     rj_code_arch_t arch) {
-  return options.moi_max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
+  return options.max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
 }
 
 /// One eight-byte shadow slot covers one four-byte guest-LDS granule. Keeping

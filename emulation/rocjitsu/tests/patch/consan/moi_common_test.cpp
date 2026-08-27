@@ -2512,7 +2512,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "opaque_lds", /*vgpr_granulated=*/4);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_max_workgroup_lds_bytes = kRuntimeLdsBytes;
+  options.max_workgroup_lds_bytes = kRuntimeLdsBytes;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
