@@ -264,11 +264,6 @@ struct alignas(64) ncclIbSendFifo {
 };
 static_assert(sizeof(struct ncclIbSendFifo) == 64, "CTS slot is one cache line");
 
-// Connect-time capability: peer registered a side table immediately after the
-// 64-byte CTS FIFO. Mixed nSegments<=1 traffic stays bit-compatible with stock
-// classic; nSegments>1 requires this bit.
-#define NCCL_IB_CAP_MULTISEG 0x1u
-
 // Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
 // equal the CTS slot's idx so a later single-segment reuse of the same CTS
 // index ignores a stale side slot.
