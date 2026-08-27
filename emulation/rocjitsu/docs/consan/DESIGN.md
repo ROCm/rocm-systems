@@ -802,6 +802,13 @@ can move the boundary only when the existing allocation or trusted metadata
 proves there are no live AccVGPR values. Analysis, SuperCollider, and MOI no
 longer carry separate descriptor mutation algorithms.
 
+When SuperCollider accumulates updates for several sites and owners, both
+register classes use `DescriptorRegisterGrowth`: a descriptor offset and a
+one-past-the-end extent merged by maximum. The value is intentionally neutral
+about VGPR versus SGPR interpretation. After merging, the class-specific
+mutation contract applies the extent, and the active output transaction decides
+whether to write bytes directly or through `CodeObjectPatcher`.
+
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,

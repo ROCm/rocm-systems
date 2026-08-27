@@ -6588,6 +6588,32 @@ for nominal line-count reductions.
   component/integration tests pass. The broader checked-in gate is deferred to
   the next deletion tranche. E2E validation remains outside this work.
 
+### Slice 5DO: merge descriptor register requirements once
+
+- **One batching representation:** SuperCollider VGPR and SGPR growth queues
+  now use `DescriptorRegisterGrowth`, whose documented unit is a
+  descriptor-indexed one-past-the-end register extent. One
+  `merge_descriptor_register_growths` operation takes the maximum extent for
+  every owner. The two structurally identical records and merge loops are
+  deleted.
+- **Real distinctions retained:** VGPR and SGPR requests still flow into their
+  different mutation contracts, and byte-backed versus patcher-backed output
+  retains its distinct rollback/error transaction. This slice does not replace
+  those responsibilities with callbacks merely to make the surrounding text
+  look shared.
+- **Contract coverage:** The passive record owns no behavior beyond its
+  documented fields; maximum merging remains covered by the existing
+  multi-site and multi-owner SuperCollider descriptor-growth tests for both
+  register classes. The complete test binary compiles after the cutover; the
+  broader test gate is batched with the current deletion tranche.
+- **Accounting:** Across the three affected implementation files, physical
+  lines fall from 9,088 to 9,078, nonblank lines from 8,755 to 8,747, and
+  estimated comment-excluded code lines from 8,422 to 8,408. The slice adds 21
+  and deletes 31 physical implementation lines, a net deletion of 10.
+- **Batched gate:** Compilation passes. Broader checked-in qualification is
+  deferred to the current deletion tranche. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

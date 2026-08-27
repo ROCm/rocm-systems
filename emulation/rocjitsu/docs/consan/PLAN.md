@@ -594,6 +594,11 @@ limit, and any trusted proof that a CDNA accumulator bank is empty. One shared
 transaction handles ordinary growth, gfx1250's selectable banks, empty gaps
 below `ACCUM_OFFSET`, and safe boundary movement. The separate
 analysis/SuperCollider and MOI mutation implementations are gone.
+SuperCollider's VGPR and SGPR growth batches now also share one
+register-class-neutral descriptor/extent record and maximum merge operation.
+The class-specific mutation rules and byte-versus-patcher transactions remain
+separate because those differences are real; only the copied batching
+representation and algorithm were removed.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object

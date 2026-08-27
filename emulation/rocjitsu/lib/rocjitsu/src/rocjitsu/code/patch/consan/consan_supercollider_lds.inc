@@ -3672,14 +3672,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                                         return patch.use_appended_cave;
                                                       }) ||
                                   !selected_relay_reservoirs.empty();
-  std::vector<DescriptorVgprGrowth> descriptor_growths;
+  std::vector<DescriptorRegisterGrowth> descriptor_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.required_vgpr_allocation_count) {
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
         descriptor_growths.push_back({owner, *planned.required_vgpr_allocation_count});
     }
   }
-  std::vector<DescriptorSgprGrowth> descriptor_sgpr_growths;
+  std::vector<DescriptorRegisterGrowth> descriptor_sgpr_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     const uint16_t required =
         std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count);

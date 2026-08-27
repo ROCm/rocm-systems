@@ -31,20 +31,21 @@ read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
   return descriptor_vgpr_allocation_count(desc, arch);
 }
 
-struct DescriptorVgprGrowth {
-  uint64_t descriptor_file_offset = 0;
-  uint16_t required_count = 0;
-};
-
-struct DescriptorSgprGrowth {
+/// One kernel descriptor's merged register-file extent requirement.
+///
+/// The value is deliberately register-class-neutral: VGPR and SGPR planners
+/// both accumulate a one-past-the-end count per descriptor, then their
+/// class-specific mutation contracts interpret that count. Duplicate owners
+/// merge by maximum so application order cannot shrink an earlier request.
+struct DescriptorRegisterGrowth {
   uint64_t descriptor_file_offset = 0;
   uint16_t required_count = 0;
 };
 
 [[nodiscard]] std::unordered_map<uint64_t, uint16_t>
-merge_descriptor_sgpr_growths(std::span<const DescriptorSgprGrowth> growths) {
+merge_descriptor_register_growths(std::span<const DescriptorRegisterGrowth> growths) {
   std::unordered_map<uint64_t, uint16_t> merged;
-  for (const DescriptorSgprGrowth &growth : growths) {
+  for (const DescriptorRegisterGrowth &growth : growths) {
     auto [it, inserted] = merged.emplace(growth.descriptor_file_offset, growth.required_count);
     if (!inserted)
       it->second = std::max(it->second, growth.required_count);
@@ -54,11 +55,11 @@ merge_descriptor_sgpr_growths(std::span<const DescriptorSgprGrowth> growths) {
 
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
-                                         std::span<const DescriptorSgprGrowth> growths,
+                                         std::span<const DescriptorRegisterGrowth> growths,
                                          rj_code_arch_t arch, std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
   for (const auto &[descriptor_file_offset, required_count] :
-       merge_descriptor_sgpr_growths(growths)) {
+       merge_descriptor_register_growths(growths)) {
     if (descriptor_file_offset > current_image.size() ||
         sizeof(KD) > current_image.size() - descriptor_file_offset) {
       errors.emplace_back("ConSan relay-reservoir descriptor SGPR growth exceeds ELF bytes");
@@ -78,10 +79,10 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
-                                       std::span<const DescriptorSgprGrowth> growths,
+                                       std::span<const DescriptorRegisterGrowth> growths,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
-       merge_descriptor_sgpr_growths(growths)) {
+       merge_descriptor_register_growths(growths)) {
     if (descriptor_file_offset > image.size() ||
         sizeof(KD) > image.size() - descriptor_file_offset) {
       errors.emplace_back("ConSan relay-reservoir descriptor SGPR growth exceeds ELF bytes");
@@ -98,23 +99,12 @@ apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
   return true;
 }
 
-[[nodiscard]] std::unordered_map<uint64_t, uint16_t>
-merge_descriptor_vgpr_growths(std::span<const DescriptorVgprGrowth> growths) {
-  std::unordered_map<uint64_t, uint16_t> merged;
-  for (const DescriptorVgprGrowth &growth : growths) {
-    auto [it, inserted] = merged.emplace(growth.descriptor_file_offset, growth.required_count);
-    if (!inserted)
-      it->second = std::max(it->second, growth.required_count);
-  }
-  return merged;
-}
-
 [[nodiscard]] bool
 apply_descriptor_vgpr_growths_to_bytes(std::span<uint8_t> image,
-                                       std::span<const DescriptorVgprGrowth> growths,
+                                       std::span<const DescriptorRegisterGrowth> growths,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
-       merge_descriptor_vgpr_growths(growths)) {
+       merge_descriptor_register_growths(growths)) {
     if (descriptor_file_offset > image.size() ||
         sizeof(KD) > image.size() - descriptor_file_offset) {
       errors.emplace_back("ConSan LDS check/trap proof descriptor VGPR growth exceeds ELF bytes");
@@ -137,10 +127,10 @@ apply_descriptor_vgpr_growths_to_bytes(std::span<uint8_t> image,
 [[nodiscard]] bool
 apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
                                          std::span<const uint8_t> original_image,
-                                         std::span<const DescriptorVgprGrowth> growths,
+                                         std::span<const DescriptorRegisterGrowth> growths,
                                          rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
-       merge_descriptor_vgpr_growths(growths)) {
+       merge_descriptor_register_growths(growths)) {
     if (descriptor_file_offset > original_image.size() ||
         sizeof(KD) > original_image.size() - descriptor_file_offset) {
       errors.emplace_back("ConSan LDS check/trap proof descriptor VGPR growth exceeds ELF bytes");
