@@ -24,9 +24,4 @@ struct Stats
     std::atomic<std::uint64_t> user_scope_inherits{0};
 };
 
-inline void inc(std::atomic<std::uint64_t>& counter)
-{
-    counter.fetch_add(1, std::memory_order_relaxed);
-}
-
 }  // namespace torch_trace_collector::detail

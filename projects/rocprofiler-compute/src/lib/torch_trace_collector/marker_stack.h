@@ -7,7 +7,6 @@
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <vector>
@@ -26,33 +25,10 @@ struct ThreadState
 };
 
 // The calling thread's state. Each thread walks its own marker stack.
-inline ThreadState& thread_state()
-{
-    static thread_local ThreadState state;
-    return state;
-}
+ThreadState& thread_state();
 
 // Pushes `chain` onto the thread stack, skipping any leading prefix that is
 // already present. Returns the number of frames pushed.
-inline std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
-{
-    std::vector<StackEntry>& stack  = thread_state().stack;
-    const std::size_t        maxc   = std::min(chain.size(), stack.size());
-    std::size_t              common = 0;
-    for (; common < maxc; ++common)
-    {
-        if (chain[common].marker != stack[common].marker || chain[common].context != stack[common].context)
-        {
-            break;
-        }
-    }
-    std::size_t pushed = 0;
-    for (std::size_t i = common; i < chain.size(); ++i)
-    {
-        stack.push_back(chain[i]);
-        ++pushed;
-    }
-    return pushed;
-}
+std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain);
 
 }  // namespace torch_trace_collector::detail
