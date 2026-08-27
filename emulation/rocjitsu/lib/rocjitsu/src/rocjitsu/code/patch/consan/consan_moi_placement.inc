@@ -871,30 +871,6 @@ struct MoiSgprRange {
   return true;
 }
 
-[[nodiscard]] bool grow_moi_descriptor_sgpr_allocation(KD &desc, uint32_t required_count,
-                                                       rj_code_arch_t arch) {
-  if (required_count == 0 || required_count > kMaxSgprs)
-    return false;
-  if (required_count <= descriptor_sgpr_allocation_count(desc, arch))
-    return true;
-
-  constexpr uint32_t kSgprGranularity = 8;
-  const uint32_t rounded =
-      ((required_count + kSgprGranularity - 1u) / kSgprGranularity) * kSgprGranularity;
-  // s0:s105 are the ordinary scalar operand file; the descriptor expresses
-  // allocation in eight-register granules. The final legal request therefore
-  // encodes the 112-register granule even though instruction operands stop at
-  // s105. Decoding clamps that granule back to kMaxSgprs above.
-  constexpr uint32_t kMaxEncodedSgprs =
-      ((kMaxSgprs + kSgprGranularity - 1u) / kSgprGranularity) * kSgprGranularity;
-  if (rounded > kMaxEncodedSgprs)
-    return false;
-  const uint32_t granulated = rounded / kSgprGranularity - 1u;
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated);
-  return true;
-}
-
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
                                                     const ConSanKernelInfo &kernel,

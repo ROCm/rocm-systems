@@ -31,40 +31,6 @@ read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
   return descriptor_vgpr_allocation_count(desc, arch);
 }
 
-[[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
-                                                   rj_code_arch_t arch) {
-  constexpr uint32_t kCdnaAllocationTailSgprs = 6u;
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (!profile)
-    return false;
-  const uint32_t sgpr_granularity = profile->sgpr_allocation_granularity;
-  const uint32_t max_ordinary_sgprs = profile->ordinary_sgpr_limit;
-  const bool descriptor_has_allocation_tail =
-      profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned;
-  if (required_count == 0 || required_count > max_ordinary_sgprs)
-    return false;
-
-  // CDNA's descriptor count includes a six-register allocation tail for
-  // VCC/XNACK/FLAT_SCRATCH. Ordinary temporaries cannot borrow those slots:
-  // for example, a 16-SGPR allocation physically places VCC at s[10:11].
-  // Grow far enough to keep the complete tail above the highest new ordinary
-  // SGPR. RDNA's special registers have fixed architectural indices.
-  const uint32_t required_allocation =
-      static_cast<uint32_t>(required_count) +
-      (descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u);
-  if (required_allocation <= descriptor_sgpr_allocation_count(desc, arch))
-    return true;
-  const uint32_t rounded =
-      (required_allocation + sgpr_granularity - 1u) / sgpr_granularity * sgpr_granularity;
-  const uint32_t max_allocation =
-      max_ordinary_sgprs + (descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u);
-  if (rounded > (max_allocation + sgpr_granularity - 1u) / sgpr_granularity * sgpr_granularity)
-    return false;
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  (rounded / sgpr_granularity - 1u));
-  return true;
-}
-
 [[nodiscard]] bool grow_descriptor_vgpr_allocation(KD &desc, uint16_t required_count,
                                                    rj_code_arch_t arch) {
   if (required_count > REGISTER_SET_MAX_VGPRS)

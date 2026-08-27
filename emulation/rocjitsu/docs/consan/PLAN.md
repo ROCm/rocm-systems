@@ -582,6 +582,12 @@ granularity come from RocJitsu's generic kernel-descriptor contract, so gfx1250
 is treated as mandatory Wave32 even when a producer omits the legacy Wave32
 bit. The former analysis-local and MOI-local decoders, including MOI's
 nominally distinct but equivalent unified-allocation query, are gone.
+SGPR descriptor mutation now follows the same ownership: SuperCollider and all
+MOI prologue/emission paths call one target-profile-driven growth function.
+That contract accounts for CDNA3/CDNA4's descriptor-managed six-register
+VCC/XNACK/FLAT_SCRATCH tail, while RDNA and gfx1250 retain their fixed special
+register model. The two private growth policies and their divergent CDNA
+behavior are deleted.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object

@@ -3,7 +3,6 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
-#include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -720,35 +719,6 @@ TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 80u);
-}
-
-TEST(ConSanMoi, DescriptorResourceFactsShareTargetWaveAndAccumulatorSemantics) {
-  namespace kd = rocr::llvm::amdhsa;
-  kd::kernel_descriptor_t descriptor{};
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                  kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3u);
-
-  // gfx1250 is Wave32-only even when a producer omits the legacy Wave32 bit.
-  EXPECT_EQ(descriptor_vgpr_granularity(descriptor, ROCJITSU_CODE_ARCH_CDNA5), 16u);
-  EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA5), 64u);
-
-  // The same encoded count has distinct RDNA Wave64 and Wave32 meanings.
-  EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_RDNA4), 16u);
-  AMDHSA_BITS_SET(descriptor.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1u);
-  EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_RDNA4), 32u);
-
-  // Only descriptor-partitioned CDNA targets interpret ACCUM_OFFSET as the
-  // ordinary/accumulator boundary.
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
-  EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 32u);
-  EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 16u);
-  EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA5), 64u);
-
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                  kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 15u);
-  EXPECT_EQ(descriptor_sgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4),
-            REGISTER_SET_MAX_SGPRS);
 }
 
 TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {

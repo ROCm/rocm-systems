@@ -6517,6 +6517,33 @@ for nominal line-count reductions.
   descriptor tests pass. The broader checked-in gate is deferred to the current
   deletion tranche. E2E validation remains outside this work.
 
+### Slice 5DM: give SGPR descriptor growth one target-aware rule
+
+- **One mutation authority:** `grow_descriptor_sgpr_allocation` now lives with
+  the descriptor facts in `consan_descriptor.h`. SuperCollider, shared
+  descriptor-growth transactions, MOI prologues, and MOI emitted-patch
+  installation all call it. The analysis-local and MOI-local growth functions
+  are deleted.
+- **Architectural invariant restored:** The function receives an ordinary-SGPR
+  extent. CDNA3/CDNA4 descriptor allocation must leave the six-register
+  VCC/XNACK/FLAT_SCRATCH tail above that extent; RDNA and gfx1250 use fixed
+  special-register indices. The deleted MOI copy rounded only the ordinary
+  extent and could therefore encode physical VCC over newly admitted scratch.
+  The shared rule uses the target profile's limit and granularity and rejects
+  invalid requests without mutating the descriptor.
+- **Contract coverage:** Descriptor tests directly distinguish CDNA4 tail
+  growth from RDNA4's fixed scalar file and cover zero, unsupported-target,
+  maximum, and over-limit requests. Existing CDNA3 and CDNA4 MOI integration
+  tests continue to prove that transient assignments avoid both original and
+  relocated physical VCC. All five focused tests pass.
+- **Accounting:** Across the five affected implementation files, physical
+  lines fall from 16,618 to 16,601, nonblank lines from 15,942 to 15,925, and
+  estimated comment-excluded code lines from 14,779 to 14,761. The slice adds
+  48 and deletes 65 physical implementation lines, a net deletion of 17.
+- **Batched gate:** The library and test binary compile and the five focused
+  component/integration tests pass. The broader checked-in gate is deferred to
+  the current deletion tranche. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

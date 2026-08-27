@@ -664,8 +664,8 @@ private:
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count,
-                                             result.program_inventory.arch())) {
+    if (!grow_descriptor_sgpr_allocation(descriptor, required_count,
+                                         result.program_inventory.arch())) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
@@ -761,8 +761,8 @@ private:
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count,
-                                             result.program_inventory.arch())) {
+    if (!grow_descriptor_sgpr_allocation(descriptor, required_count,
+                                         result.program_inventory.arch())) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }

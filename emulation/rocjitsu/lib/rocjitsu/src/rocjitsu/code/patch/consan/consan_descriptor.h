@@ -74,4 +74,45 @@ descriptor_sgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &
       amdgpu_kernel_descriptor_sgpr_count(granulated, arch), REGISTER_SET_MAX_SGPRS));
 }
 
+/// Grow a descriptor so that @p required_ordinary_count ordinary SGPRs remain
+/// addressable after the target's descriptor-managed special-register tail.
+///
+/// CDNA3 and CDNA4 place VCC, XNACK, and FLAT_SCRATCH in a six-SGPR tail at the
+/// end of the descriptor allocation. A scratch register below the architectural
+/// ordinary-SGPR limit is therefore usable only when the encoded allocation
+/// also leaves room for that tail. RDNA and gfx1250 use fixed special-register
+/// indices and need no tail. The function rejects zero, unsupported targets,
+/// and requests beyond the target's ordinary operand file without modifying
+/// the descriptor.
+[[nodiscard]] inline bool
+grow_descriptor_sgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                                uint32_t required_ordinary_count, rj_code_arch_t arch) {
+  constexpr uint32_t kCdnaAllocationTailSgprs = 6u;
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (!profile || required_ordinary_count == 0u ||
+      required_ordinary_count > profile->ordinary_sgpr_limit)
+    return false;
+
+  const bool descriptor_has_allocation_tail =
+      profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned;
+  const uint32_t allocation_tail = descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u;
+  const uint32_t required_allocation = required_ordinary_count + allocation_tail;
+  if (required_allocation <= descriptor_sgpr_allocation_count(descriptor, arch))
+    return true;
+
+  const uint32_t granularity = profile->sgpr_allocation_granularity;
+  const uint32_t rounded_allocation =
+      (required_allocation + granularity - 1u) / granularity * granularity;
+  const uint32_t maximum_allocation = profile->ordinary_sgpr_limit + allocation_tail;
+  const uint32_t rounded_maximum =
+      (maximum_allocation + granularity - 1u) / granularity * granularity;
+  if (rounded_allocation > rounded_maximum)
+    return false;
+
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  (rounded_allocation / granularity - 1u));
+  return true;
+}
+
 } // namespace rocjitsu

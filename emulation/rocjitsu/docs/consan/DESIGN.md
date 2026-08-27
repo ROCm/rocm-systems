@@ -784,6 +784,13 @@ Wave32 execution is architectural and does not depend on a producer setting the
 legacy descriptor Wave32 bit. Analysis and both engine families therefore
 cannot disagree about the register allocation represented by one descriptor.
 
+The same component owns SGPR descriptor growth. Its input is the highest
+ordinary-SGPR extent required by instrumentation, not the raw encoded
+allocation. On CDNA3/CDNA4 it reserves the descriptor-managed six-register
+VCC/XNACK/FLAT_SCRATCH tail above that extent; on RDNA and gfx1250 the special
+registers have fixed indices and require no tail. SuperCollider and every MOI
+prologue/emission path use this one mutation rule.
+
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,
