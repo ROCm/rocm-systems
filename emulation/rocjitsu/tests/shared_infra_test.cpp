@@ -7,7 +7,9 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -5717,6 +5719,76 @@ TEST(RdnaScratchExecutionTest, Rdna3B128StoreFeedsB32LoadsWithVectorOffsets) {
   EXPECT_EQ(cu->read_vgpr(vbase + 1, 2), 0x1202u);
   EXPECT_EQ(cu->read_vgpr(vbase + 1, 3), 0x1303u);
   EXPECT_EQ(cu->read_vgpr(vbase + 1, 4), 0u);
+}
+
+// SMEM SBASE, SOFFSET (SOE=1) and OFFSET[6:0] (IMM=0) name FLAT_SCRATCH / VCC / M0 through the
+// scalar-source selector space, never the raw SGPR slice; byte components drop their two LSBs;
+// s_scratch_* scales the register offset by 64.
+TEST(CdnaAddrCalcTest, SmemOffsetSelectorsAlignmentAndScratchScale) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    amdgpu::GpuMemory mem("cdna_smem_addr_mem");
+    amdgpu::L2Cache l2("cdna_smem_addr_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 128;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("cdna_smem_addr_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+    ASSERT_NE(wf, nullptr);
+
+    constexpr uint64_t kBase = 0x10'0001'0000ULL;
+    constexpr uint64_t kVcc = 0x20'0000'1234ULL;
+    constexpr uint64_t kScratchBase = 0x30'0003'0000ULL;
+    const uint32_t sbase = wf->sgpr_alloc().base;
+    cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
+    cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
+    cu->write_sgpr(sbase + 8, 63);
+    for (uint32_t sel :
+         {cdna3::OPR_SMEM_OFFSET_FLAT_SCRATCH_LO, cdna3::OPR_SMEM_OFFSET_FLAT_SCRATCH_HI,
+          cdna3::OPR_SMEM_OFFSET_VCC_LO, cdna3::OPR_SMEM_OFFSET_VCC_HI,
+          cdna3::OPR_SMEM_OFFSET_M0}) // decoys in the aliasing SGPR slots
+      cu->write_sgpr(sbase + sel, 0x777);
+    wf->set_m0(0x40);
+    wf->set_vcc_raw(kVcc);
+    wf->set_scratch_base(kScratchBase);
+
+    amdgpu::SmemMachineInst inst{}; // sbase = s[0:1]
+    inst.op = cdna3::kSLoadDwordSmem;
+    auto smem_addr = [&] {
+      return arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::smem_calculate_address(inst, *wf)
+                                              : cdna4::smem_calculate_address(inst, *wf);
+    };
+    inst.offset = cdna3::OPR_SMEM_OFFSET_M0; // IMM=0
+    EXPECT_EQ(smem_addr(), kBase + 0x40) << arch;
+    inst.soffset_en = 1;
+    inst.offset = 0;
+    inst.soffset = cdna3::OPR_SMEM_OFFSET_M0; // SOE=1
+    EXPECT_EQ(smem_addr(), kBase + 0x40) << arch;
+    inst.soffset = cdna3::OPR_SMEM_OFFSET_VCC_LO;
+    EXPECT_EQ(smem_addr(), kBase + 0x1234) << arch;
+    inst.soffset = 8; // SOE=1: 63 -> 60
+    EXPECT_EQ(smem_addr(), kBase + 60) << arch;
+    inst.imm = 1;
+    inst.offset = 0x9; // IMM=1 SOE=1: 9 -> 8
+    EXPECT_EQ(smem_addr(), kBase + 8 + 60) << arch;
+    inst.sbase = cdna3::OPR_SMEM_OFFSET_VCC_LO / 2; // VCC pair, not s[106:107]
+    EXPECT_EQ(smem_addr(), kVcc + 8 + 60) << arch;
+
+    inst = {};
+    inst.op = cdna3::kSScratchLoadDwordSmem;
+    inst.offset = 8; // IMM=0: s8 * 64
+    EXPECT_EQ(smem_addr(), kBase + 63 * 64) << arch;
+    inst.soffset_en = 1;
+    inst.soffset = 8;
+    inst.imm = 1;
+    inst.offset = 0x10; // IMM=1 SOE=1: 0x10 + s8 * 64
+    EXPECT_EQ(smem_addr(), kBase + 0x10 + 63 * 64) << arch;
+    inst.sbase = cdna3::OPR_SMEM_OFFSET_FLAT_SCRATCH_LO / 2; // FLAT_SCRATCH pair, not s[102:103]
+    EXPECT_EQ(smem_addr(), kScratchBase + 0x10 + 63 * 64) << arch;
+  }
 }
 
 TEST(RdnaAddrCalcTest, Rdna3SmemSoffsetHandlesNullM0AndSgprSelectors) {

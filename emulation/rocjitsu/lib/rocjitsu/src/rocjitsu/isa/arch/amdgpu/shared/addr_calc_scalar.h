@@ -13,6 +13,7 @@
 /// with any ISA family whose encoding struct exposes the required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -33,27 +34,34 @@ constexpr bool smem_is_scratch_op(uint32_t op) {
 
 /// @brief Compute scalar address for SMEM encoding.
 ///
-/// Requires: inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
+/// @details GFX9 scalar memory addressing:
+/// ADDR = SGPR[base] + inst_offset + {SGPR[offset] or M0 or 0}, with the register
+/// component scaled by 64 for s_scratch_*. The two LSBs of each byte component are
+/// ignored. SBASE, OFFSET[6:0] (IMM=0) and SOFFSET (SOE=1) are scalar-source selectors.
+///
+/// Requires: inst.op, inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
 uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
-  const uint32_t sbase_sel = inst.sbase * 2;
-  uint64_t base = amdgpu::read_scalar_selector64(wf, sbase_sel);
-  uint64_t off = 0;
-  if (inst.soffset_en)
-    off += amdgpu::read_scalar_selector(wf, inst.soffset);
-  else if (!inst.imm && !smem_is_scratch_op(inst.op)) { // IMM=0, SOE=0: SGPR[OFFSET[6:0]] or M0
-    const uint32_t sel = inst.offset & 0x7F;
-    off += (sel == 124 ? wf.m0() : amdgpu::read_scalar_selector(wf, sel)) & ~3u; // 2 LSBs ignored
-  }
+  constexpr uint64_t kDwordMask = ~0x3ULL;
+  constexpr int kM0Selector = 124;
+  const uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2, kM0Selector) & kDwordMask;
+  int64_t inst_offset = 0;
   if (inst.imm)
-    off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  uint64_t addr = base + off;
+    inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11) & ~0x3LL;
+  uint64_t reg_offset = 0;
+  if (inst.soffset_en)
+    reg_offset = amdgpu::resolve_src_scalar(wf, inst.soffset, kM0Selector);
+  else if (!inst.imm)
+    reg_offset = amdgpu::resolve_src_scalar(wf, inst.offset & 0x7F, kM0Selector);
+  reg_offset = smem_is_scratch_op(inst.op) ? reg_offset * 64 : reg_offset & kDwordMask;
+  const uint64_t addr = base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
     if (++smem_count <= 12 || (smem_count % 240) == 0)
-      os << std::format("SMEM #{} base={:#x} off={} imm={} soff_en={} addr={:#x} raw_off={}",
-                        smem_count, base, static_cast<int64_t>(off), inst.imm, inst.soffset_en,
-                        addr, inst.offset);
+      os << std::format("SMEM #{} op={} base={:#x} inst_off={:#x} reg_off={:#x} imm={} soff_en={} "
+                        "addr={:#x} raw_off={}",
+                        smem_count, inst.op, base, inst_offset, reg_offset, inst.imm,
+                        inst.soffset_en, addr, inst.offset);
   });
   return addr;
 }
