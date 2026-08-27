@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <new>
 #include <type_traits>
@@ -50,6 +51,104 @@ class DevcommMicrotest : public ::testing::Test {
   void TearDown() override { ResetDevcommFakes(); }
 };
 
+// ---- shared byte-level oracles ----
+//
+// Every block below reasons about the units at byte granularity, so these are the whole suite's
+// assertion vocabulary. One copy, not one per block: a weakened oracle then weakens every block at
+// once and mutation testing sees it, instead of rotting quietly in the block nobody re-derived.
+
+// True when every byte of [p, p+n) equals v.
+bool AllBytesAre(void const* p, std::size_t n, unsigned char v) {
+  unsigned char const* b = static_cast<unsigned char const*>(p);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (b[i] != v) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// -1 when equal, else the index of the first differing byte (a bare memcmp says only "no").
+// ptrdiff_t, not long: it states the "byte index or -1" contract without depending on the
+// platform's long width.
+std::ptrdiff_t FirstDiff(void const* a, void const* b, std::size_t n) {
+  uint8_t const* x = static_cast<uint8_t const*>(a);
+  uint8_t const* y = static_cast<uint8_t const*>(b);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (x[i] != y[i]) {
+      return static_cast<std::ptrdiff_t>(i);
+    }
+  }
+  return -1;
+}
+
+// Half-open [off, off+len) window of bytes a unit is allowed to write.
+struct ByteRange {
+  std::size_t off;
+  std::size_t len;
+};
+
+// EXPECTs got == want byte for byte outside `allowed`. Per-byte EXPECT_EQ rather than one memcmp on
+// purpose: the failure has to name WHICH byte moved, otherwise a scribble two fields over reads the
+// same as the store the test meant to check.
+void ExpectBytesUnchangedExcept(void const* got, void const* want, std::size_t n,
+                                std::vector<ByteRange> const& allowed) {
+  unsigned char const* g = static_cast<unsigned char const*>(got);
+  unsigned char const* w = static_cast<unsigned char const*>(want);
+  for (std::size_t i = 0; i < n; ++i) {
+    bool skip = false;
+    for (ByteRange const& r : allowed) {
+      skip = skip || (i >= r.off && i < r.off + r.len);
+    }
+    if (skip) {
+      continue;
+    }
+    EXPECT_EQ(w[i], g[i]) << "byte " << i << " was modified";
+  }
+}
+
+// Over-sized byte arena holding exactly one T, flanked by guard bands. Three blocks below used to
+// hand-roll this; the shape is load-bearing in three ways, all of which must survive any edit here:
+//  * The object region is poisoned BEFORE T's lifetime starts, so "the unit stored 0" stays
+//    distinguishable from "the unit stored nothing" -- most of the values under test are 0.
+//  * placement-new starts that lifetime, so obj() is not a strict-aliasing violation under -O3.
+//    T must be trivially default-constructible or the new would erase the poison; static_asserted.
+//  * The guards use kGuardByte, deliberately distinct from any poison callers pass and from every
+//    byte the units write, so a memset/memcpy running past sizeof(T) at EITHER end is caught by
+//    GuardsIntact() alone. Do not flatten the leading guard away: it is what makes an underrun
+//    (a copy handed &obj minus an offset) fail rather than corrupt an unrelated local.
+template <class T, std::size_t kGuardLen = 64>
+class PoisonedArena {
+ public:
+  static constexpr unsigned char kGuardByte = 0x5A;
+
+  explicit PoisonedArena(unsigned char poison = 0xA5) { Reset(poison); }
+
+  // Re-poisons the object region and restarts T's lifetime, for fixtures that re-arm per test.
+  void Reset(unsigned char poison) {
+    static_assert(std::is_trivially_default_constructible_v<T>,
+                  "placement-new below would overwrite the poison the oracles depend on");
+    std::memset(bytes_, kGuardByte, sizeof(bytes_));
+    std::memset(bytes_ + kGuardLen, poison, sizeof(T));
+    new (bytes_ + kGuardLen) T;
+  }
+
+  unsigned char* raw() { return bytes_ + kGuardLen; }
+  unsigned char const* raw() const { return bytes_ + kGuardLen; }
+  T* obj() { return reinterpret_cast<T*>(raw()); }
+  unsigned char byteAt(std::size_t i) const { return bytes_[kGuardLen + i]; }
+
+  bool GuardsIntact() const {
+    return AllBytesAre(bytes_, kGuardLen, kGuardByte) &&
+           AllBytesAre(bytes_ + kGuardLen + sizeof(T), kGuardLen, kGuardByte);
+  }
+
+ private:
+  static constexpr std::size_t kAlign = alignof(T) > 16 ? alignof(T) : 16;
+  static_assert(kGuardLen % kAlign == 0, "guard band would misalign the object it flanks");
+  alignas(kAlign) unsigned char bytes_[kGuardLen + sizeof(T) + kGuardLen];
+};
+
 }  // namespace
 
 // ---- block: ncclCommPropertiesFilter_v22902 ----
@@ -76,38 +175,32 @@ constexpr unsigned char kPoison = 0xA5;
 
 class DevcommPropsFilterV22902Microtest : public DevcommMicrotest {
  protected:
-  alignas(alignof(struct ncclCommProperties)) unsigned char raw_[kPropsSize];
+  PoisonedArena<struct ncclCommProperties> arena_;
   unsigned char before_[kPropsSize];
 
-  struct ncclCommProperties* props() { return reinterpret_cast<struct ncclCommProperties*>(raw_); }
+  struct ncclCommProperties* props() { return arena_.obj(); }
+  unsigned char byteAt(std::size_t i) const { return arena_.byteAt(i); }
 
   // Poisons the whole buffer, then writes only the two inputs the block reads.
   void ArmProps(bool deviceApiSupport) {
-    std::memset(raw_, kPoison, sizeof(raw_));
-    // Start an ncclCommProperties lifetime in raw_ so the reinterpret_cast above is not UB under
-    // -O3 strict aliasing. The type is trivially default-constructible, so the poison survives.
-    static_assert(std::is_trivially_default_constructible_v<struct ncclCommProperties>,
-                  "placement-new here would overwrite the poison bytes the oracle depends on");
-    new (raw_) struct ncclCommProperties;
+    arena_.Reset(kPoison);
     props()->size = kPropsSize;
     props()->rank = 3;
     props()->nRanks = 8;
     props()->deviceApiSupport = deviceApiSupport;
-    std::memcpy(before_, raw_, sizeof(raw_));
+    std::memcpy(before_, arena_.raw(), kPropsSize);
   }
 
-  // Fails for every byte the block changed other than the ones named.
-  void ExpectBytesUnchangedExcept(std::initializer_list<std::size_t> allowed) {
-    for (std::size_t i = 0; i < kPropsSize; ++i) {
-      bool skip = false;
-      for (std::size_t a : allowed) {
-        skip = skip || (a == i);
-      }
-      if (skip) {
-        continue;
-      }
-      EXPECT_EQ(raw_[i], before_[i]) << "byte " << i << " was modified";
+  // Fails for every byte the block changed other than the ones named, and for any write that
+  // escaped ncclCommProperties entirely -- the shim stores through a shorter struct layout, so an
+  // offset that drifts the wrong way lands outside the object rather than on a sibling field.
+  void ExpectPropsBytesUnchangedExcept(std::initializer_list<std::size_t> allowed) {
+    std::vector<ByteRange> ranges;
+    for (std::size_t a : allowed) {
+      ranges.push_back({a, 1});
     }
+    ExpectBytesUnchangedExcept(arena_.raw(), before_, kPropsSize, ranges);
+    EXPECT_TRUE(arena_.GuardsIntact()) << "the filter wrote outside ncclCommProperties";
   }
 };
 
@@ -205,12 +298,12 @@ TEST_F(DevcommPropsFilterV22902Microtest, ZeroesGinTypeByteAtV22902OffsetOnly) {
 
   EXPECT_EQ(ncclCommPropertiesFilter_v22902(comm_.get(), props()), ncclSuccess);
 
-  EXPECT_EQ(raw_[kV22902GinOff], 0x00) << "v22902 ginType byte not zeroed";
+  EXPECT_EQ(byteAt(kV22902GinOff), 0x00) << "v22902 ginType byte not zeroed";
   for (std::size_t i = kModernGinOff; i < kModernGinOff + sizeof(ncclGinType_t); ++i) {
-    EXPECT_EQ(raw_[i], kPoison) << "byte " << i << ": the store went through the modern struct layout";
+    EXPECT_EQ(byteAt(i), kPoison) << "byte " << i << ": the store went through the modern struct layout";
   }
-  EXPECT_EQ(raw_[33], kPoison) << "multimemSupport clobbered";
-  ExpectBytesUnchangedExcept({kDeviceApiOff, kV22902GinOff});
+  EXPECT_EQ(byteAt(33), kPoison) << "multimemSupport clobbered";
+  ExpectPropsBytesUnchangedExcept({kDeviceApiOff, kV22902GinOff});
 }
 
 // Same store, on the cleared-support arm: the ginType write is unconditional.
@@ -226,9 +319,9 @@ TEST_F(DevcommPropsFilterV22902Microtest, ZeroesGinTypeByteEvenWhenSupportCleare
   EXPECT_EQ(ncclCommPropertiesFilter_v22902(comm_.get(), props()), ncclSuccess);
 
   EXPECT_FALSE(props()->deviceApiSupport);
-  EXPECT_EQ(raw_[kV22902GinOff], 0x00);
-  EXPECT_EQ(raw_[kModernGinOff], kPoison);
-  ExpectBytesUnchangedExcept({kDeviceApiOff, kV22902GinOff});
+  EXPECT_EQ(byteAt(kV22902GinOff), 0x00);
+  EXPECT_EQ(byteAt(kModernGinOff), kPoison);
+  ExpectPropsBytesUnchangedExcept({kDeviceApiOff, kV22902GinOff});
 }
 
 // The default seam models an lsa team spanning the comm, so support survives it.
@@ -240,7 +333,7 @@ TEST_F(DevcommPropsFilterV22902Microtest, DefaultTeamSeam_SpansComm) {
   EXPECT_EQ(ncclCommPropertiesFilter_v22902(comm_.get(), props()), ncclSuccess);
 
   EXPECT_TRUE(props()->deviceApiSupport);
-  EXPECT_EQ(raw_[kV22902GinOff], 0x00);
+  EXPECT_EQ(byteAt(kV22902GinOff), 0x00);
 }
 
 }  // namespace
@@ -538,22 +631,10 @@ static_assert(offsetof(struct ncclDevComm_v22902, railGinBarrier) == 128,
 static_assert(sizeof(struct ncclDevComm_v22902) == 200,
               "v22902 devComm resized; the guard-band arena and the memset span below must follow");
 
-constexpr std::size_t kCopyNewToOld22902Guard = 64;
 constexpr unsigned char kCopyNewToOld22902Poison = 0xA5;
 
-// Destination arena: the v22902 struct followed by a poisoned guard, so an oversized memset shows up.
-struct CopyNewToOld22902Dest {
-  alignas(16) unsigned char bytes[sizeof(struct ncclDevComm_v22902) + kCopyNewToOld22902Guard];
-
-  CopyNewToOld22902Dest() {
-    std::memset(bytes, kCopyNewToOld22902Poison, sizeof(bytes));
-    // See ArmProps: start the object's lifetime so old() is not a strict-aliasing violation.
-    static_assert(std::is_trivially_default_constructible_v<struct ncclDevComm_v22902>,
-                  "placement-new here would overwrite the poison the guard band depends on");
-    new (bytes) struct ncclDevComm_v22902;
-  }
-  struct ncclDevComm_v22902* old() { return reinterpret_cast<struct ncclDevComm_v22902*>(bytes); }
-};
+// Destination: the v22902 struct inside guard bands, so a memset or copy that runs past it shows up.
+using CopyNewToOld22902Dest = PoisonedArena<struct ncclDevComm_v22902>;
 
 // Distinguishable, non-zero source. Every LSA field gets its own value so a shifted or dropped copy
 // cannot alias onto a neighbour's expected value.
@@ -571,26 +652,17 @@ std::unique_ptr<struct ncclDevComm> MakeCopyNewToOld22902Source() {
   return dev;
 }
 
-bool CopyNewToOld22902AllBytesAre(const unsigned char* p, std::size_t n, unsigned char v) {
-  for (std::size_t i = 0; i < n; ++i) {
-    if (p[i] != v) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Arm: the whole body on the real CopyLsaData default -- memset zeroes all 200 bytes, then the LSA
 // prefix is copied in from newDevComm, leaving the GIN tail zero and the source untouched.
 TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix) {
-  CopyNewToOld22902Dest dst;
+  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
   auto src = MakeCopyNewToOld22902Source();
   unsigned char srcSnapshot[sizeof(struct ncclDevComm)];
   std::memcpy(srcSnapshot, static_cast<void*>(src.get()), sizeof(srcSnapshot));
 
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.bytes, src.get()));
+  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
 
-  struct ncclDevComm_v22902* old = dst.old();
+  struct ncclDevComm_v22902* old = dst.obj();
   EXPECT_EQ(7, old->rank);
   EXPECT_EQ(64, old->nRanks);
   EXPECT_EQ(0xDEADBEEFu, old->nRanks_rcp32);
@@ -600,15 +672,15 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix)
   EXPECT_EQ(reinterpret_cast<void*>(0x1122334455667788ull), static_cast<void*>(old->windowTable));
   EXPECT_EQ(reinterpret_cast<void*>(0x99aabbccddeeff00ull), static_cast<void*>(old->resourceWindow));
   // Byte-exact: the copied prefix must equal the source's rank..railGinBarrier window verbatim.
-  EXPECT_EQ(0, std::memcmp(dst.bytes,
-                           reinterpret_cast<const unsigned char*>(src.get()) +
-                               offsetof(struct ncclDevComm, rank),
-                           kCopyNewToOld22902LsaSpan));
+  EXPECT_EQ(-1, FirstDiff(dst.raw(),
+                          reinterpret_cast<const unsigned char*>(src.get()) +
+                              offsetof(struct ncclDevComm, rank),
+                          kCopyNewToOld22902LsaSpan))
+      << "copied LSA prefix differs from the source window";
 
   // The GIN tail past the copy is never written by CopyLsaData, so only the memset can have cleared it.
-  EXPECT_TRUE(CopyNewToOld22902AllBytesAre(dst.bytes + kCopyNewToOld22902LsaSpan,
-                                           sizeof(struct ncclDevComm_v22902) - kCopyNewToOld22902LsaSpan,
-                                           0x00));
+  EXPECT_TRUE(AllBytesAre(dst.raw() + kCopyNewToOld22902LsaSpan,
+                          sizeof(struct ncclDevComm_v22902) - kCopyNewToOld22902LsaSpan, 0x00));
   EXPECT_EQ(0u, old->ginContextCount);
   EXPECT_EQ(0, old->ginSignalCount);
   EXPECT_EQ(0u, old->ginSignalBase);
@@ -616,32 +688,31 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix)
   EXPECT_EQ(0u, old->ginCounterBase);
   EXPECT_EQ(nullptr, old->ginSignalShadows);
 
-  // sizeof(*old), not more: bytes past the struct keep the poison.
-  EXPECT_TRUE(CopyNewToOld22902AllBytesAre(dst.bytes + sizeof(struct ncclDevComm_v22902),
-                                           kCopyNewToOld22902Guard, kCopyNewToOld22902Poison));
+  // sizeof(*old), not more: the bytes flanking the struct keep the guard byte.
+  EXPECT_TRUE(dst.GuardsIntact()) << "the shim wrote outside ncclDevComm_v22902";
   // Direction: newDevComm is read-only here.
-  EXPECT_EQ(0, std::memcmp(srcSnapshot, static_cast<void*>(src.get()), sizeof(srcSnapshot)));
+  EXPECT_EQ(-1, FirstDiff(srcSnapshot, src.get(), sizeof(srcSnapshot)))
+      << "source was modified; the copy ran in the wrong direction";
 }
 
 // Arm: the memset alone, isolated from the copy -- with an inert seam every one of the 200 bytes
 // must be zero, which no partial-size memset can achieve.
 TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetClearsEveryByteOfTheStruct) {
-  CopyNewToOld22902Dest dst;
+  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
   auto src = MakeCopyNewToOld22902Source();
   ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [](void*, void const*) {});
 
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.bytes, src.get()));
+  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
 
   EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_TRUE(CopyNewToOld22902AllBytesAre(dst.bytes, sizeof(struct ncclDevComm_v22902), 0x00));
-  EXPECT_TRUE(CopyNewToOld22902AllBytesAre(dst.bytes + sizeof(struct ncclDevComm_v22902),
-                                           kCopyNewToOld22902Guard, kCopyNewToOld22902Poison));
+  EXPECT_TRUE(AllBytesAre(dst.raw(), sizeof(struct ncclDevComm_v22902), 0x00));
+  EXPECT_TRUE(dst.GuardsIntact()) << "the memset ran past ncclDevComm_v22902";
 }
 
 // Arm: the argument computation -- CopyLsaData is handed &old->rank and &newDevComm->rank exactly
 // once, in that order. Both are first fields, so a swap is only visible in the captured pointers.
 TEST_F(DevcommMicrotest, CopyNewToOld22902_PassesDestThenSourceRankPointers) {
-  CopyNewToOld22902Dest dst;
+  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
   auto src = MakeCopyNewToOld22902Source();
   void* seenDst = nullptr;
   void const* seenSrc = nullptr;
@@ -650,10 +721,10 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_PassesDestThenSourceRankPointers) {
     seenSrc = s;
   });
 
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.bytes, src.get()));
+  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
 
   EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_EQ(static_cast<void*>(dst.bytes), seenDst);
+  EXPECT_EQ(static_cast<void*>(dst.raw()), seenDst);
   EXPECT_EQ(static_cast<void const*>(reinterpret_cast<const unsigned char*>(src.get()) +
                                      offsetof(struct ncclDevComm, rank)),
             seenSrc);
@@ -663,21 +734,20 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_PassesDestThenSourceRankPointers) {
 // Arm: statement order -- the seam observes a fully zeroed destination, proving the memset runs
 // before the copy rather than after it (which would erase everything the copy just wrote).
 TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetRunsBeforeTheCopy) {
-  CopyNewToOld22902Dest dst;
+  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
   auto src = MakeCopyNewToOld22902Source();
   bool destZeroedOnEntry = false;
   ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [&](void* d, void const* s) {
-    destZeroedOnEntry = CopyNewToOld22902AllBytesAre(static_cast<unsigned char*>(d),
-                                                     sizeof(struct ncclDevComm_v22902), 0x00);
+    destZeroedOnEntry = AllBytesAre(d, sizeof(struct ncclDevComm_v22902), 0x00);
     DefaultNcclDevCommCopyLsaData(d, s);
   });
 
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.bytes, src.get()));
+  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
 
   EXPECT_EQ(1, copyLsa.calls);
   EXPECT_TRUE(destZeroedOnEntry);
-  EXPECT_EQ(7, dst.old()->rank);
-  EXPECT_EQ(0xCAFEBABEu, dst.old()->lsaSize_rcp32);
+  EXPECT_EQ(7, dst.obj()->rank);
+  EXPECT_EQ(0xCAFEBABEu, dst.obj()->lsaSize_rcp32);
 }
 
 }  // namespace
@@ -702,20 +772,6 @@ void FillPattern(void* p, std::size_t n, uint8_t base, uint8_t step) {
   for (std::size_t i = 0; i < n; ++i) {
     b[i] = static_cast<uint8_t>(base + step * i);
   }
-}
-
-// -1 when equal, else the index of the first differing byte (a bare memcmp says only "no").
-// ptrdiff_t, not long: it states the "byte index or -1" contract without depending on the
-// platform's long width.
-std::ptrdiff_t FirstDiff(void const* a, void const* b, std::size_t n) {
-  uint8_t const* x = static_cast<uint8_t const*>(a);
-  uint8_t const* y = static_cast<uint8_t const*>(b);
-  for (std::size_t i = 0; i < n; ++i) {
-    if (x[i] != y[i]) {
-      return static_cast<std::ptrdiff_t>(i);
-    }
-  }
-  return -1;
 }
 
 class DevcommCopyOldToNewV22902Microtest : public DevcommMicrotest {
@@ -1089,8 +1145,8 @@ class DevcommReqsFilterV22907Microtest : public DevcommMicrotest {
     std::memcpy(reqsSnapshot_, &reqs_, sizeof(reqs_));
     std::memcpy(nodesSnapshot_, nodes_, sizeof(nodes_));
   }
-  bool ReqsUnchanged() const { return std::memcmp(reqsSnapshot_, &reqs_, sizeof(reqs_)) == 0; }
-  bool NodesUnchanged() const { return std::memcmp(nodesSnapshot_, nodes_, sizeof(nodes_)) == 0; }
+  std::ptrdiff_t ReqsFirstDiff() const { return FirstDiff(reqsSnapshot_, &reqs_, sizeof(reqs_)); }
+  std::ptrdiff_t NodesFirstDiff() const { return FirstDiff(nodesSnapshot_, nodes_, sizeof(nodes_)); }
 
   ncclResult_t Run() { return ncclDevCommRequirementsFilter_v22907(comm_.get(), &reqs_); }
 
@@ -1119,7 +1175,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, SignalCountAloneRejects) {
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
   EXPECT_EQ(3, reqs_.ginSignalCount);
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: reqs->ginCounterCount > 0 alone trips the initial expression.
@@ -1135,7 +1191,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, CounterCountAloneRejects) {
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
   EXPECT_EQ(0, reqs_.ginSignalCount);
   EXPECT_EQ(5, reqs_.ginCounterCount);
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: reqs->barrierCount > 0 alone trips it -- v22907 counts plain barriers as GIN and,
@@ -1153,7 +1209,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, BarrierCountAloneRejectsAndIsNotPromote
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
   EXPECT_EQ(2, reqs_.barrierCount);
   EXPECT_EQ(0, reqs_.lsaBarrierCount);
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: reqs->railGinBarrierCount > 0 alone trips it, and v22907 does not zero it the way v22902 does.
@@ -1168,7 +1224,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, RailGinBarrierCountAloneRejectsAndIsNot
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
   EXPECT_EQ(1, reqs_.railGinBarrierCount);
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: no GIN request and an empty resource list -- the while loop is never entered.
@@ -1185,7 +1241,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, NoRequestEmptyListReturnsSuccessWithout
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(quiet, kWarnSite22907)) << quiet;
   EXPECT_TRUE(LogHas(anchor, kWarnSite22907)) << anchor;
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: the loop walks a three-node list in which no node requests GIN, exits on
@@ -1203,8 +1259,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, AllZeroNodeListWalksToEndAndSucceeds) {
   EXPECT_FALSE(LogHas(quiet, kWarnSite22907)) << quiet;
   EXPECT_TRUE(LogHas(anchor, kWarnSite22907)) << anchor;
   EXPECT_EQ(&nodes_[0], reqs_.resourceRequirementsList);
-  EXPECT_TRUE(ReqsUnchanged());
-  EXPECT_TRUE(NodesUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
+  EXPECT_EQ(-1, NodesFirstDiff()) << "v22907 promotes nothing: the resource list must come back byte-identical";
 }
 
 // Arm: a middle node's ginSignalCount trips the loop; the trailing all-zero node must not overwrite that result.
@@ -1219,8 +1275,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, MiddleNodeSignalCountRejectsAndLoopStop
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
-  EXPECT_TRUE(ReqsUnchanged());
-  EXPECT_TRUE(NodesUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
+  EXPECT_EQ(-1, NodesFirstDiff()) << "v22907 promotes nothing: the resource list must come back byte-identical";
 }
 
 // Arm: the loop body's second operand -- a middle node's ginCounterCount alone trips it.
@@ -1236,7 +1292,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, MiddleNodeCounterCountRejects) {
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
   EXPECT_EQ(0, nodes_[1].ginSignalCount);
-  EXPECT_TRUE(NodesUnchanged());
+  EXPECT_EQ(-1, NodesFirstDiff()) << "v22907 promotes nothing: the resource list must come back byte-identical";
 }
 
 // Arm: GIN resources requested but the outer gate's second operand is false on both sides --
@@ -1260,7 +1316,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, GinRequestedWithoutConnectionOrForceSuc
   EXPECT_EQ(2, reqs_.barrierCount);
   EXPECT_EQ(3, reqs_.railGinBarrierCount);
   EXPECT_EQ(0, reqs_.lsaBarrierCount);
-  EXPECT_TRUE(ReqsUnchanged());
+  EXPECT_EQ(-1, ReqsFirstDiff()) << "v22907 promotes nothing: reqs_ must come back byte-identical";
 }
 
 // Arm: outer gate opened by ginConnectionType alone (FULL), ginForceEnable false.
@@ -1328,38 +1384,14 @@ constexpr std::size_t kOld907AbortOff = offsetof(struct ncclDevComm_v22907, abor
 // What ncclDevCommCopyLsaData actually moves; anything past it in `old` can only be zero or abortFlag.
 constexpr std::size_t kLsaPrefixLen =
     offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank);
-constexpr std::size_t kGuardLen = 32;
-
 // Never nullptr: a 0x00 abortFlag is indistinguishable from the memset result.
 uint32_t* const kAbortA = reinterpret_cast<uint32_t*>(0xABCDEF0012345678ull);
 uint32_t* const kAbortB = reinterpret_cast<uint32_t*>(0x0FEDCBA987654320ull);
 
-// Destination flanked by 0x5A guard bands so a memset running past sizeof(*old) is visible.
-class Old907Buf {
- public:
-  explicit Old907Buf(unsigned char poison) {
-    std::memset(bytes_, 0x5A, sizeof(bytes_));
-    std::memset(bytes_ + kGuardLen, poison, kOld907Size);
-    // See ArmProps: start the object's lifetime so old() is not a strict-aliasing violation.
-    static_assert(std::is_trivially_default_constructible_v<struct ncclDevComm_v22907>,
-                  "placement-new here would overwrite the poison the guard band depends on");
-    new (bytes_ + kGuardLen) struct ncclDevComm_v22907;
-  }
-  void* raw() { return bytes_ + kGuardLen; }
-  struct ncclDevComm_v22907* old() { return reinterpret_cast<struct ncclDevComm_v22907*>(raw()); }
-  unsigned char byteAt(std::size_t i) const { return bytes_[kGuardLen + i]; }
-  bool GuardsIntact() const {
-    for (std::size_t i = 0; i < kGuardLen; ++i) {
-      if (bytes_[i] != 0x5A || bytes_[kGuardLen + kOld907Size + i] != 0x5A) {
-        return false;
-      }
-    }
-    return true;
-  }
-
- private:
-  alignas(16) unsigned char bytes_[kGuardLen + kOld907Size + kGuardLen];
-};
+// Destination flanked by guard bands so a memset running past sizeof(*old) is visible. The poison
+// is per-instance: one arm needs a non-zero fill to tell "cleared" from "never written", another
+// starts from 0x00 so stale GIN fields it writes by hand are the only non-zero bytes present.
+using Old907Buf = PoisonedArena<struct ncclDevComm_v22907>;
 
 std::unique_ptr<ncclDevComm> MakeZeroedNewDevComm() {
   auto p = std::make_unique<ncclDevComm>();
@@ -1384,7 +1416,7 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsEveryByte_ThenStoresAbortFlagAf
     }
     EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " of old was not cleared";
   }
-  EXPECT_EQ(kAbortA, buf.old()->abortFlag);
+  EXPECT_EQ(kAbortA, buf.obj()->abortFlag);
   EXPECT_TRUE(buf.GuardsIntact());
 }
 
@@ -1403,7 +1435,7 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_CallsCopyLsaDataOnceWithOldRankAndNew
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
   EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_EQ(static_cast<void*>(&buf.old()->rank), seenDst);
+  EXPECT_EQ(static_cast<void*>(&buf.obj()->rank), seenDst);
   EXPECT_EQ(static_cast<void const*>(&newDev->rank), seenSrc);
 }
 
@@ -1432,40 +1464,41 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_RealCopyMovesLsaPrefixAndLeavesSource
   ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
   EXPECT_EQ(1, copyLsa.calls);
 
-  EXPECT_EQ(3, buf.old()->rank);
-  EXPECT_EQ(8, buf.old()->nRanks);
-  EXPECT_EQ(0x11223344u, buf.old()->nRanks_rcp32);
-  EXPECT_EQ(2, buf.old()->lsaRank);
-  EXPECT_EQ(4, buf.old()->lsaSize);
-  EXPECT_EQ(0x55667788u, buf.old()->lsaSize_rcp32);
+  EXPECT_EQ(3, buf.obj()->rank);
+  EXPECT_EQ(8, buf.obj()->nRanks);
+  EXPECT_EQ(0x11223344u, buf.obj()->nRanks_rcp32);
+  EXPECT_EQ(2, buf.obj()->lsaRank);
+  EXPECT_EQ(4, buf.obj()->lsaSize);
+  EXPECT_EQ(0x55667788u, buf.obj()->lsaSize_rcp32);
   EXPECT_EQ(reinterpret_cast<void*>(0x1000200030004000ull),
-            static_cast<void*>(buf.old()->windowTable));
+            static_cast<void*>(buf.obj()->windowTable));
   EXPECT_EQ(reinterpret_cast<void*>(0x2000300040005000ull),
-            static_cast<void*>(buf.old()->resourceWindow));
-  EXPECT_EQ(kAbortA, buf.old()->abortFlag);
+            static_cast<void*>(buf.obj()->resourceWindow));
+  EXPECT_EQ(kAbortA, buf.obj()->abortFlag);
 
   for (std::size_t i = kLsaPrefixLen; i < kOld907AbortOff; ++i) {
     EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " past the LSA prefix was not cleared";
   }
-  EXPECT_EQ(0, std::memcmp(srcBefore.get(), newDev.get(), sizeof(*newDev)));
+  EXPECT_EQ(-1, FirstDiff(srcBefore.get(), newDev.get(), sizeof(*newDev)))
+      << "source was modified; the copy ran in the wrong direction";
   EXPECT_TRUE(buf.GuardsIntact());
 }
 
 // Arm: memset-before-store ordering -- a dirty old struct is fully reinitialised, GIN fields dropped.
 TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsStaleGinFieldsAndOverwritesStaleAbortFlag) {
   Old907Buf buf(0x00);
-  buf.old()->ginConnectionCount = 3;
-  buf.old()->ginNetDeviceTypes[0] = 7;
-  buf.old()->ginHandles[0] = reinterpret_cast<void*>(0x1111222233334444ull);
-  buf.old()->ginSignalBase = 0x99u;
-  buf.old()->ginSignalCount = 5;
-  buf.old()->ginCounterBase = 0x77u;
-  buf.old()->ginCounterCount = 6;
-  buf.old()->ginSignalShadows = reinterpret_cast<uint64_t*>(0x5555666677778888ull);
-  buf.old()->ginContextCount = 9;
-  buf.old()->ginContextBase = 0x33u;
-  buf.old()->ginIsRailed = true;
-  buf.old()->abortFlag = kAbortB;
+  buf.obj()->ginConnectionCount = 3;
+  buf.obj()->ginNetDeviceTypes[0] = 7;
+  buf.obj()->ginHandles[0] = reinterpret_cast<void*>(0x1111222233334444ull);
+  buf.obj()->ginSignalBase = 0x99u;
+  buf.obj()->ginSignalCount = 5;
+  buf.obj()->ginCounterBase = 0x77u;
+  buf.obj()->ginCounterCount = 6;
+  buf.obj()->ginSignalShadows = reinterpret_cast<uint64_t*>(0x5555666677778888ull);
+  buf.obj()->ginContextCount = 9;
+  buf.obj()->ginContextBase = 0x33u;
+  buf.obj()->ginIsRailed = true;
+  buf.obj()->abortFlag = kAbortB;
 
   auto newDev = MakeZeroedNewDevComm();
   newDev->rank = 1;
@@ -1473,19 +1506,19 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsStaleGinFieldsAndOverwritesStal
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
 
-  EXPECT_EQ(0u, buf.old()->ginConnectionCount);
-  EXPECT_EQ(0u, buf.old()->ginNetDeviceTypes[0]);
-  EXPECT_EQ(nullptr, buf.old()->ginHandles[0]);
-  EXPECT_EQ(0u, buf.old()->ginSignalBase);
-  EXPECT_EQ(0, buf.old()->ginSignalCount);
-  EXPECT_EQ(0u, buf.old()->ginCounterBase);
-  EXPECT_EQ(0, buf.old()->ginCounterCount);
-  EXPECT_EQ(nullptr, buf.old()->ginSignalShadows);
-  EXPECT_EQ(0u, buf.old()->ginContextCount);
-  EXPECT_EQ(0u, buf.old()->ginContextBase);
-  EXPECT_FALSE(buf.old()->ginIsRailed);
-  EXPECT_EQ(1, buf.old()->rank);
-  EXPECT_EQ(kAbortA, buf.old()->abortFlag);
+  EXPECT_EQ(0u, buf.obj()->ginConnectionCount);
+  EXPECT_EQ(0u, buf.obj()->ginNetDeviceTypes[0]);
+  EXPECT_EQ(nullptr, buf.obj()->ginHandles[0]);
+  EXPECT_EQ(0u, buf.obj()->ginSignalBase);
+  EXPECT_EQ(0, buf.obj()->ginSignalCount);
+  EXPECT_EQ(0u, buf.obj()->ginCounterBase);
+  EXPECT_EQ(0, buf.obj()->ginCounterCount);
+  EXPECT_EQ(nullptr, buf.obj()->ginSignalShadows);
+  EXPECT_EQ(0u, buf.obj()->ginContextCount);
+  EXPECT_EQ(0u, buf.obj()->ginContextBase);
+  EXPECT_FALSE(buf.obj()->ginIsRailed);
+  EXPECT_EQ(1, buf.obj()->rank);
+  EXPECT_EQ(kAbortA, buf.obj()->abortFlag);
   EXPECT_TRUE(buf.GuardsIntact());
 }
 
