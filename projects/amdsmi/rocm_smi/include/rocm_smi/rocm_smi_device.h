@@ -39,7 +39,6 @@
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
-#include "rocm_smi/rocm_smi_properties.h"
 #include "shared_mutex.h"  //NOLINT
 
 namespace amd::smi {
@@ -256,8 +255,6 @@ class Device {
   rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
   template <typename T>
   std::string readBootPartitionState(uint32_t dv_ind);
-  rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx,
-                                                          AMDGpuVerbTypes_t verb_type);
 
   const AMDGpuMetricsHeader_v1_t& dev_get_metrics_header() { return m_gpu_metrics_header; }
   auto setup_gpu_metrics_reading(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics) -> rsmi_status_t;
@@ -309,8 +306,6 @@ class Device {
   int readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string>* retVec);
   int readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_binary_data);
   int writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr = false);
-  rsmi_status_t run_amdgpu_property_reinforcement_query(
-      const AMDGpuPropertyQuery_t& amdgpu_property_query);
 
   uint64_t bdfid_;
   uint64_t kfd_gpu_id_;
