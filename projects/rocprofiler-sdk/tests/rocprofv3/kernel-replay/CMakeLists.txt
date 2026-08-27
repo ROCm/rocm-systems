@@ -33,7 +33,7 @@ rocprofiler_configure_pytest_files(
 add_test(
     NAME rocprofv3-test-kernel-replay-cli-unit
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
-            --script ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/bin/rocprofv3.py)
+            --script $<TARGET_FILE:rocprofiler-sdk::rocprofv3>)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
