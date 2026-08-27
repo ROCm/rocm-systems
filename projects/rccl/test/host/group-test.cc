@@ -79,6 +79,8 @@ class GroupEndInternalTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_;
   std::unique_ptr<ncclAsyncJob> job_;
+  // Backing frame for the comm's memScoped stack (see EnterGroupWithOneCollectiveComm).
+  ncclMemoryStack::Frame memScopedBelow_{};
 
   // Records every ncclCommSetAsyncError state pushed to comm_.
   std::vector<ncclResult_t> asyncStates_;
@@ -131,6 +133,29 @@ class GroupEndInternalTest : public ::testing::Test {
     ncclGroupBlocking = blocking;
     ncclIntruQueueEnqueue(&ncclAsyncJobs, job_.get());
   }
+
+  // Enter a group whose only work is a single communicator on the collective
+  // task chain and no pending async jobs -- the shape ncclGroupEnd sees after a
+  // plain collective (e.g. ncclAllReduce) enqueued in a non-blocking group.
+  void EnterGroupWithOneCollectiveComm(int blocking) {
+    comm_->config.blocking = blocking;
+    comm_->config.numRmaCtx = 0;
+    comm_->nRanks = 0;
+    comm_->groupNext[ncclGroupTaskTypeCollective] = nullptr;
+
+    // A real collective comm joins the group via ncclGroupCommJoin, which pushes
+    // a memScoped frame; the fail:/cleanup path pops it in ncclGroupCommLeave.
+    // ncclMemoryStackPush needs allocateSpilled (in the un-linked utils.cc), so
+    // wire the pop target frame by hand: construct the stack and point topFrame
+    // .below at a zeroed frame so the cleanup pop restores it without faulting.
+    ncclMemoryStackConstruct(&comm_->memScoped);
+    memScopedBelow_ = ncclMemoryStack::Frame{};
+    comm_->memScoped.topFrame.below = &memScopedBelow_;
+
+    ncclGroupStartInternal();  // ncclGroupDepth = 1
+    ncclGroupBlocking = blocking;
+    ncclGroupCommHead[ncclGroupTaskTypeCollective] = comm_.get();
+  }
 };
 
 // The fix: a non-blocking group carrying pending init work must return
@@ -174,6 +199,34 @@ TEST_F(GroupEndInternalTest, ThreadCreateFailure_LeavesNoDanglingGroupJob) {
   EXPECT_EQ(ncclSystemError, ncclGroupEndInternal());
   EXPECT_EQ(nullptr, comm_->groupJob);
   EXPECT_EQ(1, failThreadCreate.calls);
+}
+
+// A non-blocking group whose only work is a communicator on the collective
+// chain (no async init jobs, no preconnect) must still take the non-blocking
+// path: it publishes ncclInProgress on the comm and hands the launch to the
+// background thread. This is the quadrant that regressed while a stale RCCL-only
+// predicate (ncclGroupBlocking == 0 && (preconnect || !asyncJobs.empty()))
+// diverged from upstream -- with that gate a collective-only non-blocking group
+// fell through to the blocking path. The launch itself is forced to abort at
+// thread-create so no real GPU work runs; reaching that failure proves the
+// non-blocking branch (not the blocking branch) was selected.
+TEST_F(GroupEndInternalTest, NonBlockingGroupWithOnlyCollectiveComm_TakesNonBlockingPath) {
+  EnterGroupWithOneCollectiveComm(/*blocking=*/0);
+  ScopedHook failThreadCreate(g_threadCreateShouldFail, [] { return true; });
+
+  // ncclSystemError => STDTHREADCREATE_GOTO was reached, i.e. the non-blocking
+  // branch ran. The blocking branch never touches thread creation and would
+  // have returned the (synchronous) launch result instead.
+  EXPECT_EQ(ncclSystemError, ncclGroupEndInternal());
+  EXPECT_EQ(1, failThreadCreate.calls);
+
+  // Before the forced failure the non-blocking branch publishes ncclInProgress
+  // on the participating comm -- the poll/abort handle a caller relies on.
+  EXPECT_NE(asyncStates_.end(),
+            std::find(asyncStates_.begin(), asyncStates_.end(), ncclInProgress));
+
+  // fail: path must leave no dangling group job on the comm (fix kept from #3).
+  EXPECT_EQ(nullptr, comm_->groupJob);
 }
 
 // Contrast: a blocking group runs its jobs on the caller and reports the final
