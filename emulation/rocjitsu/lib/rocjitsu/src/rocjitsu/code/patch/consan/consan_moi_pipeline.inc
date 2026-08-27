@@ -55,7 +55,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedFenceRecord> selected;
-  MoiResourcePlanningState resource_state(bytes, arch, options, result);
+  MoiResourcePlanningState resource_state(bytes, arch, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -153,7 +153,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (!record_event)
       continue;
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, *record_event)) {
+    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+                                       *record_event)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
     }
@@ -231,7 +232,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, planned)) {
+    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+                                       planned)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
     }
@@ -853,8 +855,9 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       ConSanOptions owner_options = options;
-      if (!options.moi_transient_sgpr_assignments.empty() &&
-          !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+      if (!state.register_allocation.owner_transient_sgprs.empty() &&
+          !apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
+                                               plan.owner_descriptor_file_offsets)) {
         if (state.arch == ROCJITSU_CODE_ARCH_CDNA5)
           continue;
         owner_options.moi_dispatch_id_sgpr.reset();
@@ -869,7 +872,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       if (!owner_options.moi_dispatch_id_sgpr &&
           std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             const ConSanMoiTransientSgprAssignment *assignment =
-                find_moi_transient_sgpr_assignment(options, descriptor_offset);
+                find_moi_transient_sgpr_assignment(state.register_allocation, descriptor_offset);
             return assignment != nullptr && !assignment->dispatch_id_sgpr;
           })) {
         continue;
@@ -897,11 +900,13 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-            return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
+            return find_moi_transient_sgpr_assignment(state.register_allocation,
+                                                      descriptor_offset) != nullptr;
           });
       if (has_owner_override) {
         ConSanOptions owner_options = options;
-        if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
+        if (apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
+                                                plan.owner_descriptor_file_offsets))
           continue;
       }
       const auto owner_contexts =

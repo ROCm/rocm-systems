@@ -331,14 +331,16 @@ struct ConSanMoiTransientSgprAssignment {
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
 
-/// Final scalar/vector register allocation selected for one MOI transform.
+/// Authoritative scalar/vector register allocation selected for one MOI
+/// transform.
 ///
 /// Lowering may select one code-object-wide transient scalar ABI and override
 /// it for independent owner components. Those selections are input to several
 /// emitted patches, not properties that can be reconstructed from any single
-/// patch record. This value freezes that completed allocation once, after
-/// planning and before final validation. It contains no search candidates or
-/// mutable placement controls.
+/// patch record. Placement builds this value incrementally; emission and final
+/// validation then consume the same completed value without copying its
+/// per-owner assignments through mutable lowerer options. It contains no
+/// search candidates or placement-control flags.
 struct ConSanMoiRegisterAllocation {
   /// Code-object-wide transient scalar ABI used by owners without an override.
   ConSanMoiTransientSgprState default_transient_sgprs;
@@ -775,9 +777,6 @@ struct ConSanOptions : ConSanRequest,
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
-  /// Per-owner overrides used when an automatic code-object-wide transient
-  /// window is unsafe for only a subset of independent owner components.
-  std::vector<ConSanMoiTransientSgprAssignment> moi_transient_sgpr_assignments;
   /// Internal gfx1250 fallback: one high code-object-wide EXEC-save window is
   /// retained, while resource planning excludes only owner groups whose guest
   /// scalar allocation reaches that window.

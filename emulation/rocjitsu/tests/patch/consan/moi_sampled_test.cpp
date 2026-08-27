@@ -2769,21 +2769,23 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
   // Another owner component may already have required a local EXEC window.
   // That must not suppress the independent dispatch-only override below.
   options.automatic_moi_partial_exec_save_sgprs = true;
-  options.moi_transient_sgpr_assignments.push_back(
-      {.descriptor_file_offset = high_original->descriptor_file_offset,
-       .exec_save_sgpr = kLocalExecSaveSgpr,
-       .owner_sgpr = std::nullopt,
-       .dispatch_id_sgpr = 96u,
-       .spill_backed = false,
-       .indirect_pc_sgpr = std::nullopt,
-       .indirect_scc_sgpr = std::nullopt,
-       .dispatch_key_sgpr = std::nullopt,
-       .call_return_sgpr = std::nullopt,
-       .visible_evidence_sgpr = std::nullopt,
-       .branch_only_scalar_spill = false,
-       .dynamic_stack_borrowed_sgpr = std::nullopt});
+  const ConSanMoiTransientSgprAssignment seed_assignment{
+      .descriptor_file_offset = high_original->descriptor_file_offset,
+      .exec_save_sgpr = kLocalExecSaveSgpr,
+      .owner_sgpr = std::nullopt,
+      .dispatch_id_sgpr = 96u,
+      .spill_backed = false,
+      .indirect_pc_sgpr = std::nullopt,
+      .indirect_scc_sgpr = std::nullopt,
+      .dispatch_key_sgpr = std::nullopt,
+      .call_return_sgpr = std::nullopt,
+      .visible_evidence_sgpr = std::nullopt,
+      .branch_only_scalar_spill = false,
+      .dynamic_stack_borrowed_sgpr = std::nullopt,
+  };
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan_with_owner_transient_sgpr_assignment(bytes, options, seed_assignment);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7530,20 +7532,23 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
-  options.moi_transient_sgpr_assignments.push_back({.descriptor_file_offset = descriptor_offset,
-                                                    .exec_save_sgpr = kLocalExecSaveSgpr,
-                                                    .owner_sgpr = std::nullopt,
-                                                    .dispatch_id_sgpr = std::nullopt,
-                                                    .spill_backed = true,
-                                                    .indirect_pc_sgpr = kLocalIndirectPcSgpr,
-                                                    .indirect_scc_sgpr = kLocalIndirectSccSgpr,
-                                                    .dispatch_key_sgpr = 5u,
-                                                    .call_return_sgpr = kLocalIndirectPcSgpr,
-                                                    .visible_evidence_sgpr = std::nullopt,
-                                                    .branch_only_scalar_spill = false,
-                                                    .dynamic_stack_borrowed_sgpr = std::nullopt});
+  const ConSanMoiTransientSgprAssignment seed_assignment{
+      .descriptor_file_offset = descriptor_offset,
+      .exec_save_sgpr = kLocalExecSaveSgpr,
+      .owner_sgpr = std::nullopt,
+      .dispatch_id_sgpr = std::nullopt,
+      .spill_backed = true,
+      .indirect_pc_sgpr = kLocalIndirectPcSgpr,
+      .indirect_scc_sgpr = kLocalIndirectSccSgpr,
+      .dispatch_key_sgpr = 5u,
+      .call_return_sgpr = kLocalIndirectPcSgpr,
+      .visible_evidence_sgpr = std::nullopt,
+      .branch_only_scalar_spill = false,
+      .dynamic_stack_borrowed_sgpr = std::nullopt,
+  };
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan_with_owner_transient_sgpr_assignment(bytes, options, seed_assignment);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);

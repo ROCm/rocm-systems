@@ -237,10 +237,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return !candidate->container.is_kernel();
       });
-  const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
-      options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
+  const bool has_spill_backed_scalar_assignment =
+      std::ranges::any_of(result.moi_register_allocation.owner_transient_sgprs,
+                          &ConSanMoiTransientSgprAssignment::spill_backed);
   const bool has_branch_only_scalar_assignment =
-      std::ranges::any_of(options.moi_transient_sgpr_assignments,
+      std::ranges::any_of(result.moi_register_allocation.owner_transient_sgprs,
                           &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill);
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
@@ -299,7 +300,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   size_t branch_only_candidate_count = 0u;
   uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
   for (const ConSanMoiCandidate *candidate : candidates) {
-    if (!moi_candidate_uses_branch_only_scalar_spill(result, options, *candidate)) {
+    if (!moi_candidate_uses_branch_only_scalar_spill(result, *candidate)) {
       continue;
     }
     ++branch_only_candidate_count;
@@ -360,7 +361,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, candidate_resource_plan->owner_descriptor_file_offsets) ||
+            candidate_options, result.moi_register_allocation,
+            candidate_resource_plan->owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
             candidate_options, candidate_resource_plan->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -368,7 +370,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
-        options, candidate_resource_plan->owner_descriptor_file_offsets);
+        result.moi_register_allocation, candidate_resource_plan->owner_descriptor_file_offsets);
     const bool planned_spill_backed_operand_recovery =
         std::ranges::any_of(candidate_resource_plan->alternatives, [](const auto &alternative) {
           return alternative.kind ==
@@ -768,7 +770,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+            candidate_options, result.moi_register_allocation,
+            planned_patch.resources.owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
             candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
       continue;
@@ -825,7 +828,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         continue;
       ConSanOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              group_options, group.front()->resources.owner_descriptor_file_offsets))
+              group_options, result.moi_register_allocation,
+              group.front()->resources.owner_descriptor_file_offsets))
         continue;
       if (!emit_moi_dense_access_group(std::span<const PlannedSampledPatch *const>(group),
                                        dispatcher_offset, dense_entry_hosts, group_options, arch,
@@ -839,7 +843,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+              candidate_options, result.moi_register_allocation,
+              planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_moi_persistent_vgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
@@ -1179,7 +1184,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const PlannedSampledPatch *representative = dense_groups.at(dispatcher).front();
       ConSanOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              group_options, representative->resources.owner_descriptor_file_offsets)) {
+              group_options, result.moi_register_allocation,
+              representative->resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe lost its dense-host transient scalar assignment");
         return;
@@ -1213,7 +1219,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           [&](const PlannedSampledPatch &planned_patch) {
             ConSanOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+                    candidate_options, result.moi_register_allocation,
+                    planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_moi_persistent_vgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(

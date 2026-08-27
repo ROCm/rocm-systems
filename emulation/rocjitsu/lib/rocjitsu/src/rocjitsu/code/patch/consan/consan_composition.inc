@@ -327,15 +327,18 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
 } // namespace
 
-[[nodiscard]] ConSanTransformArtifacts
-try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                      std::span<const CarriedPerturbationPlan> carried_plans = {},
-                      std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
-                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-                      const ConSanPreappliedMutationLayout &preapplied_mutation = {}) {
+[[nodiscard]] ConSanTransformArtifacts try_patch_consan_impl(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const CarriedPerturbationPlan> carried_plans = {},
+    std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
+    ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+    const ConSanPreappliedMutationLayout &preapplied_mutation = {},
+    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
+  result.moi_register_allocation.owner_transient_sgprs.assign(initial_owner_transient_sgprs.begin(),
+                                                              initial_owner_transient_sgprs.end());
   ConSanPerturbationPlanningState local_perturbation;
   ConSanPerturbationPlanningState &perturbation =
       inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;

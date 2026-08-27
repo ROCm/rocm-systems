@@ -1112,7 +1112,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         candidate_options.scratch_vgpr = resources->base;
         candidate_options.moi_record_replay_workgroup_private_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, owners) ||
+        if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+                                                 owners) ||
             !apply_record_replay_entry_workgroup_assignment(candidate_options, owners)) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
@@ -1238,7 +1239,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     if (automatic_moi_persistent_state(options) && owners.empty())
       continue;
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, owners) ||
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+                                             owners) ||
         !apply_moi_persistent_vgpr_assignment(candidate_options, owners)) {
       continue;
     }
@@ -1363,7 +1365,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         candidate_options.moi_record_replay_workgroup_private_offsets =
             planned.private_record_replay_workgroup_offsets;
       }
-      if (!apply_moi_transient_sgpr_assignment(candidate_options,
+      if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                                planned.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(candidate_options,
                                                           planned.owner_descriptor_file_offsets)) {
@@ -1406,7 +1408,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                        candidate.container_entry_text_offset, site.file_offset)
             : std::nullopt;
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its transient scalar assignment");
       return;
@@ -1721,7 +1723,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         return ReusedDenseRelayResult::Unavailable;
 
       ConSanOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, owners)) {
+      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+                                               owners)) {
         result.errors.emplace_back(
             "ConSan MOI reused barrier relay lost its transient scalar assignment");
         return ReusedDenseRelayResult::Failed;
@@ -1780,7 +1783,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
         ConSanOptions candidate_options = options;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options,
+        if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI reused barrier relay lost a site scalar assignment");
@@ -1922,7 +1925,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         break;
       }
       ConSanOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, group_owner)) {
+      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+                                               group_owner)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay lost its transient scalar assignment");
         return;
@@ -2038,7 +2042,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
         ConSanOptions candidate_options = options;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options,
+        if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay lost its transient scalar assignment");
@@ -2414,7 +2418,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  MoiResourcePlanningState standalone_resource_state(bytes, arch, options, result);
+  MoiResourcePlanningState standalone_resource_state(bytes, arch, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -2609,12 +2613,13 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const uint64_t cave_text_offset = placement_planner.appended_end();
     uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, planned)) {
+    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+                                       planned)) {
       result.errors.emplace_back("ConSan MOI barrier record patch lost a planned assignment");
       return;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
-        options, planned.resources.owner_descriptor_file_offsets);
+        result.moi_register_allocation, planned.resources.owner_descriptor_file_offsets);
     // A routed branch-only body replaces this harmless placeholder after all
     // body coordinates and the shared relay plan are fixed.
     const uint64_t cave_return_target =
@@ -2634,7 +2639,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;
     uint32_t displaced_original_size = site.size;
     if (branch_only_scalar_spill && moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-                                        options, planned.resources.owner_descriptor_file_offsets)) {
+                                        options, result.moi_register_allocation,
+                                        planned.resources.owner_descriptor_file_offsets)) {
       std::vector<std::string> ignored_errors;
       std::vector<uint32_t> displaced_words;
       while (displaced_words.size() < kMoiRecordReplayBorrowedEntryIslandWords) {

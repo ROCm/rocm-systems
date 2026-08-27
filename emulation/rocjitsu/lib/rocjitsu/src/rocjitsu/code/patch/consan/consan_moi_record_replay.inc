@@ -109,10 +109,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const uint64_t runtime_gate_island_words = moi_runtime_workgroup_gate_reserved_words(
       static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
       has_cluster_workgroup_id);
-  const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
-      options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
+  const bool has_spill_backed_scalar_assignment =
+      std::ranges::any_of(result.moi_register_allocation.owner_transient_sgprs,
+                          &ConSanMoiTransientSgprAssignment::spill_backed);
   const bool has_branch_only_scalar_assignment =
-      std::ranges::any_of(options.moi_transient_sgpr_assignments,
+      std::ranges::any_of(result.moi_register_allocation.owner_transient_sgprs,
                           &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill);
   // Spill-backed groups need room for the extra scalar-save arm, while truly
   // large generated objects need a conservative envelope to keep every
@@ -265,7 +266,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
       collect_moi_synchronization_ranges(result);
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    return moi_candidate_uses_branch_only_scalar_spill(result, options, *candidate);
+    return moi_candidate_uses_branch_only_scalar_spill(result, *candidate);
   };
   struct BorrowedEntryProtectedRange {
     uint64_t begin = 0u;
@@ -305,7 +306,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
     if (plan == nullptr || original_text.empty() ||
         !moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-            options, plan->owner_descriptor_file_offsets)) {
+            options, result.moi_register_allocation, plan->owner_descriptor_file_offsets)) {
       return std::nullopt;
     }
     std::vector<std::string> ignored_errors;
@@ -338,7 +339,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       std::ranges::count_if(candidates, uses_branch_only_scalar_spill);
   const auto resource_plan_uses_branch_only_scalar_spill = [&](const auto &plan) {
     return !plan.owner_descriptor_file_offsets.empty() &&
-           moi_transient_sgpr_assignment_is_branch_only(options,
+           moi_transient_sgpr_assignment_is_branch_only(result.moi_register_allocation,
                                                         plan.owner_descriptor_file_offsets);
   };
   const size_t branch_only_barrier_count =
@@ -551,7 +552,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common transient SGPR assignment");
@@ -605,7 +606,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           private_layout->record_replay_workgroup_offsets;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
-        options, resources->owner_descriptor_file_offsets);
+        result.moi_register_allocation, resources->owner_descriptor_file_offsets);
     if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
                                                         resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -736,7 +737,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (branch_only_scalar_spill) {
         const bool assignment_supports_borrowed_entry =
             moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-                options, resources->owner_descriptor_file_offsets);
+                options, result.moi_register_allocation, resources->owner_descriptor_file_offsets);
         std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry_prototype;
         if (assignment_supports_borrowed_entry && !original_text.empty()) {
           std::vector<uint32_t> displaced_words =
@@ -1157,7 +1158,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     candidate_options.moi_record_replay_workgroup_private_offsets =
         planned_patch.private_workgroup_offsets;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     if (!apply_record_replay_entry_workgroup_assignment(
@@ -1215,7 +1216,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         continue;
       ConSanOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              group_options, group.front()->resources.owner_descriptor_file_offsets) ||
+              group_options, result.moi_register_allocation,
+              group.front()->resources.owner_descriptor_file_offsets) ||
           !group_options.moi_exec_save_sgpr)
         continue;
       if (!emit_moi_dense_access_group(std::span<const PlannedAccessRecordPatch *const>(group),
@@ -1233,7 +1235,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+              candidate_options, result.moi_register_allocation,
+              planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
           !candidate_options.moi_exec_save_sgpr) {
@@ -1551,7 +1554,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       ConSanOptions group_options = options;
       if (group.empty() ||
           !apply_moi_transient_sgpr_assignment(
-              group_options, group.front()->resources.owner_descriptor_file_offsets) ||
+              group_options, result.moi_register_allocation,
+              group.front()->resources.owner_descriptor_file_offsets) ||
           !group_options.moi_exec_save_sgpr) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe lost its dense-host transient SGPR assignment");
@@ -1599,7 +1603,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+                    candidate_options, result.moi_register_allocation,
+                    planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};

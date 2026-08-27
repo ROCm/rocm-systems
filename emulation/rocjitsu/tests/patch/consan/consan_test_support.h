@@ -52,10 +52,11 @@ namespace rocjitsu {
 
 /// Explicitly test-only access to compatibility-lowering working state. No
 /// production header declares this symbol.
-[[nodiscard]] ConSanTransformArtifacts
-complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-                         const ConSanPreappliedMutationLayout &preapplied_mutation = {});
+[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+    const ConSanPreappliedMutationLayout &preapplied_mutation = {},
+    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {});
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
@@ -70,6 +71,19 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOption
     std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
     const ConSanPreappliedMutationLayout &preapplied_mutation) {
   return complete_consan_lowering(code_object_bytes, options, nullptr, preapplied_mutation);
+}
+
+/// Lower one focused fixture from an explicitly selected owner-local transient
+/// scalar assignment. Normal production lowering discovers these assignments
+/// from liveness and descriptor facts; this helper exists only for mechanism
+/// tests that need to exercise a downstream owner-local ABI without reproducing
+/// the upstream placement search.
+[[nodiscard]] inline ConSanTransformArtifacts
+test_lower_consan_with_owner_transient_sgpr_assignment(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    const ConSanMoiTransientSgprAssignment &assignment) {
+  return complete_consan_lowering(code_object_bytes, options, nullptr, {},
+                                  std::span{&assignment, 1u});
 }
 
 /// Request the complete dry-run synchronization and fault-site inventory used

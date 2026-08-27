@@ -701,8 +701,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
   // of rebuilding the full instruction graph for every option refinement.
-  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
-                                                   result);
+  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, result);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   effective_options.moi_dynamic_stack_spill =
       moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
@@ -725,6 +724,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   const ConSanOptions exec_planning_base = effective_options;
+  const std::vector<ConSanMoiTransientSgprAssignment> exec_planning_base_assignments =
+      result.moi_register_allocation.owner_transient_sgprs;
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, result, resource_planning_state, moi_candidates);
@@ -735,6 +736,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // stack registers, scalar width, and any architecture-specific scratch
     // demand participate in the same resource proof.
     effective_options = exec_planning_base;
+    result.moi_register_allocation.owner_transient_sgprs = exec_planning_base_assignments;
     effective_options.moi_dynamic_stack_spill = true;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);

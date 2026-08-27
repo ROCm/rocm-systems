@@ -21,13 +21,14 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
 /// assignment disappeared and callers must abort rather than emit with a
 /// different register interpretation.
 [[nodiscard]] bool bind_moi_record_event_options(ConSanOptions &event_options,
+                                                 const ConSanMoiRegisterAllocation &allocation,
                                                  const MoiPlannedRecordEvent &event) {
   event_options.scratch_vgpr = event.resources.base;
   if (event.private_layout) {
     event_options.moi_record_replay_workgroup_private_offsets =
         event.private_layout->record_replay_workgroup_offsets;
   }
-  return apply_moi_transient_sgpr_assignment(event_options,
+  return apply_moi_transient_sgpr_assignment(event_options, allocation,
                                              event.resources.owner_descriptor_file_offsets) &&
          apply_record_replay_entry_workgroup_assignment(
              event_options, event.resources.owner_descriptor_file_offsets);
@@ -50,7 +51,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
                       std::optional<uint32_t> active_private_segment_size = std::nullopt) {
   ConSanOptions event_options = options;
   event_options.scratch_vgpr = resources.base;
-  if (!apply_moi_transient_sgpr_assignment(event_options,
+  if (!apply_moi_transient_sgpr_assignment(event_options, result.moi_register_allocation,
                                            resources.owner_descriptor_file_offsets)) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " found no common transient SGPR assignment");

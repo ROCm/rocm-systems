@@ -930,24 +930,26 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   options.moi_inline_call_return_sgpr = kIndirectPcSgpr;
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_inline_sgpr_spill = true;
-  options.moi_transient_sgpr_assignments.push_back(
-      {.descriptor_file_offset = original.kernels().front().descriptor_file_offset,
-       .exec_save_sgpr = 4u,
-       .owner_sgpr = std::nullopt,
-       .dispatch_id_sgpr = std::nullopt,
-       .spill_backed = true,
-       .indirect_pc_sgpr = kIndirectPcSgpr,
-       .indirect_scc_sgpr = kKeyAndSccSgpr,
-       .dispatch_key_sgpr = kKeyAndSccSgpr,
-       .call_return_sgpr = kIndirectPcSgpr,
-       .visible_evidence_sgpr = std::nullopt,
-       .branch_only_scalar_spill = false,
-       .dynamic_stack_borrowed_sgpr = std::nullopt});
+  const ConSanMoiTransientSgprAssignment seed_assignment{
+      .descriptor_file_offset = original.kernels().front().descriptor_file_offset,
+      .exec_save_sgpr = 4u,
+      .owner_sgpr = std::nullopt,
+      .dispatch_id_sgpr = std::nullopt,
+      .spill_backed = true,
+      .indirect_pc_sgpr = kIndirectPcSgpr,
+      .indirect_scc_sgpr = kKeyAndSccSgpr,
+      .dispatch_key_sgpr = kKeyAndSccSgpr,
+      .call_return_sgpr = kIndirectPcSgpr,
+      .visible_evidence_sgpr = std::nullopt,
+      .branch_only_scalar_spill = false,
+      .dynamic_stack_borrowed_sgpr = std::nullopt,
+  };
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan_with_owner_transient_sgpr_assignment(bytes, options, seed_assignment);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);

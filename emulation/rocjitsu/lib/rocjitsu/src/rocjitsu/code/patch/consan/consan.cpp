@@ -376,18 +376,19 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
   }
 }
 
-ConSanTransformArtifacts
-complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-                         const ConSanPreappliedMutationLayout &preapplied_mutation = {}) {
+ConSanTransformArtifacts complete_consan_lowering(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+    const ConSanPreappliedMutationLayout &preapplied_mutation = {},
+    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
     ConSanOptions effective_options = options;
-    ConSanTransformArtifacts result =
-        try_patch_consan_impl(code_object_bytes, effective_options, {}, std::nullopt,
-                              inspected_perturbation, preapplied_mutation);
+    ConSanTransformArtifacts result = try_patch_consan_impl(
+        code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation,
+        preapplied_mutation, initial_owner_transient_sgprs);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
     result = finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, inspected_perturbation);

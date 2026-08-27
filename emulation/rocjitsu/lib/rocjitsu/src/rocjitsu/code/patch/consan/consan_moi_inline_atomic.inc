@@ -80,7 +80,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
-  MoiResourcePlanningState resource_state(bytes, arch, options, result);
+  MoiResourcePlanningState resource_state(bytes, arch, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -183,7 +183,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch found no common transient SGPR assignment");
@@ -253,7 +253,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its planned transient SGPR assignment");
@@ -389,7 +389,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         std::ranges::sort(group_owners);
         group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
         ConSanOptions group_options = options;
-        if (!apply_moi_transient_sgpr_assignment(group_options, group_owners)) {
+        if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+                                                 group_owners)) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay owners have no common scalar assignment");
           continue;
@@ -716,7 +717,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its transient SGPR assignment");
