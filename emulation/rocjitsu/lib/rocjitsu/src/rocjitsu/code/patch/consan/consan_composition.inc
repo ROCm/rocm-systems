@@ -780,9 +780,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     publish_access_inventory();
     return result;
   }
-  prune_unreachable_inferred_ranges(*code_object, *decoder, arch, options,
-                                    inventory_builder.kernels(), inventory_builder.functions());
   publish_access_inventory();
+  prune_unreachable_inferred_ranges(*code_object, *decoder, arch, options,
+                                    inventory_builder.kernels(), inventory_builder.functions(),
+                                    inventory_builder.access_sites());
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
                                         options.fault_dry_run || has_fault || has_perturbation ||
                                         options.abort_unmatched_barrier_wait ||

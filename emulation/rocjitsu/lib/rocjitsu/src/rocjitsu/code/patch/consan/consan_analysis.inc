@@ -2642,8 +2642,6 @@ void prune_inferred_range_sites(Container &container, const BlockOffsetIndex &bl
     const BasicBlock *block = block_for_offset(block_index, site.text_offset);
     return block == nullptr || !owned_blocks.contains(block);
   };
-  std::erase_if(container.lds_sites, is_unowned);
-  std::erase_if(container.flat_sites, is_unowned);
   std::erase_if(container.ordinary_memory_sites, is_unowned);
   std::erase_if(container.barrier_sites, is_unowned);
   std::erase_if(container.fence_sites, is_unowned);
@@ -2660,7 +2658,8 @@ void prune_inferred_range_sites(Container &container, const BlockOffsetIndex &bl
 void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                        rj_code_arch_t arch, const ConSanOptions &options,
                                        std::span<ConSanKernelInfo> kernels,
-                                       std::span<ConSanFunctionInfo> functions) {
+                                       std::span<ConSanFunctionInfo> functions,
+                                       std::vector<ConSanAccessInventorySite> &accesses) {
   const bool needs_pruning =
       std::ranges::any_of(kernels, &ConSanKernelInfo::code_size_inferred_from_zero) ||
       std::ranges::any_of(functions, &ConSanFunctionInfo::code_size_inferred_from_zero);
@@ -2734,6 +2733,13 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
     prune_inferred_range_sites(kernel, block_index, owned_blocks);
   for (ConSanFunctionInfo &function : functions)
     prune_inferred_range_sites(function, block_index, owned_blocks);
+  std::erase_if(accesses, [&](const ConSanAccessInventorySite &access) {
+    if (!access.container.code_size_inferred_from_zero)
+      return false;
+    const BasicBlock *block =
+        block_for_offset(block_index, access.physical_id.original_text_offset);
+    return block == nullptr || !owned_blocks.contains(block);
+  });
 }
 
 [[nodiscard]] PointerComponentHint merge_call_entry_component(PointerComponentHint lhs,

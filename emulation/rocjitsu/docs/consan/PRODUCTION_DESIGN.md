@@ -4342,6 +4342,37 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AN: prune inferred ranges in normalized inventory
+
+- **One pruning authority for accesses:** The zero-sized-symbol CFG pass now
+  erases unreachable normalized access records directly. It no longer prunes
+  the prototype LDS and FLAT vectors and relies on a later rebuild to express
+  that decision.
+- **Stable construction order:** Normalization now runs before inferred-range
+  pruning. The pruned vector is the inventory published to policy, ownership,
+  faults, and lowerers; no later access rebuild can restore a rejected tail.
+  Non-access barrier, atomic, fence, and ordinary-memory records remain on
+  their existing container path until their own inventory migrations.
+- **Typed range provenance:** `ConSanProgramContainerRef` explicitly records
+  whether its source symbol range was inferred from a zero size. The inventory
+  value test covers that fact, and the pruning pass no longer reverse-looks up
+  mutable containers to decide applicability.
+- **Contract coverage:** Both final and bounded zero-sized-symbol tests still
+  exclude unreachable Record/Replay accesses, while an explicitly sized
+  unreachable tail remains conservatively inventoried. The focused inventory
+  and inferred-range gate passes all 20 cases.
+- **Temporary size cost and deletion point:** This step adds ten production
+  lines and brings the short legacy-access-removal series to 33 net-added
+  lines. That debt is bounded to the same tranche as Slice 5AM: migrate
+  preapplied-range attribution and decode publication, then delete the legacy
+  LDS/FLAT types, container vectors, and normalization bridge before declaring
+  the tranche complete.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,908 simulator-device tests across the five supported targets pass in 59.38
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
