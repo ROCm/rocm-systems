@@ -359,16 +359,17 @@ ThreadTracerAgent::start_thread_trace_locked()
         return nullptr;
     }
     signal_ptr_t                               producer_signal;
-    std::unique_ptr<hsa::SQTTBufferingPackets> buffer_packet;
+    std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets;
     if(params.num_buffers > 1)
     {
         producer_signal = make_signal(*queue);
         if(!producer_signal) return nullptr;
-        int shader_engine_id = 0;
-        for(uint64_t mask = params.shader_engine_mask; mask > 1; mask >>= 1)
-            ++shader_engine_id;
-        buffer_packet = std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(),
-                                                                    shader_engine_id);
+        for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
+        {
+            if((params.shader_engine_mask >> i) % 2 == 1)
+                buffer_packets.emplace_back(
+                    std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(), i));
+        }
     }
     auto control_packet_copy = get_control(true);
     control_packet_copy->populate_before();
@@ -412,7 +413,7 @@ ThreadTracerAgent::start_thread_trace_locked()
         producer_data.control_packet   = std::move(control_packet_copy);
         producer_data.copy_data_fn     = att_queue_copy;
         producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = std::move(buffer_packet);
+        producer_data.buffer_packets   = std::move(buffer_packets);
         producer_data.restart_trace    = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{trace_resources_mut};
             // Keep marker allocations alive in the producer until the next completed stop.
