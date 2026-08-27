@@ -4180,6 +4180,39 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AI: lower SuperCollider FLAT from normalized inventory
+
+- **No FLAT compatibility record in the engine:** The SuperCollider FLAT
+  lowerer now retains pointers to immutable `ConSanAccessInventorySite`
+  records. Instruction identity, decoded width, provenance, operands,
+  container attribution, and execution owners all come from that one
+  inventory; the lowerer no longer copies, merges, or reads `ConSanFlatSite`
+  values from kernel and function containers.
+- **One alias decision:** Shared policy admits one physical instruction and
+  rejects conflicting aliases. Lowering selects the first deterministic
+  normalized representative by file offset; execution-owner analysis has
+  already attached the complete owner set to every identical alias. A kernel
+  descriptor remains an explicit owner of its own attributed record, and
+  later resource plans can still contribute additional proven owners.
+- **Debug-path convergence:** The destructive direct-FLAT-trap probe now also
+  discovers candidates from normalized inventory. Its legacy support helper
+  is deleted, so no remaining code in the FLAT lowerer reads the legacy FLAT
+  vectors.
+- **Contract coverage:** Focused tests cover subword and wide FLAT operations,
+  strict and likely provenance, scratch overlap and spill selection, shared
+  helper ownership, one physical patch for aliased kernels, inconsistent alias
+  rejection, resource rejection, and the direct-trap debug path. Those tests
+  exercise the normalized record directly; no new compatibility-oriented test
+  was introduced.
+- **Deletion result:** Production source is 13 physical lines smaller. The
+  copied canonical FLAT-site record, duplicate container traversal and owner
+  merge, and legacy direct-trap support helper are gone.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 74.62
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

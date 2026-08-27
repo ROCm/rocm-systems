@@ -2181,15 +2181,6 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
           hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
-[[nodiscard]] bool is_supported_flat_trap_site(const ConSanFlatSite &site,
-                                               ConSanFlatProvenanceMode mode) {
-  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
-    return false;
-  if (site.size != 3u * sizeof(uint32_t))
-    return false;
-  return is_instrumentable_group_flat_hint(site.address_space_hint, mode);
-}
-
 [[nodiscard]] std::optional<uint16_t> flat_dword_count(std::string_view mnemonic,
                                                        uint32_t width_bits) {
   if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
@@ -2201,13 +2192,13 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
-  return flat_dword_count(site.mnemonic, site.width_bits);
+[[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanAccessInventorySite &access) {
+  return flat_dword_count(access.mnemonic, access.decoded_width_bits);
 }
 
-[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanFlatSite &site, rj_code_arch_t arch,
-                                                    uint16_t candidate) {
-  const auto dword_count = flat_dword_count(site);
+[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
+                                                    rj_code_arch_t arch, uint16_t candidate) {
+  const auto dword_count = flat_dword_count(access);
   return !dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch) ||
          candidate % 2u == 0u;
 }
@@ -2247,20 +2238,23 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return is_instrumentable_group_flat_hint(address_space_hint, mode);
 }
 
-[[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanFlatSite &site,
+[[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanAccessInventorySite &access,
                                                       uint16_t candidate, uint16_t required_vgprs) {
-  if (site.addr_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.addr_vgpr, 2))
+  if (access.operands.address_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.address_vgpr, 2))
     return true;
 
-  const uint16_t data_vgprs = flat_dword_count(site).value_or(1);
-  if (site.dst_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.dst_vgpr, data_vgprs))
+  const uint16_t data_vgprs = flat_dword_count(access).value_or(1);
+  if (access.operands.destination_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.destination_vgpr, data_vgprs))
     return true;
-  if (site.data_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *site.data_vgpr, data_vgprs))
+  if (access.operands.data_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.data_vgpr, data_vgprs))
     return true;
   return false;
 }
 
-[[nodiscard]] uint16_t flat_scratch_search_start(const ConSanFlatSite &site) {
+[[nodiscard]] uint16_t flat_scratch_search_start(const ConSanAccessInventorySite &access) {
   std::optional<uint32_t> first_after_operands;
   auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
     if (!base)
@@ -2270,23 +2264,23 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
       first_after_operands = end;
   };
 
-  const uint16_t data_vgprs = flat_dword_count(site).value_or(1);
-  note_range(site.addr_vgpr, 2);
-  note_range(site.dst_vgpr, data_vgprs);
-  note_range(site.data_vgpr, data_vgprs);
+  const uint16_t data_vgprs = flat_dword_count(access).value_or(1);
+  note_range(access.operands.address_vgpr, 2);
+  note_range(access.operands.destination_vgpr, data_vgprs);
+  note_range(access.operands.data_vgpr, data_vgprs);
   if (!first_after_operands)
     return 0;
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_flat_scratch_vgpr(
-    const ConSanFlatSite &site, const ConSanOptions &options, const Instruction *inst,
+    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
     const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        flat_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
-        !is_forbidden_flat_scratch_vgpr_run(site, *options.scratch_vgpr, required_vgprs))
+        flat_scratch_tuple_base_is_valid(access, arch, *options.scratch_vgpr) &&
+        !is_forbidden_flat_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
   }
@@ -2295,7 +2289,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     return std::nullopt;
 
   uint16_t search_start =
-      std::max(flat_scratch_search_start(site), min_auto_scratch_vgpr.value_or(0));
+      std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
   while (search_start < REGISTER_SET_MAX_VGPRS) {
     auto candidate = liveness->find_free_run(inst, required_vgprs, search_start);
     if (!candidate)
@@ -2304,8 +2298,8 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
       return std::nullopt;
     if (candidate_end <= REGISTER_SET_MAX_VGPRS &&
-        flat_scratch_tuple_base_is_valid(site, arch, *candidate) &&
-        !is_forbidden_flat_scratch_vgpr_run(site, *candidate, required_vgprs))
+        flat_scratch_tuple_base_is_valid(access, arch, *candidate) &&
+        !is_forbidden_flat_scratch_vgpr_run(access, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
       return std::nullopt;
@@ -2318,15 +2312,14 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 /// guest access operands. Liveness is intentionally irrelevant here: the
 /// caller saves and restores the complete selected window through private
 /// memory before using it.
-[[nodiscard]] std::optional<uint16_t> choose_flat_spill_scratch_vgpr(const ConSanFlatSite &site,
-                                                                     uint16_t allocation_count,
-                                                                     uint16_t required_vgprs,
-                                                                     rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t>
+choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
+                               uint16_t required_vgprs, rj_code_arch_t arch) {
   for (uint32_t candidate = 0; candidate + required_vgprs <= allocation_count &&
                                candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
        ++candidate) {
-    if (flat_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(candidate)) &&
-        !is_forbidden_flat_scratch_vgpr_run(site, static_cast<uint16_t>(candidate),
+    if (flat_scratch_tuple_base_is_valid(access, arch, static_cast<uint16_t>(candidate)) &&
+        !is_forbidden_flat_scratch_vgpr_run(access, static_cast<uint16_t>(candidate),
                                             required_vgprs)) {
       return static_cast<uint16_t>(candidate);
     }
@@ -2474,11 +2467,12 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
   return words;
 }
 
-[[nodiscard]] std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanFlatSite &site) {
-  if (site.kind == ConSanLdsAccessKind::Read)
-    return site.dst_vgpr;
-  if (site.kind == ConSanLdsAccessKind::Write)
-    return site.data_vgpr;
+[[nodiscard]] std::optional<uint16_t>
+flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access) {
+  if (access.kind == ConSanLdsAccessKind::Read)
+    return access.operands.destination_vgpr;
+  if (access.kind == ConSanLdsAccessKind::Write)
+    return access.operands.data_vgpr;
   return std::nullopt;
 }
 
