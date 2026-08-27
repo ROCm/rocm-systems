@@ -6,12 +6,8 @@
 /// and owner representation, and register-preservation plan. Keeping that
 /// transaction in one type prevents the event-specific planners from
 /// acquiring subtly different rules for the same Record/Replay resources.
-struct MoiPlannedRecordEvent {
-  ResolvedMoiScratchPlan resources;
-  std::optional<VgprSpillSequence> spill;
-  std::optional<SgprSpillSequence> scalar_spill;
+struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   std::optional<MoiPrivateRecordOwnerPlan> private_owner;
-  std::optional<MoiPrivateEpochLayout> private_layout;
 };
 
 /// Bind one planned Record/Replay event to the still-mutable options accepted
@@ -35,30 +31,6 @@ struct MoiPlannedRecordEvent {
                                              event.resources.owner_descriptor_file_offsets) &&
          apply_record_replay_entry_workgroup_assignment(
              event_options, event.resources.owner_descriptor_file_offsets);
-}
-
-/// Accumulate the private-memory descriptor requirement imposed by one
-/// planned Record/Replay event.
-///
-/// VGPR and scalar spills and persistent private identity share one kernel
-/// private segment. Their allocations are already non-overlapping; the
-/// descriptor therefore needs the maximum end offset, not three independent
-/// mutations. Dynamic-stack VGPR spills additionally carry their own loader
-/// requirement through `note_spill_descriptor_requirements`.
-void note_moi_record_event_private_requirements(MoiDescriptorPrivateRequirements &requirements,
-                                                const MoiPlannedRecordEvent &event) {
-  if (event.spill)
-    note_spill_descriptor_requirements(requirements, event.resources, *event.spill);
-  const uint32_t required_private_bytes =
-      std::max(event.scalar_spill ? event.scalar_spill->total_private_bytes : 0u,
-               event.private_layout ? event.private_layout->ephemeral_base : 0u);
-  if (required_private_bytes == 0u)
-    return;
-  for (uint64_t descriptor_offset : event.resources.owner_descriptor_file_offsets) {
-    auto [it, inserted] = requirements.emplace(descriptor_offset, required_private_bytes);
-    if (!inserted)
-      it->second = std::max(it->second, required_private_bytes);
-  }
 }
 
 /// Resolve the resource state shared by Record/Replay synchronization events.
@@ -110,43 +82,20 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     return std::nullopt;
   }
 
-  ResolvedMoiScratchPlan active_resources = resources;
-  if (active_private_segment_size)
-    active_resources.original_private_segment_size = *active_private_segment_size;
   std::optional<MoiPrivateRecordOwnerPlan> private_owner;
   if (moi_record_uses_private_owner(event_options)) {
+    ResolvedMoiScratchPlan owner_resources = resources;
+    if (active_private_segment_size)
+      owner_resources.original_private_segment_size = *active_private_segment_size;
     private_owner =
-        resolve_moi_private_record_owner(bytes, active_resources, *private_layout, result.warnings);
+        resolve_moi_private_record_owner(bytes, owner_resources, *private_layout, result.warnings);
     if (!private_owner)
       return std::nullopt;
   }
-
-  std::optional<uint32_t> private_layout_base;
-  // Keep this as a separate assignment: GCC 13 otherwise diagnoses the
-  // equivalent conditional optional construction as maybe-uninitialized.
-  if (private_layout)
-    private_layout_base = private_layout->ephemeral_base;
-  else if (active_private_segment_size)
-    private_layout_base = active_resources.original_private_segment_size;
-  std::optional<VgprSpillSequence> spill;
-  if (active_resources.source == ConSanRegisterAllocationSource::SpillRequired ||
-      moi_scalar_spill_requires_dynamic_vgpr_frame(result, active_resources, event_options)) {
-    spill = build_moi_spill_sequence(result, active_resources, event_options, spill_managers, arch,
-                                     result.warnings, private_layout_base);
-    if (!spill)
-      return std::nullopt;
-  }
-  std::optional<SgprSpillSequence> scalar_spill;
-  if (event_options.automatic_moi_record_replay_sgpr_spill) {
-    scalar_spill = build_inline_sgpr_spill_sequence(result, active_resources, event_options,
-                                                    spill_managers, arch, result.warnings,
-                                                    private_layout_base, spill ? &*spill : nullptr);
-    if (!scalar_spill)
-      return std::nullopt;
-  }
-  return MoiPlannedRecordEvent{.resources = std::move(active_resources),
-                               .spill = std::move(spill),
-                               .scalar_spill = std::move(scalar_spill),
-                               .private_owner = private_owner,
-                               .private_layout = private_layout};
+  auto probe = plan_moi_probe_resources(
+      result, resources, event_options, spill_managers, arch, std::move(private_layout),
+      event_options.automatic_moi_record_replay_sgpr_spill, active_private_segment_size);
+  if (!probe)
+    return std::nullopt;
+  return MoiPlannedRecordEvent{std::move(*probe), private_owner};
 }

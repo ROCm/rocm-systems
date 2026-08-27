@@ -6074,6 +6074,49 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5CY: share cross-engine probe preservation planning
+
+- **One preservation contract:** `MoiPlannedProbeResources` owns resolved
+  scratch, VGPR/SGPR spill sequences, optional private identity layout, and the
+  final private-segment extent for Record/Replay atomics, barriers, and fences,
+  Sampled atomics and barriers, and Inline Shadow atomics. Engine-local planned
+  types derive from it instead of repeating those fields.
+- **One preservation transaction:** `plan_moi_probe_resources` builds the
+  compatible spill sequences and private extent once. Its scalar-spill input is
+  an explicit caller decision, which preserves the distinct Inline Shadow and
+  Record/Replay/Sampled policies rather than inferring policy from unrelated
+  option flags.
+- **One descriptor rule:** `note_moi_probe_private_requirements` accounts for
+  VGPR spill, SGPR spill, and private identity allocations for all six probe
+  paths. Record/Replay's stronger event plan adds only its private owner load.
+- **Principled exclusion:** The main Inline Shadow access path retains its
+  branch-only dynamic-stack bootstrap. That path has a different spill
+  construction algorithm; routing it through the ordinary helper would add
+  policy switches and weaken the shared contract merely to increase its caller
+  count.
+- **Sharing and target boundary:** The plan and transaction contain no target
+  discriminator or native instruction encoding. Architecture remains an input
+  to the established spill builders, while address semantics, sampling,
+  routing, evidence, and emission stay with their owning engine components.
+- **Test policy:** The new type is a passive stage handoff and the helper
+  centralizes existing behavior without adding a public choice. Existing host
+  tests exercise fixed and dynamic VGPR/SGPR spill, private epoch/owner state,
+  descriptor growth, and alias rejection across all three consumers; paired
+  device tests remain the execution contract. No artificial field-access test
+  is added.
+- **Accounting:** Across the eight affected implementation files, physical
+  lines fall from 11,134 to 11,075, nonblank lines from 10,811 to 10,750, and
+  estimated comment-excluded code lines from 10,451 to 10,376. The slice adds
+  128 and deletes 187 physical implementation lines, a net deletion of 59. No
+  fallback, target branch, public option, or alternate plan representation is
+  added.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  One first-pass gfx1250 simulator case passed immediately alone and the full
+  matrix then passed on a clean rerun. E2E validation remains outside this
+  deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

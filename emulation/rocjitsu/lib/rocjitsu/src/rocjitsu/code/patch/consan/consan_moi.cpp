@@ -456,6 +456,8 @@ private:
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_probe_planning.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

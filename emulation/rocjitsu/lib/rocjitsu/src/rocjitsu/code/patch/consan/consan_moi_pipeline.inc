@@ -154,7 +154,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
     }
-    note_moi_record_event_private_requirements(private_requirements, *record_event);
+    note_moi_probe_private_requirements(private_requirements, *record_event);
     note_descriptor_requirements(descriptor_requirements, record_event->resources);
     note_moi_sgpr_requirements(scalar_requirements, record_event->resources, candidate_options,
                                arch);

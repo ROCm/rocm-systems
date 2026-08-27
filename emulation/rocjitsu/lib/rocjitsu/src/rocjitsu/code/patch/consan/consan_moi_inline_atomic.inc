@@ -73,13 +73,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.errors.emplace_back("ConSan MOI inline atomic patch found no .text section");
     return;
   }
-  struct PlannedInlineAtomic {
+  struct PlannedInlineAtomic : MoiPlannedProbeResources {
     AtomicRecordCandidate candidate;
-    ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<MoiPrivateEpochLayout> private_layout;
     uint32_t relocated_guest_size = 0;
     std::vector<uint32_t> trailing_guest_words;
   };
@@ -219,16 +215,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
       }
     }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-      spill = build_moi_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
-      if (!spill)
-        continue;
-    }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_inline_sgpr_spill) {
       if (!candidate_options.moi_exec_save_sgpr) {
         result.warnings.emplace_back(
@@ -246,17 +232,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             candidate.container_name);
         continue;
       }
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
-          spill ? &*spill : nullptr);
-      if (!scalar_spill)
-        continue;
     }
-    planned_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
-                                  std::move(spill), std::move(scalar_spill),
-                                  std::move(private_layout), relocated_guest_size,
-                                  std::move(trailing_guest_words)});
+    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
+                                          arch, std::move(private_layout),
+                                          candidate_options.automatic_moi_inline_sgpr_spill);
+    if (!probe)
+      continue;
+    planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,
+                                  relocated_guest_size, std::move(trailing_guest_words)});
   }
   // Retain every admitted release even when this code object contains no
   // acquire. Its consumer can live in another large code object, and pruning
@@ -267,25 +250,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   for (const PlannedInlineAtomic &planned : planned_candidates) {
-    if (planned.spill) {
-      note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
-    }
-    if (planned.scalar_spill) {
-      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] = private_requirements.emplace(
-            descriptor_offset, planned.scalar_spill->total_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, planned.scalar_spill->total_private_bytes);
-      }
-    }
-    if (planned.private_layout) {
-      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, planned.private_layout->ephemeral_base);
-        if (!inserted)
-          it->second = std::max(it->second, planned.private_layout->ephemeral_base);
-      }
-    }
+    note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,

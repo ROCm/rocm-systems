@@ -921,13 +921,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  struct Planned {
+  struct Planned : MoiPlannedProbeResources {
     SampledBarrierCandidate candidate;
-    ResolvedMoiScratchPlan resources;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<MoiPrivateEpochLayout> private_layout;
-    uint32_t required_private_bytes = 0;
   };
   std::vector<Planned> selected;
   MoiSpillManagers spill_managers;
@@ -1016,39 +1011,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
     }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-      spill = build_moi_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
-      if (!spill)
-        continue;
-    }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
-          spill ? &*spill : nullptr);
-      if (!scalar_spill)
-        continue;
-    }
-    const uint32_t required_private_bytes =
-        std::max({private_layout ? private_layout->ephemeral_base : 0u,
-                  spill ? spill->total_private_bytes : 0u,
-                  scalar_spill ? scalar_spill->total_private_bytes : 0u});
-    if (required_private_bytes != 0u) {
-      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, required_private_bytes);
-      }
-    }
-    note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back({std::move(candidate), *resources, std::move(spill), std::move(scalar_spill),
-                        std::move(private_layout), required_private_bytes});
+    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
+                                          arch, std::move(private_layout),
+                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+    if (!probe)
+      continue;
+    note_moi_probe_private_requirements(private_requirements, *probe);
+    note_descriptor_requirements(descriptor_requirements, probe->resources);
+    selected.push_back({std::move(*probe), std::move(candidate)});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled barrier sync found no patchable sequence");
@@ -2082,14 +2052,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  struct Planned {
+  struct Planned : MoiPlannedProbeResources {
     Candidate candidate;
-    ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<MoiPrivateEpochLayout> private_layout;
-    uint32_t required_private_bytes = 0;
     uint64_t physical_anchor_offset = 0;
     uint32_t relocated_guest_size = 0;
     std::vector<uint32_t> trailing_guest_words;
@@ -2198,39 +2163,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
     }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-      spill = build_moi_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
-      if (!spill)
-        continue;
-    }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
-          spill ? &*spill : nullptr);
-      if (!scalar_spill)
-        continue;
-    }
-    const uint32_t required_private_bytes =
-        std::max({private_layout ? private_layout->ephemeral_base : 0u,
-                  spill ? spill->total_private_bytes : 0u,
-                  scalar_spill ? scalar_spill->total_private_bytes : 0u});
-    if (required_private_bytes != 0u) {
-      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, required_private_bytes);
-      }
-    }
-    note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back({std::move(candidate), *resources, address_plan, std::move(spill),
-                        std::move(scalar_spill), std::move(private_layout), required_private_bytes,
+    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
+                                          arch, std::move(private_layout),
+                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+    if (!probe)
+      continue;
+    note_moi_probe_private_requirements(private_requirements, *probe);
+    note_descriptor_requirements(descriptor_requirements, probe->resources);
+    selected.push_back({std::move(*probe), std::move(candidate), address_plan,
                         physical_anchor_offset, relocated_guest_size,
                         std::move(trailing_guest_words)});
   }

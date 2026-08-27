@@ -653,16 +653,26 @@ artificial getter tests. Their purpose is to give subsequent resource and
 emission cutovers one shared state boundary while deleting three independently
 evolving field lists.
 
-Record/Replay synchronization events now have the corresponding shared
-resource boundary. `MoiPlannedRecordEvent` is the common
-placement-to-emission state for an atomic, barrier, or fence record: resolved
-scratch, VGPR and SGPR preservation, and optional private epoch/owner state.
-`plan_moi_record_event` performs that resource transaction once after the
-event-specific planner has chosen its site and scratch plan. Atomic address
-classification, barrier routing, fence-sequence identity, and native emission
-remain in their semantic components. Descriptor private-memory requirements
-are accumulated from the common event plan, so the three event kinds cannot
-quietly diverge on spill or persistent-state sizing.
+Probe preservation now has a cross-engine resource boundary.
+`MoiPlannedProbeResources` is the placement-to-emission state shared by
+Record/Replay atomic, barrier, and fence records, Sampled atomic and barrier
+probes, and Inline Shadow atomic probes: resolved scratch, optional VGPR and
+SGPR spill sequences, optional private epoch/owner layout, and the resulting
+private-segment extent. `plan_moi_probe_resources` constructs that state after
+an engine has selected a site and scratch plan. Whether an SGPR spill is needed
+is an explicit engine decision, so sharing preservation does not merge the
+distinct Inline Shadow and Record/Replay/Sampled policies. Site identity,
+address semantics, sampling decisions, routing, evidence indices, and native
+emission are deliberately absent from this resource contract.
+
+`MoiPlannedRecordEvent` extends the common probe resources with the private
+owner load needed only by Record/Replay. `plan_moi_record_event` performs its
+owner-local assignment and private-identity transaction once for atomics,
+barriers, and fences. Atomic address classification, barrier routing, and
+fence-sequence identity remain in their semantic components. All six shared
+probe paths accumulate descriptor private-memory requirements from the common
+resource plan, so they cannot quietly diverge on spill or persistent-state
+sizing.
 
 The native event emitters still accept the mutable compatibility options.
 `bind_moi_record_event_options` is the one explicit boundary that projects a

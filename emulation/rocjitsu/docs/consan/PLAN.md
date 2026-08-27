@@ -482,6 +482,16 @@ deleted. Event admission, address semantics, routing, and emission remain
 separate. The surviving mutable-options binding is named as the next emitter
 compatibility seam rather than duplicated invisibly across each event path.
 
+The preservation portion of that transaction is now shared farther across
+engine boundaries. Record/Replay atomic/barrier/fence, Sampled atomic/barrier,
+and Inline Shadow atomic lowering use one typed probe-resource plan for scratch,
+VGPR/SGPR spill, private identity layout, and descriptor extent. Each caller
+selects its own scalar-spill policy explicitly; evidence semantics, address
+qualification, sampling, routing, and native emission remain engine-owned.
+The main Inline Shadow access path deliberately remains outside this cutover
+because its branch-only dynamic-stack bootstrap is a different preservation
+algorithm, not another textual copy of the ordinary transaction.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

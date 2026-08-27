@@ -2926,7 +2926,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     // reachability rejection from changing an uninstrumented owner.
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
-    note_moi_record_event_private_requirements(private_requirements, planned);
+    note_moi_probe_private_requirements(private_requirements, planned);
     patches.push_back(info);
   }
 
