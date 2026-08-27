@@ -1001,12 +1001,15 @@ TEST_CASE("Unit_HRR_ApiMatrix_ShareableHandle_Direct", "[.][hrr-direct]") {
 
   // dmabuf export of an ordinary allocation: MoRI's RDMA path
   // (src/application/transport/rdma/rdma.cpp:463).
+  // Absent from amdhip.def.in, so HrrTest.exe cannot link it on Windows.
+#ifndef _WIN32
   {
     int range_handle = -1;
     (void)hipMemGetHandleForAddressRange(
         &range_handle, reinterpret_cast<hipDeviceptr_t>(d), kSZ,
         hipMemRangeHandleTypeDmaBufFd, 0);
   }
+#endif
 
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -1115,9 +1118,16 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
   }
 
   // ---- CU-masked streams (RCCL's channel isolation path) -------------------
+  // hipExtStreamGetCUMask rejects a buffer smaller than one bit per CU, so the
+  // word count has to come from the device rather than a constant: a fixed 8
+  // words covers parts up to 256 CUs but not gfx94X's 304, and a rejected call
+  // is never recorded, which drops the API out of the tier's coverage.
   {
+    const uint32_t cu_count =
+        static_cast<uint32_t>(device_attr(hipDeviceAttributeMultiprocessorCount));
+    const uint32_t mask_words = (cu_count + 31) / 32;
     hipStream_t cu_stream = nullptr;
-    std::vector<uint32_t> cu_mask(8, 0xFFFFFFFFu);
+    std::vector<uint32_t> cu_mask(mask_words ? mask_words : 1, 0xFFFFFFFFu);
     if (hipExtStreamCreateWithCUMask(&cu_stream,
                                      static_cast<uint32_t>(cu_mask.size()),
                                      cu_mask.data()) == hipSuccess) {
@@ -1635,7 +1645,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     size_t dynamic_smem = 0;
     (void)hipOccupancyAvailableDynamicSMemPerBlock(
         &dynamic_smem, reinterpret_cast<const void*>(hrr_mtx_fill), 1, 256);
+    // Absent from amdhip.def.in, so HrrTest.exe cannot link it on Windows.
+#ifndef _WIN32
     (void)hipKernelNameRefByPtr(reinterpret_cast<const void*>(hrr_mtx_fill), s);
+#endif
   }
 
   // ---- Module and library loaders in their remaining spellings ------------
@@ -1688,10 +1701,13 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     void* attr_data[] = {&device_ptr, &mem_type};
     (void)hipDrvPointerGetAttributes(2, attrs, attr_data,
                                      reinterpret_cast<hipDeviceptr_t>(d));
+    // Absent from amdhip.def.in, so HrrTest.exe cannot link it on Windows.
+#ifndef _WIN32
     unsigned int sync_memops = 1;
     (void)hipPointerSetAttribute(&sync_memops,
                                  HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS,
                                  reinterpret_cast<hipDeviceptr_t>(d));
+#endif
   }
 
   // ---- Deprecated device-property spellings -------------------------------

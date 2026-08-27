@@ -414,12 +414,17 @@ hrr:
   Unit_HRR_ApiMatrix_T2_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
+  # T3 and T4 declare hipMemGetHandleForAddressRange, hipKernelNameRefByPtr and
+  # hipPointerSetAttribute, which amdhip.def.in does not export; the workloads
+  # compile those calls out on Windows, so the tier coverage floors cannot be met.
   Unit_HRR_ApiMatrix_T3_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
+    disabled: [amd_windows, amd_wsl]
   Unit_HRR_ApiMatrix_T4_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
+    disabled: [amd_windows, amd_wsl]
   Unit_HRR_ApiMatrix_T5_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
