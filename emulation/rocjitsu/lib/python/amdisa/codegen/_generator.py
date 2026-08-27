@@ -5307,10 +5307,6 @@ class CodeGenerator:
               uint32_t hi;
             };
 
-            bool is_general_register(const std::optional<RegisterRef> &reg) {
-              return reg && (reg->cls == RegClass::SGPR || reg->cls == RegClass::VGPR);
-            }
-
             Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
               Operand shifted = operand;
               shifted.encoding_value_ += static_cast<int>(dword_offset);
@@ -5330,13 +5326,15 @@ class CodeGenerator:
 
             PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
                                        uint32_t lane) {
-              if (!is_general_register(operand.to_register_ref())) {
+              // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
+              // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+              const auto reg = operand.to_register_ref();
+              if (reg && reg->cls == RegClass::SGPR) {
                 const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
                 return {value, value};
               }
-
-              const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-              return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+              return {pair.lo, pair.hi};
             }
 
             void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,

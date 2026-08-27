@@ -1262,6 +1262,51 @@ TEST(Gfx1251PackedU64ExecutionTest, PublicVgprVectorExecutesSupportedShiftsAndAc
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 3), kInactiveSeed);
 }
 
+TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinationWrite) {
+  // The currently proven execution range is 0..4. Public LLVM separately shows
+  // that larger values are encodable; until their arithmetic meaning is public,
+  // fail closed without partially committing an earlier active lane.
+  constexpr std::array<uint32_t, 2> words{0xCC7E4004u, 0x1C421908u};
+  constexpr std::array<uint32_t, 4> kUnprovenCounts{5u, 63u, 64u, 101u};
+  constexpr PackedU64Pair kLane0Seed{0x1111222233334444ULL, 0x5555666677778888ULL};
+  constexpr PackedU64Pair kLane1Seed{0x9999aaaabbbbccccULL, 0xddddeeeeffff0000ULL};
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+  ASSERT_NE(decoded, nullptr);
+  ASSERT_NE(decoded->execute, nullptr);
+
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  for (uint32_t case_index = 0; case_index < kUnprovenCounts.size(); ++case_index) {
+    SCOPED_TRACE(kUnprovenCounts[case_index]);
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
+    write_vgpr_packed_u64(*cu, *wf, 8, 1, {5u, 7u});
+    write_vgpr_packed_u32(*cu, *wf, 12, 0, {0u, 4u});
+    const std::array<uint32_t, 2> invalid_shifts =
+        case_index % 2 == 0 ? std::array<uint32_t, 2>{kUnprovenCounts[case_index], 0u}
+                            : std::array<uint32_t, 2>{0u, kUnprovenCounts[case_index]};
+    write_vgpr_packed_u32(*cu, *wf, 12, 1, invalid_shifts);
+    write_vgpr_packed_u64(*cu, *wf, 16, 0, {11u, 13u});
+    write_vgpr_packed_u64(*cu, *wf, 16, 1, {17u, 19u});
+    write_vgpr_packed_u64(*cu, *wf, 4, 0, kLane0Seed);
+    write_vgpr_packed_u64(*cu, *wf, 4, 1, kLane1Seed);
+
+    cu->execute_instruction(decoded.get(), *wf);
+
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kLane0Seed);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 1), kLane1Seed);
+  }
+}
+
 TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   struct SourceFormCase {
     std::string_view name;
@@ -1274,8 +1319,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   // arithmetic coverage; the exact vector remains decode-only above.
   constexpr std::array kCases{
       SourceFormCase{"vgpr-vgpr-vgpr", {0xCC7E4004u, 0x1C421908u, 0u}, {39u, 59u}},
-      SourceFormCase{"sgpr-sgpr-vgpr", {0xCC7E4004u, 0x1C401808u, 0u}, {17u, 31u}},
-      SourceFormCase{"vgpr-sgpr-vgpr", {0xCC7E4004u, 0x1C401908u, 0u}, {11u, 23u}},
+      SourceFormCase{"sgpr-sgpr-vgpr", {0xCC7E4004u, 0x1C401808u, 0u}, {17u, 21u}},
+      SourceFormCase{"vgpr-sgpr-vgpr", {0xCC7E4004u, 0x1C401908u, 0u}, {11u, 17u}},
       SourceFormCase{"sgpr-vgpr-vgpr", {0xCC7E4004u, 0x1C421808u, 0u}, {87u, 91u}},
       SourceFormCase{"vgpr-null-vgpr", {0xCC7E4004u, 0x1C40F908u, 0u}, {9u, 14u}},
       SourceFormCase{"vgpr-inline-vgpr", {0xCC7E4004u, 0x1C410308u, 0u}, {11u, 17u}},
@@ -1321,6 +1366,48 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
     ASSERT_NE(decoded->execute, nullptr);
     cu->execute_instruction(decoded.get(), *wf);
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+  }
+}
+
+TEST(Gfx1251PackedU64ExecutionTest, SplitsVccAndExecShiftSourcesIntoLowAndHighDwords) {
+  struct SpecialSourceCase {
+    std::string_view name;
+    std::array<uint32_t, 2> words;
+    bool use_exec;
+  };
+  // Public LLVM MC accepts both special-register forms for gfx1251:
+  //   v_pk_lshl_add_u64 v[4:7], v[8:11], vcc,  v[16:19]
+  //   v_pk_lshl_add_u64 v[4:7], v[8:11], exec, v[16:19]
+  constexpr std::array kCases{
+      SpecialSourceCase{"vcc", {0xCC7E4004u, 0x1C40D508u}, false},
+      SpecialSourceCase{"exec", {0xCC7E4004u, 0x1C40FD08u}, true},
+  };
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  for (const auto &test_case : kCases) {
+    SCOPED_TRACE(test_case.name);
+    wf->set_exec_raw(1u);
+    wf->set_vcc_raw(0u);
+    if (test_case.use_exec)
+      wf->set_exec_raw(0x0000000200000001ULL);
+    else
+      wf->set_vcc_raw(0x0000000200000001ULL);
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
+    write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
+    write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
+
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{11u, 23u}));
   }
 }
 

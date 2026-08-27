@@ -46,10 +46,6 @@ struct PkU32Pair {
   uint32_t hi;
 };
 
-bool is_general_register(const std::optional<RegisterRef> &reg) {
-  return reg && (reg->cls == RegClass::SGPR || reg->cls == RegClass::VGPR);
-}
-
 Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
   Operand shifted = operand;
   shifted.encoding_value_ += static_cast<int>(dword_offset);
@@ -67,13 +63,15 @@ PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, 
 }
 
 PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  if (!is_general_register(operand.to_register_ref())) {
+  // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
+  // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+  const auto reg = operand.to_register_ref();
+  if (reg && reg->cls == RegClass::SGPR) {
     const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
     return {value, value};
   }
-
-  const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-  return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+  return {pair.lo, pair.hi};
 }
 
 void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
@@ -2995,19 +2993,28 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 
 void VPkLshlAddU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
+  std::array<PkU64Pair, 64> results{};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     const auto values = read_pk_u64_pair(src0, wf, lane);
     const auto shifts = read_pk_u32_pair(src1, wf, lane);
     const auto addends = read_pk_u64_pair(src2, wf, lane);
-    // Public semantics cover shift counts 0..4. The masked helper only avoids host undefined
-    // behavior for unsupported values.
+    if (shifts.lo > 4u || shifts.hi > 4u) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+      return;
+    }
     const uint64_t result_lo =
         amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;
     const uint64_t result_hi =
         amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;
-    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+    results[lane] = {result_lo, result_hi};
+  }
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    write_pk_u64_pair(vdst, wf, lane, results[lane]);
   }
 }
 

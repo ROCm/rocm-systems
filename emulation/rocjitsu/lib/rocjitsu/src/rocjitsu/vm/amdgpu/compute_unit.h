@@ -1328,6 +1328,7 @@ protected:
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
   void execute_instruction(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
     inst->execute(*inst, &wf);
   }
 

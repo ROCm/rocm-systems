@@ -5120,7 +5120,13 @@ def test_cdna5_model_only_variant_instructions_have_no_execution_callbacks(
     )[0]
     assert 'const auto reg = operand.to_register_ref();' in u64_read_helper
     assert 'if (!reg || reg->cls != RegClass::VGPR)' in u64_read_helper
-    assert 'is_general_register' not in u64_read_helper
+    u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
+    assert 'if (reg && reg->cls == RegClass::SGPR)' in u32_read_helper
+    assert 'read_lane(operand, lane)' in u32_read_helper
+    assert 'read_lane_pair32(operand, lane)' in u32_read_helper
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

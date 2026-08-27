@@ -884,6 +884,15 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   execute_instruction(inst, *active);
 
+  if (active->instruction_execution_failed()) {
+    util::Logger::warn("CU ", this->name(), ": wf", active->wf_id(),
+                       " halted after unsupported operand value in ", inst->mnemonic(), " at pc=0x",
+                       std::hex, active->pc);
+    active->halt(Wavefront::CpCompletionNotice::Suppress);
+    delete inst;
+    return;
+  }
+
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
   // pc, and allocations are now zeroed, so the after-execute hook, result logging,
