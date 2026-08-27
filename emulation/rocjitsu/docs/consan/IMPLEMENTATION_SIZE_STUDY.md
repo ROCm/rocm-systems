@@ -429,6 +429,56 @@ no longer stored in `ConSanOptions`, each accepted patch refers to one
 authoritative allocation/resource result, placement no longer makes direct
 product selections, and the old parallel state and retry protocols are absent.
 
+#### Stage 2 exit evidence
+
+Stage 2 is complete. `ConSanOptions` now contains only caller-owned contracts;
+explicit register inputs have `requested_*` names and seed, but never alias,
+the selected registers in a lowering attempt. Both an in-progress attempt and
+the published result use the same complete `ConSanMoiOperatingPoint`. That type
+owns code-object-wide choices and owner-local transient and persistent
+assignments. Fallback checkpoints copy and restore the complete value, and
+resource analysis holds a reference to that same attempt instead of a parallel
+result-side allocation.
+
+Admission is the typed `ConSanObservationPlan` produced before lowering.
+Resource derivation returns a private `ConSanMoiResourcePlanningResult`
+containing the complete plan set and any structural diagnostics; the caller
+publishes both together. A typed unsupported site is therefore distinct from a
+failed planning transaction. Sampled, InlineShadow, and Record/Replay all use
+these contracts. The removed compatibility state includes
+`ConSanMoiResolvedState`, `ConSanMoiTransientSgprState`, the duplicated default
+transient bundle, partial owner-vector rollback, and caller/selection register
+name aliasing.
+
+Placement has no runtime `ROCJITSU_CODE_ARCH_*` comparison or product switch.
+Its remaining family vocabulary is expressed through target-profile facts,
+named encoding/ABI predicates, native mechanics, comments, and compile-time
+profile assertions. Its comment-excluded direct target-reference lines fell
+from 191 to 95. No planning-output field remains in `ConSanOptions`.
+`MoiOptions` remains a 243-reference transitional aggregate of immutable input
+plus the operating point; Stage 3 deletes that broad emitter interface one
+semantic operation at a time.
+
+At this exit, the measured implementation has 94,055 physical lines, 89,801
+nonblank lines, and 83,441 comment-excluded code lines in the same 79 files.
+That is 39 code lines above the 83,402-line Stage 0 snapshot, while
+`consan_moi_placement.inc` fell from 6,212 to 6,184 code lines. Since the Stage
+1 foundation, production changes added 701 and deleted 637 physical lines.
+The temporary net-positive total is the cost of the now-enforced typed
+boundaries; its immediate payback is Stage 3's removal of broad `MoiOptions`
+emitter plumbing and repeated target/mechanism decisions. Under the lexical
+architecture classifier, 35 files/61,579 lines retain explicit product or
+family vocabulary, 24 files/19,594 lines consume abstract target vocabulary,
+and 20 files/2,268 lines contain neither.
+
+The fast shared-MOI/input-contract gate passed 846/846. The complete
+non-physical gate passed 4,654/4,654 in 209.55 seconds wall time. The full run
+exercised all 593 physical-gfx950 tests: 592 passed, while
+`SampledModuleLifecycle.Correct` had one output-free 60-second timeout and then
+passed alone in 0.16 seconds. Thus every one of the 5,247 checked-in ConSan
+tests passed at this Stage 2 revision; the isolated timeout is recorded rather
+than misclassified as a semantic failure.
+
 ### Stage 3: separate semantic emission requests from target emission
 
 Common emission and prologue mechanics account for 6,185 lines. They are the
