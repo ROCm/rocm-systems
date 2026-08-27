@@ -149,6 +149,40 @@ moi_guest_access_relocation_requires_adjusted_address(const ConSanMoiCandidate &
 build_moi_relocated_guest_access_words(const MoiGuestAccessRelocationRequest &request,
                                        std::vector<std::string> &errors);
 
+/// Selected scalar-register plan for preserving the guest's VCC and SCC
+/// across one injected operation sequence.
+///
+/// `vcc_save_sgpr` is the first register of an aligned scalar pair that holds
+/// the complete guest VCC value. `scc_save_sgpr` holds zero or one, produced by
+/// materializing the incoming SCC predicate. The two roles are intentionally
+/// named rather than represented as offsets from a broad EXEC-save window:
+/// placement may choose different layouts for Record/Replay, Sampled, and
+/// InlineShadow, while the target preservation operation is identical.
+struct MoiSpecialStateSgprs {
+  uint16_t vcc_save_sgpr = 0;
+  uint16_t scc_save_sgpr = 0;
+
+  bool operator==(const MoiSpecialStateSgprs &) const = default;
+};
+
+/// Append a transactional snapshot of guest SCC followed by guest VCC.
+///
+/// SCC is captured first because every later scalar instruction is permitted
+/// to overwrite it. Invalid register assignments or unsupported target
+/// encodings return false without appending either instruction.
+[[nodiscard]] bool append_save_moi_special_state(std::vector<uint32_t> &words,
+                                                 const MoiSpecialStateSgprs &registers,
+                                                 const ConSanTargetProfile &target);
+
+/// Append a transactional restoration of guest VCC followed by guest SCC.
+///
+/// SCC restoration is deliberately last so no injected scalar comparison can
+/// overwrite the value that the displaced guest instruction observes.
+/// Invalid assignments return false without changing `words`.
+[[nodiscard]] bool append_restore_moi_special_state(std::vector<uint32_t> &words,
+                                                    const MoiSpecialStateSgprs &registers,
+                                                    const ConSanTargetProfile &target);
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by

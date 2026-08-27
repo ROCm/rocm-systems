@@ -78,6 +78,58 @@ TEST(ConSanMoi, ResidentWaveOwnerTargetOperationRejectsWithoutPartialOutput) {
   EXPECT_EQ(invalid_target_words, prefix);
 }
 
+TEST(ConSanMoi, SpecialStatePreservationTargetOperationCoversEveryProfile) {
+  const consan_detail::MoiSpecialStateSgprs registers{
+      .vcc_save_sgpr = 20u,
+      .scc_save_sgpr = 24u,
+  };
+  EXPECT_EQ(registers, (consan_detail::MoiSpecialStateSgprs{
+                           .vcc_save_sgpr = 20u,
+                           .scc_save_sgpr = 24u,
+                       }));
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const auto save_scc =
+        instrumentation::build_s_cselect_b32(registers.scc_save_sgpr, scalar_positive_inline_u32(1),
+                                             scalar_positive_inline_u32(0), target.arch);
+    const auto save_vcc = instrumentation::build_s_mov_b64(
+        registers.vcc_save_sgpr, scalar_operand_vcc_lo(target.arch), target.arch);
+    const auto restore_vcc = instrumentation::build_s_mov_b64(scalar_operand_vcc_lo(target.arch),
+                                                              registers.vcc_save_sgpr, target.arch);
+    const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+        registers.scc_save_sgpr, scalar_positive_inline_u32(0), target.arch);
+    ASSERT_TRUE(save_scc);
+    ASSERT_TRUE(save_vcc);
+    ASSERT_TRUE(restore_vcc);
+    ASSERT_TRUE(restore_scc);
+
+    std::vector<uint32_t> words;
+    ASSERT_TRUE(consan_detail::append_save_moi_special_state(words, registers, target));
+    EXPECT_EQ(words, (std::vector<uint32_t>{*save_scc, *save_vcc}));
+    words.clear();
+    ASSERT_TRUE(consan_detail::append_restore_moi_special_state(words, registers, target));
+    EXPECT_EQ(words, (std::vector<uint32_t>{*restore_vcc, *restore_scc}));
+  }
+}
+
+TEST(ConSanMoi, SpecialStatePreservationRejectsWithoutPartialOutput) {
+  ASSERT_FALSE(kConSanTargetProfiles.empty());
+  const ConSanTargetProfile &target = kConSanTargetProfiles.front();
+  const std::vector<uint32_t> prefix = {0x12345678u};
+
+  std::vector<uint32_t> save_words = prefix;
+  EXPECT_FALSE(consan_detail::append_save_moi_special_state(
+      save_words, {.vcc_save_sgpr = std::numeric_limits<uint16_t>::max(), .scc_save_sgpr = 24u},
+      target));
+  EXPECT_EQ(save_words, prefix);
+
+  std::vector<uint32_t> restore_words = prefix;
+  EXPECT_FALSE(consan_detail::append_restore_moi_special_state(
+      restore_words, {.vcc_save_sgpr = 20u, .scc_save_sgpr = std::numeric_limits<uint16_t>::max()},
+      target));
+  EXPECT_EQ(restore_words, prefix);
+}
+
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {
   return base < static_cast<uint32_t>(other_base) + other_width &&

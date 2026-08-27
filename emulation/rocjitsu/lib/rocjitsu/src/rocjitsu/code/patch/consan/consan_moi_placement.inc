@@ -4100,13 +4100,6 @@ moi_has_probe_entry_runtime_workgroup_gate(const MoiOptions &options,
   return moi_runtime_workgroup_selection_source(options, arch).has_value() || register_backed_tuple;
 }
 
-struct MoiSpecialStateSgprs {
-  uint16_t vcc_save_sgpr = 0;
-  // For Sampled this is entry-boundary SCC scratch that aliases the
-  // publication EXEC-save pair. It is not the post-body guest SCC snapshot.
-  uint16_t scc_save_sgpr = 0;
-};
-
 struct MoiSampledPublicationStateSgprs {
   uint16_t original_exec_save_sgpr = 0;
   uint16_t selection_vcc_save_sgpr = 0;
@@ -4201,36 +4194,18 @@ moi_indirect_jump_sgprs(const MoiOptions &options) {
 [[nodiscard]] bool append_save_moi_special_state(std::vector<uint32_t> &words,
                                                  const MoiOptions &options, rj_code_arch_t arch) {
   const auto registers = moi_special_state_sgprs(options);
-  if (!registers)
-    return false;
-  const auto save_scc = instrumentation::build_s_cselect_b32(
-      registers->scc_save_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto save_vcc =
-      instrumentation::build_s_mov_b64(registers->vcc_save_sgpr, kRdna4VccLo, arch);
-  if (!save_scc || !save_vcc)
-    return false;
-  // Snapshot SCC before any instrumentation instruction can modify it.
-  words.push_back(*save_scc);
-  words.push_back(*save_vcc);
-  return true;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return registers && target &&
+         consan_detail::append_save_moi_special_state(words, *registers, *target);
 }
 
 [[nodiscard]] bool append_restore_moi_special_state(std::vector<uint32_t> &words,
                                                     const MoiOptions &options,
                                                     rj_code_arch_t arch) {
   const auto registers = moi_special_state_sgprs(options);
-  if (!registers)
-    return false;
-  const auto restore_vcc =
-      instrumentation::build_s_mov_b64(kRdna4VccLo, registers->vcc_save_sgpr, arch);
-  const auto restore_scc = instrumentation::build_s_cmp_lg_u32(registers->scc_save_sgpr,
-                                                               scalar_positive_inline_u32(0), arch);
-  if (!restore_vcc || !restore_scc)
-    return false;
-  words.push_back(*restore_vcc);
-  // Keep this last: every scalar comparison or saveexec before it may write SCC.
-  words.push_back(*restore_scc);
-  return true;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return registers && target &&
+         consan_detail::append_restore_moi_special_state(words, *registers, *target);
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(

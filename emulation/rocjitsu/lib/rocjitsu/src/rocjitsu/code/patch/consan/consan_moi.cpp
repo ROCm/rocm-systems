@@ -184,6 +184,35 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
   return words;
 }
 
+bool consan_detail::append_save_moi_special_state(std::vector<uint32_t> &words,
+                                                  const MoiSpecialStateSgprs &registers,
+                                                  const ConSanTargetProfile &target) {
+  const auto save_scc =
+      instrumentation::build_s_cselect_b32(registers.scc_save_sgpr, scalar_positive_inline_u32(1),
+                                           scalar_positive_inline_u32(0), target.arch);
+  const auto save_vcc = instrumentation::build_s_mov_b64(
+      registers.vcc_save_sgpr, scalar_operand_vcc_lo(target.arch), target.arch);
+  if (!save_scc || !save_vcc)
+    return false;
+  words.push_back(*save_scc);
+  words.push_back(*save_vcc);
+  return true;
+}
+
+bool consan_detail::append_restore_moi_special_state(std::vector<uint32_t> &words,
+                                                     const MoiSpecialStateSgprs &registers,
+                                                     const ConSanTargetProfile &target) {
+  const auto restore_vcc = instrumentation::build_s_mov_b64(scalar_operand_vcc_lo(target.arch),
+                                                            registers.vcc_save_sgpr, target.arch);
+  const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+      registers.scc_save_sgpr, scalar_positive_inline_u32(0), target.arch);
+  if (!restore_vcc || !restore_scc)
+    return false;
+  words.push_back(*restore_vcc);
+  words.push_back(*restore_scc);
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   uint64_t field_address, uint32_t stride_bytes,
                                                   uint16_t address_vgpr, uint16_t slot_vgpr,
@@ -282,6 +311,7 @@ using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::is_single_range_native_lds_mnemonic;
 using consan_detail::is_supported_moi_flat_access_mnemonic;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
+using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::two_address_native_lds_offset_scale;
 
 [[nodiscard]] std::optional<uint16_t>
