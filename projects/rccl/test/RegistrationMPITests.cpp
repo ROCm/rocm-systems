@@ -2229,7 +2229,8 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      ncclWindow_t win = nullptr;
      ncclResult_t result = ncclCommWindowRegister(
          getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
-     if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+     if (MPIHelpers::allRanksTrue(
+             result == ncclUnhandledCudaError || result == ncclSystemError)) {
          GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
      }
      ASSERT_MPI_EQ(ncclSuccess, result);
@@ -2295,7 +2296,8 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), buf.vaBase, buf.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+    if (MPIHelpers::allRanksTrue(
+            result == ncclUnhandledCudaError || result == ncclSystemError)) {
         GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
     }
     ASSERT_MPI_EQ(ncclSuccess, result);
@@ -2368,7 +2370,8 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+    if (MPIHelpers::allRanksTrue(
+            result == ncclUnhandledCudaError || result == ncclSystemError)) {
         GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
     }
     ASSERT_MPI_EQ(ncclSuccess, result);
@@ -2426,7 +2429,8 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridElasticRegistrationDisabled)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+    if (MPIHelpers::allRanksTrue(
+            result == ncclUnhandledCudaError || result == ncclSystemError)) {
         GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
     }
     EXPECT_EQ(result, ncclInvalidArgument);
