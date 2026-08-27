@@ -83,22 +83,26 @@ ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
     return ncclInvalidArgument;
   }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)calloc(1, sizeof(struct ncclIbMrHandle));
-  if (mhandleWrapper == nullptr) {
-    WARN("Failed to allocate IB MR handle wrapper");
-    return ncclSystemError;
-  }
+  struct ncclIbMrHandle* mhandleWrapper = NULL;
+  int registered = 0;
+  *mhandle = NULL;
+  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
   mhandleWrapper->nSegments = 1;
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
     NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i),
                   ret, fail);
+    registered++;
   }
   *mhandle = (void*)mhandleWrapper;
 exit:
   return ret;
 fail:
+  for (int i = 0; i < registered; i++) {
+    struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
+    (void)IbCastDeregMrInternal(devComm, mhandleWrapper->mrs[i]);
+  }
   free(mhandleWrapper);
   goto exit;
 }
