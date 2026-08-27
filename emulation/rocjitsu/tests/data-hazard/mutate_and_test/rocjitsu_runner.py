@@ -72,6 +72,36 @@ def gfx_target_version(arch: str) -> Optional[int]:
     return int(m.group(1)) * 10000 + int(m.group(2), 16) * 100 + int(m.group(3), 16)
 
 
+def config_gfx_target_version(path: Path) -> int:
+    """
+    The gfx target a simulator config runs kernels as.
+
+    Ordinary configs state it as the simulated device's own target; a guest
+    config describes the device the kernels see under ``dbt_guest``. Raises
+    ``FileNotFoundError`` when the config cannot be read or names no target,
+    because an unreadable or silent config cannot be checked against the target
+    the kernels are compiled for.
+    """
+    try:
+        config = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as err:
+        raise FileNotFoundError(
+            f"rocjitsu config {path} cannot be read: {err}"
+        ) from err
+
+    for section in (("vm", "gpu", "device"), ("dbt_guest", "guest_device")):
+        node = config
+        for key in section:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict) and node.get("gfx_target_version") is not None:
+            return node["gfx_target_version"]
+
+    raise FileNotFoundError(
+        f"rocjitsu config {path} names no gfx_target_version, so the target it "
+        "simulates cannot be checked against the one kernels are compiled for"
+    )
+
+
 def default_config_for_arch(arch: str) -> Optional[Path]:
     """Pick the plain (non-kmd, non-guest) config that simulates *arch*."""
     config_dir = _rocjitsu_root() / "configs"
@@ -85,10 +115,10 @@ def default_config_for_arch(arch: str) -> Optional[Path]:
     ]
     for path in candidates:
         try:
-            device = json.loads(path.read_text())["vm"]["gpu"]["device"]
-        except (OSError, ValueError, KeyError):
+            found = config_gfx_target_version(path)
+        except FileNotFoundError:
             continue
-        if device.get("gfx_target_version") == wanted:
+        if found == wanted:
             return path
     return None
 
@@ -110,7 +140,9 @@ def build_rocjitsu_runner(
     ``ROCJITSU_BUILD_DIR``), then the default location inside the build tree.
     The config must simulate the same target the kernels are compiled for: a
     kernel that the simulated device cannot run reports no hazards at all,
-    which otherwise looks like a clean run rather than a misconfiguration.
+    which otherwise looks like a clean run rather than a misconfiguration. A
+    config that cannot be read, or that names no target of its own, is rejected
+    for the same reason — it is the check, not the mismatch, that has failed.
     """
     build = (
         build_dir
@@ -133,12 +165,8 @@ def build_rocjitsu_runner(
         )
 
     wanted = gfx_target_version(arch)
-    try:
-        device = json.loads(Path(resolved_config).read_text())["vm"]["gpu"]["device"]
-        found = device.get("gfx_target_version")
-    except (OSError, ValueError, KeyError):
-        found = None
-    if wanted is not None and found is not None and found != wanted:
+    found = config_gfx_target_version(resolved_config)
+    if wanted is not None and found != wanted:
         raise FileNotFoundError(
             f"config {resolved_config} simulates gfx_target_version {found}, but kernels "
             f"are compiled for {arch} ({wanted}); the mismatch reports zero hazards"
