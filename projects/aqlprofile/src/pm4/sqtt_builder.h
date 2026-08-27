@@ -340,6 +340,16 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
 
       if (Primitives::GFXIP_LEVEL == 12) {
+        // Disable-and-reset the perfmon/SQTT state block before arming the trace.  Mirrors PAL
+        // IssueBegin which writes CP_PERFMON_CNTL = CP_PERFMON_STATE_DISABLE_AND_RESET
+        // (gfx12PerfExperiment.cpp:1910-1914) prior to WriteStartThreadTraces.  The pure-SQTT
+        // (perfcounters.size()==0, RGP) path never called StartPerfMon, so this reset was missing:
+        // stale/in-flight perfmon state let the SQTT window latch a variable amount of pre-window
+        // wave activity, producing the intermittent corrupt-thread_count (wave64) overflow that
+        // desynced RGP's wave census (Issue#2).  cp_perfmon_cntl_reset_value()==0 (PERFMON_STATE=0
+        // == DISABLE_AND_RESET).  Must precede SPI_SQG_EVENT_CTL, matching PAL's order.
+        WriteConfigPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
+                          Primitives::cp_perfmon_cntl_reset_value());
         WriteConfigPacket(cmd_buffer, Primitives::SPI_SQG_EVENT_CTL_ADDR,
                           Primitives::spi_sqg_event_ctl(true));
       }
