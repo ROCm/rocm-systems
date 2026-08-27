@@ -4128,7 +4128,8 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedMoiCoverageLedger) {
   site_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   site_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
   site_patched.patches.push_back(site_patch);
-  run_hook_load_case(kConSanHookProfiles[1], false, site_patched, HSA_STATUS_SUCCESS, 101u);
+  run_hook_load_case(kConSanHookProfiles[1], false, site_patched, HSA_STATUS_SUCCESS, 102u,
+                     site_patched.replacement);
 }
 
 TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
@@ -4853,7 +4854,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageUsesTypedPipelineLedgerAfterPublishingMecha
   const rocjitsu::ConSanTransformArtifacts result = typed_coverage_transform_result();
 
   testing::internal::CaptureStderr();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.replacement);
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(log.find("ConSan coverage reader=101 flavor=moi engine=record_replay "
@@ -4872,7 +4873,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
   const rocjitsu::ConSanTransformArtifacts result = diagnostic_coverage_transform_result();
 
   testing::internal::CaptureStderr();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.replacement);
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=access disposition=unsupported "

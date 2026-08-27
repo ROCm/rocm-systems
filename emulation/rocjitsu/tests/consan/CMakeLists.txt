@@ -2150,7 +2150,7 @@ function(rj_add_consan_common_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|REPLAY_CONFLICT) requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
@@ -2181,7 +2181,10 @@ function(rj_add_consan_common_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
-            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
+            # InlineShadow's external exact-shadow representation covers the
+            # full LDS aperture and therefore needs the production 64 MiB test
+            # ceiling, even when this case is primarily forcing VGPR spills.
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
             "RJ_CONSAN_FLAT_PROVENANCE=strict"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
             "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
@@ -2200,7 +2203,7 @@ function(rj_add_consan_common_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -2219,7 +2222,7 @@ function(rj_add_consan_common_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=sampled"
@@ -2238,7 +2241,7 @@ function(rj_add_consan_common_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none owners=2"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -2494,7 +2497,7 @@ function(rj_add_consan_cdna_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
@@ -2515,7 +2518,7 @@ function(rj_add_consan_cdna_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=barrier.*source=spill reason=none"
+        PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-barrier-record.*spilled_vgprs=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -2535,7 +2538,7 @@ function(rj_add_consan_cdna_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=atomic.*source=spill reason=none"
+        PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-atomic-record.*spilled_vgprs=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -2575,7 +2578,7 @@ function(rj_add_consan_cdna_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
@@ -2856,7 +2859,9 @@ function(rj_add_consan_gfx1250_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=barrier.*reason=none"
+        # Successful site plans are summarized rather than dumped one by one so
+        # hook logging remains bounded.  Pin the typed emitted barrier proof.
+        PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-barrier-record"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -2875,7 +2880,9 @@ function(rj_add_consan_gfx1250_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=atomic.*reason=none"
+        # Successful site plans are summarized rather than dumped one by one so
+        # hook logging remains bounded.  Pin the typed emitted atomic proof.
+        PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-atomic-record"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -3170,8 +3177,9 @@ function(rj_add_consan_hip_tests)
                     "${RJ_CONSAN_CDNA_MOI_NONEMPTY_SCALAR_SPILL_INCORRECT_TEST}"
                 PHYSICAL
             )
-            # Per-site resource plans are debug diagnostics. Cases whose pass
-            # regex matches site/source/owner details must request log level 3.
+            # Successful per-site resource plans are intentionally summarized
+            # to keep normal hook logging bounded. Spill cases match the
+            # aggregate emission proof or a typed patch record at log level 3.
             rj_add_consan_hip_case(
                 NAME "ConSanSpillHipTest.Gfx950VgprScratchRoundTrip"
                 TARGET hip_consan_spill_gfx950_test
@@ -3190,7 +3198,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=access.*source=spill reason=none"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3208,7 +3216,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_SAMPLED_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=access.*source=spill reason=none"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -3226,7 +3234,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_INLINE_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=access.*source=spill reason=none"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -3246,7 +3254,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_SHARED_HELPER_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=access.*source=spill reason=none owners=2"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3264,7 +3272,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_BARRIER_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=barrier.*source=spill reason=none"
+                PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-barrier-record.*spilled_vgprs=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3283,7 +3291,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_ATOMIC_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=atomic.*source=spill reason=none"
+                PASS_REGEX "ConSan proof patch.*kind=trampoline-moi-atomic-record.*spilled_vgprs=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3301,7 +3309,7 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
-                PASS_REGEX "site=access.*source=spill reason=none"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -3727,15 +3735,16 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_MOI_FULL_VGPR_FILE_TEST}"
                 TIMEOUT 30
         )
-        # Resource-plan cases that match debug-only site/source or
-        # owner/private-size diagnostics require log level 3.
+        # Successful resource plans are intentionally summarized to keep hook
+        # logging bounded. These cases match aggregate emission proofs at log
+        # level 3 instead of depending on removed per-site success dumps.
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiFullVgprFileForcedSpillPreservesOutput"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_FULL_VGPR_FILE_TEST}"
                 TIMEOUT 30
                 PASS_REGEX
-                    "source=spill reason=none.*current_vgprs=256 max_referenced_vgprs=256"
+                    "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3751,7 +3760,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
                 TIMEOUT 30
-                PASS_REGEX "site=access.*source=descriptor-growth reason=none owners=2"
+                PASS_REGEX "ConSan MOI resources.*descriptor_growth=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3765,7 +3774,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
                 TIMEOUT 30
-                PASS_REGEX "site=access.*source=spill reason=none owners=2"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3781,7 +3790,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST}"
                 TIMEOUT 30
-                PASS_REGEX "site=atomic.*source=spill reason=none owners=2"
+                PASS_REGEX "ConSan MOI resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"

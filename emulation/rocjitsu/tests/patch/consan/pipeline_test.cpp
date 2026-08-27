@@ -578,6 +578,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   bound.scope = ConSanRuntimeResourceScope::Executable;
   bound.moi_report_buffer_address = 0x123456780000ull;
   bound.moi_report_buffer_size = requirements->abi_plan.required_bytes;
+  bound.moi_report_layout = requirements->abi_plan.layout;
   TransformResult complete =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), bound);
@@ -606,6 +607,28 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   EXPECT_EQ(rejected_size.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
             ConSanContractIssue::InvalidResourceSize);
 
+  BoundRuntimeResources explicit_fixed;
+  explicit_fixed.scope = ConSanRuntimeResourceScope::CodeObject;
+  explicit_fixed.moi_report_buffer_address = 0x123456780000ull;
+  explicit_fixed.moi_report_buffer_size =
+      sizeof(ConSanMoiReportHeader) + sizeof(ConSanMoiAccessRecord);
+  TransformResult fixed_complete =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, complete_runtime_capabilities(), explicit_fixed);
+  ASSERT_TRUE(fixed_complete.well_formed()) << testing::PrintToString(fixed_complete.errors);
+  EXPECT_EQ(fixed_complete.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(fixed_complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
+            ConSanPipelineStageStatus::Completed);
+
+  BoundRuntimeResources dispatch_scoped = explicit_fixed;
+  dispatch_scoped.scope = ConSanRuntimeResourceScope::Dispatch;
+  TransformResult rejected_scope =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, complete_runtime_capabilities(), dispatch_scoped);
+  ASSERT_TRUE(rejected_scope.well_formed()) << testing::PrintToString(rejected_scope.errors);
+  EXPECT_EQ(rejected_scope.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
+            ConSanContractIssue::InvalidResourceScope);
+
   BoundRuntimeResources wrong_schema;
   wrong_schema.scope = ConSanRuntimeResourceScope::Executable;
   wrong_schema.report_buffer_address = 0x123456780000ull;
@@ -629,6 +652,16 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), marker);
   ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
+            ConSanPipelineStageStatus::Completed);
+
+  BoundRuntimeResources code_object_marker = marker;
+  code_object_marker.scope = ConSanRuntimeResourceScope::CodeObject;
+  TransformResult code_object_complete =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, complete_runtime_capabilities(), code_object_marker);
+  ASSERT_TRUE(code_object_complete.well_formed())
+      << testing::PrintToString(code_object_complete.errors);
+  EXPECT_EQ(code_object_complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Completed);
 
   BoundRuntimeResources wrong_schema;

@@ -59,13 +59,34 @@ validate_evidence_binding(const ConSanEvidenceRequirements &requirements,
       [&](const auto &typed) {
         using T = std::decay_t<decltype(typed)>;
         if constexpr (std::is_same_v<T, ConSanSuperColliderEvidenceRequirements>) {
+          if (resources.scope != ConSanRuntimeResourceScope::CodeObject &&
+              resources.scope != ConSanRuntimeResourceScope::Executable)
+            return ConSanContractIssue::InvalidResourceScope;
           return typed.requires_binding() && !resources.report_buffer_address
                      ? ConSanContractIssue::InvalidResourceAddress
                      : ConSanContractIssue::None;
         } else {
           if (!resources.moi_report_buffer_address)
             return ConSanContractIssue::InvalidResourceAddress;
-          return resources.moi_report_buffer_size < typed.abi_plan.required_bytes
+          // An automatic allocation carries the exact address-free layout
+          // that sized it and remains live for the executable. A caller-bound
+          // raw buffer intentionally has no such layout: legacy fixed-record
+          // lowering validates its exact engine-specific geometry, while the
+          // pipeline only requires the common header and a code-object or
+          // executable lifetime. Treating that raw buffer as the automatic
+          // multi-bank layout rejects valid small explicit buffers after
+          // lowering has already proved and emitted their instrumentation.
+          if (resources.moi_report_layout) {
+            if (resources.scope != ConSanRuntimeResourceScope::Executable)
+              return ConSanContractIssue::InvalidResourceScope;
+            return resources.moi_report_buffer_size < typed.abi_plan.required_bytes
+                       ? ConSanContractIssue::InvalidResourceSize
+                       : ConSanContractIssue::None;
+          }
+          if (resources.scope != ConSanRuntimeResourceScope::CodeObject &&
+              resources.scope != ConSanRuntimeResourceScope::Executable)
+            return ConSanContractIssue::InvalidResourceScope;
+          return resources.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)
                      ? ConSanContractIssue::InvalidResourceSize
                      : ConSanContractIssue::None;
         }
@@ -453,18 +474,33 @@ TransformResult TransformResult::publish_optional(
   } else {
     const ConSanContractIssue requirement_issue = validate_runtime_capabilities(
         capabilities, runtime_requirements(*result.evidence_requirements));
-    const bool scope_matches = resources.scope == ConSanRuntimeResourceScope::Executable;
     const ConSanContractIssue resource_issue =
         validate_evidence_binding(*result.evidence_requirements, resources);
     const ConSanContractIssue binding_issue =
-        requirement_issue != ConSanContractIssue::None
-            ? requirement_issue
-            : (!scope_matches ? ConSanContractIssue::InvalidResourceScope : resource_issue);
+        requirement_issue != ConSanContractIssue::None ? requirement_issue : resource_issue;
     if (binding_issue == ConSanContractIssue::None) {
       binding_stage.status = ConSanPipelineStageStatus::Completed;
     } else {
       binding_stage.status = ConSanPipelineStageStatus::Unsupported;
       binding_stage.contract_issue = binding_issue;
+      const uint64_t binding_required_bytes = std::visit(
+          [&](const auto &typed) {
+            using T = std::decay_t<decltype(typed)>;
+            if constexpr (std::is_same_v<T, ConSanSuperColliderEvidenceRequirements>) {
+              return typed.runtime_requirements.minimum_report_allocation_bytes.value_or(0u);
+            } else {
+              return resources.moi_report_layout
+                         ? typed.runtime_requirements.minimum_report_allocation_bytes.value_or(0u)
+                         : static_cast<uint64_t>(sizeof(ConSanMoiReportHeader));
+            }
+          },
+          *result.evidence_requirements);
+      result.warnings.emplace_back(
+          "ConSan runtime evidence binding is unsupported: issue=" +
+          std::string(consan_contract_issue_name(binding_issue)) +
+          ", scope=" + std::string(consan_runtime_resource_scope_name(resources.scope)) +
+          ", report-bytes=" + std::to_string(resources.moi_report_buffer_size) +
+          ", required-bytes=" + std::to_string(binding_required_bytes));
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.discard_candidate_modification();
       result.dispatch_requirements = {};
