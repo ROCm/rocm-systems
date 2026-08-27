@@ -3367,7 +3367,7 @@ TEST_P(IsaTest, BranchLoop) {
   EXPECT_TRUE(fx.halted());
 }
 
-// SMEM offset forms: IMM=0 (SGPR), IMM=1, IMM=1+SOE, SOE=1.
+// SMEM offset forms: IMM=0 (SGPR, M0, unaligned SGPR), IMM=1, IMM=1+SOE, SOE=1.
 TEST_P(IsaTest, SLoad_OffsetForms) {
   ExecFixture fx(arch());
   constexpr uint64_t kBufferAddr = 0x2000;
@@ -3383,6 +3383,8 @@ TEST_P(IsaTest, SLoad_OffsetForms) {
       static_cast<uint32_t>(kBufferAddr),
       s_mov_b32(SGPR(5), INLINE_CONST(0)),
       s_mov_b32(SGPR(6), INLINE_CONST(64)),
+      s_mov_b32(124, INLINE_CONST(32)), // m0
+      s_mov_b32(SGPR(11), INLINE_CONST(63)),
       s_mov_b32(SGPR(12), SGPR(4)), // V# s[12:15]: base, stride 0, 256 records
       s_mov_b32(SGPR(13), INLINE_CONST(0)),
       s_mov_b32(SGPR(14), 255),
@@ -3400,6 +3402,10 @@ TEST_P(IsaTest, SLoad_OffsetForms) {
       smem_hi(0x8, 6),
       smem_lo(S_LOAD_DWORD, 18, 4, /*imm=*/false, /*soffset_en=*/true), // s18 = [s[4:5] + s6]
       smem_hi(0, 6),
+      smem_lo(S_LOAD_DWORD, 19, 4, /*imm=*/false), // s19 = [s[4:5] + m0]
+      smem_hi(124),
+      smem_lo(S_LOAD_DWORD, 20, 4, /*imm=*/false), // s20 = [s[4:5] + (s11 & ~3)]
+      smem_hi(11),
       S_WAITCNT_0,
       S_ENDPGM,
   };
@@ -3412,6 +3418,8 @@ TEST_P(IsaTest, SLoad_OffsetForms) {
   EXPECT_EQ(fx.read_sgpr(16), 0x1002u) << "IMM=1";
   EXPECT_EQ(fx.read_sgpr(17), 0x1012u) << "IMM=1 SOE=1";
   EXPECT_EQ(fx.read_sgpr(18), 0x1010u) << "SOE=1";
+  EXPECT_EQ(fx.read_sgpr(19), 0x1008u) << "IMM=0 M0";
+  EXPECT_EQ(fx.read_sgpr(20), 0x100fu) << "IMM=0 unaligned";
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),

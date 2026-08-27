@@ -26,6 +26,11 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
+/// @brief GFX9 SMEM s_scratch_{load,store}_dword{,x2,x4} opcodes.
+constexpr bool smem_is_scratch_op(uint32_t op) {
+  return (op >= 5 && op <= 7) || (op >= 21 && op <= 23);
+}
+
 /// @brief Compute scalar address for SMEM encoding.
 ///
 /// Requires: inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
@@ -36,8 +41,10 @@ uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
   uint64_t off = 0;
   if (inst.soffset_en)
     off += amdgpu::read_scalar_selector(wf, inst.soffset);
-  else if (!inst.imm) // IMM=0, SOE=0: OFFSET[6:0] is the offset SGPR
-    off += amdgpu::read_scalar_selector(wf, inst.offset & 0x7F);
+  else if (!inst.imm && !smem_is_scratch_op(inst.op)) { // IMM=0, SOE=0: SGPR[OFFSET[6:0]] or M0
+    const uint32_t sel = inst.offset & 0x7F;
+    off += (sel == 124 ? wf.m0() : amdgpu::read_scalar_selector(wf, sel)) & ~3u; // 2 LSBs ignored
+  }
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t addr = base + off;
