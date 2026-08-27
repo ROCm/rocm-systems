@@ -106,6 +106,20 @@ get_active_contexts_impl()
 }
 }  // namespace
 
+bool
+spm_dispatch_counter_collection_service::intersects(
+    const spm_dispatch_counter_collection_service& rhs) const
+{
+    if(agents.empty() || rhs.agents.empty()) return true;
+    const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
+    const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
+    for(const auto& agent_id : small)
+    {
+        if(large.count(agent_id) > 0) return true;
+    }
+    return false;
+}
+
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter)
 {
@@ -294,6 +308,13 @@ start_context(rocprofiler_context_id_t context_id)
             // conflicting context
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
         }
+        else if(cfg->dispatch_spm && itr->dispatch_spm &&
+                cfg->dispatch_spm->intersects(*itr->dispatch_spm))
+        {
+            // Two SPM dispatch contexts can run concurrently as long as they target disjoint
+            // sets of GPU agents. A context with no agent restriction claims every agent.
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+        }
     }
 
     uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
@@ -368,24 +389,28 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
+            // Stop queue-interposed services before clearing the active slot so
+            // disable_serialization() always runs before dispatches stop being instrumented.
+            // Clearing the slot first opens the opposite window, in which write_hook sees no
+            // active context and a dispatch is submitted without serializer packets while the
+            // serializer is still enabled.
+            if(_expected->dispatch_counter_collection)
+            {
+                rocprofiler::counters::stop_context(const_cast<context*>(_expected));
+            }
+
+            if(_expected->dispatch_spm)
+                rocprofiler::spm::stop_context(const_cast<context*>(_expected));
+
+            if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
+            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
+
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
             if(success)
             {
                 auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
                 if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
-
-                if(_expected->dispatch_counter_collection)
-                {
-                    rocprofiler::counters::stop_context(const_cast<context*>(_expected));
-                }
-
-                if(_expected->dispatch_spm)
-                    rocprofiler::spm::stop_context(const_cast<context*>(_expected));
-
-                if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-                if(_expected->dispatch_thread_trace)
-                    _expected->dispatch_thread_trace->stop_context();
 
                 rocprofiler::hsa::queue_interposition::
                     notify_queue_interposition_consumer_context_stopped(_expected);
