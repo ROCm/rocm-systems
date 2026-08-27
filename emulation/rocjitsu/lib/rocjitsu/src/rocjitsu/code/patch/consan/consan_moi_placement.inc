@@ -829,9 +829,7 @@ struct MoiSgprRange {
                         std::to_string(required_count) + " registers");
     return false;
   }
-  if (!patcher.patch_kernel_descriptor(
-          kernel.descriptor_file_offset,
-          {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset, *descriptor)) {
     errors.emplace_back("ConSan MOI could not patch descriptor VGPR allocation");
     return false;
   }

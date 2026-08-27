@@ -3,7 +3,6 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
-#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
@@ -12,15 +11,9 @@
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "util/bit.h"
 
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstring>
 #include <limits>
 #include <utility> // for std::pair
 
@@ -767,20 +760,13 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
   return sequence;
 }
 
-SpillDescriptorUpdate update_kernel_descriptor_for_spills(std::span<uint8_t> image,
-                                                          uint64_t descriptor_file_offset,
-                                                          uint32_t required_private_bytes) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+SpillDescriptorUpdate
+update_kernel_descriptor_for_spills(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                                    uint32_t required_private_bytes) {
   namespace kd = rocr::llvm::amdhsa;
   if (required_private_bytes == 0 || required_private_bytes > kMaxAddressFreeScratchPrivateBytes) {
     return SpillDescriptorUpdate::InvalidPrivateSize;
   }
-  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
-    return SpillDescriptorUpdate::InvalidDescriptor;
-  }
-
-  KD descriptor{};
-  std::memcpy(&descriptor, image.data() + descriptor_file_offset, sizeof(descriptor));
   const uint32_t grown_private_bytes =
       std::max(descriptor.private_segment_fixed_size, required_private_bytes);
   const bool private_segment_enabled =
@@ -791,8 +777,22 @@ SpillDescriptorUpdate update_kernel_descriptor_for_spills(std::span<uint8_t> ima
 
   descriptor.private_segment_fixed_size = grown_private_bytes;
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
-  std::memcpy(image.data() + descriptor_file_offset, &descriptor, sizeof(descriptor));
   return SpillDescriptorUpdate::Updated;
+}
+
+SpillDescriptorUpdate update_kernel_descriptor_for_spills(std::span<uint8_t> image,
+                                                          uint64_t descriptor_file_offset,
+                                                          uint32_t required_private_bytes) {
+  auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor)
+    return SpillDescriptorUpdate::InvalidDescriptor;
+  const SpillDescriptorUpdate update =
+      update_kernel_descriptor_for_spills(*descriptor, required_private_bytes);
+  if (update != SpillDescriptorUpdate::Updated)
+    return update;
+  return write_kernel_descriptor(image, descriptor_file_offset, *descriptor)
+             ? SpillDescriptorUpdate::Updated
+             : SpillDescriptorUpdate::InvalidDescriptor;
 }
 
 } // namespace rocjitsu

@@ -1746,14 +1746,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         result.errors.emplace_back("ConSan flat check/trap spill descriptor exceeds ELF bytes");
         return;
       }
-      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          {reinterpret_cast<uint8_t *>(&*descriptor), sizeof(*descriptor)}, 0,
-          required_private_bytes);
+      const SpillDescriptorUpdate update =
+          update_kernel_descriptor_for_spills(*descriptor, required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
-          !patcher.patch_kernel_descriptor(
-              descriptor_offset,
-              {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+          !patcher.patch_kernel_descriptor(descriptor_offset, *descriptor)) {
         result.errors.emplace_back(
             "ConSan flat check/trap could not grow its private spill descriptor");
         return;

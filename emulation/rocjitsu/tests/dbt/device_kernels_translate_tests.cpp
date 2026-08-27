@@ -635,7 +635,7 @@ TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
   ASSERT_NE(co, nullptr);
 
   rocjitsu::CodeObjectPatcher patcher(*co);
-  std::array<uint8_t, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)> descriptor{};
+  rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
   const uint64_t image_size = static_cast<uint64_t>(co->image_size());
 
   EXPECT_FALSE(patcher.patch_kernel_descriptor(image_size, descriptor));

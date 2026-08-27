@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 #define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 #include "util/bit.h"
@@ -342,11 +343,23 @@ enum class SpillDescriptorUpdate : uint8_t {
   InvalidPrivateSize,
 };
 
+/// @brief Grow one already-decoded kernel descriptor's fixed private segment.
+///
+/// @details This is the descriptor-semantic operation: it validates the
+/// requested extent, monotonically grows `private_segment_fixed_size`, and
+/// enables the private-segment ABI bit while preserving every unrelated
+/// field. It performs no byte-range access, so `InvalidDescriptor` is never
+/// returned by this overload.
+[[nodiscard]] SpillDescriptorUpdate
+update_kernel_descriptor_for_spills(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                                    uint32_t required_private_bytes);
+
 /// @brief Grow one kernel descriptor's fixed private segment for spill slots.
 ///
-/// @details Sets ENABLE_PRIVATE_SEGMENT when needed and preserves all other
-/// descriptor fields. Dynamic-stack dispatch backing is a separate runtime
-/// contract because the launch's stack depth is not fixed in the descriptor.
+/// @details Reads and writes the complete descriptor through RocJitsu's shared
+/// checked byte boundary, then delegates the field mutation to the typed
+/// overload. Dynamic-stack dispatch backing is a separate runtime contract
+/// because the launch's stack depth is not fixed in the descriptor.
 [[nodiscard]] SpillDescriptorUpdate
 update_kernel_descriptor_for_spills(std::span<uint8_t> image, uint64_t descriptor_file_offset,
                                     uint32_t required_private_bytes);

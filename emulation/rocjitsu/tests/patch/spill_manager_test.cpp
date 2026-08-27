@@ -1259,23 +1259,17 @@ TEST(SpillManager, DescriptorGrowthHandlesExistingAndAdditionalPrivateBacking) {
   KD descriptor{};
   descriptor.private_segment_fixed_size = 32;
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
-  std::array<uint8_t, sizeof(KD)> image{};
-  std::memcpy(image.data(), &descriptor, sizeof(descriptor));
-
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 16), SpillDescriptorUpdate::Unchanged);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 48), SpillDescriptorUpdate::Updated);
-  KD grown{};
-  std::memcpy(&grown, image.data(), sizeof(grown));
-  EXPECT_EQ(grown.private_segment_fixed_size, 48u);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 64), SpillDescriptorUpdate::Updated);
-  std::memcpy(&grown, image.data(), sizeof(grown));
-  EXPECT_EQ(grown.private_segment_fixed_size, 64u);
-  const auto before_invalid = image;
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, kMaxAddressFreeScratchPrivateBytes + 1u),
-            SpillDescriptorUpdate::InvalidPrivateSize);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48),
-            SpillDescriptorUpdate::InvalidDescriptor);
-  EXPECT_EQ(image, before_invalid);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(descriptor, 16), SpillDescriptorUpdate::Unchanged);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(descriptor, 48), SpillDescriptorUpdate::Updated);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 48u);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(descriptor, 64), SpillDescriptorUpdate::Updated);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 64u);
+  const auto before_invalid = descriptor;
+  EXPECT_EQ(
+      update_kernel_descriptor_for_spills(descriptor, kMaxAddressFreeScratchPrivateBytes + 1u),
+      SpillDescriptorUpdate::InvalidPrivateSize);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, before_invalid.private_segment_fixed_size);
+  EXPECT_EQ(descriptor.compute_pgm_rsrc2, before_invalid.compute_pgm_rsrc2);
 }
 
 TEST(SpillManager, DescriptorGrowthIgnoresAndPreservesMetadataNotes) {

@@ -1834,13 +1834,8 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
-bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
-                                                std::span<const uint8_t> descriptor) {
-  if (!image_contains_range(image_.size(), file_offset, descriptor.size()))
-    return false;
-
-  std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
-  return true;
+bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset, const KD &descriptor) {
+  return write_kernel_descriptor(image_, file_offset, descriptor);
 }
 
 bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,

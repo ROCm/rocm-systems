@@ -626,16 +626,13 @@ private:
       errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
       return false;
     }
-    const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        {reinterpret_cast<uint8_t *>(&*descriptor), sizeof(*descriptor)},
-        /*descriptor_file_offset=*/0, required_private_bytes);
+    const SpillDescriptorUpdate update =
+        update_kernel_descriptor_for_spills(*descriptor, required_private_bytes);
     if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
       errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
       return false;
     }
-    if (!patcher.patch_kernel_descriptor(
-            active_kernel->descriptor_file_offset,
-            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+    if (!patcher.patch_kernel_descriptor(active_kernel->descriptor_file_offset, *descriptor)) {
       errors.emplace_back("ConSan MOI could not patch the owning kernel spill descriptor");
       return false;
     }
@@ -668,9 +665,7 @@ private:
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
-    if (!patcher.patch_kernel_descriptor(
-            active_descriptor_offset,
-            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+    if (!patcher.patch_kernel_descriptor(active_descriptor_offset, *descriptor)) {
       errors.emplace_back("ConSan MOI could not patch the planned descriptor SGPR allocation");
       return false;
     }
@@ -704,9 +699,7 @@ private:
       return false;
     }
     descriptor->group_segment_fixed_size = required_bytes;
-    if (!patcher.patch_kernel_descriptor(
-            active_descriptor_offset,
-            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+    if (!patcher.patch_kernel_descriptor(active_descriptor_offset, *descriptor)) {
       errors.emplace_back("ConSan MOI could not patch the planned fixed-LDS reservation");
       return false;
     }

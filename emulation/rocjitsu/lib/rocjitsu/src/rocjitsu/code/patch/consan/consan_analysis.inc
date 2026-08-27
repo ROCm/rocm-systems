@@ -52,9 +52,7 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
       return false;
     }
     if (!grow_descriptor_sgpr_allocation(*descriptor, required_count, arch) ||
-        !patcher.patch_kernel_descriptor(
-            descriptor_file_offset,
-            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+        !patcher.patch_kernel_descriptor(descriptor_file_offset, *descriptor)) {
       errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
       return false;
     }
@@ -126,9 +124,7 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
       errors.emplace_back("ConSan LDS check/trap proof could not grow descriptor VGPR allocation");
       return false;
     }
-    if (!patcher.patch_kernel_descriptor(
-            descriptor_file_offset,
-            {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+    if (!patcher.patch_kernel_descriptor(descriptor_file_offset, *descriptor)) {
       errors.emplace_back("ConSan LDS check/trap proof could not patch descriptor VGPR allocation");
       return false;
     }

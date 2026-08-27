@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstddef>
@@ -261,13 +262,13 @@ public:
   [[nodiscard]] TextReplacementResult replace_text(std::span<const uint8_t> new_text,
                                                    size_t max_file_growth) noexcept;
   /// @brief Replace text while applying explicit text and data relocation maps.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
-                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
-                                  bool require_every_text_symbol_mapped = false,
-                                  const std::unordered_map<uint64_t, uint64_t>
-                                      *canonical_code_pointer_placement = nullptr);
+  [[nodiscard]] bool replace_text(
+      std::span<const uint8_t> new_text,
+      std::span<const TextOffsetRelocation> text_relocations = {},
+      std::span<const PcRelativeDataRelocation> data_relocations = {},
+      std::span<const PcRelativeTextRelocation> code_relocations = {},
+      bool require_every_text_symbol_mapped = false,
+      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
   /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
   ///
@@ -311,8 +312,15 @@ public:
 
   void update_elf_flags(uint32_t new_flags);
 
-  [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
-                                             std::span<const uint8_t> descriptor);
+  /// @brief Replace one complete AMDHSA kernel descriptor transactionally.
+  ///
+  /// @details The typed boundary prevents descriptor callers from rebuilding
+  /// raw byte spans and accidentally supplying a partial or unrelated object.
+  /// The complete descriptor range is validated before any byte is written;
+  /// failure leaves this patcher's image unchanged.
+  [[nodiscard]] bool
+  patch_kernel_descriptor(uint64_t file_offset,
+                          const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor);
 
   /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
   ///

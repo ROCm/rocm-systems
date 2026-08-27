@@ -1650,10 +1650,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
                     1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
                     1u);
-    if (!patcher.patch_kernel_descriptor(
-            descriptor_offset,
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&descriptor),
-                                     sizeof(descriptor)))) {
+    if (!patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
       result.errors.emplace_back("ConSan MOI could not enable its full workgroup-ID payload");
       return false;
     }
@@ -1693,9 +1690,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
     errors.emplace_back("ConSan MOI could not grow descriptor SGPR allocation");
     return false;
   }
-  if (!patcher.patch_kernel_descriptor(
-          kernel.descriptor_file_offset,
-          {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
+  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset, *descriptor)) {
     errors.emplace_back("ConSan MOI could not patch descriptor register allocation");
     return false;
   }
@@ -1750,9 +1745,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
     errors.emplace_back("ConSan MOI could not grow dispatch-ID descriptor SGPR allocation");
     return false;
   }
-  if (!patcher.patch_kernel_descriptor(
-          descriptor_file_offset,
-          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)))) {
+  if (!patcher.patch_kernel_descriptor(descriptor_file_offset, desc)) {
     errors.emplace_back("ConSan MOI could not patch dispatch-ID descriptor state");
     return false;
   }
