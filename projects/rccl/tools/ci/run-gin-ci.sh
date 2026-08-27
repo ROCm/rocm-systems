@@ -77,7 +77,7 @@ DEBUG_ENV=""
 TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=()
 CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
   echo "ERROR: failed to parse test matrix ${CONFIG}" >&2; exit 1; }
-while IFS=$'\t' read -r kind f1 f2 f3 f4 f5; do
+while IFS=$'\x1f' read -r kind f1 f2 f3 f4 f5; do
   case "${kind}" in
     mca)        MCA="${f1}" ;;
     debug_env)  DEBUG_ENV="${f1}" ;;
