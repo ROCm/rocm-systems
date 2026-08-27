@@ -566,6 +566,39 @@ and InlineShadow. Stage 4 exits when discovery/causality is not repeated by
 engines, evidence policies remain explicit, and synchronization emission no
 longer performs semantic rediscovery or private target selection.
 
+#### Stage 4 exit evidence
+
+Stage 4 is complete. `SynchronizationInventoryView` now owns the normalized
+event, sequence, communication, and stable-identity joins used by all MOI
+engines. In particular, implicit gfx1250 ordered-LDS scope is normalized in
+the shared graph rather than repaired by one policy or lowerer. Atomic, fence,
+and barrier evidence start from admitted typed policy intents and become
+`MoiAtomicEvidenceSitePlan`, `MoiFenceEvidenceSitePlan`, or
+`MoiBarrierEvidenceSitePlan` values before resource planning or emission.
+Those values carry the unique graph association, placement event, decoded
+operation, communication scope, patch interval, and other family-specific
+facts needed downstream. Their invariants and the graph's unique-query
+semantics have direct host-unit coverage.
+
+Record/Replay, Sampled, InlineShadow, and shared resource planning now consume
+those plans. The migration deleted engine-private synchronization indexes,
+raw event/sequence rescans, candidate canonicalizers, post-policy admission
+filters, completing-barrier rediscovery, and lowerer-side scope repair. Flavor
+policy still explicitly selects the evidence it needs, while graph discovery
+and causality and target emission each have one owner.
+
+Relative to the Stage 3 revision, production changes added 834 and deleted
+1,113 physical lines. The measured implementation is now 94,669 physical
+lines, 90,298 nonblank lines, and 83,535 comment-excluded code lines in the
+same 79 files: reductions of 279 physical, 296 nonblank, and 359 code lines.
+
+The full checked-in ConSan gate exercised all 5,276 tests, including 3,501
+device tests and all 593 serialized physical-gfx950 tests, in 618.61 seconds
+wall time with `ctest -j64`. One physical SuperCollider clean test timed out
+after its captured test body reported success; its immediate isolated rerun
+passed in 0.13 seconds. Thus every checked-in test passed at this revision,
+with the one transient teardown timeout recorded rather than hidden.
+
 ### Stage 5: give evidence and report intent one authority
 
 The shared MOI evidence-model and report-planning group is 5,864 lines, and the
