@@ -253,7 +253,12 @@ const Isa *IsaRegistry::GetIsa(const Isa::Version &version, IsaFeature sramecc, 
   auto isareg_iter = std::find_if(GetSupportedIsas().begin(),
                                   GetSupportedIsas().end(),
                                   [&](const IsaMap::value_type& isareg) {
-                                    return isareg.second.GetVersion() == version &&
+                                    // Skip "-strict" target ids: they share the base target's
+                                    // version and are only for code-object id via GetIsa(name).
+                                    // Enumerating one here (unordered map) could mis-resolve a
+                                    // base-target device.
+                                    return isareg.first.find("-strict") == std::string::npos &&
+                                        isareg.second.GetVersion() == version &&
                                         (isareg.second.GetSramecc() == IsaFeature::Unsupported ||
                                          isareg.second.GetSramecc() == sramecc) &&
                                         (isareg.second.GetXnack() == IsaFeature::Unsupported ||
@@ -449,6 +454,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 
   return *supported_isas;
