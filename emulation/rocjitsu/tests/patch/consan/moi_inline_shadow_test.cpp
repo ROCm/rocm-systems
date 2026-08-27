@@ -1062,8 +1062,6 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_workgroup_key_sgpr);
-  ASSERT_EQ(result.resolved_moi_prologue_scratch_vgpr_assignments.size(), 1u);
-  EXPECT_GE(result.resolved_moi_prologue_scratch_vgpr_assignments.front().scratch_vgpr, 64u);
 
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -4980,11 +4978,9 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
-  EXPECT_EQ(result.resolved_moi_prologue_scratch_vgpr_assignments.size(), 2u);
   // The full-bank owner drives the code-object-wide scalar choice but its
   // forced-spill access is filtered during the rebuilt resource plan.  The
-  // other component still emits, and planning must retain an entry assignment
-  // for both so a later selection change cannot expose a partial scalar mode.
+  // other component still emits and receives its scalar entry prologue.
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             1u);

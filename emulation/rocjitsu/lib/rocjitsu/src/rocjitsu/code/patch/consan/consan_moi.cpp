@@ -501,7 +501,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_persistent_epoch_sgpr.reset();
   result.resolved_moi_persistent_workgroup_key_sgpr.reset();
   result.resolved_moi_record_replay_workgroup_sgprs = {};
-  result.resolved_moi_prologue_scratch_vgpr_assignments.clear();
   result.resolved_moi_exec_save_sgpr.reset();
   result.resolved_moi_transient_sgpr_assignments.clear();
   result.resolved_moi_owner_sgpr.reset();

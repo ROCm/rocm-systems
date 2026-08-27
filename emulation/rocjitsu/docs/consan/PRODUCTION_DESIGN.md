@@ -3594,6 +3594,28 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 72.28
   seconds. E2E validation remains outside this work.
 
+### Slice 5N: delete copied prologue-scratch assignments
+
+- **Direct stage ownership:** Entry-prologue scratch assignments remain in the
+  mutable lowering options that carry them from resource planning to prologue
+  emission. They are transient mechanism state, not transform output,
+  validation evidence, or user-visible telemetry.
+- **Completed deletion:** `ConSanResult` no longer copies the complete
+  assignment vector after each of five scalar-persistence selection paths or
+  clears a sixth unused mirror on entry. No production consumer ever read the
+  copy. Two tests no longer assert its size or selected register; they retain
+  the stronger observable requirements that the correct scalar state,
+  descriptor growth, access/barrier instrumentation, and owning entry
+  prologues are actually emitted and finally validated.
+- **Deletion result:** Production source is 12 lines smaller, source plus tests
+  is 16 lines smaller, and every result loses another dynamically allocated
+  vector. No replacement state or adapter was added.
+- **Completed checked-in gate:** The two affected full-bank and multi-component
+  tests pass. The complete host gate passes 1,509 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878 simulator-
+  device tests across the five supported targets pass in 70.45 seconds. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

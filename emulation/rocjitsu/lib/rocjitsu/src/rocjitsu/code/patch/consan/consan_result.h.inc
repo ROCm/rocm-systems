@@ -215,8 +215,6 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_persistent_epoch_sgpr;
   std::optional<uint16_t> resolved_moi_persistent_workgroup_key_sgpr;
   ConSanMoiPersistentWorkgroupRegisters resolved_moi_record_replay_workgroup_sgprs;
-  std::vector<ConSanMoiPrologueScratchVgprAssignment>
-      resolved_moi_prologue_scratch_vgpr_assignments;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
   std::optional<uint16_t> resolved_moi_owner_sgpr;
