@@ -98,6 +98,13 @@ const char* ncclGetEnv(const char* /*name*/) { return nullptr; }
 // not abort-floor -- commSetUnrollFactor indexes it unconditionally on every
 // call, including the manual-override path any Tier-1-adjacent test might
 // exercise. All-true is the safe default: "every unroll factor was built".
+//
+// The static_assert below is the same signature-drift-watchdog idea as
+// fakes/signature-drift.h: without it, a new unroll factor added to RCCL
+// wouldn't fail to compile here -- the extra array slot would just silently
+// zero-initialize to false, quietly changing behavior instead of erroring.
+static_assert(NCCL_NUM_UNROLLS == 6,
+              "NCCL_NUM_UNROLLS changed -- add/remove a `true` entry below to match");
 const bool ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {true, true, true, true, true, true};
 
 // ncclCommCount: trivial accessor, real behaviour costs nothing and de-risks
@@ -117,6 +124,18 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
 // nvtx dependency chain this lean binary otherwise avoids entirely (see the
 // file header comment). Each function below names the exact definition it
 // copies, so a drift is checkable without leaving this file.
+//
+// NCCL_ALGO_* / NCCL_PROTO_* are plain #defines, not a real enum, so the
+// compiler can't warn on a switch missing a newly-added case the way it could
+// for an enum. The counts below are the same signature-drift-watchdog idea as
+// fakes/signature-drift.h (a build-time tripwire instead of a human noticing
+// a stale comment): if RCCL ever adds/removes an algorithm or protocol, this
+// static_assert breaks the build right here, forcing the switches below to be
+// updated to match, rather than silently returning "Unknown".
+static_assert(NCCL_NUM_ALGORITHMS == 7,
+              "NCCL_NUM_ALGORITHMS changed -- update ncclAlgoToString's switch below to match collectives.cc:115");
+static_assert(NCCL_NUM_PROTOCOLS == 3,
+              "NCCL_NUM_PROTOCOLS changed -- update ncclProtoToString's switch below to match collectives.cc:136");
 // ---------------------------------------------------------------------------
 const char* ncclFuncToString(ncclFunc_t fn) {  // collectives.cc:32
   switch (fn) {
