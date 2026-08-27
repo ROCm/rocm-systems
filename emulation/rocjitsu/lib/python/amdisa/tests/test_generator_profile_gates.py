@@ -4,6 +4,8 @@
 import xml.etree.ElementTree as elem_tree
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +13,7 @@ import pytest
 
 from amdisa.__main__ import (
     _collect_shared_execute_body_variants,
-    _run_multi,
+    _run,
     _unshared_execute_keys_from_variants,
 )
 from amdisa.codegen import CodeGenerator
@@ -2351,13 +2353,13 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
         pytest.skip('CDNA3 semantics XML not available')
 
     args = SimpleNamespace(
-        multi=[f'cdna3:{isa_xml}'],
+        isafiles=[f'cdna3:{isa_xml}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
-    _run_multi(args)
+    _run(args)
 
     vop3p = (tmp_path / 'cdna3' / 'vop3p_exec.cpp').read_text()
     body = _generated_method_body(
@@ -3447,14 +3449,14 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     args = SimpleNamespace(
-        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
+        isafiles=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
 
-    _run_multi(args)
+    _run(args)
 
     rdna4_vop3 = (tmp_path / 'rdna4' / 'vop3_exec.cpp').read_text()
     ceil_body = _generated_function_body(rdna4_vop3, 'void VCeilF16Vop3::execute_impl')
@@ -3478,21 +3480,195 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     ) < ceil_modifier_body.index('ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16')
 
 
-def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
+def test_single_isa_cdna1_sources_preprocess_with_source_includes(
+    tmp_path, monkeypatch, rocjitsu_source_root: Path
+):
+    compiler = shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ preprocessor is unavailable')
+
+    monkeypatch.chdir(tmp_path)
+    isa_output = Path('generated')
+    generated_root = tmp_path / isa_output
     args = SimpleNamespace(
-        multi=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
+        isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(isa_output),
+        dbt_output=None,
+    )
+
+    _run(args)
+
+    shared_root = generated_root / 'shared'
+    assert (shared_root / 'isa_properties.h').is_file()
+    assert not (shared_root / 'execute_shared.h').exists()
+
+    simd_glue_include = '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"'
+    for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
+        source = (generated_root / 'cdna1' / source_name).read_text()
+        assert source.count(simd_glue_include) == 1
+        assert 'shared/execute_shared.h' not in source
+
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    subprocess.run(
+        [
+            compiler,
+            '-E',
+            *(flag for root in include_roots for flag in ('-I', str(root))),
+            str(generated_root / 'cdna1' / 'vop3p_exec.cpp'),
+            '-o',
+            os.devnull,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_custom_identity_preprocesses_with_profile_handwritten_includes(
+    tmp_path, rocjitsu_source_root: Path
+):
+    compiler = shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ preprocessor is unavailable')
+
+    args = SimpleNamespace(
+        isafiles=[f'gfx1250:{_mrisa_dir() / "amdgpu_isa_cdna5.xml"}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
 
-    _run_multi(args)
+    _run(args)
 
-    simd_glue_include = '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"'
-    for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
-        source = (tmp_path / 'cdna1' / source_name).read_text()
-        assert source.count(simd_glue_include) == 1
+    generated_root = tmp_path / 'gfx1250'
+    vop3p_header = (generated_root / 'vop3p.h').read_text()
+    vop3p_source = (generated_root / 'vop3p_exec.cpp').read_text()
+    vglobal_source = (generated_root / 'vglobal_exec.cpp').read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"' in vop3p_header
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/mma_exec.h"' in vop3p_source
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"' in vglobal_source
+
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    for source_path in (
+        generated_root / 'vop3p_exec.cpp',
+        generated_root / 'vglobal_exec.cpp',
+    ):
+        subprocess.run(
+            [
+                compiler,
+                '-E',
+                *(flag for root in include_roots for flag in ('-I', str(root))),
+                str(source_path),
+                '-o',
+                os.devnull,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+
+def test_single_isa_skips_dbt_generation(tmp_path, capsys):
+    args = SimpleNamespace(
+        isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
+        gen_isas=False,
+        gen_dbt=True,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run(args)
+
+    assert (
+        'Skipping DBT generation: at least two ISAs are required.'
+        in capsys.readouterr().err
+    )
+    assert not list(tmp_path.iterdir())
+
+
+def test_multi_isa_dbt_output_defaults_to_isa_output(tmp_path):
+    args = SimpleNamespace(
+        isafiles=[
+            f'rdna3_5:{_mrisa_dir() / "amdgpu_isa_rdna3_5.xml"}',
+            f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+        ],
+        gen_isas=False,
+        gen_dbt=True,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run(args)
+
+    assert (tmp_path / 'legalization_rdna3_5_to_rdna4.h').is_file()
+    assert (tmp_path / 'encoding_fields.h').is_file()
+
+
+@pytest.mark.parametrize('gen_isas', [False, True])
+def test_encoding_translator_uses_selected_generated_include_tree(tmp_path, gen_isas):
+    include_root = tmp_path / 'include'
+    isa_output = include_root / 'custom' / 'generated'
+    dbt_output = tmp_path / 'dbt'
+    args = SimpleNamespace(
+        isafiles=[
+            f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}',
+            f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+        ],
+        gen_isas=gen_isas,
+        gen_dbt=True,
+        isa_output=str(isa_output),
+        include_root=str(include_root),
+        dbt_output=str(dbt_output),
+    )
+
+    _run(args)
+
+    header = (dbt_output / 'encoding_cdna4_to_rdna4.h').read_text()
+    assert '#include "custom/generated/cdna4/machine_insts.h"' in header
+    assert '#include "custom/generated/rdna4/builders.h"' in header
+    assert '#include "custom/generated/rdna4/machine_insts.h"' in header
+
+
+def test_dbt_generation_canonicalizes_rdna35_cli_alias(tmp_path):
+    generated_tables = []
+    for output_name, alias in (
+        ('underscore', 'rdna3_5'),
+        ('documented', 'rdna3.5'),
+    ):
+        dbt_output = tmp_path / output_name
+        args = SimpleNamespace(
+            isafiles=[
+                f'{alias}:{_mrisa_dir() / "amdgpu_isa_rdna3_5.xml"}',
+                f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+            ],
+            gen_isas=False,
+            gen_dbt=True,
+            isa_output=None,
+            dbt_output=str(dbt_output),
+        )
+
+        _run(args)
+
+        generated_tables.append(
+            (dbt_output / 'legalization_rdna3_5_to_rdna4.h').read_text()
+        )
+
+    assert generated_tables[0] == generated_tables[1]
 
 
 def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
@@ -3514,14 +3690,14 @@ def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
 
 def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):
     args = SimpleNamespace(
-        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
+        isafiles=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
 
-    _run_multi(args)
+    _run(args)
 
     vop3 = (tmp_path / 'rdna4' / 'vop3.cpp').read_text()
     signed_ctor = _generated_constructor_body(vop3, 'VCmpLtI64Vop3')
@@ -3550,13 +3726,13 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     tmp_path: Path,
 ):
     args = SimpleNamespace(
-        multi=[f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}'],
+        isafiles=[f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
-    _run_multi(args)
+    _run(args)
 
     gfx_operand_exec = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
     gfx_vop3_alu = _generated_split_model_source(gfx1250_generated_root, 'vop3_alu')
@@ -5157,7 +5333,7 @@ def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
 
 def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
     args = SimpleNamespace(
-        multi=[
+        isafiles=[
             f'cdna3:{_mrisa_dir() / "amdgpu_isa_cdna3.xml"}',
             f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}',
         ],
@@ -5167,7 +5343,7 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
         dbt_output=None,
     )
 
-    _run_multi(args)
+    _run(args)
 
     shared = (tmp_path / 'shared' / 'execute_shared.h').read_text()
     cdna3_vop1 = (tmp_path / 'cdna3' / 'vop1_exec.cpp').read_text()
@@ -5235,6 +5411,15 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
     assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in cdna4_vop3
     assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' not in cdna4_vop3
+
+
+def test_generated_pseudo_scalar_users_include_dependency(
+    amdgpu_generated_root: Path,
+):
+    for source in amdgpu_generated_root.glob('*/*_exec*.cpp'):
+        text = source.read_text()
+        include = '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"'
+        assert (include in text) == ('pseudo_scalar::' in text), source
 
 
 def test_generated_vop3_dot2_true16_uses_true16_helpers(

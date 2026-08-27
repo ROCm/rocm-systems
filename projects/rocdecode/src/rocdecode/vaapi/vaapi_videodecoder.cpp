@@ -503,9 +503,10 @@ void VaapiVideoDecoder::GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3],
 
 rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
-    if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr ||
-        pic_idx >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr ||
-        d3d12_copy_queue_ == nullptr) {
+    if (pic_idx < 0 || static_cast<size_t>(pic_idx) >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr ||
+        static_cast<size_t>(pic_idx) >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr ||
+        d3d12_device_ == nullptr || d3d12_copy_queue_ == nullptr || d3d12_cmd_allocator_ == nullptr || d3d12_cmd_list_ == nullptr ||
+        d3d12_fence_ == nullptr || d3d12_fence_event_ == nullptr) {
         CriticalLog(g_rocdec_logger, "D3D12 staging infrastructure not available for pic_idx=" + ROCDEC_TOSTR(pic_idx));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
@@ -529,6 +530,9 @@ rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
                                          src_footprints, src_num_rows, src_row_sizes, &src_total);
 
     // Record copy commands: texture (tiled) → buffer (linear) for each subresource.
+    // This is a COPY-type queue/command list: D3D12 does not track resource states on
+    // copy queues (all resources are treated as COMMON), so no ResourceBarrier transitions
+    // to COPY_SOURCE/COPY_DEST are needed — and issuing them here would be invalid.
     d3d12_cmd_allocator_->Reset();
     d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr);
 
@@ -906,8 +910,11 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 
     D3D12_HEAP_FLAGS heap_flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
 
-    // Try linear layout first; fall back to driver-default layout.
-    bool linear_layout = true;
+    // Probe ROW_MAJOR (linear) layout on slot 0; fall back to driver-default (tiled) layout.
+    // On success, slot 0 is already created, so the main loop below skips it. On failure the
+    // out-param is left null, res_desc is switched to the tiled layout, and the loop creates
+    // all slots. Either way GetVideoFrame routes through the staging copy, so the decode
+    // surface layout only affects whether that copy is redundant (see staging section below).
     {
         HRESULT hr = d3d12_device_->CreateCommittedResource(
             &heap_props, heap_flags,
@@ -917,7 +924,6 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             InfoLog(g_rocdec_logger, "ROW_MAJOR layout not supported (HRESULT=0x" +
                     ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr) +
                     "), falling back to LAYOUT_UNKNOWN (tiled)");
-            linear_layout = false;
             res_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             res_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
             heap_flags = D3D12_HEAP_FLAG_SHARED;
@@ -926,7 +932,8 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
         }
     }
 
-    for (uint32_t i = (linear_layout ? 1 : 0); i < num_surfaces; i++) {
+    // Skip slot 0 if the probe above already created it.
+    for (uint32_t i = (d3d12_shared_resources_[0] != nullptr ? 1 : 0); i < num_surfaces; i++) {
         HRESULT hr = d3d12_device_->CreateCommittedResource(
             &heap_props, heap_flags,
             &res_desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
@@ -977,8 +984,12 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
                 " Alignment=" + ROCDEC_TOSTR(alloc_info.Alignment));
     }
 
-    // Create linear staging buffers for tiled→linear copy, and D3D12 copy infrastructure.
-    if (!linear_layout) {
+    // Create linear staging buffers for the tiled→linear copy, plus D3D12 copy infrastructure.
+    // These are created unconditionally: GetVideoFrame always routes through CopyToStagingBuffer,
+    // so the staging path must exist even when the decode surfaces happened to be created with
+    // ROW_MAJOR layout. In that (currently AMD-unreachable) case the copy is linear→linear, i.e.
+    // redundant but correct. Revisit with a direct-import fast path if ROW_MAJOR becomes usable.
+    {
         // Size the staging buffer from GetSurfaceLayout (matches sample layer expectations).
         SurfaceLayout layout = GetSurfaceLayout();
         UINT64 staging_size = layout.total_size;

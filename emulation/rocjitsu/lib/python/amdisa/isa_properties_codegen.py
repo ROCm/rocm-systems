@@ -21,7 +21,9 @@ _AMDGPU_ARCH_ORDER = (
 
 def emit_isa_properties(output_dir: str, specs) -> Path:
     """Emit a constexpr runtime property map for the supplied AMDGPU ISAs."""
-    profiles = {name: spec.profile for name, spec, _ in specs}
+    profiles = {
+        getattr(spec, 'arch_name', name): spec.profile for name, spec, _ in specs
+    }
     unknown = profiles.keys() - set(_AMDGPU_ARCH_ORDER)
     if unknown:
         raise ValueError(f'unsupported ISA property entries: {sorted(unknown)}')
