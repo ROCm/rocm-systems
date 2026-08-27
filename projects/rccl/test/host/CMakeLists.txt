@@ -218,6 +218,100 @@ if(BUILD_TESTS)
     endif()
   endforeach()
 
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroEnqueue -- host-only microtests for src/enqueue.cc.
+  #
+  # Its own binary, not shared with the init/p2p ones: #include-ing a second
+  # production .cc into an existing TU would collide on file-scope state
+  # (enqueue.cc has 41 statics and 16 NCCL_PARAM/RCCL_PARAM globals).
+  #
+  # Three symbols must be omitted from the shared nccl_stubs.cc for this target:
+  # enqueue.cc defines ncclInitKernelsForDevice and ncclParamGraphStreamOrdering
+  # itself, and rcclUseAinic needs a real value rather than a fail-loud stub.
+  # Each is omitted by its OWN RCCL_STUBS_OMIT_<symbol> macro rather than one
+  # target-wide switch, so the exclusion names exactly what it drops. (These are
+  # still target-wide definitions -- a source added here later sees all three --
+  # but each names a single symbol, so the mapping to its replacement in
+  # fakes/enqueue_stub_overrides.cc stays reviewable.)
+  # ---------------------------------------------------------------------------
+  set(TEST_MICRO_ENQUEUE_SOURCE_FILES
+    enqueue-test.cc
+    fakes/enqueue_fakes.cc               # enqueue-only seams (ResetEnqueueFakes)
+    fakes/enqueue_stubs.cc               # fail-loud floor for launch/graph paths
+    fakes/enqueue_stub_overrides.cc      # replacements for omitted shared stubs
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
+    ../common/main_altrsmi.cpp
+  )
+
+  add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
+  target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS}
+    ${PROJECT_BINARY_DIR}/hipify/src/device          # device_table.h chain
+    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+    ${PROJECT_BINARY_DIR}/hipify/gensrc)             # generated device_table.h
+  # src/enqueue.cc is basename-unique in the tree, so hipify keeps its name --
+  # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
+  target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
+    ${RCCL_COMMON_COMPILE_DEFS}
+    # Per-symbol omissions from the shared nccl_stubs.cc; see
+    # fakes/enqueue_stub_overrides.cc for what supplies each one instead.
+    RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+    RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    RCCL_STUBS_OMIT_rcclUseAinic
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+  # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE ${MICRO_TEST_LINK_LIBS})
+  add_dependencies(rccl-UnitTestsMicroEnqueue hipify_all copy_nccl_device_headers)
+  target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
+    --offload-host-only -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE
+    -no-hip-rt
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address)
+    target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
+  if(COMMAND apply_test_category_labels)
+    set(_enqueue_categories_yaml
+        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
+    if(EXISTS "${_enqueue_categories_yaml}")
+      message(STATUS "Applying test categories for rccl-UnitTestsMicroEnqueue")
+      apply_test_category_labels(
+        rccl-UnitTestsMicroEnqueue
+        "${_enqueue_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for rccl-UnitTestsMicroEnqueue: missing ${_enqueue_categories_yaml}")
+    endif()
+  endif()
+
   return()
 endif()
 
@@ -603,6 +697,68 @@ foreach(_variant "" "-uncached")
     target_link_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
 endforeach()
+
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroEnqueue (standalone mode) -- see the in-build block for the
+# rationale behind the separate binary and the RCCL_STUBS_OMIT_* macros.
+# ---------------------------------------------------------------------------
+set(TEST_MICRO_ENQUEUE_SOURCE_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_stub_overrides.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+)
+
+add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
+
+target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+
+target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_INCLUDE_DIRS}
+  ${RCCL_HIPIFY_DIR}/src/device                # device_table.h include chain
+  ${RCCL_HIPIFY_DIR}/src/include/nccl_device
+  ${RCCL_BUILD_DIR}/hipify/gensrc              # generated device_table.h
+)
+
+target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  USE_AMDSMI
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+  RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+  RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+  RCCL_STUBS_OMIT_rcclUseAinic
+  ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+)
+
+target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE -no-hip-rt -Wl,--gc-sections)
+target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE
+  GTest::GTest
+  Threads::Threads
+  fmt::fmt-header-only
+)
+
+if(MICRO_COVERAGE)
+  target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping)
+endif()
 
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly, e.g.

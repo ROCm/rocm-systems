@@ -1,0 +1,112 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only microtests for src/enqueue.cc: the UUT is #include'd, so static
+// helpers are directly callable.
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "fakes/enqueue_fakes.h"
+#include "../common/LogCapture.hpp"
+
+// alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
+// transitive includes see them.
+#include "alloc.h"
+
+#include "fakes/param_redirect.h"
+
+// The real RCCL_PARAM macros cache and declare a pthread_mutex_t global;
+// redirect so params stay per-test controllable.
+#undef RCCL_PARAM
+#define RCCL_PARAM(name, env, deftVal) \
+  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+#undef RCCL_PARAM_NCCL_ALIAS
+#define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
+  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+
+// The NVTX3 range macros expand to NOTHING in this binary, so any guard around
+// them shows partial coverage by design.
+#if !defined(NVTX_NO_IMPL) && !defined(NVTX_DISABLE)
+#include "nvtx.h"  // guarded; enqueue.cc's re-include is a no-op
+#undef NCCL_NVTX3_FUNC_RANGE
+#define NCCL_NVTX3_FUNC_RANGE
+#undef NVTX3_RANGE
+#define NVTX3_RANGE(...)
+#undef NVTX3_RANGE_ADD_PAYLOAD
+#define NVTX3_RANGE_ADD_PAYLOAD(...)
+#undef NVTX3_FUNC_WITH_PARAMS
+#define NVTX3_FUNC_WITH_PARAMS(...)
+#else
+#define NCCL_NVTX_H_
+#ifndef NCCL_NVTX3_FUNC_RANGE
+#define NCCL_NVTX3_FUNC_RANGE
+#endif
+#endif
+
+// ---------------------------------------------------------------------------
+// enqueue.cc:28 includes "common.h", which resolves to src/device/common.h -- a
+// DEVICE header. Under --offload-host-only it cannot compile on its own terms
+// (extern __shared__ variables; undeclared insert_random_delay_per_warp).
+//
+// As of this change, the only declaration enqueue.cc uses from it is the six
+// ncclDevKernel_Generic_N kernels whose ADDRESSES populate ncclKerns[] at
+// enqueue.cc:53; every use is `plan->kernelFn = ncclKerns[i].kernelFn`, an opaque
+// void* that is stored, never dereferenced or launched on a host path. So we
+// pre-set the device header's own include guard to neuter it and supply those
+// six symbols as ordinary host functions.
+//
+// LIMITS OF THIS SUBSTITUTION -- read before relying on it:
+//   * These are host functions, NOT __global__ declarations with the production
+//     grid-constant annotation. This binary therefore CANNOT validate the real
+//     kernel declarations, their symbols, or the host/device ABI. It exercises
+//     host-side table indexing only; kernel-table integrity belongs to a
+//     device-linked build.
+//   * Neutering the whole header changes the include environment for the rest of
+//     the TU. If enqueue.cc later needs another declaration from device/common.h,
+//     the build may keep working only because something arrives transitively.
+//     A compile error here is the expected signal to revisit this shim -- do not
+//     paper over it by adding another local definition.
+//
+// Pre-setting another header's guard is the same technique init-test.cc uses for
+// the nvtx.h / nvtx_stub.h nccl_domain collision.
+// ---------------------------------------------------------------------------
+#include "device_table.h"  // real ncclDevKernelArgsDefaultStorage
+#define NCCL_DEVICE_COMMON_H_
+void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage) {}
+void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage) {}
+void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage) {}
+void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage) {}
+void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage) {}
+void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
+
+// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc -- enqueue.cc is
+// basename-unique in the tree, so hipify keeps its name (no _tmp suffix).
+#include ENQUEUE_CC_PATH
+
+class EnqueueMicrotest : public ::testing::Test {
+ protected:
+  void TearDown() override { ResetEnqueueFakes(); }
+};
+
+#include "tests_batch1.inc"
+#include "tests_batch2.inc"
+#include "tests_batch3.inc"
+#include "tests_batch4.inc"
+#include "tests_batch5.inc"
+#include "tests_batch6.inc"
+#include "tests_batch7.inc"
+#include "tests_batch8.inc"
+#include "tests_batch9.inc"

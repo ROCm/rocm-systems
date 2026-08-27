@@ -6,6 +6,16 @@
 
 // Fail-loud stub floor for the core nccl/rccl symbols, satisfying link-time symbol closure for host-only microtests.
 
+// Some targets must omit an individual stub because their unit under test (or
+// their own fakes) already defines that symbol. Each such stub is guarded by its
+// own RCCL_STUBS_OMIT_<symbol> macro rather than one target-wide mode switch, so
+// the exclusion names exactly what it drops and a reviewer can see the 1:1
+// mapping to a replacement.
+//
+// Note the limit of this: target_compile_definitions apply to EVERY source in
+// the target, so a source added later still sees all of that target's omission
+// macros. What the per-symbol scheme buys is legibility and a narrow blast
+// radius per symbol -- not source-level isolation.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -49,7 +59,10 @@ ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, stru
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+// Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit under test defines this itself (enqueue.cc:90).
+#ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
+#endif
 // Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
 // so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
 extern ncclResult_t g_ncclMnnvlCheckResult;
@@ -116,11 +129,17 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   g_tuningIndexLastArch = gfxarch ? gfxarch : "<null>";
   return g_tuningIndexValue;
 }
+// Omitted when RCCL_STUBS_OMIT_rcclUseAinic is defined -- a unit needs a real value, not a fail-loud stub; see its own fakes.
+#ifndef RCCL_STUBS_OMIT_rcclUseAinic
 bool rcclUseAinic() { ::abort(); }
+#endif
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+// Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the unit under test emits this via NCCL_PARAM (enqueue.cc:1986).
+#ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
 int64_t ncclParamGraphStreamOrdering() { return 0; }
+#endif
 int64_t rcclParamHierarchicalAllGather() { ::abort(); }
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }
 namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
