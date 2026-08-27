@@ -170,12 +170,26 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         external_mem_handle_desc.handle.win32.handle = nt_handle;
         external_mem_handle_desc.size = resource_size;
 
-        CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+        hipError_t hip_status = hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc);
+        if (hip_status != hipSuccess) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipImportExternalMemory failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
+            CloseHandle(nt_handle);
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
 
         hipExternalMemoryBufferDesc buf_desc = {};
         buf_desc.size = resource_size;
-        CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem,
-                                                   hip_interop_[pic_idx].hip_ext_mem, &buf_desc));
+        hip_status = hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem,
+                                                      hip_interop_[pic_idx].hip_ext_mem, &buf_desc);
+        if (hip_status != hipSuccess) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipExternalMemoryGetMappedBuffer failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
+            hipDestroyExternalMemory(hip_interop_[pic_idx].hip_ext_mem);
+            hip_interop_[pic_idx].hip_ext_mem = nullptr;
+            CloseHandle(nt_handle);
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
 
         uint32_t d3d_pitches[3] = {}, d3d_offsets[3] = {}, d3d_num_planes = 0;
         va_video_decoder_.GetD3D12ResourceLayout(pic_idx, d3d_pitches, d3d_offsets, d3d_num_planes);
