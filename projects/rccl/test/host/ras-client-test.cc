@@ -2260,3 +2260,258 @@ TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolved
   EXPECT_EQ(std::vector<int>({400, 401, 402}), g_closedFds);
   EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
 }
+
+
+
+// ===========================================================================
+// connectToNCCL: the RAS client protocol handshake (src/ras/client.cc:220-250)
+//
+// Every test here drives connectToNCCL from the top with timeout == -1, so the
+// resolve/connect walk succeeds on the default seams and the TIMEOUT
+// negotiation at :252 is skipped. Note `if (timeout)` at :278 is still TRUE for
+// -1, so one further setsockopt runs before `return 0`; that belongs to the
+// TIMEOUT block and is deliberately not asserted on here.
+// ===========================================================================
+
+namespace {
+
+struct HandshakeOutcome {
+  int ret;
+  std::string log;
+};
+
+// Runs the handshake on the fixture defaults: timeout is -1, so the TIMEOUT
+// negotiation is skipped and connectToNCCL ends right after this block.
+HandshakeOutcome RunConnectToNCCL() {
+  HandshakeOutcome out{-999, {}};
+  out.log = CaptureLog([&]() { out.ret = connectToNCCL(); });
+  return out;
+}
+
+// The exact bytes the handshake must put on the wire. Spelled as a literal on
+// purpose: rebuilding it from STR(NCCL_RAS_CLIENT_PROTOCOL) would launder any
+// mutation of the string client.cc actually sends.
+constexpr const char kClientHello[] = "CLIENT PROTOCOL 2\n";
+
+// The fd DefaultSocket hands out; `fail:` and `timeout:` both close exactly this.
+constexpr int kSocketFd = 42;
+
+void ExpectClosedExactlyOnce(int fd) {
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(fd, g_closedFds[0]);
+}
+
+}  // namespace
+
+// Arms: the CLIENT PROTOCOL write succeeds, rasRead returns > 0, strncasecmp
+// matches and strtol equals NCCL_RAS_CLIENT_PROTOCOL, so nothing is reported.
+TEST_F(RasClientMicrotest, ConnectHandshake_ServerAcceptsProtocol_SendsClientHelloAndReturnsZero) {
+  ScriptReadData("SERVER PROTOCOL 2\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ("", out.log);
+}
+
+// Arm: strncasecmp folds case, so a lowercase banner is still a valid response.
+TEST_F(RasClientMicrotest, ConnectHandshake_LowercaseServerBanner_IsAcceptedCaseInsensitively) {
+  ScriptReadData("server protocol 2\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ("", out.log);
+}
+
+// Arm: strtol != NCCL_RAS_CLIENT_PROTOCOL warns but does NOT abort. 7 is neither
+// the real version nor the 0 that a failed strtol yields.
+TEST_F(RasClientMicrotest, ConnectHandshake_ServerProtocolMismatch_WarnsAndContinues) {
+  ScriptReadData("SERVER PROTOCOL 7\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(g_closedFds.empty());  // not the `fail:` arm: the socket stays open
+  // The %s is msgBuf + 16, which still carries the response's trailing newline.
+  EXPECT_TRUE(LogHas(out.log,
+                     "NCCL RAS protocol version mismatch (NCCL: 7\n; RAS client: 2)!\n"
+                     "Will try to continue in spite of that...\n"))
+      << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Unexpected response from NCCL: "));
+}
+
+// Arm: strtol converts nothing and returns 0, which is != 2, so a non-numeric
+// version lands in the same non-fatal warning and the raw text is echoed.
+TEST_F(RasClientMicrotest, ConnectHandshake_NonNumericProtocolVersion_WarnsWithEchoedTextAndContinues) {
+  ScriptReadData("SERVER PROTOCOL abc\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_TRUE(LogHas(out.log,
+                     "NCCL RAS protocol version mismatch (NCCL: abc\n; RAS client: 2)!\n"
+                     "Will try to continue in spite of that...\n"))
+      << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Unexpected response from NCCL: "));
+}
+
+// Arm: the strtol base is 10, so "0x2" stops at 'x' and yields 0 -- a mismatch.
+// Base 16 or base 0 would read it as 2 and take the silent arm instead.
+TEST_F(RasClientMicrotest, ConnectHandshake_HexSpelledVersion_IsParsedBaseTenAndWarns) {
+  ScriptReadData("SERVER PROTOCOL 0x2\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_TRUE(LogHas(out.log,
+                     "NCCL RAS protocol version mismatch (NCCL: 0x2\n; RAS client: 2)!\n"
+                     "Will try to continue in spite of that...\n"))
+      << out.log;
+}
+
+// Arm: strncasecmp compares 16 bytes, so the banner's trailing space is part of
+// the contract -- "SERVER PROTOCOL" alone stops at the '\n' in byte 15.
+TEST_F(RasClientMicrotest, ConnectHandshake_BannerWithoutTrailingSpace_ReportsUnexpectedAndFails) {
+  ScriptReadData("SERVER PROTOCOL\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_TRUE(LogHas(out.log, "Unexpected response from NCCL: SERVER PROTOCOL\n\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "NCCL RAS protocol version mismatch"));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: byte 15 must be the space specifically. A comparison one byte short would
+// accept this and then read msgBuf+16 as "2" and return 0.
+TEST_F(RasClientMicrotest, ConnectHandshake_SixteenthByteNotSpace_ReportsUnexpectedAndFails) {
+  ScriptReadData("SERVER PROTOCOLX2\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_TRUE(LogHas(out.log, "Unexpected response from NCCL: SERVER PROTOCOLX2\n\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "NCCL RAS protocol version mismatch"));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: a response that differs in its very first byte takes the same reject path.
+TEST_F(RasClientMicrotest, ConnectHandshake_UnrelatedResponse_ReportsUnexpectedAndFails) {
+  ScriptReadData("ERROR unknown command\n");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_TRUE(LogHas(out.log, "Unexpected response from NCCL: ERROR unknown command\n\n")) << out.log;
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: rasRead returns 0. The empty script makes the default read report EOF.
+TEST_F(RasClientMicrotest, ConnectHandshake_ServerClosesBeforeReplying_ReportsClosedConnectionAndFails) {
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);  // the write arm ran; only the reply is missing
+  EXPECT_TRUE(LogHas(out.log, "NCCL unexpectedly closed the connection\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Unexpected response from NCCL: "));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: the CLIENT PROTOCOL write fails with an errno that is not EAGAIN, so the
+// perror/`goto fail` pair runs instead of the retry.
+TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EIO;
+    return -1;
+  });
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ("", g_writtenData);
+  EXPECT_TRUE(LogHas(out.log, "write to socket: Input/output error\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Connection timed out; retrying...\n"));
+  EXPECT_FALSE(LogHas(out.log, "read socket: "));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: rasRead fails with an errno that is not EAGAIN. The write arm must have
+// already completed, which the recorded wire bytes pin.
+TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEio_PerrorsAndFails) {
+  ScriptRead(-1, EIO, "");
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(1, out.ret);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_TRUE(LogHas(out.log, "read socket: Input/output error\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Connection timed out; retrying...\n"));
+  EXPECT_FALSE(LogHas(out.log, "write to socket: "));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: the write fails with EAGAIN, so `goto timeout` closes the socket and
+// re-runs resolve/connect/handshake. The hook must succeed on the second pass --
+// a seam that returns EAGAIN forever makes the retry loop non-terminating.
+TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEagainOnce_RetriesOnceThenSucceeds) {
+  ScriptReadData("SERVER PROTOCOL 2\n");
+  int writes = 0;
+  ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
+  ScopedHook writeHook(g_write, [&writes](int, const void* buf, size_t count) -> ssize_t {
+    if (++writes == 1) {
+      errno = EAGAIN;
+      return -1;
+    }
+    if (writes > 4) {  // cap: a mutant that keeps retrying must fail out, not hang the binary
+      errno = EIO;
+      return -1;
+    }
+    g_writtenData.append(static_cast<const char*>(buf), count);
+    return static_cast<ssize_t>(count);
+  });
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(2, writeHook.calls);
+  EXPECT_EQ(2, connectHook.calls);         // the retry re-ran the whole resolve/connect walk
+  EXPECT_EQ(kClientHello, g_writtenData);  // only the second, successful write reached the wire
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(LogHas(out.log, "Connection timed out; retrying...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "write to socket: "));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
+
+// Arm: rasRead fails with EAGAIN, so `goto timeout` retries; the second pass
+// reads the next scripted step. Two client hellos on the wire prove the whole
+// handshake re-ran rather than resuming mid-way.
+TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEagainOnce_RetriesOnceThenSucceeds) {
+  ScriptRead(-1, EAGAIN, "");
+  ScriptReadData("SERVER PROTOCOL 2\n");
+  ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
+
+  const HandshakeOutcome out = RunConnectToNCCL();
+
+  EXPECT_EQ(0, out.ret);
+  EXPECT_EQ(2, connectHook.calls);
+  EXPECT_EQ(std::string(kClientHello) + kClientHello, g_writtenData);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(LogHas(out.log, "Connection timed out; retrying...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "read socket: "));
+  ExpectClosedExactlyOnce(kSocketFd);
+}
