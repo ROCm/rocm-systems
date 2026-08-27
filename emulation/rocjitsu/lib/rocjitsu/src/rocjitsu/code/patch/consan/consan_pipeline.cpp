@@ -48,11 +48,6 @@ runtime_requirements(const ConSanEvidenceRequirements &requirements) {
   return std::visit([](const auto &typed) { return typed.runtime_requirements; }, requirements);
 }
 
-[[nodiscard]] ConSanRuntimeResourceScope
-delivery_scope(const ConSanEvidenceRequirements &requirements) {
-  return std::visit([](const auto &typed) { return typed.delivery_scope; }, requirements);
-}
-
 [[nodiscard]] bool evidence_requires_binding(const ConSanEvidenceRequirements &requirements) {
   return std::visit([](const auto &typed) { return typed.requires_binding(); }, requirements);
 }
@@ -572,7 +567,7 @@ TransformResult TransformResult::publish_optional(
   } else {
     const ConSanContractIssue requirement_issue = validate_runtime_capabilities(
         capabilities, runtime_requirements(*result.evidence_requirements));
-    const bool scope_matches = resources.scope == delivery_scope(*result.evidence_requirements);
+    const bool scope_matches = resources.scope == ConSanRuntimeResourceScope::Executable;
     const ConSanContractIssue resource_issue =
         validate_evidence_binding(*result.evidence_requirements, resources);
     const ConSanContractIssue binding_issue =

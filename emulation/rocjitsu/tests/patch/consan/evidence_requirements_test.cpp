@@ -199,13 +199,6 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
 }
 
 TEST(ConSanEvidenceRequirements, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
-  expect_evidence_enum_contract(kConSanEvidenceSchemas, ConSanEvidenceSchema::Count,
-                                consan_evidence_schema_name, "invalid-evidence-schema");
-  expect_evidence_enum_contract(kConSanEvidenceBoundednessValues, ConSanEvidenceBoundedness::Count,
-                                consan_evidence_boundedness_name, "invalid-evidence-boundedness");
-  expect_evidence_enum_contract(kConSanEvidenceLossSeverities, ConSanEvidenceLossSeverity::Count,
-                                consan_evidence_loss_severity_name,
-                                "invalid-evidence-loss-severity");
   expect_evidence_enum_contract(
       kConSanEvidenceRequirementReasons, ConSanEvidenceRequirementReason::Count,
       consan_evidence_requirement_reason_name, "invalid-evidence-requirement-reason");
@@ -239,10 +232,6 @@ TEST(ConSanEvidenceRequirements, EmptyRecordReplayPlanProducesOneAddressFreeHead
       plan_consan_record_replay_evidence(plan);
   ASSERT_TRUE(requirements.well_formed());
   ASSERT_TRUE(requirements.complete());
-  EXPECT_EQ(requirements.schema, ConSanEvidenceSchema::RecordReplay);
-  EXPECT_EQ(requirements.boundedness, ConSanEvidenceBoundedness::BoundedFirstLight);
-  EXPECT_EQ(requirements.loss_severity, ConSanEvidenceLossSeverity::InvalidatesCompleteness);
-  EXPECT_EQ(requirements.delivery_scope, ConSanRuntimeResourceScope::Executable);
   EXPECT_EQ(requirements.sizing_inventory.access_range_count, 0u);
   EXPECT_EQ(requirements.abi_plan.required_bytes, sizeof(ConSanMoiReportHeader));
   EXPECT_EQ(requirements.runtime_requirements.minimum_report_allocation_bytes,
@@ -465,11 +454,6 @@ TEST(ConSanEvidenceRequirements, WellFormedRejectsEveryCrossTypeContractMismatch
     EXPECT_FALSE(broken.well_formed());
     EXPECT_FALSE(broken.complete());
   };
-  expect_rejected([](auto &value) { value.schema = ConSanEvidenceSchema::Sampled; });
-  expect_rejected(
-      [](auto &value) { value.boundedness = ConSanEvidenceBoundedness::ExactOnDevice; });
-  expect_rejected([](auto &value) { value.loss_severity = ConSanEvidenceLossSeverity::Optional; });
-  expect_rejected([](auto &value) { value.delivery_scope = ConSanRuntimeResourceScope::Dispatch; });
   expect_rejected(
       [](auto &value) { value.runtime_requirements.host_device_visible_memory = false; });
   expect_rejected(
@@ -521,10 +505,6 @@ TEST(ConSanEvidenceRequirements, SampledIntentKindsMapToIndependentTypedCapaciti
   ASSERT_TRUE(plan.valid());
   const ConSanSampledEvidenceRequirements requirements = plan_consan_sampled_evidence(plan);
   ASSERT_TRUE(requirements.complete());
-  EXPECT_EQ(requirements.schema, ConSanEvidenceSchema::Sampled);
-  EXPECT_EQ(requirements.boundedness, ConSanEvidenceBoundedness::BoundedSampled);
-  EXPECT_EQ(requirements.loss_severity, ConSanEvidenceLossSeverity::InvalidatesCompleteness);
-  EXPECT_EQ(requirements.delivery_scope, ConSanRuntimeResourceScope::Executable);
   EXPECT_EQ(requirements.sizing_inventory.access_range_count, 3u);
   EXPECT_EQ(requirements.sizing_inventory.barrier_event_count, 3u);
   EXPECT_EQ(requirements.sizing_inventory.atomic_event_count, 1u);
@@ -601,11 +581,6 @@ TEST(ConSanEvidenceRequirements, SampledWellFormedChecksEveryCrossTypeInvariant)
     EXPECT_FALSE(broken.well_formed());
     EXPECT_FALSE(broken.complete());
   };
-  expect_rejected([](auto &value) { value.schema = ConSanEvidenceSchema::RecordReplay; });
-  expect_rejected(
-      [](auto &value) { value.boundedness = ConSanEvidenceBoundedness::ExactOnDevice; });
-  expect_rejected([](auto &value) { value.loss_severity = ConSanEvidenceLossSeverity::Optional; });
-  expect_rejected([](auto &value) { value.delivery_scope = ConSanRuntimeResourceScope::Dispatch; });
   expect_rejected(
       [](auto &value) { value.runtime_requirements.host_device_visible_memory = false; });
   expect_rejected(
@@ -655,8 +630,6 @@ TEST(ConSanEvidenceRequirements, InlineNativeAccessUsesImmutableDescriptorAndRan
   const ConSanInlineShadowEvidenceRequirements requirements =
       plan_consan_inline_shadow_evidence(fixture.inventory, fixture.plan);
   ASSERT_TRUE(requirements.complete());
-  EXPECT_EQ(requirements.schema, ConSanEvidenceSchema::InlineShadow);
-  EXPECT_EQ(requirements.boundedness, ConSanEvidenceBoundedness::ExactOnDevice);
   EXPECT_EQ(requirements.required_lds_aperture_bytes, 4096u);
   EXPECT_EQ(requirements.sizing_inventory.inline_lds_bytes, 4096u);
   EXPECT_EQ(requirements.sizing_inventory.access_range_count, 1u);
@@ -767,11 +740,6 @@ TEST(ConSanEvidenceRequirements, InlineWellFormedChecksEverySchemaSpecificInvari
     EXPECT_FALSE(broken.well_formed());
     EXPECT_FALSE(broken.complete());
   };
-  expect_rejected([](auto &value) { value.schema = ConSanEvidenceSchema::Sampled; });
-  expect_rejected(
-      [](auto &value) { value.boundedness = ConSanEvidenceBoundedness::BoundedSampled; });
-  expect_rejected([](auto &value) { value.loss_severity = ConSanEvidenceLossSeverity::Optional; });
-  expect_rejected([](auto &value) { value.delivery_scope = ConSanRuntimeResourceScope::Dispatch; });
   expect_rejected([](auto &value) { ++value.required_lds_aperture_bytes; });
   expect_rejected(
       [](auto &value) { value.runtime_requirements.host_device_visible_memory = false; });
@@ -821,9 +789,6 @@ TEST(ConSanEvidenceRequirements, SuperColliderMarkerContractCoversEmptyAndObserv
   empty.engine = ConSanCapabilityEngine::SuperCollider;
   const auto no_marker = plan_consan_supercollider_evidence(empty);
   ASSERT_TRUE(no_marker.complete());
-  EXPECT_EQ(no_marker.schema, ConSanEvidenceSchema::SuperCollider);
-  EXPECT_EQ(no_marker.boundedness, ConSanEvidenceBoundedness::StickyMarker);
-  EXPECT_EQ(no_marker.loss_severity, ConSanEvidenceLossSeverity::InvalidatesCompleteness);
   EXPECT_EQ(no_marker.marker_bytes, 0u);
   EXPECT_FALSE(no_marker.requires_binding());
 
@@ -882,11 +847,6 @@ TEST(ConSanEvidenceRequirements, SuperColliderWellFormedChecksEveryMarkerInvaria
     EXPECT_FALSE(broken.complete());
     EXPECT_FALSE(broken.requires_binding());
   };
-  expect_rejected([](auto &value) { value.schema = ConSanEvidenceSchema::InlineShadow; });
-  expect_rejected(
-      [](auto &value) { value.boundedness = ConSanEvidenceBoundedness::ExactOnDevice; });
-  expect_rejected([](auto &value) { value.loss_severity = ConSanEvidenceLossSeverity::Optional; });
-  expect_rejected([](auto &value) { value.delivery_scope = ConSanRuntimeResourceScope::Dispatch; });
   expect_rejected([](auto &value) { value.marker_bytes = 8; });
   expect_rejected(
       [](auto &value) { value.runtime_requirements.host_device_visible_memory = false; });
@@ -898,7 +858,7 @@ TEST(ConSanEvidenceRequirements, SuperColliderWellFormedChecksEveryMarkerInvaria
       [](auto &value) { ++*value.runtime_requirements.minimum_report_allocation_bytes; });
 }
 
-TEST(ConSanEvidenceRequirements, ClosedVariantPreservesEachSchemaAndWellFormedContract) {
+TEST(ConSanEvidenceRequirements, ClosedVariantPreservesEachAlternativeAndWellFormedContract) {
   const InlineEvidenceFixture inline_fixture =
       make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
   const std::array<ConSanEvidenceRequirements, 4> requirements = {
@@ -915,18 +875,19 @@ TEST(ConSanEvidenceRequirements, ClosedVariantPreservesEachSchemaAndWellFormedCo
                    ConSanSemanticSiteDomain::Access)
               .build()),
   };
-  for (size_t index = 0; index < requirements.size(); ++index) {
-    EXPECT_EQ(consan_evidence_requirements_schema(requirements[index]),
-              kConSanEvidenceSchemas[index]);
-    EXPECT_TRUE(consan_evidence_requirements_well_formed(requirements[index]));
-    EXPECT_EQ(requirements[index].index(), index);
-  }
-  ConSanSampledEvidenceRequirements broken = std::get<1>(requirements[1]);
-  broken.schema = ConSanEvidenceSchema::RecordReplay;
+  EXPECT_TRUE(std::holds_alternative<ConSanRecordReplayEvidenceRequirements>(requirements[0]));
+  EXPECT_TRUE(std::holds_alternative<ConSanSampledEvidenceRequirements>(requirements[1]));
+  EXPECT_TRUE(std::holds_alternative<ConSanInlineShadowEvidenceRequirements>(requirements[2]));
+  EXPECT_TRUE(std::holds_alternative<ConSanSuperColliderEvidenceRequirements>(requirements[3]));
+  for (const ConSanEvidenceRequirements &requirement : requirements)
+    EXPECT_TRUE(consan_evidence_requirements_well_formed(requirement));
+  ConSanSampledEvidenceRequirements broken =
+      std::get<ConSanSampledEvidenceRequirements>(requirements[1]);
+  broken.runtime_requirements.executable_binding = false;
   EXPECT_FALSE(consan_evidence_requirements_well_formed(ConSanEvidenceRequirements{broken}));
 }
 
-TEST(ConSanEvidenceRequirements, EverySchemaPublishesAnIndependentlyValidatedRuntimeContract) {
+TEST(ConSanEvidenceRequirements, EveryAlternativePublishesAnIndependentlyValidatedRuntimeContract) {
   const InlineEvidenceFixture inline_fixture =
       make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
   const std::array<ConSanEvidenceRequirements, 4> requirements = {
@@ -945,6 +906,7 @@ TEST(ConSanEvidenceRequirements, EverySchemaPublishesAnIndependentlyValidatedRun
   };
 
   for (const ConSanEvidenceRequirements &requirement : requirements) {
+    SCOPED_TRACE(requirement.index());
     const RuntimeCapabilityRequirements runtime =
         std::visit([](const auto &typed) { return typed.runtime_requirements; }, requirement);
     ASSERT_TRUE(runtime.minimum_report_allocation_bytes);
@@ -958,8 +920,7 @@ TEST(ConSanEvidenceRequirements, EverySchemaPublishesAnIndependentlyValidatedRun
         .executable_binding = true,
         .dispatch_segment_binding = false,
     };
-    EXPECT_EQ(validate_runtime_capabilities(capabilities, runtime), ConSanContractIssue::None)
-        << consan_evidence_schema_name(consan_evidence_requirements_schema(requirement));
+    EXPECT_EQ(validate_runtime_capabilities(capabilities, runtime), ConSanContractIssue::None);
 
     capabilities.host_device_visible_memory = false;
     EXPECT_EQ(validate_runtime_capabilities(capabilities, runtime),

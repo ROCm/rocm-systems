@@ -379,10 +379,6 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 
 bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
   if (reason != ConSanEvidenceRequirementReason::None ||
-      schema != ConSanEvidenceSchema::RecordReplay ||
-      boundedness != ConSanEvidenceBoundedness::BoundedFirstLight ||
-      loss_severity != ConSanEvidenceLossSeverity::InvalidatesCompleteness ||
-      delivery_scope != ConSanRuntimeResourceScope::Executable ||
       sizing_inventory.engine != ConSanMoiEngine::RecordReplay ||
       abi_plan.engine != ConSanMoiEngine::RecordReplay ||
       !runtime_requirements.host_device_visible_memory ||
@@ -456,11 +452,7 @@ find_inventory_access_range(const ProgramInventory &inventory, const SemanticSit
 } // namespace
 
 bool ConSanSampledEvidenceRequirements::well_formed() const {
-  if (schema != ConSanEvidenceSchema::Sampled ||
-      boundedness != ConSanEvidenceBoundedness::BoundedSampled ||
-      loss_severity != ConSanEvidenceLossSeverity::InvalidatesCompleteness ||
-      delivery_scope != ConSanRuntimeResourceScope::Executable ||
-      sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
+  if (sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
       sizing_inventory.sampled_bank_count_adaptive != (sizing_inventory.access_range_count != 0u)) {
     return false;
   }
@@ -495,11 +487,7 @@ bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
       sizing_inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
   const uint64_t expected_acquired_epoch_capacity = std::max<uint64_t>(
       expected_ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
-  return schema == ConSanEvidenceSchema::InlineShadow &&
-         boundedness == ConSanEvidenceBoundedness::ExactOnDevice &&
-         loss_severity == ConSanEvidenceLossSeverity::InvalidatesCompleteness &&
-         delivery_scope == ConSanRuntimeResourceScope::Executable &&
-         required_lds_aperture_bytes == sizing_inventory.inline_lds_bytes &&
+  return required_lds_aperture_bytes == sizing_inventory.inline_lds_bytes &&
          sizing_inventory.inline_atomic_release_count == expected_ordering_capacity &&
          sizing_inventory.inline_causal_snapshot_count == expected_ordering_capacity &&
          sizing_inventory.inline_acquired_epoch_token_count == expected_acquired_epoch_capacity &&
@@ -512,10 +500,6 @@ bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
 
 bool ConSanSuperColliderEvidenceRequirements::well_formed() const {
   return reason == ConSanEvidenceRequirementReason::None &&
-         schema == ConSanEvidenceSchema::SuperCollider &&
-         boundedness == ConSanEvidenceBoundedness::StickyMarker &&
-         loss_severity == ConSanEvidenceLossSeverity::InvalidatesCompleteness &&
-         delivery_scope == ConSanRuntimeResourceScope::Executable &&
          (marker_bytes == 0u || marker_bytes == sizeof(uint32_t)) &&
          runtime_requirements.host_device_visible_memory &&
          runtime_requirements.host_device_coherent_memory &&
@@ -523,11 +507,6 @@ bool ConSanSuperColliderEvidenceRequirements::well_formed() const {
          runtime_requirements.minimum_report_allocation_bytes == marker_bytes &&
          !runtime_requirements.max_workgroup_lds_bytes && runtime_requirements.executable_binding &&
          !runtime_requirements.dispatch_segment_binding;
-}
-
-ConSanEvidenceSchema
-consan_evidence_requirements_schema(const ConSanEvidenceRequirements &requirements) {
-  return std::visit([](const auto &value) { return value.schema; }, requirements);
 }
 
 bool consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements) {

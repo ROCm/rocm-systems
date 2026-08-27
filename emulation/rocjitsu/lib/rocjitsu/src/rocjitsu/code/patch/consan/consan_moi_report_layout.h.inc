@@ -338,137 +338,6 @@ struct ConSanMoiAutoReportPlan {
   bool operator==(const ConSanMoiAutoReportPlan &) const = default;
 };
 
-/// Evidence-record schema selected by an engine observation plan.
-///
-/// A schema names the meaning and publication protocol of retained bytes, not
-/// merely their current C++ layout. Later evidence decoders dispatch on this
-/// type. Adding a schema requires its own requirement variant; values must not
-/// be treated as layout-compatible just because some record fields coincide.
-enum class ConSanEvidenceSchema : uint8_t {
-  /// Exact bounded access and synchronization events replayed on the host.
-  RecordReplay,
-  /// Selected access windows and causal synchronization metadata.
-  Sampled,
-  /// Exact on-device shadow and ordering state plus bounded diagnostics.
-  InlineShadow,
-  /// Sticky mismatch evidence produced by redundant device execution.
-  SuperCollider,
-  /// One-past-the-end iteration bound; never an evidence schema.
-  Count,
-};
-
-/// Complete iterable set of evidence schemas.
-inline constexpr std::array<ConSanEvidenceSchema, 4> kConSanEvidenceSchemas = {
-    ConSanEvidenceSchema::RecordReplay,
-    ConSanEvidenceSchema::Sampled,
-    ConSanEvidenceSchema::InlineShadow,
-    ConSanEvidenceSchema::SuperCollider,
-};
-
-/// Return the stable diagnostic spelling of an evidence schema.
-[[nodiscard]] constexpr std::string_view consan_evidence_schema_name(ConSanEvidenceSchema schema) {
-  switch (schema) {
-  case ConSanEvidenceSchema::RecordReplay:
-    return "record-replay";
-  case ConSanEvidenceSchema::Sampled:
-    return "sampled";
-  case ConSanEvidenceSchema::InlineShadow:
-    return "inline-shadow";
-  case ConSanEvidenceSchema::SuperCollider:
-    return "supercollider";
-  case ConSanEvidenceSchema::Count:
-    break;
-  }
-  return "invalid-evidence-schema";
-}
-
-static_assert(kConSanEvidenceSchemas.size() == static_cast<size_t>(ConSanEvidenceSchema::Count));
-
-/// How an evidence schema bounds the observations it can retain.
-///
-/// This classification is part of the sanitizer contract: a clean result from
-/// bounded first-light or sampled evidence does not mean the same thing as an
-/// exact on-device decision. Capacity reduction may change quantities inside
-/// one class, but may not silently change the class itself.
-enum class ConSanEvidenceBoundedness : uint8_t {
-  /// Retain a finite first observation for each modeled dynamic identity.
-  BoundedFirstLight,
-  /// Retain only accesses selected into finite causal sampling windows.
-  BoundedSampled,
-  /// Make the conflict decision against exact bounded-address device state.
-  ExactOnDevice,
-  /// Retain a sticky indication that any redundant execution mismatched.
-  StickyMarker,
-  /// One-past-the-end iteration bound; never a boundedness contract.
-  Count,
-};
-
-/// Complete iterable set of evidence-boundedness contracts.
-inline constexpr std::array<ConSanEvidenceBoundedness, 4> kConSanEvidenceBoundednessValues = {
-    ConSanEvidenceBoundedness::BoundedFirstLight,
-    ConSanEvidenceBoundedness::BoundedSampled,
-    ConSanEvidenceBoundedness::ExactOnDevice,
-    ConSanEvidenceBoundedness::StickyMarker,
-};
-
-/// Return the stable diagnostic spelling of an evidence-boundedness contract.
-[[nodiscard]] constexpr std::string_view
-consan_evidence_boundedness_name(ConSanEvidenceBoundedness boundedness) {
-  switch (boundedness) {
-  case ConSanEvidenceBoundedness::BoundedFirstLight:
-    return "bounded-first-light";
-  case ConSanEvidenceBoundedness::BoundedSampled:
-    return "bounded-sampled";
-  case ConSanEvidenceBoundedness::ExactOnDevice:
-    return "exact-on-device";
-  case ConSanEvidenceBoundedness::StickyMarker:
-    return "sticky-marker";
-  case ConSanEvidenceBoundedness::Count:
-    break;
-  }
-  return "invalid-evidence-boundedness";
-}
-
-static_assert(kConSanEvidenceBoundednessValues.size() ==
-              static_cast<size_t>(ConSanEvidenceBoundedness::Count));
-
-/// Effect of losing evidence on ConSan's ability to claim a clean run.
-///
-/// This is not a diagnostic severity. It tells the eventual trust evaluator
-/// whether saturation, dropping, or malformed publication merely loses
-/// optional telemetry or invalidates the completeness of a no-race verdict.
-enum class ConSanEvidenceLossSeverity : uint8_t {
-  /// Loss affects optional telemetry but not the engine's minimum contract.
-  Optional,
-  /// Any loss makes the run incomplete even when no conflict was retained.
-  InvalidatesCompleteness,
-  /// One-past-the-end iteration bound; never a loss rule.
-  Count,
-};
-
-/// Complete iterable set of evidence-loss rules.
-inline constexpr std::array<ConSanEvidenceLossSeverity, 2> kConSanEvidenceLossSeverities = {
-    ConSanEvidenceLossSeverity::Optional,
-    ConSanEvidenceLossSeverity::InvalidatesCompleteness,
-};
-
-/// Return the stable diagnostic spelling of an evidence-loss rule.
-[[nodiscard]] constexpr std::string_view
-consan_evidence_loss_severity_name(ConSanEvidenceLossSeverity severity) {
-  switch (severity) {
-  case ConSanEvidenceLossSeverity::Optional:
-    return "optional";
-  case ConSanEvidenceLossSeverity::InvalidatesCompleteness:
-    return "invalidates-completeness";
-  case ConSanEvidenceLossSeverity::Count:
-    break;
-  }
-  return "invalid-evidence-loss-severity";
-}
-
-static_assert(kConSanEvidenceLossSeverities.size() ==
-              static_cast<size_t>(ConSanEvidenceLossSeverity::Count));
-
 /// Typed failure to derive evidence requirements from semantic policy.
 ///
 /// Capacity insufficiency is deliberately not a construction failure: it is a
@@ -546,21 +415,14 @@ struct ConSanRecordReplayCapacityPolicy {
 /// Address-free Record/Replay evidence contract for one code object.
 ///
 /// The immutable observation plan determines logical record counts; capacity
-/// policy supplies only boundedness choices. `sizing_inventory` is the exact
+/// policy supplies only capacity choices. This alternative intrinsically
+/// denotes bounded first-light evidence whose loss invalidates completeness
+/// and whose concrete binding has executable lifetime. `sizing_inventory` is the exact
 /// input to the current ABI layout implementation and `abi_plan` is its output.
 /// Runtime requirements state allocation properties without an address or
-/// handle. `delivery_scope` identifies the lifetime that a later binding must
-/// provide. A capacity-limited or overflowing ABI plan remains a well-formed
+/// handle. A capacity-limited or overflowing ABI plan remains a well-formed
 /// requirement and can be reported without attempting allocation.
 struct ConSanRecordReplayEvidenceRequirements {
-  /// Schema consumed by the device writer and host decoder.
-  ConSanEvidenceSchema schema = ConSanEvidenceSchema::RecordReplay;
-  /// Declared retention model for a clean-run interpretation.
-  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::BoundedFirstLight;
-  /// Trust effect of any dropped, saturated, or malformed required evidence.
-  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
-  /// Logical lifetime required of a later concrete runtime binding.
-  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
   /// Runtime facts required before allocation or executable binding.
   RuntimeCapabilityRequirements runtime_requirements;
   /// Exact address-free capacities consumed by the current ABI layout planner.
@@ -611,17 +473,11 @@ struct ConSanSampledCapacityPolicy {
 /// The observation plan supplies logical access windows and ordering events;
 /// the capacity policy supplies only explicit bounds. The sizing inventory and
 /// ABI plan preserve the current report representation without making it the
-/// semantic interface. Runtime requirements describe a future executable-
-/// lifetime binding but never own that binding.
+/// semantic interface. This alternative intrinsically denotes bounded sampled
+/// evidence whose loss invalidates completeness and whose concrete binding has
+/// executable lifetime. Runtime requirements describe that binding but never
+/// own it.
 struct ConSanSampledEvidenceRequirements {
-  /// Schema consumed by the Sampled device writer and host decoder.
-  ConSanEvidenceSchema schema = ConSanEvidenceSchema::Sampled;
-  /// Declared retention model for the finite sampled windows.
-  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::BoundedSampled;
-  /// Trust effect of dropping or saturating any required sampled evidence.
-  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
-  /// Logical lifetime required of the later concrete runtime binding.
-  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
   /// Runtime facts required before allocation or executable binding.
   RuntimeCapabilityRequirements runtime_requirements;
   /// Exact address-free capacities consumed by the current ABI planner.
@@ -667,16 +523,11 @@ struct ConSanInlineShadowCapacityPolicy {
 /// access provenance, execution owners, and pristine kernel-descriptor LDS
 /// declarations. `required_lds_aperture_bytes` makes that semantic derivation
 /// explicit beside the current ABI plan. The type contains no ELF view,
-/// transformed descriptor, report address, or device allocation.
+/// transformed descriptor, report address, or device allocation. This
+/// alternative intrinsically denotes exact on-device conflict decisions with
+/// bounded diagnostics; any evidence loss invalidates completeness and the
+/// concrete binding has executable lifetime.
 struct ConSanInlineShadowEvidenceRequirements {
-  /// Schema consumed by the InlineShadow device logic and host decoder.
-  ConSanEvidenceSchema schema = ConSanEvidenceSchema::InlineShadow;
-  /// Declared exact on-device conflict-decision model.
-  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::ExactOnDevice;
-  /// Trust effect of dropping or saturating required InlineShadow evidence.
-  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
-  /// Logical lifetime required of the later concrete runtime binding.
-  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
   /// Runtime facts required before allocation or executable binding.
   RuntimeCapabilityRequirements runtime_requirements;
   /// Largest byte aperture that any admitted exact-shadow access can address.
@@ -708,15 +559,9 @@ struct ConSanInlineShadowEvidenceRequirements {
 /// valid observation plan contains no admitted access and otherwise states the
 /// complete marker requirement. Runtime properties and executable lifetime
 /// remain explicit even though the current registry implements the allocation.
+/// This alternative intrinsically denotes a sticky marker whose loss
+/// invalidates completeness and whose concrete binding has executable lifetime.
 struct ConSanSuperColliderEvidenceRequirements {
-  /// Schema consumed by the redundant device executions and host observer.
-  ConSanEvidenceSchema schema = ConSanEvidenceSchema::SuperCollider;
-  /// Declared fixed sticky-marker retention model.
-  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::StickyMarker;
-  /// Trust effect of losing or failing to publish a required marker.
-  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
-  /// Logical lifetime required of the later concrete runtime binding.
-  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
   /// Runtime facts required before marker allocation or executable binding.
   RuntimeCapabilityRequirements runtime_requirements;
   /// Required sticky-marker storage; zero means no admitted observation.
@@ -737,17 +582,14 @@ struct ConSanSuperColliderEvidenceRequirements {
 /// Closed set of engine-specific evidence contracts passed from semantic
 /// policy to runtime coordination.
 ///
-/// Each alternative retains its own schema-specific capacities; this variant
+/// Each alternative is its own schema and retains its schema-specific
+/// capacities; this variant
 /// is an interface over distinct contracts, not a largest-union report layout.
 /// Visitors can ask common questions without assuming that an MOI record array
-/// and a SuperCollider marker have compatible bytes or loss semantics.
+/// and a SuperCollider marker have compatible bytes.
 using ConSanEvidenceRequirements =
     std::variant<ConSanRecordReplayEvidenceRequirements, ConSanSampledEvidenceRequirements,
                  ConSanInlineShadowEvidenceRequirements, ConSanSuperColliderEvidenceRequirements>;
-
-/// Return the schema carried by any evidence-requirement alternative.
-[[nodiscard]] ConSanEvidenceSchema
-consan_evidence_requirements_schema(const ConSanEvidenceRequirements &requirements);
 
 /// Return whether an engine-specific evidence requirement is internally
 /// consistent and can safely cross the runtime-coordination boundary.

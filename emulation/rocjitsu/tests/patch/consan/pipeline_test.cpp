@@ -511,28 +511,14 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
 }
 
 TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) {
-  struct ModeCase {
-    ConSanRequest request;
-    ConSanEvidenceSchema schema;
-  };
-  const std::array<ModeCase, 4> modes = {{
-      {moi_request(ConSanMoiEngine::RecordReplay), ConSanEvidenceSchema::RecordReplay},
-      {moi_request(ConSanMoiEngine::Sampled), ConSanEvidenceSchema::Sampled},
-      {moi_request(ConSanMoiEngine::InlineShadow), ConSanEvidenceSchema::InlineShadow},
-      {supercollider_request(), ConSanEvidenceSchema::SuperCollider},
-  }};
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-
-  for (const ModeCase &mode : modes) {
-    SCOPED_TRACE(consan_evidence_schema_name(mode.schema));
+  const auto check = [&]<typename ExpectedEvidence>(const ConSanRequest &request) {
     TransformResult result = transform_consan(
-        bytes, mode.request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
+        bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
         complete_runtime_capabilities(), BoundRuntimeResources{});
-    ASSERT_TRUE(result.well_formed())
-        << consan_evidence_schema_name(mode.schema) << testing::PrintToString(result.issues);
-    ASSERT_TRUE(result.evidence_requirements)
-        << consan_evidence_schema_name(mode.schema) << testing::PrintToString(result.issues);
-    EXPECT_EQ(consan_evidence_requirements_schema(*result.evidence_requirements), mode.schema);
+    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
+    ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.issues);
+    EXPECT_TRUE(std::holds_alternative<ExpectedEvidence>(*result.evidence_requirements));
     EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
               ConSanPipelineStageStatus::Completed);
     EXPECT_EQ(result.stage(ConSanPipelineStage::ObservationPlan)->status,
@@ -541,7 +527,14 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
               ConSanPipelineStageStatus::Completed);
     EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
               ConSanPipelineStageStatus::Deferred);
-  }
+  };
+
+  check.operator()<ConSanRecordReplayEvidenceRequirements>(
+      moi_request(ConSanMoiEngine::RecordReplay));
+  check.operator()<ConSanSampledEvidenceRequirements>(moi_request(ConSanMoiEngine::Sampled));
+  check.operator()<ConSanInlineShadowEvidenceRequirements>(
+      moi_request(ConSanMoiEngine::InlineShadow));
+  check.operator()<ConSanSuperColliderEvidenceRequirements>(supercollider_request());
 }
 
 TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCapabilities) {
@@ -725,8 +718,8 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   ASSERT_TRUE(malformed.evidence_requirements);
-  std::get<ConSanRecordReplayEvidenceRequirements>(*malformed.evidence_requirements).schema =
-      ConSanEvidenceSchema::Sampled;
+  std::get<ConSanRecordReplayEvidenceRequirements>(*malformed.evidence_requirements)
+      .runtime_requirements.executable_binding = false;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.issues.push_back({});

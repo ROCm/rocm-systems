@@ -987,7 +987,7 @@ The plan contains:
   guest values required, and evidence kind;
 - engine state requirements such as entry identity, epoch, sampling selector,
   exact shadow, ordering tables, or sticky marker;
-- the logical evidence schema and capacity inputs; and
+- the logical evidence kinds from which capacity inputs are derived; and
 - relationships between intents, such as one physical probe covering both
   halves of a logical barrier sequence.
 
@@ -1184,13 +1184,13 @@ contract.
 | Target classifier | ISA spelling to semantic operands/forms | decoded instruction → typed access/synchronization facts or reason | Narrow implementation per encoding family; no engine policy | golden decode/property cases for every distinct mechanism | semantic form and confidence mapping |
 | Inventory builder | Stable sites, ranges, synchronization sequences, ownership, address recipes | code object + profile → `ProgramInventory` | Shared algorithms using classifier | synthetic CFG/ownership/sequence cases on all applicable targets | vocabulary, identity, confidence invariants |
 | Engine policy | Applicability and semantic observation intent | request + inventory + target profile → `ObservationPlan` | Shared unchanged; capability data is input | per-engine semantic matrices, multi-range/sequence coalescing, no target names | each mode's claims and deliberate exclusions |
-| Coverage ledger | Static/dynamic completeness and typed reasons | decisions + lower/runtime outcomes → coverage/trust inputs | Shared unchanged | exhaustive state transition and loss-severity tests | meaning of clean, incomplete, unsupported |
-| Evidence planner | Logical schema and bounded capacities | observation plan + capacity policy → requirements | Shared arithmetic; schema variant per engine | overflow/boundary/layout-independent capacity tests | schema semantics and boundedness |
+| Coverage ledger | Static/dynamic completeness and typed reasons | decisions + lower/runtime outcomes → coverage/trust inputs | Shared unchanged | exhaustive state-transition and evidence-loss tests | meaning of clean, incomplete, unsupported |
+| Evidence planner | Engine-specific retention semantics and bounded capacities | observation plan + capacity policy → requirements | Shared arithmetic; closed typed alternative per engine | overflow/boundary/layout-independent capacity tests | retention and completeness semantics per alternative |
 | Resource planner | Register/state/spill/segment assignments | intents + liveness + target/runtime capabilities → plans | Shared search; target costs/legality are profile/adapter facts | dead/grow/spill/reject cases for each mechanism | hierarchy, lifetime, occupancy effects |
 | Target lowerer | Exact probe and entry/exit sequences | intent + resources + binding → target words/fixups/effects | Narrow target implementation; share algorithms and builders | byte goldens only for distinct encodings plus state-preservation tests | ISA/ABI reason for every branch |
 | Placement transaction | Relocation, caves/islands, fixups, descriptors, final ELF | lowered fragments + original image → validated transform | Shared unchanged; target branch forms supplied by lowerer | branch reach, multiple sites, rollback, large image, final reparse | layout strategy and transactional guarantees |
 | Runtime coordinator | Allocation, replacement and executable lifetime, dispatch binding | requirements + runtime capabilities + HSA/DBI runtime → bound resources/evidence snapshots | Shared lifecycle; backend adapter differs between simulator/hardware | mocked lifecycle, concurrent objects/dispatches, failure cleanup | ownership/lifetime/state machine |
-| Evidence decoder | Commit/generation/layout validation | bytes + schema → typed evidence or malformed reason | Shared unchanged | torn/stale/overflow/malformed snapshots | publication and validation protocol |
+| Evidence decoder | Commit/generation/layout validation | bytes + typed evidence alternative → evidence or malformed reason | Shared unchanged | torn/stale/overflow/malformed snapshots | publication and validation protocol |
 | Engine analyzers | Record/Replay replay, Sampled scan, SuperCollider/Inline collection | typed evidence + semantic metadata → analysis facts | Shared unchanged | model/reference traces and bounded-loss cases | algorithm and limitations per engine |
 | Trust evaluator | Final supported-contract claim | coverage + evidence + analysis → `RunVerdict` | Shared unchanged | truth table for loss, rejection, saturation and conflicts | user meaning of every verdict |
 | Diagnostic renderer | Stable user-facing attribution and summaries | verdict + site mapping → text/JSON | Shared unchanged | schema/golden tests only for supported output surface | versioned output fields |
@@ -3205,11 +3205,12 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
   consumes only `ConSanObservationPlan` and
-  `ConSanRecordReplayCapacityPolicy`. It returns the schema, bounded-first-
-  light retention model, loss effect, executable delivery lifetime, runtime
-  requirements, and exact address-free ABI sizing input and result. The
-  current heterogeneous report-layout planner is an implementation detail of
-  that value; neither type owns an address or allocation.
+  `ConSanRecordReplayCapacityPolicy`. It returns a typed alternative that
+  intrinsically denotes bounded-first-light retention, completeness-invalidating
+  evidence loss, and executable lifetime, plus runtime requirements and exact
+  address-free ABI sizing input and result. The current heterogeneous
+  report-layout planner is an implementation detail of that value; neither type
+  owns an address or allocation.
 - **Completed production cutover:** Automatic Record/Replay sizing counts
   access ranges, barriers, atomics, and fences from admitted typed intents.
   The HSA hook validates the requirements' coherent host/device memory, atomic
@@ -3222,9 +3223,9 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   `ObservationPlan`. Slice 4H migrated those fixtures to typed plans and
   deleted the fallback projection, so production and tests now share one
   evidence-sizing path.
-- **Completed test gate:** Focused type tests exhaustively cover schema,
-  boundedness, loss, construction-reason, layout-outcome, and layout-reason
-  enums; explicit capacity policies; empty and mixed intent plans; multi-range
+- **Completed test gate:** Focused type tests exhaustively cover
+  construction-reason, layout-outcome, and layout-reason enums; explicit
+  capacity policies; empty and mixed intent plans; multi-range
   physical-intent limits; target-neutral record-dimension mapping; invalid and
   foreign plans; malformed intent payloads; capacity failure; every runtime
   fact; cross-type invariants; value semantics; deterministic non-mutation;
@@ -3249,11 +3250,12 @@ could complete.
 
 - **Completed boundary and contract:** Sampled, InlineShadow, and
   SuperCollider now have separate address-free evidence-requirement types
-  under one closed variant. Each states its semantic schema, boundedness, loss
-  effect, executable lifetime, exact runtime capabilities, and typed
-  construction result. Sampled and InlineShadow retain their distinct ABI
-  sizing inputs and plans; SuperCollider retains only its fixed sticky-marker
-  size. No largest-union report contract exists.
+  under one closed variant. Each alternative intrinsically defines its
+  retention and loss semantics and executable lifetime while carrying only
+  varying runtime capabilities, capacities, and typed construction results.
+  Sampled and InlineShadow retain their distinct ABI sizing inputs and plans;
+  SuperCollider retains only its fixed sticky-marker size. No largest-union
+  report contract exists.
 - **Completed immutable derivation:** Sampled capacities are derived only from
   typed access, barrier, and atomic intents plus explicit capacity policy.
   InlineShadow joins exact-shadow intents to immutable access identities,
@@ -3269,8 +3271,9 @@ could complete.
   result/patch rescan and migrated the synthetic hook fixtures. ABI decoders
   and allocation mechanics remain implementation details for later slices.
 - **Completed type and unit gate:** Focused tests cover neutral and directly
-  constructed capacity policies; every schema/boundedness/loss/reason enum and
-  invalid sentinel; every intent-to-capacity mapping; expert limits; missing
+  constructed capacity policies; every construction/layout reason enum and
+  invalid sentinel; every typed-alternative and intent-to-capacity mapping;
+  expert limits; missing
   inventory relationships; descriptor/static-range/full-aperture selection;
   capacity failure; runtime capability admission; cross-type and
   schema-specific invariants; the closed variant; deterministic non-mutation;
@@ -3874,6 +3877,37 @@ analysis completed.
   the 60-second process timeout; those timeout-only rows passed immediately
   when rerun alone in 1.22 and 0.44 seconds. E2E validation remains outside
   this work.
+
+### Slice 5Y: let evidence alternatives own their fixed semantics
+
+- **One discriminant, not four copies:** The closed
+  `ConSanEvidenceRequirements` variant already distinguishes Record/Replay,
+  Sampled, InlineShadow, and SuperCollider. Each named alternative now
+  intrinsically documents its retention model, completeness effect, and
+  executable binding lifetime instead of storing mutable tags that can only be
+  equal to constants.
+- **Completed speculative deletion:** `ConSanEvidenceSchema`,
+  `ConSanEvidenceBoundedness`, and `ConSanEvidenceLossSeverity`, their iterable
+  arrays and formatters, sixteen repeated tag fields, the schema and delivery
+  visitors, and constant-comparison validation branches are gone. Runtime
+  binding still requires executable-lifetime resources directly, and every
+  alternative still fails closed on evidence loss through its documented
+  contract.
+- **Contract coverage:** Tests require each engine to publish the correct
+  concrete variant alternative and continue to corrupt every varying runtime,
+  capacity, inventory, and layout relationship accepted by `well_formed()`.
+  Variant ordinal and a type's agreement with redundant copies of its own name
+  are no longer treated as product behavior.
+- **Deletion result:** Production source is 184 physical lines smaller and
+  tests are 46 physical lines smaller. No replacement discriminator, common
+  base, tag accessor, or compatibility field was introduced.
+- **Completed checked-in gate:** The focused evidence/pipeline gate passes all
+  56 tests. The complete host gate passes 1,510 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 72.41
+  seconds. The complete physical-gfx950 gate was exercised in the immediately
+  preceding tranche; this metadata-only slice does not alter lowering or device
+  bytes. E2E validation remains outside this work.
 
 ### Slice 6: explicit pipeline and result cutover
 
