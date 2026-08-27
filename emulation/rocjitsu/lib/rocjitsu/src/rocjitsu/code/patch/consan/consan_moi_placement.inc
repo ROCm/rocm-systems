@@ -1339,11 +1339,12 @@ struct MoiKernelResourceContext {
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-find_moi_persistent_vgpr_assignment(const ConSanOptions &options, uint64_t descriptor_offset) {
+find_moi_persistent_vgpr_assignment(const ConSanMoiRegisterAllocation &allocation,
+                                    uint64_t descriptor_offset) {
   const auto assignment =
-      std::ranges::find(options.moi_persistent_vgpr_assignments, descriptor_offset,
+      std::ranges::find(allocation.owner_persistent_vgprs, descriptor_offset,
                         &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  return assignment == options.moi_persistent_vgpr_assignments.end() ? nullptr : &*assignment;
+  return assignment == allocation.owner_persistent_vgprs.end() ? nullptr : &*assignment;
 }
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
@@ -1509,15 +1510,16 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiRegisterAllocation &
 
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
+                                     const ConSanMoiRegisterAllocation &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
-  if (options.moi_persistent_vgpr_assignments.empty()) {
+  if (allocation.owner_persistent_vgprs.empty()) {
     return options.moi_owner_vgpr.has_value() || moi_uses_scalar_persistent_state(options) ||
            options.automatic_moi_private_epoch;
   }
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
   size_t assigned_owner_count = 0u;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
-    const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
+    const auto *assignment = find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
     if (!assignment)
       continue;
     ++assigned_owner_count;
@@ -1568,6 +1570,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool
 apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
+                                               const ConSanMoiRegisterAllocation &allocation,
                                                std::span<const uint64_t> owner_descriptor_offsets) {
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options))
     return false;
@@ -1575,7 +1578,7 @@ apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
       record_replay_has_entry_workgroup_capture(options)) {
     return true;
   }
-  return apply_moi_persistent_vgpr_assignment(options, owner_descriptor_offsets) &&
+  return apply_moi_persistent_vgpr_assignment(options, allocation, owner_descriptor_offsets) &&
          record_replay_has_entry_workgroup_capture(options) &&
          record_replay_entry_workgroup_capture_is_unambiguous(options);
 }
@@ -3223,7 +3226,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     if (atomic_site->dst_vgpr)
       request.forbidden.expand({RegClass::VGPR, *atomic_site->dst_vgpr, 1});
   }
-  if (!options.moi_owner_vgpr && options.moi_persistent_vgpr_assignments.empty() &&
+  if (!options.moi_owner_vgpr && state.register_allocation.owner_persistent_vgprs.empty() &&
       options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
     request.forbidden.expand({RegClass::VGPR, kRdna4WorkitemIdX, 1});
   if (options.moi_owner_vgpr)
@@ -3242,7 +3245,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       request.forbidden.expand({RegClass::VGPR, *reg, 1});
   }
   for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
+    const auto *assignment =
+        find_moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
     if (!assignment)
       continue;
     request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
@@ -3337,7 +3341,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
         spill_request.forbidden.expand({RegClass::VGPR, *reg, 1});
     }
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
+      const auto *assignment =
+          find_moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
       if (!assignment)
         continue;
       spill_request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
@@ -3417,7 +3422,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
     // site's complete owner set; size and place its final scratch window for
     // that owner's actual ABI, rather than the code-object-wide fallback.
     ConSanOptions owner_options = site_options;
-    if (apply_moi_persistent_vgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+    if (apply_moi_persistent_vgpr_assignment(owner_options, state.register_allocation,
+                                             plan.owner_descriptor_file_offsets)) {
       const uint16_t owner_scratch_count =
           moi_access_scratch_vgpr_count(owner_options, candidate, state.arch);
       if (owner_scratch_count != scratch_count) {
@@ -3671,7 +3677,7 @@ find_moi_borrowed_entry_backup_vgpr(MoiResourcePlanningState &state,
     anchors.push_back({&context, instruction});
     common_limit = std::min(common_limit, context.ordinary_vgpr_limit);
 
-    const auto *assignment = find_moi_persistent_vgpr_assignment(options, owner);
+    const auto *assignment = find_moi_persistent_vgpr_assignment(state.register_allocation, owner);
     if (!assignment)
       continue;
     forbid(assignment->owner_vgpr);
@@ -3808,7 +3814,7 @@ private:
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOptions &options,
-                         uint16_t expected_count) {
+                         const ConSanMoiRegisterAllocation &allocation, uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
        plan.source == ConSanRegisterAllocationSource::LivenessDead ||
@@ -3848,7 +3854,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
       }
     }
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
+      const auto *assignment = find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
       if (!assignment)
         continue;
       uint16_t end = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
@@ -3876,7 +3882,9 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
 resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandidate &candidate,
                     const ConSanOptions &options, uint16_t expected_count) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
-  return plan == nullptr ? std::nullopt : resolve_moi_scratch_plan(*plan, options, expected_count);
+  return plan == nullptr ? std::nullopt
+                         : resolve_moi_scratch_plan(*plan, options, result.moi_register_allocation,
+                                                    expected_count);
 }
 
 void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidates,
@@ -6645,7 +6653,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         // A prior disconnected component may already have accumulated a VGPR
         // tuple. Commit the scalar transition only after entry scratch has
         // been proven for the complete union.
-        options.moi_persistent_vgpr_assignments.clear();
+        result.moi_register_allocation.owner_persistent_vgprs.clear();
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
         prologue_scratch_assignments = std::move(*prologue_scratch);
@@ -6809,13 +6817,14 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
           assignment.dispatch_id_vgpr = next;
           next = static_cast<uint16_t>(next + 2u);
         }
-        options.moi_persistent_vgpr_assignments.push_back(assignment);
+        result.moi_register_allocation.owner_persistent_vgprs.push_back(assignment);
       }
     }
     options.moi_init_owner_epoch = true;
-    options.automatic_moi_persistent_vgprs = !options.moi_persistent_vgpr_assignments.empty();
+    options.automatic_moi_persistent_vgprs =
+        !result.moi_register_allocation.owner_persistent_vgprs.empty();
     const bool assigned_persistent_dispatch_vgprs =
-        std::ranges::any_of(options.moi_persistent_vgpr_assignments,
+        std::ranges::any_of(result.moi_register_allocation.owner_persistent_vgprs,
                             [](const ConSanMoiPersistentVgprAssignment &assignment) {
                               return assignment.dispatch_id_vgpr.has_value();
                             });

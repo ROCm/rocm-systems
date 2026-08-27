@@ -181,34 +181,11 @@ test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
                                           : consumer->persistent_sgpr_state;
 }
 
-/// Reconstruct per-owner persistent VGPR assignments from their emitted entry
-/// prologues. This is a test reporting view, not lowering state: each returned
-/// assignment is backed by a patch that initializes the same registers for
-/// the named descriptor before guest code executes.
-[[nodiscard]] std::vector<ConSanMoiPersistentVgprAssignment>
+/// Return the authoritative per-owner persistent VGPR allocation selected by
+/// placement and consumed by entry prologues and instrumented sites.
+[[nodiscard]] const std::vector<ConSanMoiPersistentVgprAssignment> &
 test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
-  std::vector<ConSanMoiPersistentVgprAssignment> assignments;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (!patch.persistent_vgpr_state_is_abi || !patch.persistent_vgpr_state_owner_local ||
-        !patch.persistent_owner_vgpr || !patch.persistent_epoch_vgpr)
-      continue;
-    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-      if (std::ranges::find(assignments, owner,
-                            &ConSanMoiPersistentVgprAssignment::descriptor_file_offset) !=
-          assignments.end()) {
-        continue;
-      }
-      assignments.push_back(
-          {.descriptor_file_offset = owner,
-           .owner_vgpr = *patch.persistent_owner_vgpr,
-           .epoch_vgpr = *patch.persistent_epoch_vgpr,
-           .workgroup_key_vgpr = patch.persistent_workgroup_key_vgpr,
-           .record_replay_workgroup_vgprs = patch.persistent_record_replay_workgroup_vgprs,
-           .dispatch_id_vgpr = patch.dispatch_id_capture_vgpr});
-    }
-  }
-  std::ranges::sort(assignments, {}, &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  return assignments;
+  return result.moi_register_allocation.owner_persistent_vgprs;
 }
 
 /// Return the code-object-wide vector-persistent ABI recorded by an emitted

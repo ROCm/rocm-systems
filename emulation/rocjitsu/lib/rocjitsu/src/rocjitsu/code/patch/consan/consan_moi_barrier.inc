@@ -952,7 +952,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline-shadow barrier epoch patch does not support this architecture");
     return;
   }
-  if (!options.moi_epoch_vgpr && options.moi_persistent_vgpr_assignments.empty() &&
+  if (!options.moi_epoch_vgpr && result.moi_register_allocation.owner_persistent_vgprs.empty() &&
       !options.moi_persistent_epoch_sgpr && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch has no persistent epoch state");
@@ -1082,7 +1082,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
       ConSanOptions owner_options = options;
-      if (!apply_moi_persistent_vgpr_assignment(owner_options, owners)) {
+      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_register_allocation,
+                                                owners)) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier lost its owner-local persistent assignment in " +
             candidate.container_name);
@@ -1099,7 +1100,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
         const auto resources =
-            resolve_moi_scratch_plan(*plan, owner_options, /*expected_count=*/6u);
+            resolve_moi_scratch_plan(*plan, owner_options, result.moi_register_allocation,
+                                     /*expected_count=*/6u);
         if (!resources ||
             !access_patch->persistent_record_replay_workgroup_private_offsets.complete()) {
           result.warnings.emplace_back(
@@ -1114,7 +1116,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             access_patch->persistent_record_replay_workgroup_private_offsets;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                                  owners) ||
-            !apply_record_replay_entry_workgroup_assignment(candidate_options, owners)) {
+            !apply_record_replay_entry_workgroup_assignment(
+                candidate_options, result.moi_register_allocation, owners)) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
@@ -1215,7 +1218,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       for (uint64_t descriptor_offset : plan->owner_descriptor_file_offsets) {
-        const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
+        const auto *assignment =
+            find_moi_persistent_vgpr_assignment(result.moi_register_allocation, descriptor_offset);
         if (assignment)
           persistent_epoch_vgpr_requirements[descriptor_offset] =
               static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
@@ -1241,7 +1245,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              owners) ||
-        !apply_moi_persistent_vgpr_assignment(candidate_options, owners)) {
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
+                                              owners)) {
       continue;
     }
     if (candidate_options.automatic_moi_private_epoch)
@@ -1263,7 +1268,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             candidate.container_name);
         continue;
       }
-      const auto resources = resolve_moi_scratch_plan(*plan, candidate_options, scratch_count);
+      const auto resources = resolve_moi_scratch_plan(
+          *plan, candidate_options, result.moi_register_allocation, scratch_count);
       if (!resources) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
@@ -1368,6 +1374,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                                planned.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                          result.moi_register_allocation,
                                                           planned.owner_descriptor_file_offsets)) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback lost its owner-local assignment");
@@ -1415,7 +1422,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     std::optional<uint64_t> oversized_local_body_island;
     if (!planned.private_epoch_offset && !candidate_options.moi_persistent_epoch_sgpr &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options,
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
                                               planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its persistent VGPR assignment");
       return;
@@ -1790,7 +1797,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           return ReusedDenseRelayResult::Failed;
         }
         if (!planned.private_epoch_offset && !candidate_options.moi_persistent_epoch_sgpr &&
-            !apply_moi_persistent_vgpr_assignment(candidate_options,
+            !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI reused barrier relay lost a persistent VGPR assignment");
@@ -2049,7 +2056,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           return;
         }
         if (!planned.private_epoch_offset && !candidate_options.moi_persistent_epoch_sgpr &&
-            !apply_moi_persistent_vgpr_assignment(candidate_options,
+            !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay lost its persistent VGPR assignment");
@@ -2453,7 +2460,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                      /*scratch_count=*/6u);
     if (!existing_plan)
       result.resource_plans.push_back(plan);
-    const auto resources = resolve_moi_scratch_plan(plan, options, /*expected_count=*/6u);
+    const auto resources = resolve_moi_scratch_plan(plan, options, result.moi_register_allocation,
+                                                    /*expected_count=*/6u);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch has no usable resource plan in " +

@@ -364,7 +364,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options, result.moi_register_allocation,
             candidate_resource_plan->owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
-            candidate_options, candidate_resource_plan->owner_descriptor_file_offsets)) {
+            candidate_options, result.moi_register_allocation,
+            candidate_resource_plan->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled probe lost its owner-local persistent or transient assignment");
       continue;
@@ -773,7 +774,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options, result.moi_register_allocation,
             planned_patch.resources.owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
-            candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
+            candidate_options, result.moi_register_allocation,
+            planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
                                arch);
@@ -846,7 +848,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               candidate_options, result.moi_register_allocation,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_moi_persistent_vgpr_assignment(
-              candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
+              candidate_options, result.moi_register_allocation,
+              planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe lost its final persistent or transient assignment");
         return;
@@ -1222,7 +1225,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                     candidate_options, result.moi_register_allocation,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_moi_persistent_vgpr_assignment(
-                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
+                    candidate_options, result.moi_register_allocation,
+                    planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
                   "ConSan MOI sampled probe lost its inline persistent or transient assignment");
               return std::optional<std::vector<uint32_t>>{};

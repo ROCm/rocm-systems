@@ -342,6 +342,9 @@ struct ConSanMoiTransientSgprAssignment {
 /// per-owner assignments through mutable lowerer options. It contains no
 /// search candidates or placement-control flags.
 struct ConSanMoiRegisterAllocation {
+  /// Per-owner persistent vector tuples selected when one code-object-wide
+  /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
+  std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
   /// Code-object-wide transient scalar ABI used by owners without an override.
   ConSanMoiTransientSgprState default_transient_sgprs;
   /// Per-owner-component transient scalar overrides selected by placement.
@@ -771,9 +774,6 @@ struct ConSanOptions : ConSanRequest,
         TransformPolicy(transform_policy) {}
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
-  /// Internal per-owner assignments used when one CDNA4 code-object-wide
-  /// tuple cannot remain below every compiler-defined AccVGPR boundary.
-  std::vector<ConSanMoiPersistentVgprAssignment> moi_persistent_vgpr_assignments;
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;

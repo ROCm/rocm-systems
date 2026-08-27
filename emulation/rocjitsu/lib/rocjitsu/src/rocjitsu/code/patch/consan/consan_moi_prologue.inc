@@ -2337,11 +2337,11 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if (options.automatic_moi_private_epoch) {
     try_apply_private_epoch_prologue_patch(options, arch, result);
-    if (!result.errors.empty() || options.moi_persistent_vgpr_assignments.empty())
+    if (!result.errors.empty() || result.moi_register_allocation.owner_persistent_vgprs.empty())
       return;
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
-      options.moi_persistent_vgpr_assignments.empty() &&
+      result.moi_register_allocation.owner_persistent_vgprs.empty() &&
       (!options.moi_persistent_owner_sgpr || !options.moi_persistent_epoch_sgpr)) {
     result.errors.emplace_back(
         "ConSan MOI owner/epoch prologue requires RJ_CONSAN_MOI_OWNER_VGPR and "
@@ -2433,7 +2433,8 @@ void try_apply_owner_epoch_prologue_patch(
     active.text_file_offset = active_kernel->text_file_offset;
     ConSanOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
-    if (!apply_moi_persistent_vgpr_assignment(kernel_options, kernel_owner)) {
+    if (!apply_moi_persistent_vgpr_assignment(kernel_options, result.moi_register_allocation,
+                                              kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no persistent assignment for kernel '" +
           kernel.name + "'");
@@ -3135,7 +3136,7 @@ void try_apply_owner_epoch_prologue_patch(
     info.entry_prologue_chained_trampoline_offset = composed_entry_trampoline_offset;
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
-    note_moi_persistent_vgpr_state(info, kernel_options);
+    note_moi_persistent_vgpr_state(info, kernel_options, result.moi_register_allocation);
     info.persistent_sgpr_state = moi_persistent_sgpr_state(kernel_options);
     info.required_sgpr_count = item.required_sgpr_count;
     if (item.entry_scalar_backup) {

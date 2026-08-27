@@ -31,7 +31,7 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   return apply_moi_transient_sgpr_assignment(event_options, allocation,
                                              event.resources.owner_descriptor_file_offsets) &&
          apply_record_replay_entry_workgroup_assignment(
-             event_options, event.resources.owner_descriptor_file_offsets);
+             event_options, allocation, event.resources.owner_descriptor_file_offsets);
 }
 
 /// Resolve the resource state shared by Record/Replay synchronization events.
@@ -57,7 +57,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
                                  " found no common transient SGPR assignment");
     return std::nullopt;
   }
-  if (!apply_moi_persistent_vgpr_assignment(event_options,
+  if (!apply_moi_persistent_vgpr_assignment(event_options, result.moi_register_allocation,
                                             resources.owner_descriptor_file_offsets)) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " found no common persistent assignment");
@@ -76,7 +76,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     event_options.moi_record_replay_workgroup_private_offsets =
         private_layout->record_replay_workgroup_offsets;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(event_options,
+  if (!apply_record_replay_entry_workgroup_assignment(event_options, result.moi_register_allocation,
                                                       resources.owner_descriptor_file_offsets)) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " found no common entry workgroup assignment");

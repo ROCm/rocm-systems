@@ -131,7 +131,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
                                      nullptr, &site);
     if (!existing_plan)
       result.resource_plans.push_back(plan);
-    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
+    const auto resources =
+        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable resource plan in " +

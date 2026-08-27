@@ -862,7 +862,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_record_replay_workgroup_vgprs = {};
     effective_options.moi_record_replay_workgroup_sgprs = {};
     effective_options.moi_dispatch_id_vgpr.reset();
-    effective_options.moi_persistent_vgpr_assignments.clear();
+    result.moi_register_allocation.owner_persistent_vgprs.clear();
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");

@@ -811,7 +811,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
       ConSanOptions owner_options = options;
       const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
-      if (!apply_moi_persistent_vgpr_assignment(owner_options, owner_descriptor)) {
+      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_register_allocation,
+                                                owner_descriptor)) {
         owner_lowering_failure = "missing owner-local persistent assignment";
         break;
       }
@@ -984,7 +985,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
                                              plan.owner_descriptor_file_offsets) ||
-        !apply_moi_persistent_vgpr_assignment(candidate_options,
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
                                               plan.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier lost its owner-local persistent or transient assignment");
@@ -1000,7 +1001,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                     candidate.barrier.kernel_descriptor_file_offset, scratch_count);
       result.resource_plans[resource_plan_index] = plan;
     }
-    const auto resources = resolve_moi_scratch_plan(plan, candidate_options, scratch_count);
+    const auto resources = resolve_moi_scratch_plan(plan, candidate_options,
+                                                    result.moi_register_allocation, scratch_count);
     if (!resources)
       continue;
     candidate_options.scratch_vgpr = resources->base;
@@ -1061,7 +1063,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+                   candidate_options, result.moi_register_allocation,
+                   planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
       return false;
@@ -1353,7 +1356,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
         } else if (!apply_moi_persistent_vgpr_assignment(
-                       candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+                       candidate_options, result.moi_register_allocation,
+                       planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
           return;
@@ -2096,7 +2100,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                           scratch_count, nullptr, &site);
     if (!existing)
       result.resource_plans.push_back(plan);
-    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
+    const auto resources =
+        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI sampled atomic sync has no " +
                                    std::to_string(scratch_count) + "-VGPR resource plan in " +
@@ -2216,7 +2221,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_epoch_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+                   candidate_options, result.moi_register_allocation,
+                   planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
       return std::nullopt;

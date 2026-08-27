@@ -562,7 +562,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     // stack component with an owner-local VGPR tuple for a disconnected
     // dynamic-stack component. Resolve that choice before building private
     // offsets; the code-object-wide marker alone does not describe this site.
-    if (!apply_moi_persistent_vgpr_assignment(candidate_options,
+    if (!apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
                                               resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common persistent assignment");
@@ -608,6 +608,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_register_allocation, resources->owner_descriptor_file_offsets);
     if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                        result.moi_register_allocation,
                                                         resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
@@ -1162,7 +1163,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
+            candidate_options, result.moi_register_allocation,
+            planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
                                arch);
@@ -1238,7 +1240,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               candidate_options, result.moi_register_allocation,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
-              candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+              candidate_options, result.moi_register_allocation,
+              planned_patch.resources.owner_descriptor_file_offsets) ||
           !candidate_options.moi_exec_save_sgpr) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe lost its owner-local register assignment");
@@ -1606,7 +1609,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                     candidate_options, result.moi_register_allocation,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
-                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
+                    candidate_options, result.moi_register_allocation,
+                    planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,

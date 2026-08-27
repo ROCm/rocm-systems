@@ -94,7 +94,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         plan.semantic_text_offset = fence_event.text_offset;
       result.resource_plans.push_back(plan);
     }
-    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
+    const auto resources =
+        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI fence record patch has no usable resource plan");
       continue;
@@ -584,7 +585,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           state, site_options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count);
       ConSanOptions owner_options = site_options;
-      if (apply_moi_persistent_vgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+      if (apply_moi_persistent_vgpr_assignment(owner_options, result.moi_register_allocation,
+                                               plan.owner_descriptor_file_offsets)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_options);
         if (owner_scratch_count != scratch_count) {
           plan =

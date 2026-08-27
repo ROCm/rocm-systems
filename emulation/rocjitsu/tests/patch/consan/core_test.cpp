@@ -82,7 +82,12 @@ TEST(ConSan, MoiRegisterAllocationEqualityCoversEveryFrozenSelection) {
   owner_state.descriptor_file_offset = 64u;
   owner_state.exec_save_sgpr = 8u;
   owner_state.dispatch_id_sgpr = 10u;
+  ConSanMoiPersistentVgprAssignment persistent_state;
+  persistent_state.descriptor_file_offset = 64u;
+  persistent_state.owner_vgpr = 16u;
+  persistent_state.epoch_vgpr = 17u;
   const ConSanMoiRegisterAllocation allocation{
+      .owner_persistent_vgprs = {persistent_state},
       .default_transient_sgprs = default_state,
       .owner_transient_sgprs = {owner_state},
       .dispatch_id_vgpr = 12u,
@@ -92,6 +97,9 @@ TEST(ConSan, MoiRegisterAllocationEqualityCoversEveryFrozenSelection) {
   EXPECT_EQ(allocation, ConSanMoiRegisterAllocation(allocation));
 
   ConSanMoiRegisterAllocation changed = allocation;
+  changed.owner_persistent_vgprs.clear();
+  EXPECT_NE(changed, allocation);
+  changed = allocation;
   changed.default_transient_sgprs.exec_save_sgpr.reset();
   EXPECT_NE(changed, allocation);
   changed = allocation;
