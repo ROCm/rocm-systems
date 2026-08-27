@@ -817,6 +817,16 @@ plans join by maximum and discovery order is irrelevant. The map's value type
 still states whether that extent counts registers or bytes; aggregation does
 not interpret or mutate the descriptor.
 
+Raw kernel-descriptor bytes enter and leave typed code only through RocJitsu's
+shared `read_kernel_descriptor` and `write_kernel_descriptor` operations. They
+validate the complete fixed-size range before copying and never expose an
+unaligned pointer into the ELF image. ConSan analysis, all four engine paths,
+composition, and final validation operate on the returned descriptor value;
+they do not repeat offset arithmetic or `memcpy` protocols. Descriptor-symbol
+and section discovery remains the separate responsibility of
+`scan_kernel_descriptors`, while semantic resource mutation remains in the
+typed growth and spill contracts described above.
+
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,

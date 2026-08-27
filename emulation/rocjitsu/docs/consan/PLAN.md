@@ -604,6 +604,12 @@ monotonic aggregation contract as well. VGPR, SGPR, private-byte, and LDS-byte
 extents retain their own units and mutation policies, but nine copies of
 insert-or-maximum bookkeeping have been replaced by shared single-owner,
 owner-set, and map-join operations.
+Kernel-descriptor byte access now belongs to RocJitsu's shared descriptor
+component rather than to individual ConSan engines. Analysis, resource
+planning, prologues, emission, composition, and final validation all consume
+one overflow-safe read/write contract. Thirty-eight copied bounds checks and
+all 50 descriptor-shaped raw copies are gone from ConSan production code; DBT
+and DBI use the same primitive.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object

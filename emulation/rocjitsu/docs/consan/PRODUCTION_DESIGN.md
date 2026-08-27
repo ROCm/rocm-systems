@@ -6585,8 +6585,11 @@ for nominal line-count reductions.
   nonblank lines, and 43 fewer estimated code lines, with all decode and growth
   policy now singular.
 - **Batched gate:** The library and test binary compile and all 17 focused
-  component/integration tests pass. The broader checked-in gate is deferred to
-  the next deletion tranche. E2E validation remains outside this work.
+  component/integration tests pass. The completed descriptor tranche passes
+  the 2,012-test host range, all 172 HSA-hook tests, all 2,878 generated
+  simulator-device tests across the five supported targets, and the 26-case
+  physical-gfx950 cross-engine smoke. E2E validation remains outside this
+  work.
 
 ### Slice 5DO: merge descriptor register requirements once
 
@@ -6610,9 +6613,10 @@ for nominal line-count reductions.
   lines fall from 9,088 to 9,078, nonblank lines from 8,755 to 8,747, and
   estimated comment-excluded code lines from 8,422 to 8,408. The slice adds 21
   and deletes 31 physical implementation lines, a net deletion of 10.
-- **Batched gate:** Compilation passes. Broader checked-in qualification is
-  deferred to the current deletion tranche. E2E validation remains outside
-  this work.
+- **Batched gate:** Compilation passes, followed by the completed descriptor
+  tranche's 2,012-test host range, 172 HSA-hook tests, 2,878 generated
+  simulator-device tests across all five supported targets, and 26 physical
+  gfx950 cross-engine smoke cases. E2E validation remains outside this work.
 
 ### Slice 5DP: aggregate every descriptor extent through one operation
 
@@ -6639,8 +6643,45 @@ for nominal line-count reductions.
   net deletion of 17 executable/declarative code lines after documenting the
   shared contract.
 - **Batched gate:** The library and test binary compile and all seven focused
-  descriptor tests pass. Broader checked-in qualification is deferred to the
-  current deletion tranche. E2E validation remains outside this work.
+  descriptor tests pass. The completed descriptor tranche also passes the
+  2,012-test host range, all 172 HSA-hook tests, all 2,878 generated
+  simulator-device tests across the five supported targets, and the 26-case
+  physical-gfx950 cross-engine smoke. E2E validation remains outside this
+  work.
+
+### Slice 5DQ: centralize kernel-descriptor byte access
+
+- **One shared byte boundary:** RocJitsu now exposes bounds-safe
+  `read_kernel_descriptor` and `write_kernel_descriptor` operations beside
+  shared descriptor discovery. They validate the complete fixed-size range,
+  copy into aligned typed storage, reject overflowing or partial offsets, and
+  leave the destination unchanged on write failure. The existing DBT/DBI
+  patcher uses the same operations instead of retaining private copies.
+- **Complete ConSan cutover:** Shared analysis, resource planning, MOI
+  prologues and emission, SuperCollider, pipeline composition, and final
+  validation consume the typed byte boundary. Thirty-eight copied
+  `sizeof(KD)` bounds checks and all 50 descriptor-shaped `memcpy` operations
+  are absent from current ConSan production code. Engine-owned diagnostics,
+  semantic descriptor mutation, active-owner resolution, and patcher versus
+  direct-byte transactions remain separate because they express different
+  policies.
+- **Contract coverage:**
+  `KernelDescriptorBytes.ReadAndWriteRejectPartialRangesWithoutMutation`
+  covers a nonzero aligned-independent offset, round-trip field preservation,
+  a one-byte-short range, write failure without mutation, and a wrapping
+  offset. It passes with the eight existing shared descriptor discovery tests;
+  existing host and device suites exercise every migrated ConSan consumer.
+- **Accounting:** Across the 13 affected implementation files, physical lines
+  fall from 31,979 to 31,966, nonblank lines from 30,757 to 30,745, and
+  estimated comment-excluded code lines from 28,731 to 28,703. The series adds
+  288 and deletes 301 physical implementation lines, a net deletion of 13
+  after adding the documented RocJitsu-wide contract and replacing every
+  ConSan consumer.
+- **Batched gate:** The complete test binary compiles; all nine focused shared
+  descriptor tests, the 2,012-test host range, all 172 HSA-hook tests, all
+  2,878 generated simulator-device tests across gfx942, gfx950, gfx1100,
+  gfx1201, and gfx1250, and the 26-case physical-gfx950 cross-engine smoke
+  pass. E2E validation remains outside this work.
 
 ### Slice 6: explicit pipeline and result cutover
 
