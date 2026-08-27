@@ -18,8 +18,6 @@ During full-panel `analyze` on MI300-class GPUs (gfx940–942), some **Percent**
 | Max above 100% | HBM Read Traffic, Data-Return Busy | **188.24%**, **345.38%** max (mat_exp CPX) |
 | Negative splits | Remote Read/Write Traffic | Already handled by shipped `NOISE_CLAMP` |
 
-These are **display plausibility** issues: the counters are real PMC events, but ratio formulas assume numerator and denominator were measured on the **same dispatch under the same kernel re-run**.
-
 **Intentional exception:** VALU Utilization on gfx942 can exceed 100% (dual-issue). Do not cap — use `ValuDualIssueDetector` warnings.
 
 ---
