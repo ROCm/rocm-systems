@@ -946,6 +946,13 @@ if(BUILD_TESTS)
     # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
     # GDA only. SDMA host code already lives in librccl.so and its device code is header-only.
     if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_LIBRARY AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      if(TARGET rocshmem_ext)
+        add_dependencies(${test_executable} rocshmem_ext)
+      endif()
+      target_include_directories(${test_executable} PRIVATE
+        ${ROCSHMEM_INCLUDE_DIR}
+        ${ROCSHMEM_SOURCE_DIR}/include
+        ${ROCSHMEM_SOURCE_DIR}/src)
       set(_ROCSHMEM_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
