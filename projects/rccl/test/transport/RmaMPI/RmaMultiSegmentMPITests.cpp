@@ -1063,10 +1063,61 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     if (SyncSkip(r == ncclSuccess))
         GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
 
-    EXPECT_EQ(r, ncclInternalError)
+    EXPECT_EQ(r, ncclInvalidUsage)
         << "asymmetric per-rank segment count must be rejected (rank " << worldRank_
         << " requested " << myNSeg << " segments)";
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
+}
+
+// NEGATIVE: equal segment counts are not sufficient symmetry. Rank 0 maps
+// [4 MiB GPU][2 MiB CPU], while rank 1 maps [2 MiB GPU][4 MiB CPU]. The total
+// size and count match, but using either rank's local boundary for the other's
+// MR would address the wrong registration.
+TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* bb =
+        worldRank_ == 0 ? AllocDeepEpElastic(4 * kMiB, 2 * kMiB)
+                        : AllocDeepEpElastic(2 * kMiB, 4 * kMiB);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "mixed GPU/CPU VMM allocation unavailable on this host";
+
+    void *mh = nullptr, *gh = nullptr;
+    const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    EXPECT_EQ(r, ncclInvalidUsage);
+    EXPECT_EQ(mh, nullptr);
+}
+
+// NEGATIVE: only rank 0 exceeds the segment cap. Rank 1 successfully registers
+// locally, then both ranks must meet in the status collective, reject, and
+// clean up. If rank 0 returns early this test hangs in registration.
+TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* probe = AllocSym(2, kSegRequestBytes);
+    if (SyncSkip(probe == nullptr))
+        GTEST_SKIP() << "multi-segment VMM allocation unavailable on this host";
+    void *probeMh = nullptr, *probeGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    const int myNSeg =
+        worldRank_ == 0 ? NCCL_RMA_MAX_SEGMENTS + 1 : 2;
+    MultiSegmentVmmBuffer* bb = AllocSym(myNSeg, kSegRequestBytes);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "asymmetric failure layout allocation unavailable";
+
+    void *mh = nullptr, *gh = nullptr;
+    const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
+    EXPECT_EQ(r, ncclInvalidUsage);
+    EXPECT_EQ(mh, nullptr);
 }
 
 // NEGATIVE (range guard): out-of-range IPut offsets/sizes must be rejected with
@@ -1186,6 +1237,11 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
                                    /*signalOff=*/kSignalSize - 4, sigMh, 0,
                                    NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
             << "out-of-range signal offset must be rejected";
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
+                                   /*signalOff=*/4, sigMh, 0,
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+            << "unaligned signal atomic must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
     Barrier();

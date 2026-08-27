@@ -7,8 +7,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 * Compatibility with NCCL 2.30.7.
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
-* Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
-* Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
+* Added multi-node multi-segment symmetric-window registration and transfers for the InfiniBand GIN proxy/RMA path. Contiguous virtual ranges backed by multiple GPU or mixed GPU/host physical allocations are exported and registered per segment for GIN `iput`, `iget`, `iputSignal`, and `iflush`.
+* Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`).
 
 ### Changed
 * Raised the default channel count on single-node gfx1250 (MI450) to 256 for both collectives and P2P. The count is still clamped by the GPU CU count and by `NCCL_MAX_NCHANNELS` / `NCCL_MAX_CTAS` / `NCCL_MAX_P2P_NCHANNELS`. Multi-node gfx1250 keeps the 64-channel cap on the NET path. `RCCL_SATURATE_P2P_NCHANNELS` now defaults to on for gfx1250 so the per-peer channel count tiles the larger pool; set it to `0` to restore the previous behavior.
@@ -22,7 +22,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
-* Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
+* Multi-segment InfiniBand registration is limited to the GIN proxy/RMA path; classic NET/IB P2P and CAST do not yet consume these per-segment handles.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 
