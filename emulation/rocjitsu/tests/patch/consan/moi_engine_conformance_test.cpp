@@ -33,9 +33,10 @@ ConSanOptions conformance_options(const MoiEngineConformanceCase &test_case,
                                   uint32_t access_count) {
   ConSanOptions options = moi_options(test_case.engine);
   options.scratch_vgpr = 8;
-  options.moi_exec_save_sgpr = test_case.engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.requested_moi_exec_save_sgpr =
+      test_case.engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
+  options.requested_moi_owner_vgpr = 40;
+  options.requested_moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = report_buffer_bytes(test_case, access_count);
   options.moi_track_barriers = false;
@@ -319,9 +320,9 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
   ConSanOptions options = conformance_options(test_case, kAccessCount);
   if (test_case.engine == ConSanMoiEngine::InlineShadow) {
     options.scratch_vgpr = 82;
-    options.moi_owner_vgpr = 80;
-    options.moi_epoch_vgpr = 81;
-    options.moi_exec_save_sgpr = 60;
+    options.requested_moi_owner_vgpr = 80;
+    options.requested_moi_epoch_vgpr = 81;
+    options.requested_moi_exec_save_sgpr = 60;
   }
   const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_sparse_stranded_accesses"), options);

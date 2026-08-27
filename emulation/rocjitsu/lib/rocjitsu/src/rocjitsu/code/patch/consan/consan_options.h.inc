@@ -295,37 +295,6 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
-/// Code-object-wide transient scalar ABI selected by MOI register placement.
-///
-/// Owner-component overrides use `ConSanMoiTransientSgprAssignment`; this
-/// descriptor-free value is the fallback consumed by every other owner. Empty
-/// optionals mean the corresponding mechanism is absent.
-struct ConSanMoiTransientSgprState {
-  /// First SGPR in the EXEC/VCC/SCC save window used while the probe runs.
-  std::optional<uint16_t> exec_save_sgpr;
-  /// Probe-local normalized resident-wave identity, when required.
-  std::optional<uint16_t> owner_sgpr;
-  /// Persistent hardware dispatch-ID pair, when retained in scalar state.
-  std::optional<uint16_t> dispatch_id_sgpr;
-  /// Whether the transient window is preserved in per-lane private memory.
-  bool spill_backed = false;
-  /// Scalar pair used for an indirect body jump.
-  std::optional<uint16_t> indirect_pc_sgpr;
-  /// SCC save paired with an indirect body jump.
-  std::optional<uint16_t> indirect_scc_sgpr;
-  /// Dense-router dispatch key selected for this patch.
-  std::optional<uint16_t> dispatch_key_sgpr;
-  /// Dense-router call return selected for this patch.
-  std::optional<uint16_t> call_return_sgpr;
-  /// Inline visible-evidence scalar selected for this patch.
-  std::optional<uint16_t> visible_evidence_sgpr;
-  /// Whether control enters through branch-only scalar-spill relays.
-  bool branch_only_scalar_spill = false;
-  /// Live pair borrowed while a dynamic-stack spill frame is active.
-  std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
-  bool operator==(const ConSanMoiTransientSgprState &) const = default;
-};
-
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
@@ -453,14 +422,20 @@ struct ConSanDebugOverrides {
 
   /// Explicit scratch VGPR, bypassing normal resource selection.
   std::optional<uint16_t> scratch_vgpr;
-  /// Explicit even SGPR pair used to preserve EXEC.
-  std::optional<uint16_t> moi_exec_save_sgpr;
-  /// Explicit scalar owner register.
-  std::optional<uint16_t> moi_owner_sgpr;
-  /// Explicit vector owner register.
-  std::optional<uint16_t> moi_owner_vgpr;
-  /// Explicit vector epoch register.
-  std::optional<uint16_t> moi_epoch_vgpr;
+  /// Caller-requested even SGPR pair used to preserve EXEC. This is an input
+  /// constraint, not the allocator's eventual selection: an empty value asks
+  /// placement to choose a suitable pair automatically.
+  std::optional<uint16_t> requested_moi_exec_save_sgpr;
+  /// Caller-requested scalar owner register. This optional override is copied
+  /// into a fresh lowering attempt and never mutated as placement explores
+  /// automatic alternatives.
+  std::optional<uint16_t> requested_moi_owner_sgpr;
+  /// Caller-requested vector owner register. An empty value leaves the
+  /// persistent owner representation and register choice to placement.
+  std::optional<uint16_t> requested_moi_owner_vgpr;
+  /// Caller-requested vector epoch register. An empty value permits placement
+  /// to select either a register or another supported epoch representation.
+  std::optional<uint16_t> requested_moi_epoch_vgpr;
 
   /// Runtime assertion requiring at least one visible MOI record.
   bool moi_require_records = false;
@@ -787,6 +762,24 @@ struct ConSanOptions : ConSanRequest,
 /// these compatibility fields with typed variants in `ConSanMoiOperatingPoint`
 /// and narrow per-patch plans.
 struct ConSanMoiResolvedState {
+  /// First SGPR in the code-object-wide EXEC/VCC/SCC save window accepted by
+  /// placement. This is seeded from the corresponding caller override when
+  /// present, but thereafter records the selected lowering state rather than
+  /// caller input. Independent owner components may replace it with an entry
+  /// in `ConSanMoiOperatingPoint::owner_transient_sgprs`.
+  std::optional<uint16_t> moi_exec_save_sgpr;
+  /// Code-object-wide scalar owner register accepted by placement. It carries
+  /// the probe-local normalized resident-wave identity when the selected
+  /// engine represents that identity in transient scalar state.
+  std::optional<uint16_t> moi_owner_sgpr;
+  /// Persistent per-lane owner VGPR accepted by placement. Some operating
+  /// points instead use per-owner assignments, scalar state, or private state,
+  /// in which case this code-object-wide value is empty.
+  std::optional<uint16_t> moi_owner_vgpr;
+  /// Persistent per-lane epoch VGPR accepted by placement. This value is empty
+  /// when the accepted operating point uses a per-owner assignment, persistent
+  /// scalar state, or a private-memory epoch representation.
+  std::optional<uint16_t> moi_epoch_vgpr;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
@@ -880,8 +873,6 @@ struct ConSanMoiOperatingPoint : ConSanMoiResolvedState {
   /// Per-owner persistent vector tuples selected when one code-object-wide
   /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
   std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
-  /// Code-object-wide transient scalar ABI used by owners without an override.
-  ConSanMoiTransientSgprState default_transient_sgprs;
   /// Per-owner-component transient scalar overrides selected by placement.
   std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
 
@@ -901,7 +892,12 @@ struct MoiOptions : ConSanOptions, ConSanMoiResolvedState {
   /// intentional at the compatibility boundary: production callers carry no
   /// resolved state, while focused mechanism tests may pass this derived type
   /// directly to preserve an explicitly seeded downstream state.
-  MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {}
+  MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {
+    moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
+    moi_owner_sgpr = options.requested_moi_owner_sgpr;
+    moi_owner_vgpr = options.requested_moi_owner_vgpr;
+    moi_epoch_vgpr = options.requested_moi_epoch_vgpr;
+  }
 };
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable

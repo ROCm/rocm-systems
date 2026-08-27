@@ -227,14 +227,14 @@ test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
 /// allocation. Owner-local overrides are exposed separately below.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_exec_save_sgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_operating_point.default_transient_sgprs.exec_save_sgpr;
+  return result.moi_operating_point.moi_exec_save_sgpr;
 }
 
 /// Return the code-object-wide scalar dispatch-ID pair selected by allocation,
 /// excluding owner-local scalar overrides.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr;
+  return result.moi_operating_point.moi_dispatch_id_sgpr;
 }
 
 /// Return the code-object-wide vector dispatch-ID pair selected by allocation,

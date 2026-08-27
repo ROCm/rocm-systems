@@ -4645,13 +4645,12 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   // window used by a private-dispatch body, without changing the instruction
   // semantics under test.
   auto &allocation = with_component_assignment.moi_operating_point;
-  allocation.default_transient_sgprs.exec_save_sgpr =
-      static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) - 12u);
+  allocation.moi_exec_save_sgpr = static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) - 12u);
   const auto fixed_assignment =
       std::ranges::find(allocation.owner_transient_sgprs, fixed->descriptor_file_offset,
                         &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
   ASSERT_NE(fixed_assignment, allocation.owner_transient_sgprs.end());
-  fixed_assignment->exec_save_sgpr = *allocation.default_transient_sgprs.exec_save_sgpr;
+  fixed_assignment->exec_save_sgpr = *allocation.moi_exec_save_sgpr;
   fixed_assignment->spill_backed = false;
   fixed_assignment->indirect_pc_sgpr.reset();
   const std::vector<std::string> component_validation_errors =

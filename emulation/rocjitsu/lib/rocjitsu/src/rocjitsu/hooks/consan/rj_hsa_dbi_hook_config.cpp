@@ -1099,13 +1099,14 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     }
     config.scratch_vgpr = static_cast<uint16_t>(scratch_vgpr);
   }
-  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_OWNER_VGPR", &config.moi_owner_vgpr))
+  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_OWNER_VGPR", &config.requested_moi_owner_vgpr))
     return std::nullopt;
-  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_EPOCH_VGPR", &config.moi_epoch_vgpr))
+  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_EPOCH_VGPR", &config.requested_moi_epoch_vgpr))
     return std::nullopt;
-  if (!parse_optional_sgpr_env("RJ_CONSAN_MOI_OWNER_SGPR", &config.moi_owner_sgpr))
+  if (!parse_optional_sgpr_env("RJ_CONSAN_MOI_OWNER_SGPR", &config.requested_moi_owner_sgpr))
     return std::nullopt;
-  if (!parse_optional_sgpr_pair_env("RJ_CONSAN_MOI_EXEC_SAVE_SGPR", &config.moi_exec_save_sgpr))
+  if (!parse_optional_sgpr_pair_env("RJ_CONSAN_MOI_EXEC_SAVE_SGPR",
+                                    &config.requested_moi_exec_save_sgpr))
     return std::nullopt;
   if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_records &&
       config.moi_auto_report_buffer_size == 0) {

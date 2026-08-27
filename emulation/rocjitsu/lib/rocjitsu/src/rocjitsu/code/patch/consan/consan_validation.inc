@@ -3253,7 +3253,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
                !patch.persistent_dispatch_id_private_offset &&
-               !result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr &&
+               !result.moi_operating_point.moi_dispatch_id_sgpr &&
                !result.moi_operating_point.moi_dispatch_id_vgpr &&
                !owner_local_dispatch_vgpr(patch) &&
                !consan_arch_uses_literal_dispatch_identity(arch);
@@ -3461,7 +3461,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     std::vector<uint32_t> capture_high;
     const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
     std::optional<uint16_t> expected_dispatch_sgpr =
-        result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr;
+        result.moi_operating_point.moi_dispatch_id_sgpr;
     std::optional<uint16_t> expected_dispatch_vgpr =
         result.moi_operating_point.moi_dispatch_id_vgpr;
     const auto &assignments = result.moi_operating_point.owner_transient_sgprs;
@@ -3524,10 +3524,9 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
             });
         if (!inconsistent_owner_assignments && every_owner_has_assignment)
           expected_dispatch_sgpr = owner_reload_sgpr;
-      } else if (!inconsistent_owner_assignments &&
-                 result.moi_operating_point.default_transient_sgprs.exec_save_sgpr) {
-        expected_dispatch_sgpr = static_cast<uint16_t>(
-            *result.moi_operating_point.default_transient_sgprs.exec_save_sgpr + 12u);
+      } else if (!inconsistent_owner_assignments && result.moi_operating_point.moi_exec_save_sgpr) {
+        expected_dispatch_sgpr =
+            static_cast<uint16_t>(*result.moi_operating_point.moi_exec_save_sgpr + 12u);
       }
     }
     if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
@@ -3652,7 +3651,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
   for (const ConSanPatchInfo &patch : result.patches) {
     if (!is_release_transaction(patch))
       continue;
-    if (!patch.scratch_vgpr || !result.moi_operating_point.default_transient_sgprs.exec_save_sgpr ||
+    if (!patch.scratch_vgpr || !result.moi_operating_point.moi_exec_save_sgpr ||
         patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset ||
         patch.trampoline_size % sizeof(uint32_t) != 0) {
@@ -3827,7 +3826,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
             vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)), *site->dst_vgpr,
             arch);
         const auto narrow = instrumentation::build_s_and_saveexec_b64(
-            *result.moi_operating_point.default_transient_sgprs.exec_save_sgpr, kVccLo, arch);
+            *result.moi_operating_point.moi_exec_save_sgpr, kVccLo, arch);
         if (!success || !narrow) {
           valid = false;
         } else {

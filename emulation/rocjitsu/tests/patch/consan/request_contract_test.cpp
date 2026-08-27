@@ -179,18 +179,18 @@ TEST(ConSanDebugOverridesContractTest, ValidatesRegisterEnvelopesAndAssertions) 
   ConSanDebugOverrides debug;
   EXPECT_EQ(validate_consan_debug_overrides(debug), ConSanContractIssue::None);
   debug.scratch_vgpr = 255;
-  debug.moi_owner_vgpr = 255;
-  debug.moi_epoch_vgpr = 255;
-  debug.moi_owner_sgpr = 105;
-  debug.moi_exec_save_sgpr = 104;
+  debug.requested_moi_owner_vgpr = 255;
+  debug.requested_moi_epoch_vgpr = 255;
+  debug.requested_moi_owner_sgpr = 105;
+  debug.requested_moi_exec_save_sgpr = 104;
   EXPECT_EQ(validate_consan_debug_overrides(debug), ConSanContractIssue::None);
 
-  debug.moi_exec_save_sgpr = 103;
+  debug.requested_moi_exec_save_sgpr = 103;
   EXPECT_EQ(validate_consan_debug_overrides(debug), ConSanContractIssue::InvalidDebugRegister);
-  debug.moi_exec_save_sgpr = 104;
-  debug.moi_owner_sgpr = 106;
+  debug.requested_moi_exec_save_sgpr = 104;
+  debug.requested_moi_owner_sgpr = 106;
   EXPECT_EQ(validate_consan_debug_overrides(debug), ConSanContractIssue::InvalidDebugRegister);
-  debug.moi_owner_sgpr.reset();
+  debug.requested_moi_owner_sgpr.reset();
   debug.moi_require_diagnostics = true;
   debug.moi_forbid_diagnostics = true;
   EXPECT_EQ(validate_consan_debug_overrides(debug),
@@ -205,10 +205,10 @@ TEST(ConSanDebugOverridesContractTest, ValidatesRegisterEnvelopesAndAssertions) 
 TEST(ConSanDebugOverridesContractTest, RejectsEveryOutOfEnvelopeRegisterKind) {
   constexpr std::array cases{
       std::pair{&ConSanDebugOverrides::scratch_vgpr, uint16_t{256}},
-      std::pair{&ConSanDebugOverrides::moi_owner_vgpr, uint16_t{256}},
-      std::pair{&ConSanDebugOverrides::moi_epoch_vgpr, uint16_t{256}},
-      std::pair{&ConSanDebugOverrides::moi_owner_sgpr, uint16_t{106}},
-      std::pair{&ConSanDebugOverrides::moi_exec_save_sgpr, uint16_t{106}},
+      std::pair{&ConSanDebugOverrides::requested_moi_owner_vgpr, uint16_t{256}},
+      std::pair{&ConSanDebugOverrides::requested_moi_epoch_vgpr, uint16_t{256}},
+      std::pair{&ConSanDebugOverrides::requested_moi_owner_sgpr, uint16_t{106}},
+      std::pair{&ConSanDebugOverrides::requested_moi_exec_save_sgpr, uint16_t{106}},
   };
   for (const auto &[field, first_invalid] : cases) {
     ConSanDebugOverrides debug;
@@ -745,10 +745,10 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   debug.test_seed_inline_exact_odd = true;
   debug.test_kernel_name_filter = "kernel";
   debug.scratch_vgpr = 1;
-  debug.moi_exec_save_sgpr = 2;
-  debug.moi_owner_sgpr = 3;
-  debug.moi_owner_vgpr = 4;
-  debug.moi_epoch_vgpr = 5;
+  debug.requested_moi_exec_save_sgpr = 2;
+  debug.requested_moi_owner_sgpr = 3;
+  debug.requested_moi_owner_vgpr = 4;
+  debug.requested_moi_epoch_vgpr = 5;
   debug.moi_require_records = true;
   debug.moi_require_diagnostics = true;
   debug.moi_forbid_diagnostics = true;
@@ -788,10 +788,10 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   EXPECT_TRUE(options.moi_partition_mask_debug);
   EXPECT_EQ(options.test_kernel_name_filter, "kernel");
   EXPECT_EQ(options.scratch_vgpr, 1);
-  EXPECT_EQ(options.moi_exec_save_sgpr, 2);
-  EXPECT_EQ(options.moi_owner_sgpr, 3);
-  EXPECT_EQ(options.moi_owner_vgpr, 4);
-  EXPECT_EQ(options.moi_epoch_vgpr, 5);
+  EXPECT_EQ(options.requested_moi_exec_save_sgpr, 2);
+  EXPECT_EQ(options.requested_moi_owner_sgpr, 3);
+  EXPECT_EQ(options.requested_moi_owner_vgpr, 4);
+  EXPECT_EQ(options.requested_moi_epoch_vgpr, 5);
   EXPECT_EQ(options.max_workgroup_lds_bytes, 327680u);
 }
 

@@ -1464,24 +1464,6 @@ capture_moi_operating_point(const MoiOptions &options,
   ConSanMoiOperatingPoint point = owner_assignments;
   static_cast<ConSanMoiResolvedState &>(point) =
       static_cast<const ConSanMoiResolvedState &>(options);
-  point.default_transient_sgprs = {
-      .exec_save_sgpr = options.moi_exec_save_sgpr,
-      .owner_sgpr = options.moi_owner_sgpr,
-      .dispatch_id_sgpr = options.moi_dispatch_id_sgpr,
-      .spill_backed =
-          options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill,
-      .indirect_pc_sgpr = options.moi_inline_indirect_pc_sgpr,
-      .indirect_scc_sgpr = options.moi_inline_indirect_scc_sgpr,
-      .dispatch_key_sgpr = options.moi_engine == ConSanMoiEngine::RecordReplay
-                               ? options.moi_record_replay_dispatch_key_sgpr
-                               : options.moi_inline_dispatch_key_sgpr,
-      .call_return_sgpr = options.moi_engine == ConSanMoiEngine::RecordReplay
-                              ? options.moi_record_replay_call_return_sgpr
-                              : options.moi_inline_call_return_sgpr,
-      .visible_evidence_sgpr = options.moi_inline_visible_evidence_sgpr,
-      .branch_only_scalar_spill = options.moi_inline_branch_only_scalar_spill,
-      .dynamic_stack_borrowed_sgpr = options.moi_inline_dynamic_stack_borrowed_sgpr,
-  };
   return point;
 }
 
@@ -1492,8 +1474,6 @@ void restore_moi_operating_point(MoiOptions &options, ConSanTransformArtifacts &
                                  const ConSanMoiOperatingPoint &point) {
   static_cast<ConSanMoiResolvedState &>(options) =
       static_cast<const ConSanMoiResolvedState &>(point);
-  options.moi_exec_save_sgpr = point.default_transient_sgprs.exec_save_sgpr;
-  options.moi_owner_sgpr = point.default_transient_sgprs.owner_sgpr;
   result.moi_operating_point = point;
 }
 

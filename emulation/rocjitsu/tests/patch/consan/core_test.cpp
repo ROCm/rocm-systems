@@ -36,48 +36,7 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
-TEST(ConSan, MoiTransientSgprStateEqualityCoversCompleteAllocationContract) {
-  const ConSanMoiTransientSgprState empty;
-  const ConSanMoiTransientSgprState state{
-      .exec_save_sgpr = 2u,
-      .owner_sgpr = 3u,
-      .dispatch_id_sgpr = 4u,
-      .spill_backed = true,
-      .indirect_pc_sgpr = 6u,
-      .indirect_scc_sgpr = 7u,
-      .dispatch_key_sgpr = 8u,
-      .call_return_sgpr = 9u,
-      .visible_evidence_sgpr = 10u,
-      .branch_only_scalar_spill = true,
-      .dynamic_stack_borrowed_sgpr = 11u,
-  };
-
-  EXPECT_EQ(empty, ConSanMoiTransientSgprState{});
-  EXPECT_EQ(state, ConSanMoiTransientSgprState(state));
-  EXPECT_NE(state, empty);
-
-  auto expect_field_participates = [&](auto mutate) {
-    ConSanMoiTransientSgprState changed = state;
-    mutate(changed);
-    EXPECT_NE(changed, state);
-  };
-  expect_field_participates([](auto &value) { value.exec_save_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.owner_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.dispatch_id_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.spill_backed = false; });
-  expect_field_participates([](auto &value) { value.indirect_pc_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.indirect_scc_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.dispatch_key_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.call_return_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.visible_evidence_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.branch_only_scalar_spill = false; });
-  expect_field_participates([](auto &value) { value.dynamic_stack_borrowed_sgpr.reset(); });
-}
-
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
-  ConSanMoiTransientSgprState default_state;
-  default_state.exec_save_sgpr = 2u;
-  default_state.dispatch_id_sgpr = 4u;
   ConSanMoiTransientSgprAssignment owner_state;
   owner_state.descriptor_file_offset = 64u;
   owner_state.exec_save_sgpr = 8u;
@@ -88,8 +47,9 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   persistent_state.epoch_vgpr = 17u;
   ConSanMoiOperatingPoint allocation;
   allocation.automatic_moi_private_epoch = true;
+  allocation.moi_exec_save_sgpr = 2u;
+  allocation.moi_dispatch_id_sgpr = 4u;
   allocation.owner_persistent_vgprs = {persistent_state};
-  allocation.default_transient_sgprs = default_state;
   allocation.owner_transient_sgprs = {owner_state};
   allocation.moi_dispatch_id_vgpr = 12u;
 
@@ -103,7 +63,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   changed.owner_persistent_vgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
-  changed.default_transient_sgprs.exec_save_sgpr.reset();
+  changed.moi_exec_save_sgpr.reset();
   EXPECT_NE(changed, allocation);
   changed = allocation;
   changed.owner_transient_sgprs.clear();
@@ -115,6 +75,10 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
 
 TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
   const ConSanMoiResolvedState state{
+      .moi_exec_save_sgpr = 2u,
+      .moi_owner_sgpr = 3u,
+      .moi_owner_vgpr = 4u,
+      .moi_epoch_vgpr = 5u,
       .automatic_moi_persistent_vgprs = true,
       .automatic_moi_private_epoch = true,
       .automatic_moi_partial_exec_save_sgprs = true,
@@ -155,6 +119,10 @@ TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
     mutate(changed);
     EXPECT_NE(changed, state);
   };
+  expect_field_participates([](auto &value) { value.moi_exec_save_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_owner_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_owner_vgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_epoch_vgpr.reset(); });
   expect_field_participates([](auto &value) { value.automatic_moi_persistent_vgprs = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_private_epoch = false; });
   expect_field_participates(
@@ -187,6 +155,35 @@ TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
   expect_field_participates(
       [](auto &value) { value.moi_record_replay_workgroup_private_offsets = {}; });
   expect_field_participates([](auto &value) { value.moi_workgroup_key_vgpr.reset(); });
+}
+
+TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
+  ConSanOptions input;
+  input.requested_moi_exec_save_sgpr = 2u;
+  input.requested_moi_owner_sgpr = 3u;
+  input.requested_moi_owner_vgpr = 4u;
+  input.requested_moi_epoch_vgpr = 5u;
+
+  MoiOptions attempt(input);
+  EXPECT_EQ(attempt.moi_exec_save_sgpr, 2u);
+  EXPECT_EQ(attempt.moi_owner_sgpr, 3u);
+  EXPECT_EQ(attempt.moi_owner_vgpr, 4u);
+  EXPECT_EQ(attempt.moi_epoch_vgpr, 5u);
+
+  attempt.moi_exec_save_sgpr = 12u;
+  attempt.moi_owner_sgpr.reset();
+  attempt.moi_owner_vgpr = 14u;
+  attempt.moi_epoch_vgpr.reset();
+
+  EXPECT_EQ(input.requested_moi_exec_save_sgpr, 2u);
+  EXPECT_EQ(input.requested_moi_owner_sgpr, 3u);
+  EXPECT_EQ(input.requested_moi_owner_vgpr, 4u);
+  EXPECT_EQ(input.requested_moi_epoch_vgpr, 5u);
+  const MoiOptions fresh_attempt(input);
+  EXPECT_EQ(fresh_attempt.moi_exec_save_sgpr, 2u);
+  EXPECT_EQ(fresh_attempt.moi_owner_sgpr, 3u);
+  EXPECT_EQ(fresh_attempt.moi_owner_vgpr, 4u);
+  EXPECT_EQ(fresh_attempt.moi_epoch_vgpr, 5u);
 }
 
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {

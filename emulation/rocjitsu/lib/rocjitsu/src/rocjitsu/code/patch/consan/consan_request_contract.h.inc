@@ -285,11 +285,11 @@ validate_transform_policy(const TransformPolicy &policy) {
 [[nodiscard]] constexpr ConSanContractIssue
 validate_consan_debug_overrides(const ConSanDebugOverrides &debug) {
   if ((debug.scratch_vgpr && *debug.scratch_vgpr > 255) ||
-      (debug.moi_owner_vgpr && *debug.moi_owner_vgpr > 255) ||
-      (debug.moi_epoch_vgpr && *debug.moi_epoch_vgpr > 255) ||
-      (debug.moi_owner_sgpr && *debug.moi_owner_sgpr > 105) ||
-      (debug.moi_exec_save_sgpr &&
-       (*debug.moi_exec_save_sgpr > 104 || *debug.moi_exec_save_sgpr % 2 != 0))) {
+      (debug.requested_moi_owner_vgpr && *debug.requested_moi_owner_vgpr > 255) ||
+      (debug.requested_moi_epoch_vgpr && *debug.requested_moi_epoch_vgpr > 255) ||
+      (debug.requested_moi_owner_sgpr && *debug.requested_moi_owner_sgpr > 105) ||
+      (debug.requested_moi_exec_save_sgpr && (*debug.requested_moi_exec_save_sgpr > 104 ||
+                                              *debug.requested_moi_exec_save_sgpr % 2 != 0))) {
     return ConSanContractIssue::InvalidDebugRegister;
   }
   if (debug.moi_require_diagnostics && debug.moi_forbid_diagnostics)

@@ -403,9 +403,9 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
-  options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.requested_moi_exec_save_sgpr = 30;
+  options.requested_moi_owner_vgpr = 14;
+  options.requested_moi_epoch_vgpr = 15;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(5, 0, 0, 0, 5);
   options.max_patches = 8;
@@ -485,9 +485,9 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   ConSanOptions options = moi_options();
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
-  options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 9; // Deliberately overlaps the six-VGPR scratch window.
-  options.moi_epoch_vgpr = 15;
+  options.requested_moi_exec_save_sgpr = 30;
+  options.requested_moi_owner_vgpr = 9; // Deliberately overlaps the six-VGPR scratch window.
+  options.requested_moi_epoch_vgpr = 15;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(5, 0, 0, 0, 5);
   options.max_patches = 8;

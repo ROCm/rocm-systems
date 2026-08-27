@@ -2195,12 +2195,17 @@ public:
             : "unlimited",
         config.max_patches, config.max_patches_explicit ? "expert-limit" : "all-supported-default",
         config.scratch_vgpr ? std::to_string(*config.scratch_vgpr).c_str() : "auto",
-        config.moi_exec_save_sgpr ? std::to_string(*config.moi_exec_save_sgpr).c_str() : "unset",
+        config.requested_moi_exec_save_sgpr
+            ? std::to_string(*config.requested_moi_exec_save_sgpr).c_str()
+            : "unset",
         owner_source_name(config.moi_owner_source),
         flat_provenance_mode_name(config.flat_provenance_mode),
-        config.moi_owner_sgpr ? std::to_string(*config.moi_owner_sgpr).c_str() : "unset",
-        config.moi_owner_vgpr ? std::to_string(*config.moi_owner_vgpr).c_str() : "unset",
-        config.moi_epoch_vgpr ? std::to_string(*config.moi_epoch_vgpr).c_str() : "unset",
+        config.requested_moi_owner_sgpr ? std::to_string(*config.requested_moi_owner_sgpr).c_str()
+                                        : "unset",
+        config.requested_moi_owner_vgpr ? std::to_string(*config.requested_moi_owner_vgpr).c_str()
+                                        : "unset",
+        config.requested_moi_epoch_vgpr ? std::to_string(*config.requested_moi_epoch_vgpr).c_str()
+                                        : "unset",
         config.moi_runtime_sample_stride,
         config.moi_runtime_sample_stride_explicit ? "expert-override" : "standard-profile",
         config.moi_report_buffer_address ? std::to_string(*config.moi_report_buffer_address).c_str()
@@ -4235,11 +4240,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->max_patches,
         config->max_patches_explicit ? "expert-limit" : "all-supported-default",
         config->scratch_vgpr ? std::to_string(*config->scratch_vgpr).c_str() : "auto",
-        config->moi_exec_save_sgpr ? std::to_string(*config->moi_exec_save_sgpr).c_str() : "unset",
+        config->requested_moi_exec_save_sgpr
+            ? std::to_string(*config->requested_moi_exec_save_sgpr).c_str()
+            : "unset",
         owner_source_name(config->moi_owner_source),
-        config->moi_owner_sgpr ? std::to_string(*config->moi_owner_sgpr).c_str() : "unset",
-        config->moi_owner_vgpr ? std::to_string(*config->moi_owner_vgpr).c_str() : "unset",
-        config->moi_epoch_vgpr ? std::to_string(*config->moi_epoch_vgpr).c_str() : "unset",
+        config->requested_moi_owner_sgpr ? std::to_string(*config->requested_moi_owner_sgpr).c_str()
+                                         : "unset",
+        config->requested_moi_owner_vgpr ? std::to_string(*config->requested_moi_owner_vgpr).c_str()
+                                         : "unset",
+        config->requested_moi_epoch_vgpr ? std::to_string(*config->requested_moi_epoch_vgpr).c_str()
+                                         : "unset",
         config->report_buffer_address ? std::to_string(*config->report_buffer_address).c_str()
                                       : "disabled",
         config->report_marker,
