@@ -111,7 +111,7 @@ These are known gaps, listed so they are not rediscovered:
   warns once, but nothing asserts it, so a workload that captures graphs — which is the default for
   much of PyTorch and vLLM — would silently get no replay.
 
-Static analysis is in better shape than the build checks: clang-tidy runs on the MI325 CI matrix
+Static analysis is in better shape than the build checks: clang-tidy runs on a GPU CI matrix
 entry (`--linter clang-tidy`, opt-in locally via `ROCPROFILER_ENABLE_CLANG_TIDY`), and CodeQL has its
 own workflow. The `kernel_replay/tests` directory calls `rocprofiler_deactivate_clang_tidy()`, as
 every test directory does, so the tests themselves are not linted — only the code they exercise.

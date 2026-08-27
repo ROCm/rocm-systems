@@ -71,8 +71,8 @@ same domain for timing, PC sampling, or thread trace.
   capture, the decline-rather-than-corrupt failure policy, HIP graph behavior, and planned hashing.
 - **[Performance assessment](kernel_replay_performance.md)** — what replay costs and why: the
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
-  performance problems visible in the implementation, and how the cost behaves on MI250X, MI325X
-  and MI455X.
+  performance problems visible in the implementation, and how the cost behaves as device capacity
+  outpaces host-link bandwidth across accelerator generations.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for

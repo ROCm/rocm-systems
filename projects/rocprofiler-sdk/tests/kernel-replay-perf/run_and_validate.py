@@ -9,19 +9,19 @@
 # The baseline defaults to P=2, not P=1, on purpose. A pass_count_cb returning 1 means the dispatch
 # is NOT replayed: it takes the ordinary single-dispatch path with no snapshot and no restore (see
 # experimental/kernel_replay.h). Timing P=1 therefore times a bare dispatch, and a P=N/P=1 ratio is
-# dominated by the one-time cost of turning replay on at all rather than by the pass count. Measured
-# on MI325X (Debug) that ratio is ~280x at P=5 and ~58x at P=3, which no linear-scaling cap can
-# express. Comparing two replayed configurations keeps the snapshot/restore fixed cost on both
-# sides, so the ratio measures per-pass scaling, which is what a regression would move.
+# dominated by the one-time cost of turning replay on at all rather than by the pass count -- orders
+# of magnitude, which no linear-scaling cap can express. Comparing two replayed configurations keeps
+# the snapshot/restore fixed cost on both sides, so the ratio measures per-pass scaling, which is
+# what a regression would move.
 #
 # Alternatives considered and rejected: (b) keep the P=1 baseline and make the scaling check
 # advisory behind ROCPROFILER_PERF_STRICT_CEILING, the way the absolute ceiling already works --
-# rejected because it removes the only per-commit scaling signal; (c) keep P=1 and raise the caps to
-# measured values (~400x / ~100x) -- rejected because it bakes a machine- and build-type-specific
+# rejected because it removes the only per-commit scaling signal; (c) keep P=1 and raise the caps
+# to accommodate that fixed cost -- rejected because it bakes a machine- and build-type-specific
 # constant into the gate and would not catch a real per-pass regression hiding under it.
 #
-# Known gap (d): these ratios were first measured on a Debug build. Release numbers will differ, and
-# the caps here are deliberately loose rather than tuned to one machine. See
+# The caps here are deliberately loose rather than tuned to any one machine or build type; ratios
+# differ between Debug and Release. See
 # docs/conceptual/kernel_replay/kernel_replay_performance.md.
 #
 # Each configuration is sampled several times after a warmup and compared on the median, because
