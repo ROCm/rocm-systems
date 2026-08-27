@@ -16,6 +16,12 @@
 
 #include "fakes/comm_fakes.h"
 
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_commSetAsyncError, ncclCommSetAsyncError);
+
+#undef ASSERT_HOOK_MATCHES_PROD
+
 // --- Controllable seam ----------------------------------------------------
 static ncclResult_t DefaultCommSetAsyncError(struct ncclComm*, ncclResult_t) {
   return ncclSuccess;
