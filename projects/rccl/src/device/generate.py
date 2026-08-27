@@ -7,14 +7,14 @@ import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
 # The empty entries are for collectives like Gather, Scatter, etc.
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "AllGatherV"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
 all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
-all_unrolls   = ["1", "2", "4"]
+all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # User-buffer registration mode (compile-time UserRegMode template parameter):
 #   "0" = runtime / not-applicable (single kernel, current behavior)
 #   "1" = registered user buffer   (LL128 Direct path bypasses cache)
@@ -35,6 +35,14 @@ ll128_reg_variant_colls = {"AllReduce", "AllGather", "Broadcast"}
 def reg_values_of(coll, proto):
   if proto == "LL128" and coll in ll128_reg_variant_colls:
     return ["1", "2"]
+  # SendRecv is generated as two latency-protocol kernel variants, selected on the
+  # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
+  #   reg "0" = legacy LL latency path (built on every arch; the default)
+  #   reg "1" = LL128 latency path (built for gfx942/gfx950 only; used when
+  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
+  if coll == "SendRecv":
+    return ["0", "1"]
   return ["0"]
 
 ################################################################################
@@ -105,14 +113,15 @@ if func_pattern and func_pattern[0]:
 else:
   # GDA (rocSHMEM-based) kernels only when rocshmem build requested
   if is_rocshmem:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
   else:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
 
 ################################################################################
 
 algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
+  "AllGatherV":            ["RING"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
   "AlltoAllGda":           ["RING"],
@@ -125,6 +134,7 @@ algos_of_coll = {
 
 protos_of_coll = {
   "AllGather":              all_protos,
+  "AllGatherV":             all_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
   "AlltoAllGda":            ["SIMPLE"],
@@ -137,6 +147,7 @@ protos_of_coll = {
 
 redops_of_coll = {
   "AllGather":            ["Sum"],
+  "AllGatherV":           ["Sum"],
   "AllReduce":            all_redops,
   "AlltoAllPivot":        ["Sum"],
   "AlltoAllGda":          ["Sum"],
@@ -149,6 +160,7 @@ redops_of_coll = {
 
 tys_of_coll = {
   "AllGather":             ["i8"],
+  "AllGatherV":            ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
   "AlltoAllGda":           ["i8"],
@@ -161,6 +173,7 @@ tys_of_coll = {
 
 acc_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_accs,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -173,6 +186,7 @@ acc_of_coll = {
 
 pipelines_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_pipelines,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -186,6 +200,7 @@ pipelined_types = ["bf16"]
 
 coll_camel_to_lower = {
   "AllGather":             "all_gather",
+  "AllGatherV":            "all_gather_v",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
   "AlltoAllGda":           "alltoall_gda",
@@ -242,13 +257,17 @@ def calc_unroll_and_pipeline_for_local_arch():
   # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
   gfx_targets = list(gfx_targets.keys())
   
-  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
+  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950 and gfx1250)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
     if "gfx950" == gfx_name:
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
+    elif "gfx1250" == gfx_name:
+      # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
+      # 32 is the default (commSetUnrollFactor).
+      return (["8", "16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -266,6 +285,12 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
+    return False
+  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, which never
+  # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
+  # device linker would skip compiling them for gfx942 while the dispatch table still expected
+  # them (undefined-symbol link error).
+  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
     return False
   if not is_rocshmem and coll in gda_colls:
     return False
@@ -391,13 +416,18 @@ def custom_sort_key(fn: Fn):
 def get_arch_guard(fn):
   cond = None
 
-  if fn.proto == "LL128" and fn.acc == "1":
+  if fn.coll == "SendRecv" and fn.reg == "1":
+      # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
+      # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
+      cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+  elif fn.unroll in ("8", "16", "32"):
+      cond = "defined(__gfx1250__)"
+  elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
       cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
       cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
-
   return cond
 
 # Build the mangled function symbol suffix. The user-buffer registration mode is
@@ -479,7 +509,12 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           "};\n\n")
       unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
       for i, fn in enumerate(unroll_fns):
-        sym = paste("_", "ncclDevFunc", *fn)
+        # Must match the symbol emitted for the forward declarations / table /
+        # DEFINE_ncclDevFunc above: fn_sym() omits the reg suffix when reg=="0",
+        # so calling by name here must use it too (plain *fn would append the
+        # "_0" reg field and reference an undeclared symbol, breaking the
+        # pure-RDC / --no-device-linker build).
+        sym = "ncclDevFunc_" + fn_sym(fn)
         guard = get_arch_guard(fn)
         spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
         if guard:
@@ -561,10 +596,25 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       )
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
-      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
+      if fn.coll == "SendRecv":
+        # SendRecv has two latency-protocol variants distinguished by reg (0=LL, 1=LL128).
+        # reg=0 keeps the historical coll-only key for backward compatibility.
+        key = ((coll_idx & 0x3F) | ((reg_idx & 0xF) << 28))
+      if fn.coll in ["AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
+  out("};\n")
+
+  # Which unroll-factor tables were actually generated for this build. The host
+  # (commSetUnrollFactor) uses this to reject an RCCL_UNROLL_FACTOR that maps to
+  # an empty ncclDevFuncTable_* / NCCL_CALL_FUNCTIONS_* slot, which would
+  # otherwise dispatch to a nullptr and segfault on the device.
+  out("\n")
+  out("// Indexed by unroll-factor enum (NCCL_UNROLL_1 .. NCCL_UNROLL_32).\n")
+  out("bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {\n")
+  for u in all_unrolls:
+    out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
 # Maps to .cu filename which implements this func. The only constraint is that
@@ -707,7 +757,13 @@ specialized_filelist.sort(key=_compile_cost_key)
 
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
-  for filename, func_name, guard, _ in specialized_filelist:
-    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+  for filename, func_name, guard, fn in specialized_filelist:
+    if fn.unroll in ("8", "16", "32"):
+      cmake_guard = "defined(__gfx1250__)"
+      if fn.proto == "LL128":
+        cmake_guard += " && defined(ENABLE_LL128)"
+    else:
+      cmake_guard = guard or ""
+    f.write("%s %s %s\n" % (filename, func_name, cmake_guard))
 
 print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))

@@ -352,6 +352,10 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
+target_sources(
+    rocjitsu_shared
+    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
+)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
@@ -360,24 +364,14 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_isa
         rocjitsu_isa_registry
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
-        rocjitsu_isa_risc_v
         simdojo
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        # Host-side plugin loader. The logging/race plugins are no longer
+        # linked in statically; they are separate librocjitsu_plugin_<name>.so
+        # modules discovered and dlopen()ed at runtime.
+        rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
@@ -410,11 +404,11 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
 endif()
-# Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
@@ -436,13 +430,32 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The translator ships alongside the hook: both must resolve to the SAME
+    # shared object, or the cache identity they derive from it would differ and
+    # neither could read what the other wrote.
     install(
-        TARGETS rocjitsu_gfx1250_b0_to_a0
+        TARGETS hsa_hotswap_rocjitsu rocjitsu_gfx1250_b0_to_a0
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
-    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # rj_pretranslate ships because the tier it fills is only worth having if an
+    # image build or a post-install step can fill it.
+    install(
+        TARGETS rocjitsu_bin rj_pretranslate
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    # And the wrapper ships with it. rj_pretranslate takes standalone code
+    # objects; the script is the only piece that knows how to find them inside
+    # fat binaries, offload bundles and KPACK archives, and the tool's own help
+    # text points at it. Installing one without the other leaves that pointer
+    # dangling and the deployed workflow with no entry point.
+    install(
+        PROGRAMS scripts/rocjitsu-pretranslate.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

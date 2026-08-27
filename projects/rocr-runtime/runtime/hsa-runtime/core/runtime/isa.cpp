@@ -287,7 +287,8 @@ IsaRegistry::GetSupportedGenericVersions() {
     {prepend_isa_prefix("gfx10-1-generic:xnack+"), 1},
     {prepend_isa_prefix("gfx10-3-generic"), 1},
     {prepend_isa_prefix("gfx11-generic"), 1},
-    {prepend_isa_prefix("gfx12-generic"), 1}
+    {prepend_isa_prefix("gfx12-generic"), 1},
+    {prepend_isa_prefix("gfx12-5-generic"), 1}
   };
   return *min_gen_versions;
 }
@@ -364,9 +365,8 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx900",                 9, 0, 0,  unsupported, any,         64, "gfx9-generic")
   ISAREG_ENTRY_GEN("gfx900:xnack-",          9, 0, 0,  unsupported, disabled,    64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx900:xnack+",          9, 0, 0,  unsupported, enabled,     64, "gfx9-generic:xnack+")
-  ISAREG_ENTRY_GEN("gfx902",                 9, 0, 2,  unsupported, any,         64, "gfx9-generic")
-  ISAREG_ENTRY_GEN("gfx902:xnack-",          9, 0, 2,  unsupported, disabled,    64, "gfx9-generic:xnack-")
-  ISAREG_ENTRY_GEN("gfx902:xnack+",          9, 0, 2,  unsupported, enabled,     64, "gfx9-generic:xnack+")
+  ISAREG_ENTRY_GEN("gfx902",                 9, 0, 2,  unsupported, unsupported, 64, "gfx9-generic")
+  ISAREG_ENTRY_GEN("gfx902:xnack-",          9, 0, 2,  unsupported, unsupported, 64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx904",                 9, 0, 4,  unsupported, any,         64, "gfx9-generic")
   ISAREG_ENTRY_GEN("gfx904:xnack-",          9, 0, 4,  unsupported, disabled,    64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx904:xnack+",          9, 0, 4,  unsupported, enabled,     64, "gfx9-generic:xnack+")
@@ -388,9 +388,8 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx908:sramecc-:xnack+", 9, 0, 8,  disabled,    enabled,     64, "")
   ISAREG_ENTRY_GEN("gfx908:sramecc+:xnack-", 9, 0, 8,  enabled,     disabled,    64, "")
   ISAREG_ENTRY_GEN("gfx908:sramecc+:xnack+", 9, 0, 8,  enabled,     enabled,     64, "")
-  ISAREG_ENTRY_GEN("gfx909",                 9, 0, 9,  unsupported, any,         64, "gfx9-generic")
-  ISAREG_ENTRY_GEN("gfx909:xnack-",          9, 0, 9,  unsupported, disabled,    64, "gfx9-generic:xnack-")
-  ISAREG_ENTRY_GEN("gfx909:xnack+",          9, 0, 9,  unsupported, enabled,     64, "gfx9-generic:xnack+")
+  ISAREG_ENTRY_GEN("gfx909",                 9, 0, 9,  unsupported, unsupported, 64, "gfx9-generic")
+  ISAREG_ENTRY_GEN("gfx909:xnack-",          9, 0, 9,  unsupported, unsupported, 64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx90a",                 9, 0, 10, any,         any,         64, "")
   ISAREG_ENTRY_GEN("gfx90a:xnack-",          9, 0, 10, any,         disabled,    64, "")
   ISAREG_ENTRY_GEN("gfx90a:xnack+",          9, 0, 10, any,         enabled,     64, "")
@@ -401,6 +400,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx90a:sramecc+:xnack-", 9, 0, 10, enabled,     disabled,    64, "")
   ISAREG_ENTRY_GEN("gfx90a:sramecc+:xnack+", 9, 0, 10, enabled,     enabled,     64, "")
   ISAREG_ENTRY_GEN("gfx90c",                 9, 0, 12, unsupported, unsupported, 64, "gfx9-generic")
+  ISAREG_ENTRY_GEN("gfx90c:xnack-",          9, 0, 12, unsupported, unsupported, 64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx942",                 9, 4, 2,  any,         any,         64, "gfx9-4-generic")
   ISAREG_ENTRY_GEN("gfx942:xnack-",          9, 4, 2,  any,         disabled,    64, "gfx9-4-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx942:xnack+",          9, 4, 2,  any,         enabled,     64, "gfx9-4-generic:xnack+")
@@ -448,7 +448,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1153",                11, 5, 3, unsupported, unsupported, 32, "gfx11-generic")
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
-  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-generic")
+  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 
   return *supported_isas;

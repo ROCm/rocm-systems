@@ -320,18 +320,14 @@ The features of ``rocpd`` output format are:
 Generating rocpd output
 -------------------------
 
-To generate profiling data in the rocpd format, pass ``--output-format rocpd`` to
+To generate profiling data in the ``rocpd`` format, pass ``--output-format rocpd`` to
 ``rocprof-sys-run`` or ``rocprof-sys-sample``.
 
 .. code-block:: shell
 
    rocprof-sys-sample --output-format rocpd -- ./your_application
 
-The ``--output-format`` argument is authoritative: only the listed format(s) are
-produced. Tokens are space- or comma-separated, so you can request multiple formats at
-once, for example ``--output-format proto rocpd`` to emit both a Perfetto trace and a
-rocpd database. This argument cannot be combined with ``--trace``, ``--profile``,
-``--flat-profile``, or ``--profile-format`` on the same command line.
+The ``--output-format`` argument is authoritative and only the listed format(s) are produced. Tokens are space- or comma-separated, so you can request multiple formats at once. For example, to emit both a Perfetto trace and a ``rocpd`` database, use ``--output-format proto rocpd`` . This argument cannot be combined with ``--trace``, ``--profile``, ``--flat-profile``, or ``--profile-format`` on the same command line.
 
 See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
 details on setting up the profiling configuration options.
@@ -378,13 +374,7 @@ this file.
    :alt: Visualization of ROCm flow data in Perfetto
    :width: 800
 
-**Figure 4:** Visualization of ROCm API calls in Perfetto
-
-.. image:: ../data/rocprof-sys-user-api.png
-   :alt: Visualization of ROCm API calls in Perfetto
-   :width: 800
-
-**Figure 5:** Visualization of ROCm GPU metrics in Perfetto
+**Figure 4:** Visualization of ROCm GPU metrics in Perfetto
 
 .. image:: ../data/rocprof-sys-gpu-metrics.png
    :alt: Visualization of ROCm GPU metrics in Perfetto

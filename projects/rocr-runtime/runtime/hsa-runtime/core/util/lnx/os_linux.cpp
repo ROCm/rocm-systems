@@ -422,6 +422,15 @@ std::string GetLibraryName(LibHandle lib) {
   return map->l_name;
 }
 
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename) {
+  Dl_info info = {};
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) return {};
+
+  const std::string path(info.dli_fname);
+  const auto slash = path.find_last_of('/');
+  return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1) + filename;
+}
+
 Semaphore CreateSemaphore() {
   sem_t *sem = new sem_t;
   sem_init(sem, 0, 0);

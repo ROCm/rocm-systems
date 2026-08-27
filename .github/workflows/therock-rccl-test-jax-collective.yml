@@ -14,6 +14,12 @@ on:
       notify_email:
         type: string
         default: ''
+      notify_webhook:
+        type: string
+        default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -26,6 +32,10 @@ on:
         type: string
       notify_email:
         description: 'Email address to send test summary report'
+        type: string
+        default: ''
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
 
@@ -67,7 +77,7 @@ jobs:
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
       - name: Run setup test environment workflow
@@ -112,16 +122,20 @@ jobs:
         timeout-minutes: 10
         env:
           NCCL_DEBUG: INFO
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
-          fi
-          python rocm-systems/.github/scripts/test_jax_collective.py \
+          NOTIFY_ARGS=()
+          [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
+          [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
+          python rocm-systems/projects/rccl/ci/scripts/test_jax_collective.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --jax-src ${{ env.JAX_SRC }} \
             --results-log ${{ env.JAX_SRC }}/jax_collective_results.log \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results
         if: always()

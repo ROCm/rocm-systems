@@ -238,8 +238,8 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rccl_stats);
 }
 
-// NOTE: OMPT and rocSHMEM do not produce direct stats/CSV output; they are exported via
-// `rocpd convert`, so there is intentionally no generate_stats() overload for either.
+// NOTE: OMPT, rocSHMEM, and hipFILE do not produce direct stats/CSV output; they are exported
+// via `rocpd convert`, so there is intentionally no generate_stats() overload for any of them.
 
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,

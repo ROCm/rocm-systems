@@ -12,9 +12,9 @@
 
 #include "encoding_fields.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 
 namespace rocjitsu {
 // Per-pair named namespace. Two pairs that share a source ISA

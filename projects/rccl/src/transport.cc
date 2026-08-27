@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "comm.h"
+#include "alloc.h"
 #include "info.h"
 #include "bootstrap.h"
 #define ENABLE_TIMER 0
@@ -153,7 +154,13 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   cudaStream_t hostStream, deviceStream;
 
   int count = 0;
-  int num = MAXCHANNELS / 64;
+  int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD;
+
+  // Pool a single side stream for all buffer allocations during this pre-connect
+  // phase (including proxy-thread ncclCudaCalloc for this device), avoiding
+  // transient per-connection stream create/destroy. Released when this returns
+  // so it does not persist into the steady-state collective phase.
+  ncclSideStreamScope sideScope(comm->cudaDev, comm->sideStreamPriority);
 
   NCCLCHECK(ncclCalloc(&data, maxPeers));
   NCCLCHECKGOTO(ncclCalloc(&recvData, maxPeers), ret, fail);
@@ -363,7 +370,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     int recvPeer = (comm->rank - i + comm->nRanks) % comm->nRanks;
     int sendPeer = (comm->rank + i) % comm->nRanks;
 
-    for (int j = 0; j < MAXCHANNELS / 64; j++) {
+    for (int j = 0; j < MAXCHANNELS / CHANNELS_PER_MASK_WORD; j++) {
       if (recvPeer != sendPeer) {
         if (comm->connectSend[sendPeer].masks[j] != 0UL)
           NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);

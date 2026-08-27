@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "param.h"
 #include "profiler/net_ib.h"
+#include "net_telemetry.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -87,6 +88,8 @@ extern int IbCastNMergedDevs;
 struct alignas(64) ncclIbMergedDev {
   ncclNetVDeviceProps_t vProps;
   int speed;
+  int16_t railId;
+  int16_t planeId;
   char devName[MAX_MERGED_DEV_NAME]; // Up to NCCL_IB_MAX_DEVS_PER_NIC * name size, and a character for each '+'
 };
 
@@ -124,6 +127,9 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int16_t railId;
+  int16_t planeId;
+  int16_t planeIdx;
   enum ncclIbProvider ibProvider;
   union {
     struct {
@@ -134,6 +140,10 @@ struct alignas(64) ncclIbDev {
 
 #define MAX_IB_DEVS 32
 #define MAX_IB_VDEVS MAX_IB_DEVS * 8
+// Telemetry indexes device slots by this transport's device index, so a
+// shortfall would silently drop every counter past the end.
+static_assert(MAX_IB_DEVS <= RCCL_TELEMETRY_MAX_DEVS,
+              "telemetry has fewer device slots than the transport can enumerate");
 extern struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
 extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
@@ -145,7 +155,7 @@ extern bool IbCastUseInline;
 #define WR_IMM_SIZE_MASK 0x007fffff
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
-extern bool rcclCtsInlineData;
+extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
 
@@ -318,6 +328,7 @@ struct ncclIbRequest {
   uint64_t id;
   int nreqs;
   struct IbCastQpSchedDesc desc;
+  uint64_t tel_post_ts;
   union {
     struct {
       int size;
@@ -367,10 +378,10 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   uint32_t rkeys[1];
   int size;
   uint8_t nreqs;
-  uint16_t rxReqIndex;
+  uint8_t rxReqIndex; // num req is max 256
   uint16_t tag;
   uint32_t idx;
-  char padding[9];
+  char padding[8];
 } __attribute__((packed));
 
 struct ncclIbQpInitAttr {
@@ -391,6 +402,7 @@ struct ncclIbQpRtrAttr {
   union ibv_gid remoteGid;
 
   uint8_t localIbPort;
+  uint8_t localPortFlags;
   union ibv_gid localGid;
   int32_t localGidIndex;
 };
@@ -422,6 +434,10 @@ struct ncclIbQp {
   int8_t ctsQpSlot;
   int channelId;
   bool isDataQp;
+
+  // Resolved telemetry slot (NULL if untracked); the pointer keeps a posted WQE
+  // to one slot resolution. Reuses padding, so ncclIbQp keeps its size.
+  RcclQpStats* telQpStats;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -501,6 +517,9 @@ struct alignas(32) ncclIbNetCommBase {
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
   // statistics about the comm
   struct ncclIbStats stats;
+  // Telemetry: ibv_poll_cq calls by this comm, folded into the device at close.
+  // Kept per-comm so the hot poll path never touches the shared device line.
+  uint64_t telCqPollCount;
 #ifdef ENABLE_FAULT_INJECTION
   uint32_t faultQpDelayUs[NCCL_IB_MAX_QPS];
   bool faultQpError[NCCL_IB_MAX_QPS];
@@ -579,6 +598,12 @@ struct ncclIbSendComm {
   // issuing a (multi-)receive request). Each row in the 2D array corresponds
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
+  // Note: for AINIC when CTS offload and/or Inline CTS is enabled,
+  // it uses 32B data type (ncclIbSendFifoCtsInline) for CTS messages.
+  // In that case, the ctsFifo for a given slot which holds the CTS messages
+  // for multi-receive requests will be used as a contiguous buffer of
+  // 32B element (instead of 64B) and not used as a 2D array with
+  // with each element of size 64B.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
   struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
@@ -596,6 +621,10 @@ struct ncclIbSendComm {
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
+  int telChId; // Telemetry: NCCL channel ID for this communicator
+  // Resolved slot for telChId on this comm's first device (NULL if untracked).
+  // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
+  RcclChannelStats* telChStats;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -606,7 +635,9 @@ static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendC
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
 static_assert(sizeof(struct ncclIbSendFifo) <= 64, "struct ncclIbSendFifo should fit one cache line");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
-              "ncclIbSendFifoCtsInline element size must be 32-byte multiples");
+              "ncclIbSendFifoCtsInline element size must be 32-byte aligned");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) <= 32),
+              "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -626,6 +657,12 @@ struct ncclIbRemCtsFifo {
   // the CTS FIFO locally on its side. Receiver uses this memory to place the
   // CTS messages and populates the RDMA message "gather address" with the
   // memory of the CTS message that is sent.
+  // Note: for AINIC when CTS offload and/or Inline CTS is enabled,
+  // it uses 32B data type (ncclIbSendFifoCtsInline) for CTS messages.
+  // In that case, the ctsFifo for a given slot which holds the CTS messages
+  // for multi-receive requests will be used as a contiguous buffer of
+  // 32B element (instead of 64B) and not used as a 2D array with
+  // with each element of size 64B.
   struct ncclIbSendFifo elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   uint64_t addr;
   // Array of RKeys (one RKey per device) from which the receiver chooses the
@@ -677,6 +714,9 @@ struct ncclIbRecvComm {
   // and only the wr_id is updated before posting a receive work request.
   struct ibv_recv_wr ibRecvWorkRequest;
   bool useCtsOffload;
+  int telChId; // Telemetry: NCCL channel ID for this communicator
+  // See ncclIbSendComm::telChStats.
+  RcclChannelStats* telChStats;
 };
 static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
@@ -741,6 +781,8 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);
+ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** /*sendDevComm*/, int envTrafficClass);
 ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/);
 ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);

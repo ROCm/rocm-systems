@@ -628,12 +628,21 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.luidLowPart_ = palProp.osProperties.luidLowPart;
   info_.luidHighPart_ = palProp.osProperties.luidHighPart;
 #endif
-  // Setup the node mask for MGPU only case from the original PAL list of all devices
-  if ((gNumDevices > 1) && (pal_device != nullptr)) {
-    for (uint32_t i = 0; i < gNumDevices; ++i) {
-      if (gDeviceList[i] == pal_device) {
-        info_.luidDeviceNodeMask_ = 1 << i;
+  // Node mask = this device's index within its adapter (LUID). Devices sharing a
+  // LUID form a linked adapter; a standalone adapter reports 0x1.
+  if (pal_device != nullptr) {
+    uint32_t luidNodeIndex = 0;
+    for (uint32_t i = 0; (i < gNumDevices) && (gDeviceList[i] != pal_device); ++i) {
+      Pal::DeviceProperties siblingProps = {};
+      if ((gDeviceList[i] != nullptr) &&
+          (gDeviceList[i]->GetProperties(&siblingProps) == Pal::Result::Success) &&
+          (siblingProps.osProperties.luidLowPart == palProp.osProperties.luidLowPart) &&
+          (siblingProps.osProperties.luidHighPart == palProp.osProperties.luidHighPart)) {
+        ++luidNodeIndex;
       }
+    }
+    if (luidNodeIndex < 32) {
+      info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
     }
   }
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
@@ -1935,11 +1944,14 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
 #endif  //_WIN32
 
   if (flags & amd::Context::Flags::GLDeviceKhr) {
-    // Attempt to associate PAL-OGL
-    if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      if (!validateOnly) {
-        LogError("Failed glAssociate()");
+    void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (validateOnly) {
+      // Probe: check compatibility without starting a GL interop session.
+      if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
+        return false;
       }
+    } else if (!glAssociate(pContext, glDevice)) {
+      LogError("Failed glAssociate()");
       return false;
     }
   }
@@ -1954,12 +1966,11 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   }
 
   void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (glDevice != nullptr) {
+  // validateOnly never started a session; nothing to dissociate.
+  if (glDevice != nullptr && !validateOnly) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }

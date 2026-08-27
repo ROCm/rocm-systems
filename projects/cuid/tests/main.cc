@@ -1,29 +1,12 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "test_common.h"
 
 // Unit tests (no root or device required)
+#include "unit/cuid_gpu_test.h"
 #include "unit/file_lock_test.h"
+#include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
@@ -38,6 +21,7 @@
 #include "functional/device_refresh_test.h"
 #include "functional/hmac_test.h"
 #include "functional/reverse_lookup_test.h"
+#include "src/gim_util.h"
 
 // =============================================================================
 // cuidtstUnprivileged — tests that run without root
@@ -123,6 +107,26 @@ TEST(cuidtstUnprivileged, DeviceRefresh) {
   RunGenericTest(&tst);
 }
 
+TEST(cuidtstUnprivileged, GimClientAvailability) {
+  TestGimClientAvailability tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimParseAsicSerial) {
+  TestGimParseAsicSerial tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimFormatBdf) {
+  TestGimFormatBdf tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, CuidGpuRenderNode) {
+  TestCuidGpuRenderNode tst;
+  RunGenericTest(&tst);
+}
+
 // =============================================================================
 // cuidtstPrivileged — tests that require root
 // =============================================================================
@@ -180,6 +184,17 @@ TEST(cuidtstPrivileged, ReverseDeviceType) {
     GTEST_SKIP() << "Requires root; run with sudo to enable.";
   }
   TestReverseDeviceType tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstPrivileged, GimDeviceEnumeration) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  if (!cuid::gim::GimClient::is_available()) {
+    GTEST_SKIP() << "GIM device node not present; skipping.";
+  }
+  TestGimDeviceEnumeration tst;
   RunGenericTest(&tst);
 }
 

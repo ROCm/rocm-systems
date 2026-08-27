@@ -63,6 +63,7 @@ ncclResult_t ncclRmaProxyPutBuildOp(struct ncclComm* comm, struct ncclRmaProxyCt
                                     bool persistent, struct ncclDevrWindow* srcWin, size_t srcOff,
                                     struct ncclDevrWindow* peerWin, size_t peerOff, size_t size, int peer,
                                     ncclSignalMode_t signalMode, struct ncclRmaPutSignalOp* op) {
+  // Offsets are relative to the backing allocation the MR was registered on.
   op->srcOff = ncclDevrGetWinOffset(srcWin) + srcOff;
   op->srcHandle = ncclDevrGetRmaWin(srcWin, ctx);
   op->dstOff = ncclDevrGetWinOffset(peerWin) + peerOff;

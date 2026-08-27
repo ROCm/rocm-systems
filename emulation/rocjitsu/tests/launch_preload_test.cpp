@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "launch_preload.h"
+#include "scoped_temp.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -149,19 +150,13 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
   const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   ASSERT_FALSE(ec) << ec.message();
 
-  const std::filesystem::path temp_dir =
-      std::filesystem::temp_directory_path() /
-      ("rocjitsu_launch_preload_test_" + std::to_string(getpid()));
-  ASSERT_TRUE(std::filesystem::create_directories(temp_dir, ec) ||
-              std::filesystem::exists(temp_dir))
-      << ec.message();
+  const rocjitsu::test::ScopedTempDirectory temp_dir_owner("rocjitsu-launch-preload-");
+  const std::filesystem::path temp_dir(temp_dir_owner.path());
 
   static constexpr const char *alias_names[] = {"launch-asan-preload-test",
                                                 "launch-tsan-preload-test"};
   for (const char *alias_name : alias_names) {
     const std::filesystem::path alias = temp_dir / alias_name;
-    std::filesystem::remove(alias, ec);
-    ec.clear();
     std::filesystem::create_symlink(exe, alias, ec);
     ASSERT_FALSE(ec) << ec.message();
 
@@ -182,7 +177,6 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(0, WEXITSTATUS(status));
   }
-  std::filesystem::remove_all(temp_dir, ec);
 #endif
 }
 

@@ -38,6 +38,11 @@ void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
+// Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
+int ncclMaxP2pNchannels();
+// Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the
+// user's NCCL_MAX_P2P_NCHANNELS above that. Always a power of two.
+int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);
@@ -120,9 +125,10 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// [RCCL] Kept at 64 (not upstream's 640): ncclTopoGraph's RCCL-specific treeBase array is
+// Allows for up to 144 GPUs in scale-up domain (72 GPUs in DPX mode).
+// [RCCL] Not raised to upstream's 640: ncclTopoGraph's RCCL-specific treeBase array is
 // O(NCCL_TOPO_MAX_NODES^2), so 640 would blow sizeof(ncclComm) up to ~17.6 MiB. TODO: decouple.
-#define NCCL_TOPO_MAX_NODES 64
+#define NCCL_TOPO_MAX_NODES 144
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType,
                               int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
 ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,

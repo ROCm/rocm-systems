@@ -28,6 +28,7 @@
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
+#include "sym_kernels.h"
 #include "tuner.h"
 #include "ras.h"
 #include "profiler.h"
@@ -76,9 +77,9 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce.h"
-#include "ipc_init.h"
-#include "fabric_init.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/ipc/ipc_init.h"
+#include "algorithms/dda/fabric/fabric_init.h"
 #include <cpuid.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,6 +117,12 @@ NCCL_PARAM(GroupCudaStream, "GROUP_CUDA_STREAM", NCCL_GROUP_CUDA_STREAM);
 NCCL_PARAM(CheckPointers, "CHECK_POINTERS", 0);
 NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
+// When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
+NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
+// When enabled (default), PAT ReduceScatter and AllGather share one connection set.
+// RCCL_PAT_SHARED_QPS=0 restores a separate set per collective. The value must be identical on
+// every rank, otherwise peers disagree on direction and the first PAT collective hangs.
+RCCL_PARAM(PatSharedQps, "PAT_SHARED_QPS", 1);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -192,13 +199,15 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// RCCL_GFX9_CHEAP_FENCE_OFF: 0 = arch-tuned, non-zero = force cheap fence off (__threadfence_system)
-RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
+// RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
+//   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
+RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -256,9 +265,8 @@ ncclResult_t checkHostUncacheMemSetting(struct ncclComm* comm) {
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
     ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
     return ncclSystemError;
-  } else {
-    return ncclSuccess;
   }
+  return ncclSuccess;
 #endif
 }
 
@@ -277,8 +285,8 @@ exit:;
 }
 
 static ncclResult_t ncclInit() {
-    // Register atexit handler to detect process shutdown. This must happen
-    // early so the handler runs BEFORE HIP runtime static destructors.
+  // Register atexit handler to detect process shutdown. This must happen
+  // early so the handler runs BEFORE HIP runtime static destructors.
   rcclRegisterShutdownHandler();
 
   char strValue[2048];
@@ -298,7 +306,7 @@ static ncclResult_t ncclInit() {
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
     NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
-      // Check BIOS string and hypervisor presence on ecx bit 31
+    // Check BIOS string and hypervisor presence on ecx bit 31
     if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
       char cmdline[2048] = {0};
       const char* cmdlinePtr = NULL;
@@ -444,6 +452,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclCeFinalize(comm));
 
+  if (comm->nNodes == 1) {
+    NCCLCHECK(ncclMemFree(comm->localSizes));
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
+
+    comm->localSizes = nullptr;
+    comm->gatheredSizes = nullptr;
+  }
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
   // It is owned by the communicator; free it during communicator teardown.
   if (comm->tempBuff) {
@@ -451,10 +466,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
     comm->tempBuff = nullptr;
   }
 
-  // Free hierarchical AG resources
-  if (comm->hierarchicalAGTempBuffer) {
-    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer, comm->memManager));
-    comm->hierarchicalAGTempBuffer = nullptr;
+  // Free hierarchical AG/RS resources
+  if (comm->hierarchicalTempBuffer) {
+    NCCLCHECK(ncclCudaFree(comm->hierarchicalTempBuffer, comm->memManager));
+    comm->hierarchicalTempBuffer = nullptr;
   }
   if (comm->hierarchicalIntraComm) {
     NCCLCHECK(ncclCommDestroy(comm->hierarchicalIntraComm));
@@ -583,7 +598,12 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclRegCleanup(comm));
 
-  NCCLCHECK(ncclDestroySideStream(comm->cudaDev));
+  // Safety net: release the side stream if init failed/aborted before it was
+  // released on the normal init-completion path. No-op after normal success.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECK(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority));
+    comm->sideStreamAcquired = false;
+  }
 
   INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx - %s COMPLETE", comm, comm->rank, comm->nRanks,
        comm->cudaDev, comm->busId, abort ? "Abort" : "Destroy");
@@ -674,10 +694,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaScratchBytes = 0;
   comm->ddaScratchIsVmm = false;
   comm->ddaPeerPtrsDev = nullptr;
+  comm->ddaPeerPtrsHost = nullptr;
   comm->ddaIpcBarrierState = nullptr;
   comm->ddaFabricBarrierState = nullptr;
   comm->ddaFabricMemHandler = nullptr;
   comm->ddaFabricMaxBlocks = 0;
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
 
   comm->rank = rank;
   comm->nRanks = ndev;
@@ -687,8 +710,10 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
-  comm->hierarchicalAGTempBuffer = nullptr;
+  comm->hierarchicalTempBuffer = nullptr;
+  // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
+  comm->patSharedQps = rcclParamPatSharedQps() != 0;
 
   // Try to create a CUDA object right away. If there is something wrong with
   // the device we're on (failure cause #1) , better know it early.
@@ -736,8 +761,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->lastStream = nullptr;
   comm->lastStreamValid = false;
 
-  // RCCL: create persistent stream for calloc
-  NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
+  // RCCL: acquire a scoped side stream for init-time allocations. It is
+  // released once init completes (see ncclCommInitRankFunc) so it does not hold
+  // a scarce GPU hardware queue through the steady-state collective phase.
+  comm->sideStreamPriority = 0;
+  NCCLCHECK(ncclSideStreamAcquire(comm->cudaDev, comm->sideStreamPriority));
+  comm->sideStreamAcquired = true;
 
   if (ncclParamLaunchOrderImplicit()) {
     NCCLCHECK(ncclCudaContextTrack(&comm->context));
@@ -758,7 +787,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   TRACE(NCCL_INIT, "comm %p rank %d nranks %d cudaDev %d busId %lx compCap %d", comm, rank, ndev, comm->cudaDev,
         comm->busId, comm->compCap);
 
-  comm->checkMode = ncclParamCheckPointers() == 1 ? ncclCheckModeDebugLocal : ncclCheckModeDefault;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
 
   // Initialize memory manager
@@ -865,7 +893,8 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.abortFlag = comm->abortFlagDev;
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
-  tmpCommAndChans.comm.gfx9CheapFenceOff = comm->gfx9CheapFenceOff;
+  tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
+  tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1053,6 +1082,32 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 #endif
   info->busId = comm->busId;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP names do not contain "MLOPart". DPX/XCP/CPX logical GPUs are still
+  // exposed as PCI function .N while sysfs at that BDF is not a GPU (often the
+  // BDF is missing entirely). Use the PCI function as the partition index so
+  // ranks share the physical function-0 PCI node (see ncclTopoFillGpu) with
+  // distinct overlay DEV ids: function 0 is mlopart 0, a fake non-GPU function
+  // is mlopart N (CPX uses N=1..7).
+  if (info->mloPart == NCCL_TOPO_UNDEF) {
+    int fn = (int)(info->busId & 0xf);
+    if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char deviceClass[MAX_STR_LEN];
+      deviceClass[0] = '\0';
+      if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
+        (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+        int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+                    strncmp(deviceClass, "0x03", 4) == 0;
+        if (fn == 0) {
+          if (isGpu) info->mloPart = 0;
+        } else if (!isGpu) {
+          info->mloPart = fn;
+        }
+      }
+    }
+  }
+#endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 
   // detect if fine grained memory is available on this GPU
@@ -1354,8 +1409,7 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
 
 #ifdef ENABLE_WARP_SPEED
 static bool willEnableWarpSpeed(struct ncclComm* parent, struct ncclComm* comm, int nNodes) {
-  return rcclParamWarpSpeedForceEnable() > 0 ||
-         ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes));
+  return rcclParamWarpSpeedForceEnable() > 0 || ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes));
 }
 #endif
 
@@ -1475,8 +1529,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // Check for MNNVL support
   NCCLCHECKGOTO(ncclGetUserP2pLevel(&p2pLevel), ret, fail);
-  if ((nNodes > 1 && ncclParamMNNVLEnable() != 0 && p2pLevel != 0) || ncclParamMNNVLEnable() == 1) {
-    NCCLCHECKGOTO(ncclMnnvlCheck(comm), ret, fail);
+  {
+    const int mnnvlEnable = ncclParamMNNVLEnable();
+    const bool isGfx1250 = comm->archName && IsArchMatch(comm->archName, "gfx1250");
+    // Auto (default=2): multi-node, or single-node gfx1250
+    const bool mnnvlAutoScope = (nNodes > 1 || isGfx1250) && p2pLevel != 0;
+    if (mnnvlEnable == 1 || (mnnvlEnable != 0 && mnnvlAutoScope)) {
+      NCCLCHECKGOTO(ncclMnnvlCheck(comm), ret, fail);
+    }
   }
 
   do {
@@ -1606,7 +1666,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
+  {
+    bool nonUniformRanks = !uniformRanksPerHost(comm, nranks);
+    bool isGfx1250 = comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+    comm->topo->skipPresetTopoMatching = nonUniformRanks || isGfx1250;
+    if (comm->topo->skipPresetTopoMatching) {
+      INFO(NCCL_INIT, "Rome model matching disabled %s", isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
+    }
+  }
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
@@ -1755,7 +1822,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, NCCL_TOPO_ID(comm->topo->systemId, comm->busId), &idx));
+  // GPU node ids include the MLOPart overlay (and a local-rank-on-DEV field), so they
+  // no longer match the raw PCI busId. Look up this rank's GPU node instead.
+  NCCLCHECK(ncclTopoRankToIndex(comm->topo, rank, &idx, /*showWarn=*/true));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)
@@ -1770,18 +1839,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx90a"))
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4 / ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS / 2) allGather3Data[rank].nc = 1;
-  comm->gfx9CheapFenceOff = 1;
+  // cheap fence is only safe with cache bypassing load/store availability in kernel.
+  comm->cheapPostSendFenceOff = rcclComputeCheapPostSendFenceOff(comm->cudaArch, rcclParamCheapPostSendFenceOff(),
 #ifdef HIP_UNCACHED_MEMORY
-  // cheap fence is only safe with cache bypassing load/store availability in kernel
-  // only enabled on gfx942, gfx950 and gfx1250
-  if (!rcclParamGfx9CheapFenceOff()) {
-    if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
-      comm->gfx9CheapFenceOff = 0;
-  }
+                                                                 true);
+#else
+                                                                 false);
 #endif
-  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm->gfx9CheapFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {
@@ -1820,9 +1885,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  // gfx1250 defaults to the full pool; ncclTopoPostset caps nc by CU count and NCCL_MAX_NCHANNELS.
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
-    allGather3Data[rank].nc = 2;
+    allGather3Data[rank].nc = MAXCHANNELS;
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
@@ -2160,7 +2225,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->p2pSchedule = ncclMemoryStackAlloc<ncclComm::P2pSchedulePair>(&comm->memPermanent, comm->nRanks);
   comm->planner.peers = ncclMemoryStackAlloc<ncclKernelPlanner::Peer>(&comm->memPermanent, comm->nRanks);
   NCCLCHECK(ncclP2pSchedule(comm));
-  // initialize non-zero fields.
+  // for bcast: init the ringTasks and min/max bcast peer
+  comm->ringTasks = ncclMemoryStackAlloc<void*>(&comm->memPermanent, comm->nRanks);
   comm->planner.bcast_info.minBcastPeer = INT_MAX;
   comm->planner.bcast_info.maxBcastPeer = INT_MIN;
 
@@ -2206,8 +2272,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     NCCLCHECKGOTO(ncclTransportTreeConnect(comm), ret, fail);
 
     // Connect PAT only for communicators with 1 GPU per node and PAT enabled
-    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable))
-      NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable)) {
+      if (ncclParamPatLazyInit()) {
+        // Leave initAlgoChannels[PAT] unset so ncclPrepareTasks() triggers the on-demand connect (see enqueue.cc / group.cc ncclCollPreconnect).
+        INFO(NCCL_INIT, "PAT lazy init enabled: deferring PAT QP creation until first PAT collective");
+      } else {
+        NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+        comm->initAlgoChannels[NCCL_ALGO_PAT] = true;
+      }
+    }
 
     // Attempt to setup NVLS
     NCCLCHECKGOTO(ncclNvlsSetup(comm, parent), ret, fail);
@@ -2336,6 +2409,24 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
 
+  // Pre-init the symmetric-kernel runtime now. It allocates device memory
+  // (window table / shadow pools) on first use, which HIP forbids during graph
+  // capture. Deferring this to the first collective is not safe: some graph
+  // users' very first call on a comm is itself captured, with no preceding
+  // eager call at all (e.g. rccl-tests' per-size warm-up-for-all-sizes loop
+  // begins capture before issuing a single collective), so there is no
+  // reliably-eager "first use" moment to hook a lazy trigger into. Doing it
+  // here makes the narrower per-collective lazy triggers no-ops.
+  //
+  // Note: the CE (copy-engine) runtime is intentionally NOT pre-inited here.
+  // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
+  // cross-rank memop barrier deadlock on graph replay), so CE is instead
+  // skipped entirely while a stream is capturing (see taskAppend() in
+  // enqueue.cc and ncclAllReduce_impl() in collectives.cc).
+  if (comm->symmetricSupport) {
+    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
+  }
+
   timers[TIMER_INIT_CONNECT] = clockNano() - timers[TIMER_INIT_CONNECT];
 
   /* Local intra-node barrier */
@@ -2348,7 +2439,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   TRACE(NCCL_INIT, "rank %d nranks %d - DONE", rank, nranks);
 
 exit:
-  if (ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(affinitySave);
+  if (ncclOsCpuCount(comm->cpuAffinity))
+    ncclOsSetAffinity(comm->cpuAffinity); // RCCL 2.29.7 behavior: leave calling thread pinned to GPU-local NUMA
   /* If split resource is shared, we are not able to unlink the proxy ops pool here since the child comm can
    * attach the proxy ops pool of parent at any time; otherwise, unlink it here to make sure the pool will be
    * properly cleaned up. */
@@ -2530,7 +2622,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // Set the maximum kernel stack size of all kernels to avoid
   // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
 #ifdef USE_INDIRECT_FUNCTION_CALL
-  if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName, "gfx942") && !IsArchMatch(archName, "gfx950")) {
+  if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName, "gfx942") && !IsArchMatch(archName, "gfx950") &&
+      !IsArchMatch(archName, "gfx1250")) {
     stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : maxLocalSizeBytes;
     if (stackSize == 0) {
       if (IsArchMatch(archName, "gfx906")) stackSize = 1024;
@@ -2705,10 +2798,19 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // update communicator state
   comm->initState = ncclSuccess;
 
-  // Initialize hierarchical sub-communicators and temp buffer
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
+  if (comm->nNodes == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+    const size_t nLocal = 4 * (size_t)comm->nRanks;
+    const size_t nGather = nLocal * (size_t)comm->nRanks;
+
+    NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
+    NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
+  }
+
+  // Initialize hierarchical sub-communicators and temp buffers
+  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
+      (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
+      INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
     } else {
       // Hierarchical Shuffle kernel assumes compact rank ordering.
       // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
@@ -2721,7 +2823,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         }
       }
       if (!compactRanks) {
-        INFO(NCCL_INIT, "Hierarchical AllGather: non-compact rank ordering, skipping hierarchical allgather");
+        INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
         int node_id = comm->rankToNode[comm->rank];
         int local_rank = comm->rankToLocalRank[comm->rank];
@@ -2732,16 +2834,24 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
-        size_t tempBufSize =
-          (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
+        // inherit PXN disable from parent comm
+        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                            rcclParamHierarchicalReduceScatter() == 1);
+        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
              comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
       }
     }
   }
 
+  // RCCL: init-time allocations are done; release the side stream now so its GPU
+  // hardware queue is freed before the steady-state collective phase begins.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECKGOTO(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority), res, fail);
+    comm->sideStreamAcquired = false;
+  }
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
 
   // Trace this call for replay tool

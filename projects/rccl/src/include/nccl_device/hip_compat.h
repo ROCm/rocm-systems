@@ -22,9 +22,17 @@
 
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
 #define NCCL_HIP_PLATFORM 1
-#define NCCL_DEVICE_COMPILE 1
 #elif defined(__CUDACC__)
 #define NCCL_CUDA_PLATFORM 1
+#endif
+// Key device-compile on the device translation unit (compiled by hipcc/nvcc),
+// not the HIP *platform* macro. A pure host-only build defines __HIP_PLATFORM_AMD__
+// to get AMD types but is NOT compiled by hipcc, so it must not pull in device
+// template bodies. __HIPCC__ / __CUDACC__ are set for BOTH the host and device
+// passes of a real device compile, so real builds -- including the device-TU host
+// pass that declares device-only types (ncclGin, ncclCoopCta, barrier sessions) --
+// are unaffected.
+#if defined(__HIPCC__) || defined(__CUDACC__)
 #define NCCL_DEVICE_COMPILE 1
 #else
 #define NCCL_DEVICE_COMPILE 0
@@ -115,7 +123,7 @@
 #if defined(NCCL_HIP_PLATFORM)
   // AMD GPUs use 64-wide waves (or 32 in wave32 mode)
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || defined(__gfx1101__) || \
-  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__)
+  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
 #define NCCL_WARP_SIZE 32
 #else
 #define NCCL_WARP_SIZE 64

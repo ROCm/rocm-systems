@@ -2001,6 +2001,10 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_prese
 }
 
 static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_node_number) {
+  if (numa_node_number == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   TRY
 
       GET_DEV_AND_KFDNODE_FROM_INDX
@@ -3456,7 +3460,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    // Multiple by 1000 to convert from Centigrade to mCentigrade
+    *temperature = static_cast<int64_t>(val_ui16) * 1000;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "
@@ -3794,45 +3799,6 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
      << getRSMIStatusString(ret, false);
   LOG_INFO(ss);
   return ret;
-
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-  // TODO(amdsmi_team): technically, we should block for all devices
-  // As this is a global operation, we can use a mutex to ensure
-  // that only one thread is trying to restart the driver at a time.
-  uint32_t dv_ind = 0;  // Default to first device
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-         << " | Fail - restart AMD GPU detected"
-         << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-         << " | Cause: AMDGPU Driver Reload failed "
-         << " | Returning = " << getRSMIStatusString(restartRet, false);
-      LOG_ERROR(ss);
-    }
-    return restartRet;
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - if restart completed successfully"
-       << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-       << " | Returning = " << getRSMIStatusString(restartRet, false);
-    LOG_INFO(ss);
-  }
-  return restartRet;
 
   CATCH
 }
@@ -5047,6 +5013,9 @@ rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
                                    void* /*unused*/) {
+  if (evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   TRY
 
       amd::smi::evt::Event* evt = reinterpret_cast<amd::smi::evt::Event*>(evt_handle);
@@ -5056,10 +5025,6 @@ rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_
   REQUIRE_ROOT_ACCESS
 
   int ret = 0;
-
-  if (evt_handle == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (cmd) {
     case RSMI_CNTR_CMD_START:
@@ -7662,7 +7627,6 @@ rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(header_value != nullptr);
   if (header_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -7686,7 +7650,6 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(xcd_counter_value != nullptr);
   if (xcd_counter_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -7699,9 +7662,7 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
       if (gfxclk == UINT16_MAX) {
         break;
       }
-      if ((gfxclk != 0) && (gfxclk != UINT16_MAX)) {
-        xcd_counter++;
-      }
+      xcd_counter++;
     }
   }
 

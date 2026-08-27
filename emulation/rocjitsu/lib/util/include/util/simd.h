@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 
 #if __has_include(<experimental/simd>)
@@ -46,16 +47,54 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
-/// Process-wide switch that callers check before taking the SIMD fast path.
-/// Read ONCE from the `RJ_FORCE_SCALAR` env var at startup (unset/empty/"0" =>
-/// false, any other value => true). Production code never writes it; a
-/// test-only seam (util/simd_test_hooks.h) may override it in-process so a
-/// single test can drive both the scalar and SIMD execute paths and compare.
+namespace detail {
+
+inline bool init_force_scalar() {
+  const char *e = std::getenv("RJ_FORCE_SCALAR");
+  if (e == nullptr) {
+    return false;
+  }
+  const std::string_view v(e);
+  return !v.empty() && v != "0";
+}
+
+/// Force-scalar gate, initialized ONCE from the `RJ_FORCE_SCALAR` env var at
+/// image load (dynamic init) and read with a plain load thereafter -- no
+/// per-call guard byte. An `inline` variable so the definition lives in this
+/// header and `util` stays header-only. Mutable so the test-only seam
+/// (util/simd_test_hooks.h) can override it; production code never writes it.
 ///
-/// Defined in util/src/simd.cpp; the backing global is hidden in that TU. e2e
-/// runs force the scalar codepath by setting `RJ_FORCE_SCALAR` before launch,
-/// without recompiling.
-bool force_scalar();
+/// THERE IS ONE INSTANCE PER LINKED MODULE, NOT ONE PER PROCESS. rocjitsu builds
+/// with hidden visibility (`CMAKE_CXX_VISIBILITY_PRESET hidden` in the top-level
+/// CMakeLists.txt, plus `-fvisibility=hidden` in cmake/rj_add_object_library.cmake),
+/// so this variable gets local binding in every module that links it: it is
+/// never a dynamic symbol, and librocjitsu.so, librocjitsu_hooks.so, each plugin
+/// module, the hotswap DSOs and every test executable carry a private copy.
+/// Env-var control is unaffected -- each copy parses `RJ_FORCE_SCALAR`
+/// independently at its own load -- but a write through the test seam reaches
+/// ONLY the copy in the caller's module. Making the gate genuinely process-wide
+/// would require a deliberate default-visibility attribute here (or a single
+/// state owner all modules call into); that is an explicit decision, not
+/// something to acquire by accident.
+///
+/// Safe as a dynamic-init global because force_scalar() is only ever read at
+/// runtime instruction-execute, never during another TU's static construction.
+inline bool g_force_scalar = init_force_scalar();
+
+} // namespace detail
+
+/// Switch that callers check before taking the SIMD fast path. Read ONCE from
+/// the `RJ_FORCE_SCALAR` env var at image load (unset/empty/"0" => false, any
+/// other value => true). Production code never writes it; a test-only seam
+/// (util/simd_test_hooks.h) may override it so a single test can drive both the
+/// scalar and SIMD execute paths and compare.
+///
+/// There is one instance per linked module, not one per process -- see
+/// detail::g_force_scalar for why. `RJ_FORCE_SCALAR` therefore applies uniformly
+/// (each module parses it at its own load), while a test-seam override applies
+/// only within the caller's module. e2e runs force the scalar codepath by
+/// setting the env var before launch, without recompiling.
+inline bool force_scalar() { return detail::g_force_scalar; }
 
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;
@@ -529,6 +568,48 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   return out;
 }
 
+/// Vectorized counterpart of `f32_to_f16_mode`.
+inline native<uint32_t> f32_to_f16_mode_simd(native<float> val, bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_f16_simd(val);
+  if (!fp16_ovfl)
+    return out;
+
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U fe = (f >> 23) & 0xFFu;
+  stdx::where(fe != 0xFFu && (out & 0x7FFFu) == 0x7C00u, out) = (out & 0x8000u) | 0x7BFFu;
+  return out;
+}
+
+/// One-argument helper for generated lambdas used only on the `FP16_OVFL` path.
+inline native<uint32_t> f32_to_f16_ovfl_simd(native<float> val) {
+  return f32_to_f16_mode_simd(val, true);
+}
+
+/// Vectorized, bit-exact port of `f32_to_f16_rtz` (util/data_types.h).
+inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 16) & 0x8000u;
+  const U fe = (f >> 23) & 0xFFu;
+  const U fm = f & 0x7FFFFFu;
+
+  U out = sign | ((fe - 112u) << 10) | (fm >> 13);
+
+  const U mm = fm | 0x800000u;
+  U sh = 126u - fe;
+  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe <= 112u, out) = sign | (mm >> sh);
+
+  stdx::where(fe < 102u, out) = sign;
+  stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
+
+  stdx::where(fe == 255u, out) = sign | 0x7C00u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+
+  return out;
+}
+
 /// Bit-exact SIMD rounding helpers (trunc / ceil / floor / round-to-nearest-even).
 ///
 /// libstdc++'s `std::experimental::simd` rounding intrinsics are NOT bit-exact
@@ -915,26 +996,48 @@ inline native<float> cube_tc_f32_simd(native<float> x, native<float> y, native<f
   return r;
 }
 
+/// Round an in-range finite float to the nearest integer, with halfway values
+/// choosing the even integer. Unlike nearbyint(), this is independent of the
+/// process floating-point environment.
+inline float round_to_nearest_even(float value) {
+  const float lower = std::floor(value);
+  const float fraction = value - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    return lower + 1.0f;
+  return lower;
+}
+
+/// SIMD counterpart of round_to_nearest_even().
+inline native<float> round_to_nearest_even_simd(native<float> value) {
+  native<float> lower = stdx::floor(value);
+  const native<float> fraction = value - lower;
+  const native<float> lower_mod_two = lower - native<float>(2.0f) * stdx::floor(lower * 0.5f);
+  const auto increment =
+      (fraction > native<float>(0.5f)) ||
+      ((fraction == native<float>(0.5f)) && (lower_mod_two != native<float>(0.0f)));
+  stdx::where(increment, lower) += native<float>(1.0f);
+  return lower;
+}
+
 /// Normalized f32->int16 / ->uint16 pack-convert lanes (back v_cvt_pk[_]norm_*).
-/// Scalar: `isnan(f) ? 0 : static_cast<intN>(clamp(f * K, lo, hi))`. The NaN->0
-/// blend is done in the FLOAT domain (so the mask type matches) before the int
-/// truncation, avoiding any float-mask -> int-mask conversion. Clamp keeps the
-/// value in range so static_simd_cast (truncate-toward-zero) matches the scalar
-/// cast; the caller masks &0xFFFF when packing. i16: K=32767, clamp
+/// Scalar: `isnan(f) ? 0 : static_cast<intN>(round_to_nearest_even(clamp(f * K, lo, hi)))`. The
+/// NaN->0 blend is done in the FLOAT domain (so the mask type matches) before the int conversion,
+/// avoiding any float-mask -> int-mask conversion. The caller masks &0xFFFF when packing. i16:
+/// K=32767, clamp
 /// [-32768,32767]; u16: K=65535, clamp [0,65535].
 inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
   native<float> p = f * native<float>(32767.0f);
   stdx::where(p < native<float>(-32768.0f), p) = native<float>(-32768.0f);
   stdx::where(p > native<float>(32767.0f), p) = native<float>(32767.0f);
   stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<int32_t>>(p);
+  return stdx::static_simd_cast<native<int32_t>>(round_to_nearest_even_simd(p));
 }
 inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
   native<float> p = f * native<float>(65535.0f);
   stdx::where(p < native<float>(0.0f), p) = native<float>(0.0f);
   stdx::where(p > native<float>(65535.0f), p) = native<float>(65535.0f);
   stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<uint32_t>>(p);
+  return stdx::static_simd_cast<native<uint32_t>>(round_to_nearest_even_simd(p));
 }
 
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
@@ -1086,7 +1189,7 @@ inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> 
 }
 
 /// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
-/// reference (src0) value is zero contributes nothing. Bit-identical to scalar.
+/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
 inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
   using U = native<uint32_t>;
   U r(0u);
@@ -1095,38 +1198,31 @@ inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t>
     U bi = (b >> (i * 8)) & U(0xFFu);
     U d = ai - bi;
     stdx::where(bi > ai, d) = bi - ai;
-    stdx::where(ai == 0u, d) = 0u; // skip masked-out (zero reference) bytes
+    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
     r += d;
   }
   return r;
 }
 
-/// Per-byte unsigned lerp (v_lerp_u8): out_byte = a + ((b - a) * c + 128) / 256,
-/// computed independently per byte and repacked. The division is signed and
-/// truncates toward zero (matching the scalar `int / 256`), so a negative
-/// numerator gets the +1 floor->trunc correction. Bit-identical to the scalar.
+/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
+/// computed independently per byte and repacked. Bit-identical to the scalar.
 inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
   using U = native<uint32_t>;
-  using I = native<int32_t>;
   U r(0u);
   for (int i = 0; i < 4; ++i) {
     const int sh = i * 8;
-    I ab = stdx::static_simd_cast<I>((a >> sh) & U(0xFFu));
-    I bb = stdx::static_simd_cast<I>((b >> sh) & U(0xFFu));
-    I cb = stdx::static_simd_cast<I>((c >> sh) & U(0xFFu));
-    I num = (bb - ab) * cb + I(128);
-    I q = num >> 8; // arithmetic shift == floor division by 256
-    stdx::where((num < 0) && ((num & I(255)) != 0), q) = q + I(1); // floor -> toward zero
-    I res = ab + q;
-    r = r | (stdx::static_simd_cast<U>(res) << sh);
+    U ab = (a >> sh) & U(0xFFu);
+    U bb = (b >> sh) & U(0xFFu);
+    U round_up = (c >> sh) & U(1u);
+    r = r | (((ab + bb + round_up) >> 1) << sh);
   }
   return r;
 }
 
 /// Byte permute (v_perm_b32): build each output byte from a selector byte of
 /// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
-/// Selector 0..7 picks a source byte; 0xD yields 0xFF; every other value yields
-/// 0. Bit-identical to the scalar byte loop.
+/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
+/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
 inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
   using U = native<uint32_t>;
   U srcbyte[8];
@@ -1137,10 +1233,13 @@ inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, na
   U r(0u);
   for (int i = 0; i < 4; ++i) {
     U sel = (c >> (i * 8)) & U(0xFFu);
-    U byte(0u); // 0xC and all other selectors >= 8 -> 0
+    U byte(0u);
     for (int k = 0; k < 8; ++k)
       stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
-    stdx::where(sel == U(0xDu), byte) = U(0xFFu); // 0xD -> 0xFF
+    for (int k = 0; k < 4; ++k)
+      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
+          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
+    stdx::where(sel >= U(13u), byte) = U(0xFFu);
     r = r | (byte << (i * 8));
   }
   return r;

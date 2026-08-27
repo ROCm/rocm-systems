@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -44,6 +45,7 @@
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
@@ -117,6 +119,8 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCSHMEM_API_EXT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API_EXT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -369,6 +373,12 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
+        {
+            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
+            break;
+        }
     };
 
     if(!val)
@@ -541,6 +551,12 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
+        {
+            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
+            break;
+        }
     }
 
     for(const auto& itr : ops)
@@ -576,6 +592,7 @@ rocprofiler_iterate_buffer_tracing_record_args(
         case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
         case ROCPROFILER_BUFFER_TRACING_RCCL_API:
         case ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API:
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
@@ -608,6 +625,14 @@ rocprofiler_iterate_buffer_tracing_record_args(
             auto* _payload =
                 static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(record.payload);
             rocprofiler::rocshmem::iterate_args<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
+                _payload->operation, _payload->args, callback, user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
+        {
+            auto* _payload =
+                static_cast<rocprofiler_buffer_tracing_hipfile_api_ext_record_t*>(record.payload);
+            rocprofiler::hipfile::iterate_args<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(
                 _payload->operation, _payload->args, callback, user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }

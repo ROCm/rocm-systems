@@ -2172,9 +2172,10 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
  public:
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
-                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size)
+                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
+                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size) {}
+                          size, copyMetadata) {}
 
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
@@ -2182,7 +2183,7 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
                        const BufferRect& srcRect, const BufferRect& dstRect,
                        amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size, srcRect, dstRect) {}
+                          size, srcRect, dstRect, copyMetadata) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitCopyMemoryP2P(*this); }
 

@@ -55,6 +55,8 @@ static ncclResult_t IbCastGinIbGdrGpuSupport(bool gdaki) {
 }
 
 NCCL_PARAM(CastGinType, "GIN_TYPE", -1);
+NCCL_PARAM(CastGinIbTc, "GIN_IB_TC", -1);
+extern int64_t ncclParamIbCastTc();
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 static std::mutex IbCastGinGdakiLockMutex;
@@ -88,7 +90,7 @@ extern ncclGin_t IbCastGinIbGdaki;
 // backend, so there is no bespoke IB-CAST GIN proxy vtable anymore.
 ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
-  if (IbCastNDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
+  if (IbCastNDevs <= 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   if (type == NCCL_GIN_TYPE_GDAKI) {
@@ -208,7 +210,8 @@ ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank
   next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(netIbCast.connect(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL));
+      NCCLCHECK(IbCastConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL,
+                                  ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()));
     }
     if (cComm->recvComm == NULL) NCCLCHECK(netIbCast.accept(lComm, &cComm->recvComm, NULL));
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
@@ -294,6 +297,9 @@ ncclResult_t IbCastGinIbGdakiConnect(void* ctx, void* handles[], int nranks, int
 ncclResult_t IbCastGinIbGdakiCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** ginCtx,
                                            ncclNetDeviceHandle_t** devHandle) {
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
+
+  if (ncclParamCastGinIbTc() != -1) config->trafficClass = ncclParamCastGinIbTc();
+  else if (ncclParamIbCastTc() != -1) config->trafficClass = ncclParamIbCastTc();
 
   NCCLCHECK(ncclGinGdakiCreateContext(cComm, config->nSignals, config->nCounters, config->nContexts, config->queueDepth,
                                       config->trafficClass, ginCtx, devHandle));
@@ -399,10 +405,12 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
   NCCLCHECKGOTO(ncclIbMalloc((void**)&handles, NCCL_NET_HANDLE_MAXSIZE * cComm->nranks), ret, end);
   handle = handles + NCCL_NET_HANDLE_MAXSIZE * cComm->rank;
 
+  NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
+
   // Mark communicator as RMA communicator: 1QP, Flush enabled, no CTS offload.
+  // Must be set after listen() which memsets the handle, but before allGather().
   ((struct ncclIbHandle*)handle)->isRMA = true;
 
-  NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
 
   for (int c = 0; c < config->nContexts; c++) {
@@ -416,8 +424,9 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
       do {
         if (gc->fullSendComm[connectPeer] == NULL)
-          NCCLCHECKGOTO(netIbCast.connect(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
-                                          &gc->fullSendComm[connectPeer], NULL),
+          NCCLCHECKGOTO(IbCastConnectImpl(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
+                                          &gc->fullSendComm[connectPeer], NULL,
+                                          ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
                         ret, end);
         if (gc->fullRecvComm[acceptPeer] == NULL)
           NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);

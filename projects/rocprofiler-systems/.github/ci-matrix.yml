@@ -1,18 +1,19 @@
 # Matrix definitions for rocprofiler-systems-continuous-integration
+# Runner labels are resolved from ROCm/therock-ci-config at workflow runtime.
 
 matrix-nightly:
   # MI355
-  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
   # MI325
-  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X' }
+  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X' }
   # Navi 2x
-  - { os-release: '24.04', gpu: 'navi2x', arch: 'gfx103X', runner: 'linux-gfx1030-gpu-rocm' }
+  - { os-release: '24.04', gpu: 'navi2x', arch: 'gfx103X' }
   # Navi 3x
-  - { os-release: '24.04', gpu: 'navi3x', arch: 'gfx110X', runner: 'linux-gfx110X-gpu-rocm' }
+  - { os-release: '24.04', gpu: 'navi3x', arch: 'gfx110X' }
   # Navi 4x
-  - { os-release: '24.04', gpu: 'navi4x', arch: 'gfx120X', runner: 'linux-gfx120X-gpu-rocm' }
+  - { os-release: '24.04', gpu: 'navi4x', arch: 'gfx120X' }
 matrix-ci:
   # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }

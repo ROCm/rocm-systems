@@ -47,6 +47,23 @@
       }
     },
 
+    "socket_poll_bootstrap": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Bootstrap socket busy-loop regression. Validates that NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of pinning a CPU core at 100%. Single node, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "Socket_BootstrapPollNoBusyLoop",
+          "description": "With NCCL_SOCKET_POLL_TIMEOUT_MSEC set, a receiver blocked on a slow peer sleeps in poll() (low CPU); the control case with the param at 0 reproduces the pre-fix busy loop (high CPU).",
+          "test_filter": "SocketPollTimeout.*"
+        }
+      ]
+    },
+
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -289,6 +306,11 @@
           "name": "NetIB_VDev_InvalidProps",
           "description": "Reject makeVDevice with ndevs=0 (ncclInvalidUsage)",
           "test_filter": "NetIbMPITest.MakeVirtualDeviceInvalidProps"
+        },
+        {
+          "name": "NetIB_VDev_NegativeNdevs",
+          "description": "Reject makeVDevice with a negative ndevs (ncclInvalidUsage)",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceNegativeNdevs"
         },
         {
           "name": "NetIB_VDev_MergeMultipleDevices",
@@ -953,9 +975,47 @@
       "env_variables": {
         "NCCL_NET": "ib-cast"
       }
+    },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Independent worker connections concurrently execute one host-memory send/receive each",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Independent worker connections concurrently execute sequential host-memory transfers",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        }
+      ]
+    },
+    "net_ib_multithread_independent_2": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "net_ib_multithread_independent_4": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "net_ib_multithread_independent_16": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=16"
     }
   },
   "test_suites": [
+    {
+      "name": "Bootstrap socket poll - no busy loop",
+      "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
+      "config": "socket_poll_bootstrap",
+      "enabled": true
+    },
     {
       "name": "NET IB - Initialization",
       "description": "InfiniBand plugin initialization and device enumeration",
@@ -1206,6 +1266,24 @@
       "name": "NET IB-CAST - GIN DmaBuf",
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_cast_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (2)",
+      "description": "2 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (16)",
+      "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_16",
       "enabled": true
     }
   ]

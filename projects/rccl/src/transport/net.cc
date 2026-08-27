@@ -1212,6 +1212,12 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*p == NCCL_PROTO_LL*/, proxyState->buffSizes[NCCL_PROTO_LL],
                                buffs[NCCL_PROTO_LL]);
       resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+      // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+      // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+      // and the proxy's LL128 fast-path (ready = useGdr).
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                               proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+      resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
     }
 
     NCCL_NET_MAP_ADD_POINTER(map, 1, resources->useGdr ? 1 : 0, mapMem->size, buffs[NCCL_PROTO_SIMPLE]);
@@ -1222,7 +1228,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // Ring/tree (shared==0) always need dedicated device buffers. Shared p2p connections
+    // normally have no dedicated device memory, but when NCCL_ALLOC_P2P_NET_LL_BUFFERS is on
+    // the LL128 staging buffer lives here (device memory + GDR, like the collective net path),
+    // so the bank must be backed for shared connections too.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
@@ -1293,9 +1303,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1313,12 +1323,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+      } else // FALL-THROUGH to the HSA DMA-BUF export path
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
@@ -1465,14 +1474,26 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclSendMem), sendMem);
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclRecvMem), recvMem);
 
-  if (proxyState->allocP2pNetLLBuffers) {
+  // Only P2P (shared) net connections need the LL/LL128 staging buffers. Guarding on
+  // resources->shared != 0 keeps ring/tree (shared==0) collective connections from
+  // allocating an unused GDR-resident LL128 buffer, which otherwise enlarges their DEVMEM
+  // bank and degrades collective GDR performance (e.g. all_reduce). Mirrors the send side.
+  if (resources->shared != 0 && proxyState->allocP2pNetLLBuffers) {
     NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*devMem*/, proxyState->buffSizes[NCCL_PROTO_LL], buffs[NCCL_PROTO_LL]);
     resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+    // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+    // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+    // and the proxy's LL128 fast-path (ready = useGdr).
+    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                             proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+    resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
   }
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // See sendProxyConnect: shared p2p connections need the dedicated device bank backed when
+    // NCCL_ALLOC_P2P_NET_LL_BUFFERS is on so the LL128 staging buffer is valid.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
           map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
@@ -1534,9 +1555,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1554,12 +1575,11 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+      } else // FALL-THROUGH to the HSA DMA-BUF export path
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
@@ -2398,9 +2418,9 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2409,22 +2429,24 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
     (void)close(dmabuf_fd);
-    needReg = false;
+    dmabuf_fd = -1;
   }
-peermem:
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
+  }
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
@@ -2470,9 +2492,9 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2481,22 +2503,24 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
     (void)close(dmabuf_fd);
-    needReg = false;
+    dmabuf_fd = -1;
   }
-peermem:
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
+  }
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments

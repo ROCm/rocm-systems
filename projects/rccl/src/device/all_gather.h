@@ -11,7 +11,7 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto, bool isNetOffload = false>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -181,7 +181,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
 
     if (tid == nworkers) { // Algo computation thread
       PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
-                                channelOffset + channelCount, count, chunkCount, rank, nranks);
+                                channelOffset + channelCount, count, chunkCount, rank, nranks,
+                                ncclShmem.comm.patSharedQps);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
       (void)parallelFactor;// unused variable - compiler warning
       int step = 0;

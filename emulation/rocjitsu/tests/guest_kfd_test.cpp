@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include "long_path_handoff.h"
+#include "scoped_temp.h"
+
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
@@ -28,6 +31,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -60,10 +64,11 @@ constexpr uint64_t kAllocSize = 4096;
 // tier has a handoff yet, return the highest-priority writable tier so
 // install_inline_dbt_config() writes where the reader looks first.
 // rpc_default_runtime_dir() already treats an unset OR empty $ROCJITSU_RUNTIME_DIR as
-// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so this never returns
-// nullopt on that account — otherwise the test would write nowhere while the runtime
-// hook still reads the default location.
-std::optional<std::filesystem::path> config_handoff_dir() {
+// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so the per-PID and base tiers
+// are always well-formed and a directory is always returned — otherwise the test would
+// write nowhere while the runtime hook still reads the default location. The return
+// type spells that out: callers cannot be asked to handle an absence that cannot occur.
+std::filesystem::path config_handoff_dir() {
   std::vector<std::filesystem::path> tiers;
   if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
     tiers.emplace_back(inv);
@@ -81,11 +86,9 @@ std::optional<std::filesystem::path> config_handoff_dir() {
 }
 
 std::optional<std::string> read_active_config_json() {
-  const auto dir = config_handoff_dir();
-  if (!dir)
-    return std::nullopt;
+  const std::filesystem::path dir = config_handoff_dir();
 
-  std::ifstream active_config(*dir / "config_path");
+  std::ifstream active_config(dir / "config_path");
   std::string configured_path;
   if (!std::getline(active_config, configured_path) || configured_path.empty())
     return std::nullopt;
@@ -97,13 +100,10 @@ std::optional<std::string> read_active_config_json() {
 }
 
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
-                               uint32_t lds_size_kb, std::string_view external_host_config = {}) {
-  const auto dir = config_handoff_dir();
-  if (!dir)
-    return false;
-
+                               uint32_t lds_size_kb, std::string_view external_host_config = {},
+                               bool include_resolved_gpu_id = true) {
   try {
-    const std::filesystem::path runtime(*dir);
+    const std::filesystem::path runtime = config_handoff_dir();
     std::filesystem::create_directories(runtime);
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
@@ -151,10 +151,42 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     if (!active_config)
       return false;
     active_config << config_path.string() << '\n';
+    if (include_resolved_gpu_id)
+      active_config << "50148\n";
     return active_config.good();
   } catch (const std::filesystem::filesystem_error &) {
     return false;
   }
+}
+
+using rocjitsu::test::LongPathHandoff;
+
+/// @brief kSkip when this process's runtime directory is too deep to host the oversized handoff.
+/// @details Consulted before anything is installed, so the environmental limit surfaces as a
+/// skip rather than as a red install for the very same reason.
+LongPathHandoff long_path_handoff_supported() {
+  return rocjitsu::test::long_path_handoff_supported(config_handoff_dir());
+}
+
+// Move the active config to a path just under PATH_MAX so the handoff the KFD interposer
+// parses exceeds 4095 bytes. The path arithmetic and the resolved gpu_id both live in
+// long_path_handoff.h, shared with the HSA-hook side of the same pairing
+// (ConfigLoaderTest.ReadsRuntimeHandoffLargerThan4095Bytes), so the two consumers are handed
+// bytes built the same way and pinned to the same host GPU.
+LongPathHandoff relocate_active_config_to_long_path() {
+  const std::filesystem::path dir = config_handoff_dir();
+  // Checked before the config is read so the skip-half test, which installs nothing, reaches
+  // the environmental verdict instead of failing on the missing config below.
+  if (LongPathHandoff supported = rocjitsu::test::long_path_handoff_supported(dir);
+      supported.status() != LongPathHandoff::Status::kOk)
+    return supported;
+
+  // The caller asserts the config is installed before calling, so an unreadable
+  // one here is a defect in the run rather than a property of the environment.
+  const auto json = read_active_config_json();
+  if (!json)
+    return LongPathHandoff::fail("no active config JSON to relocate");
+  return rocjitsu::test::install_oversized_handoff(dir, *json);
 }
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
@@ -215,38 +247,35 @@ bool read_process_aperture_count(int fd, uint32_t *count) {
   return true;
 }
 
+// Local mode supports fork-then-exec only, so a child must NOT be able to open the
+// emulated KFD before exec -- and must not silently fall through to the host's real
+// one either. Both outcomes are checked here: refusal, with ENODEV.
 int child_process() {
   int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
-  if (fd < 0)
-    return 2;
-
-  const bool visible = guest_gpu_is_visible();
-  close(fd);
-  return visible ? 0 : 3;
+  if (fd >= 0) {
+    close(fd);
+    return 2; // opened a GPU endpoint before exec.
+  }
+  if (errno != ENODEV)
+    return 3; // refused, but not with the documented error.
+  return 0;
 }
 
+// Under fork-then-exec the child neither reuses the inherited descriptor for
+// rocJITsu work nor re-opens its own. What matters is that it cannot, and that
+// trying leaves the parent untouched.
 int child_reset_process(int inherited_fd, uint32_t expected_reopened_count) {
-  uint32_t inherited_count = 0;
-  if (read_process_aperture_count(inherited_fd, &inherited_count))
-    return 7;
-
+  static_cast<void>(inherited_fd);
+  static_cast<void>(expected_reopened_count);
   int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
-  if (fd < 0)
+  if (fd >= 0) {
+    close(fd);
     return 2;
-
-  uint32_t reopened_count = 0;
-  const bool count_ok = read_process_aperture_count(fd, &reopened_count);
-  const bool visible_after_reopen = guest_gpu_is_visible();
-  close(fd);
-
-  if (!count_ok)
-    return 5;
-  if (reopened_count < expected_reopened_count)
-    return 6;
-  return visible_after_reopen ? 0 : 3;
+  }
+  return errno == ENODEV ? 0 : 3;
 }
 
-TEST(GuestKfdMultiprocessTest, ForkedChildrenDoNotRemoveParentOverlay) {
+TEST(GuestKfdMultiprocessTest, ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
 
@@ -273,14 +302,15 @@ TEST(GuestKfdMultiprocessTest, ForkedChildrenDoNotRemoveParentOverlay) {
     int status = 0;
     ASSERT_EQ(waitpid(pid, &status, 0), pid);
     ASSERT_TRUE(WIFEXITED(status)) << "child " << pid << " did not exit normally";
-    EXPECT_EQ(WEXITSTATUS(status), 0) << "child " << pid << " failed";
+    EXPECT_EQ(WEXITSTATUS(status), 0)
+        << "child " << pid << ": 2=opened a GPU endpoint before exec, 3=wrong errno";
   }
 
   EXPECT_TRUE(guest_gpu_is_visible()) << "parent guest topology disappeared after forked children";
   close(parent_fd);
 }
 
-TEST(GuestKfdMultiprocessTest, ForkedChildDropsInheritedGuestDriverBeforeReopen) {
+TEST(GuestKfdMultiprocessTest, ForkedChildCannotUseInheritedGuestDriver) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
 
@@ -302,7 +332,8 @@ TEST(GuestKfdMultiprocessTest, ForkedChildDropsInheritedGuestDriverBeforeReopen)
   int status = 0;
   ASSERT_EQ(waitpid(pid, &status, 0), pid);
   ASSERT_TRUE(WIFEXITED(status)) << "child " << pid << " did not exit normally";
-  EXPECT_EQ(WEXITSTATUS(status), 0) << "child " << pid << " did not reset and reopen cleanly";
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "child " << pid << ": 2=opened a GPU endpoint before exec, 3=wrong errno";
 
   uint32_t parent_count_after = 0;
   EXPECT_TRUE(read_process_aperture_count(parent_fd, &parent_count_after));
@@ -354,6 +385,21 @@ TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
   EXPECT_EQ(sysfs_failures.load(std::memory_order_relaxed), 0);
 }
 
+TEST(GuestKfdLifecycleTest, ReopensAfterLastClose) {
+  if (access(kKfdPath, R_OK | W_OK) != 0)
+    GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+    ASSERT_GE(fd, 0) << "open attempt " << attempt << " failed: " << std::strerror(errno);
+
+    kfd_ioctl_get_version_args version{};
+    EXPECT_EQ(ioctl(fd, AMDKFD_IOC_GET_VERSION, &version), 0);
+    EXPECT_TRUE(guest_gpu_is_visible());
+    EXPECT_EQ(close(fd), 0);
+  }
+}
+
 TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
@@ -391,9 +437,8 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
 }
 
 TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
-  const auto dir = config_handoff_dir();
-  ASSERT_TRUE(dir.has_value());
-  const std::string nonexistent = (*dir / "nonexistent_simulator_config.json").string();
+  const std::string nonexistent =
+      (config_handoff_dir() / "nonexistent_simulator_config.json").string();
   ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
 
   errno = 0;
@@ -428,6 +473,81 @@ TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
   EXPECT_EQ(errno, ENODEV);
   if (fd >= 0)
     close(fd);
+}
+
+TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64, {}, false));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+// The KFD half of a pair. ConfigLoaderTest.ReadsRuntimeHandoffLargerThan4095Bytes drives the
+// same oversized handoff through the other consumer -- the HSA hook's
+// load_dbt_guest_config_from_runtime_config() -- and both pin test::kOversizedHandoffHostGpuId,
+// so the two independent readers cannot resolve different host GPUs from the same bytes.
+TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  // Consulted before anything is installed: a runtime directory too deep to host the
+  // oversized handoff is also too deep to host the ordinary config the install below
+  // writes, so checking only at relocation time would surface that environmental limit
+  // as a red install and the skip would never be reached.
+  if (const LongPathHandoff supported = long_path_handoff_supported();
+      supported.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << supported.reason();
+
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64));
+
+  // A second skip site rather than a redundant one: the relocation can still find the
+  // filesystem itself unable to hold the path, which the gate above cannot predict.
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+  if (handoff.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == LongPathHandoff::Status::kOk) << handoff.reason();
+
+  // The overlay only comes up once GuestKfd::ensure_ready_locked() has found a topology GPU
+  // carrying the host ISA under the gpu_id it read out of this >4095-byte handoff; an
+  // unresolved or wrong id fails closed with ENODEV, as PathOnlyAutomaticDbtHandoffFailsClosed
+  // pins. So a visible guest overlay here says the interposer resolved
+  // test::kOversizedHandoffHostGpuId specifically -- which only holds while the launcher config
+  // this test runs under declares that same GPU, hence the pin.
+  static_assert(rocjitsu::test::kOversizedHandoffHostGpuId == 50148,
+                "must stay the gpu_id in configs/gfx942_cdna3_kmd.json, the topology this test "
+                "is launched against; otherwise bring-up below stops proving which id was read");
+
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  EXPECT_TRUE(guest_gpu_is_visible());
+  close(fd);
+}
+
+// Pins the skip half of the classification above. A $ROCJITSU_INVOCATION_DIR deeper
+// than the path the helper builds is a limit of where the test runs, not a defect in
+// the handoff reader, so the helper must report kSkip with a reason rather than red.
+// Nothing is created on disk: config_handoff_dir() falls back to the highest-priority
+// tier when no tier holds a handoff, so a directory that does not exist is enough.
+TEST(GuestKfdConfigTest, LongPathHandoffSkipsWhenRuntimeDirIsTooDeep) {
+  // 4082 bytes: one past the 4081-byte parent the helper targets, and still short
+  // enough that the kernel would accept it as a path.
+  std::string too_deep;
+  for (int i = 0; i < 20; ++i)
+    too_deep += "/" + std::string(200, 'd');
+  too_deep += "/" + std::string(61, 'd');
+  ASSERT_EQ(too_deep.size(), 4082u);
+
+  const rocjitsu::test::ScopedEnvironmentVariable invocation_dir("ROCJITSU_INVOCATION_DIR",
+                                                                 too_deep);
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+
+  EXPECT_TRUE(handoff.status() == LongPathHandoff::Status::kSkip) << handoff.reason();
+  EXPECT_FALSE(handoff.reason().empty());
 }
 
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not

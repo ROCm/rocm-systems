@@ -636,12 +636,22 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
   case ncclPatternPipelineTo:
     {
       struct ncclRing* ring = &channel->ring;
-      if (NeedProxy(proxyRecv, op->pattern, op->root, ring, comm->nRanks)) {
+      needProxy = NeedProxy(proxyRecv, op->pattern, op->root, ring, comm->nRanks);
+      if (op->coll == ncclFuncAllGatherV && op->pattern == ncclPatternRing) {
+        op->nsteps = op->specifics.bcast.recvSlices;
+        if (op->nsteps == 0) needProxy = false;
+      }
+      if (needProxy) {
         op->prevRank = ring->prev;
         op->nextRank = ring->next;
         NCCLCHECK(SaveProxy(comm, channel, proxyRecv, ring->prev, op, op->connIndex, justInquire));
       }
-      if (NeedProxy(proxySend, op->pattern, op->root, ring, comm->nRanks)) {
+      needProxy = NeedProxy(proxySend, op->pattern, op->root, ring, comm->nRanks);
+      if (op->coll == ncclFuncAllGatherV && op->pattern == ncclPatternRing) {
+        op->nsteps = op->specifics.bcast.sendSlices;
+        if (op->nsteps == 0) needProxy = false;
+      }
+      if (needProxy) {
         op->prevRank = ring->prev;
         op->nextRank = ring->next;
         NCCLCHECK(SaveProxy(comm, channel, proxySend, ring->next, op, op->connIndex, justInquire));
@@ -740,7 +750,9 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       const ssize_t size = op->nbytes / comm->nRanks;
       const int rank = comm->rank, nranks = comm->nRanks;
       int *nstepsSend = NULL, *nstepsRecv = NULL;
-      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks);
+      const int sharedConns = comm->patSharedQps ? 1 : 0;
+      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks,
+                                sharedConns);
       struct ncclPatStep ps = {0};
       NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nranks)), result, exit_pat_down);
       NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nranks)), result, exit_pat_down);
@@ -751,14 +763,15 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
         if (ps.recvDim != -1 && ps.postRecv) nstepsRecv[ps.recvDim]++;
         if (ps.sendDim != -1 && ps.postSend) nstepsSend[ps.sendDim]++;
       } while (ps.last != 2);
+      // When sharing, these match ncclPatternPatUp so AllGather and ReduceScatter use one connection set.
       for (int i = 0; i < log2Up(nranks); i++) {
         if (nstepsSend[i]) {
-          int sendPeer = (rank - (1 << i) + nranks) % nranks;
+          int sendPeer = sharedConns ? (rank + (1 << i)) % nranks : (rank - (1 << i) + nranks) % nranks;
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_down);
         }
         if (nstepsRecv[i]) {
-          int recvPeer = (rank + (1 << i)) % nranks;
+          int recvPeer = sharedConns ? (rank - (1 << i) + nranks) % nranks : (rank + (1 << i)) % nranks;
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_down);
         }
