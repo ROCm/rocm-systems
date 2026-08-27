@@ -432,7 +432,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
 
     std::optional<MoiPrivateEpochLayout> private_layout;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
           candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
@@ -472,6 +472,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       if (!private_layout)
         continue;
       if (candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+        std::optional<uint16_t> owner_shift;
         if (direct_descriptor) {
           auto [cached, inserted] =
               direct_owner_shift_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -479,13 +480,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             cached->second =
                 common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           }
-          private_owner_shift = cached->second;
+          owner_shift = cached->second;
         } else {
-          private_owner_shift =
-              common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
+          owner_shift = common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
         }
-        if (!private_owner_shift)
+        if (!owner_shift || !private_layout->owner_offset)
           continue;
+        owner_derivation = MoiWorkitemOwnerDerivationPlan{
+            .entry_workitem_x_private_offset = private_layout->owner_offset,
+            .wave_size_shift = *owner_shift,
+        };
       }
     }
 
@@ -590,8 +594,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         bytes, candidate, candidate_options, arch, layout, *workgroup_sources, workgroup_shadow,
         requires_wave_partitioned_exact_shadow,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        private_layout ? private_layout->workgroup_key_offset : std::nullopt,
+        owner_derivation, private_layout ? private_layout->workgroup_key_offset : std::nullopt,
         private_layout ? private_layout->dispatch_id_offset : std::nullopt,
         workgroup_shadow_compact_token, resources->count, spill.has_value(),
         spill ? &*spill : nullptr, candidate_errors, &guest_instruction_word_count);
@@ -908,12 +911,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     planned.scalar_spill = scalar_spill;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
-      planned.private_owner_offset = private_layout->owner_offset;
       planned.private_workgroup_key_offset = private_layout->workgroup_key_offset;
       planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
       planned.persistent_private_state_end = private_layout->persistent_state_end;
     }
-    planned.private_owner_shift = private_owner_shift;
+    planned.owner_derivation = owner_derivation;
     planned.workgroup_shadow = workgroup_shadow;
     planned.workgroup_shadow_compact_token = workgroup_shadow_compact_token;
     planned.required_private_bytes = required_private_bytes;
@@ -1086,11 +1088,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       auto words = build_inline_shadow_words(
           bytes, candidate, candidate_options, arch, layout, planned_patch.workgroup_sources,
           planned_patch.workgroup_shadow, requires_wave_partitioned_exact_shadow,
-          planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-          planned_patch.private_owner_shift, planned_patch.private_workgroup_key_offset,
-          planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
-          planned_patch.resources.count, planned_patch.spill.has_value(),
-          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
+          planned_patch.private_epoch_offset, planned_patch.owner_derivation,
+          planned_patch.private_workgroup_key_offset, planned_patch.private_dispatch_id_offset,
+          planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
+          planned_patch.spill.has_value(), planned_patch.spill ? &*planned_patch.spill : nullptr,
+          result.errors);
       if (!words)
         return;
 
@@ -1528,8 +1530,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                 bytes, *planned_patch.candidate, candidate_options, arch, layout,
                 planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
-                planned_patch.private_owner_offset, planned_patch.private_owner_shift,
-                planned_patch.private_workgroup_key_offset,
+                planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
                 planned_patch.private_dispatch_id_offset,
                 planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
                 planned_patch.spill.has_value(),
@@ -2649,9 +2650,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     uint32_t pending_acquire_owner_bank_count, bool spill_overlaps_guest_operands,
     bool spill_backed_operand_recovery, const VgprSpillSequence *spill,
-    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    std::optional<uint32_t> private_epoch_offset,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
+    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
@@ -2772,24 +2774,17 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
   }
-  if (private_owner_offset) {
-    if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !private_owner_shift) {
+  if (owner_derivation) {
+    if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr ||
+        !owner_derivation->entry_workitem_x_private_offset) {
       errors.emplace_back("ConSan MOI sampled probe has an invalid private owner plan");
       return std::nullopt;
     }
-    const auto load = instrumentation::build_private_load_b32(*options.moi_owner_vgpr,
-                                                              *private_owner_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    const auto owner = instrumentation::build_v_lshrrev_b32(
-        *options.moi_owner_vgpr, scalar_positive_inline_u32(*private_owner_shift),
-        *options.moi_owner_vgpr, arch);
-    if (!load || !wait || !owner) {
-      errors.emplace_back("ConSan MOI sampled probe could not load private owner state");
+    const auto owner = build_moi_workitem_owner_derivation(
+        *owner_derivation, *options.moi_owner_vgpr, arch, "sampled probe", errors);
+    if (!owner)
       return std::nullopt;
-    }
-    words.insert(words.end(), load->begin(), load->end());
-    words.push_back(*wait);
-    words.push_back(*owner);
+    words.insert(words.end(), owner->words.begin(), owner->words.end());
   }
   if (options.moi_persistent_sgprs.complete()) {
     if (!consan_detail::validate_scalar_state_temporaries(options, "sampled probe", errors))

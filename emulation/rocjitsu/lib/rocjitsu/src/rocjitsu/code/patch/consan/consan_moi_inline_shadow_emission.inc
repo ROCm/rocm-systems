@@ -2400,7 +2400,7 @@
     const ConSanMoiWorkgroupSources &workgroup_sources,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::optional<uint32_t> private_workgroup_key_offset,
     std::optional<uint32_t> private_dispatch_id_offset, uint16_t workgroup_shadow_compact_token,
     uint16_t scratch_count, bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
@@ -2805,7 +2805,7 @@
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
   if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, high_vgpr, arch,
-                                        private_owner_offset, private_owner_shift, errors)) {
+                                        owner_derivation, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }

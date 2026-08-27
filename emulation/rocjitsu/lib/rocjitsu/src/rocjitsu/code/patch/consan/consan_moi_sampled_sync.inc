@@ -3031,7 +3031,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
     size_t fence_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    const std::optional<MoiRecordOwnerDerivationPlan> &derived_owner,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
   (void)record_index;
   if (!options.scratch_vgpr) {
@@ -3068,8 +3068,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       return std::nullopt;
     }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner = build_moi_record_owner_derivation(*derived_owner, value_vgpr, arch,
-                                                         "fence record patch", errors);
+    const auto owner = build_moi_workitem_owner_derivation(*derived_owner, value_vgpr, arch,
+                                                           "fence record patch", errors);
     if (!owner)
       return std::nullopt;
     derived_owner_vgpr = owner->vgpr;

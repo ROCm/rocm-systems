@@ -55,7 +55,7 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
          !options.moi_persistent_sgprs.owner;
 }
 
-[[nodiscard]] std::optional<MoiRecordOwnerDerivationPlan> resolve_moi_private_record_owner(
+[[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan> resolve_moi_private_workitem_owner(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
     const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   if (!layout.owner_offset) {
@@ -65,28 +65,28 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
   const auto common_shift = common_moi_workitem_owner_shift(image, resources, arch, warnings);
   if (!common_shift)
     return std::nullopt;
-  return MoiRecordOwnerDerivationPlan{.entry_workitem_x_private_offset = *layout.owner_offset,
-                                      .wave_size_shift = *common_shift};
+  return MoiWorkitemOwnerDerivationPlan{.entry_workitem_x_private_offset = *layout.owner_offset,
+                                        .wave_size_shift = *common_shift};
 }
 
 /// Lowered owner value together with the exact target words that materialize
-/// it. Keeping the destination beside the words lets record-field emission
-/// remain agnostic about whether the source was live ABI state or a private
-/// entry capture.
-struct MoiRecordOwnerDerivation {
+/// it. Keeping the destination beside the words lets each engine's field
+/// emission remain agnostic about whether the source was live ABI state or a
+/// private entry capture.
+struct MoiWorkitemOwnerDerivation {
   uint16_t vgpr = 0;
   std::vector<uint32_t> words;
 };
 
-[[nodiscard]] std::optional<MoiRecordOwnerDerivation>
-build_moi_record_owner_derivation(const MoiRecordOwnerDerivationPlan &plan, uint16_t value_vgpr,
-                                  rj_code_arch_t arch, std::string_view consumer,
-                                  std::vector<std::string> &errors) {
-  MoiRecordOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
+[[nodiscard]] std::optional<MoiWorkitemOwnerDerivation>
+build_moi_workitem_owner_derivation(const MoiWorkitemOwnerDerivationPlan &plan, uint16_t value_vgpr,
+                                    rj_code_arch_t arch, std::string_view consumer,
+                                    std::vector<std::string> &errors) {
+  MoiWorkitemOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr ||
-      !append_moi_record_owner_derivation(derivation.words,
-                                          {.plan = plan, .result_vgpr = value_vgpr}, *target)) {
+      !append_moi_workitem_owner_derivation(derivation.words,
+                                            {.plan = plan, .result_vgpr = value_vgpr}, *target)) {
     errors.emplace_back("ConSan MOI " + std::string(consumer) +
                         " could not encode owner derivation");
     return std::nullopt;
@@ -731,7 +731,7 @@ private:
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
@@ -831,51 +831,25 @@ private:
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (private_owner_offset.has_value() != private_owner_shift.has_value()) {
-    errors.emplace_back("ConSan MOI first-light probe has an incomplete private owner plan");
-    return std::nullopt;
-  }
-  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner &&
-      (private_owner_offset || candidate.kernel_descriptor_file_offset)) {
-    std::optional<uint16_t> owner_shift = private_owner_shift;
-    if (!owner_shift && candidate.kernel_descriptor_file_offset) {
-      owner_shift =
-          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    }
-    if (!owner_shift)
+  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
+    if (!owner_derivation) {
+      errors.emplace_back("ConSan MOI first-light probe requires a planned owner derivation");
       return std::nullopt;
+    }
     const uint16_t value_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr + (options.moi_dynamic_access_records ? 4u : 2u));
-    if (private_owner_offset) {
-      const auto owner_load =
-          instrumentation::build_private_load_b32(value_vgpr, *private_owner_offset, arch);
-      const auto owner_wait = instrumentation::build_s_wait_private_load0(arch);
-      const auto owner_init = instrumentation::build_v_lshrrev_b32(
-          value_vgpr, scalar_positive_inline_u32(*owner_shift), value_vgpr, arch);
-      if (!owner_load || !owner_wait || !owner_init) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not load its persistent workitem-id owner");
-        return std::nullopt;
-      }
-      derived_owner_words.insert(derived_owner_words.end(), owner_load->begin(), owner_load->end());
-      derived_owner_words.push_back(*owner_wait);
-      derived_owner_words.push_back(*owner_init);
-    } else {
-      const auto owner_init = instrumentation::build_v_lshrrev_b32(
-          value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
-      if (!owner_init) {
-        errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
-        return std::nullopt;
-      }
-      derived_owner_words.push_back(*owner_init);
-    }
+    const auto owner = build_moi_workitem_owner_derivation(*owner_derivation, value_vgpr, arch,
+                                                           "first-light probe", errors);
+    if (!owner)
+      return std::nullopt;
     const auto owner_mask = instrumentation::build_v_and_b32_literal(
         value_vgpr, consan_moi_exact_shadow::max_owner, value_vgpr, arch);
     if (!owner_mask) {
       errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
       return std::nullopt;
     }
-    derived_owner_vgpr = value_vgpr;
+    derived_owner_vgpr = owner->vgpr;
+    derived_owner_words = owner->words;
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
   const auto persistent_workgroup_sources =
@@ -2370,8 +2344,9 @@ private:
 
 [[nodiscard]] bool append_inline_shadow_owner_field(
     std::vector<uint32_t> &words, const MoiOptions &options, uint16_t low_vgpr, uint16_t tmp_vgpr,
-    uint16_t owner_backup_vgpr, rj_code_arch_t arch, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors) {
+    uint16_t owner_backup_vgpr, rj_code_arch_t arch,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
+    std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
@@ -2393,24 +2368,16 @@ private:
     errors.emplace_back("ConSan MOI inline-shadow probe has an unresolved automatic owner source");
     return false;
   case ConSanMoiOwnerSource::WorkitemId: {
-    if (!private_owner_offset || !private_owner_shift) {
+    if (!owner_derivation || !owner_derivation->entry_workitem_x_private_offset) {
       errors.emplace_back(
           "ConSan MOI private owner has no persistent descriptor-compatible workitem-id state");
       return false;
     }
-    const auto load =
-        instrumentation::build_private_load_b32(tmp_vgpr, *private_owner_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    const auto owner = instrumentation::build_v_lshrrev_b32(
-        tmp_vgpr, scalar_positive_inline_u32(*private_owner_shift), tmp_vgpr, arch);
-    if (!load || !wait || !owner) {
-      errors.emplace_back(
-          "ConSan MOI inline-shadow probe could not load its persistent workitem-id owner");
+    const auto owner = build_moi_workitem_owner_derivation(*owner_derivation, tmp_vgpr, arch,
+                                                           "inline-shadow probe", errors);
+    if (!owner)
       return false;
-    }
-    words.insert(words.end(), load->begin(), load->end());
-    words.push_back(*wait);
-    words.push_back(*owner);
+    words.insert(words.end(), owner->words.begin(), owner->words.end());
     break;
   }
   case ConSanMoiOwnerSource::HwId: {

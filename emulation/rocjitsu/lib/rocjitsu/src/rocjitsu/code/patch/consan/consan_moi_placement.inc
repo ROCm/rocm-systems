@@ -3582,8 +3582,10 @@ struct MoiPlannedAccessPatch {
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
   std::optional<uint32_t> private_epoch_offset;
-  std::optional<uint32_t> private_owner_offset;
-  std::optional<uint16_t> private_owner_shift;
+  /// Complete workitem-owner source selected during planning. When present,
+  /// emission either consumes the live entry ABI value or reloads its private
+  /// capture; it never receives an independently optional offset/shift pair.
+  std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
   uint32_t persistent_private_state_end = 0;
   uint32_t required_private_bytes = 0;
   uint32_t guest_instruction_word_count = 0;
@@ -7177,7 +7179,9 @@ void note_moi_access_patch_info(ConSanPatchInfo &info, const MoiPlannedAccessPat
   info.scratch_vgpr = patch.resources.base;
   info.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
   info.persistent_epoch_private_offset = patch.private_epoch_offset;
-  info.persistent_owner_private_offset = patch.private_owner_offset;
+  info.persistent_owner_private_offset =
+      patch.owner_derivation ? patch.owner_derivation->entry_workitem_x_private_offset
+                             : std::nullopt;
   if (patch.private_epoch_offset)
     info.persistent_private_state_end = patch.persistent_private_state_end;
   info.required_private_segment_size = patch.required_private_bytes;

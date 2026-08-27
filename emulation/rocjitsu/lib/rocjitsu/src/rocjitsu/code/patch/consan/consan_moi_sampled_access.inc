@@ -395,7 +395,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (!workgroup_descriptor)
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_options.automatic_moi_private_epoch) {
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
@@ -410,10 +410,17 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
                                                             arch, result.warnings);
       }
-      if (private_layout && private_layout->owner_offset)
-        private_owner_shift =
+      if (private_layout && private_layout->owner_offset) {
+        const auto owner_shift =
             common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
-      if (!private_layout || (private_layout->owner_offset && !private_owner_shift))
+        if (owner_shift) {
+          owner_derivation = MoiWorkitemOwnerDerivationPlan{
+              .entry_workitem_x_private_offset = private_layout->owner_offset,
+              .wave_size_shift = *owner_shift,
+          };
+        }
+      }
+      if (!private_layout || (private_layout->owner_offset && !owner_derivation))
         continue;
     }
     if (private_layout) {
@@ -553,9 +560,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                             layout.sampled_causal_window_capacity),
         spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        runtime_workgroup_gate_in_body, candidate_errors, &probe_guest_instruction_offset,
-        &guest_instruction_word_count);
+        owner_derivation, runtime_workgroup_gate_in_body, candidate_errors,
+        &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -715,9 +721,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     if (private_layout)
       planned.private_epoch_offset = private_layout->epoch_offset;
-    if (private_layout)
-      planned.private_owner_offset = private_layout->owner_offset;
-    planned.private_owner_shift = private_owner_shift;
+    planned.owner_derivation = owner_derivation;
     if (private_layout)
       planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
     if (private_layout)
@@ -860,7 +864,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (planned_patch.private_epoch_offset || candidate_options.moi_persistent_sgprs.complete()) {
         uint16_t state_vgpr =
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count);
-        if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
+        if (!planned_patch.private_epoch_offset ||
+            (planned_patch.owner_derivation &&
+             planned_patch.owner_derivation->entry_workitem_x_private_offset))
           candidate_options.moi_owner_vgpr = --state_vgpr;
         candidate_options.moi_epoch_vgpr = --state_vgpr;
       }
@@ -876,8 +882,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
           planned_patch.spill_overlaps_guest_operands, planned_patch.spill_backed_operand_recovery,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          planned_patch.private_owner_offset, planned_patch.private_owner_shift,
-          planned_patch.runtime_workgroup_gate_in_body, result.errors);
+          planned_patch.owner_derivation, planned_patch.runtime_workgroup_gate_in_body,
+          result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -1237,7 +1243,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 candidate_options.moi_persistent_sgprs.complete()) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
                                                           planned_patch.resources.count);
-              if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
+              if (!planned_patch.private_epoch_offset ||
+                  (planned_patch.owner_derivation &&
+                   planned_patch.owner_derivation->entry_workitem_x_private_offset))
                 candidate_options.moi_owner_vgpr = --state_vgpr;
               candidate_options.moi_epoch_vgpr = --state_vgpr;
             }
@@ -1254,9 +1262,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill_backed_operand_recovery,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-                planned_patch.private_owner_shift, planned_patch.runtime_workgroup_gate_in_body,
-                result.errors);
+                planned_patch.private_epoch_offset, planned_patch.owner_derivation,
+                planned_patch.runtime_workgroup_gate_in_body, result.errors);
             if (words) {
               const size_t planned_words =
                   static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));

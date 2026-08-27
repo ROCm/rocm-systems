@@ -7,7 +7,7 @@
 /// transaction in one type prevents the event-specific planners from
 /// acquiring subtly different rules for the same Record/Replay resources.
 struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
-  std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
+  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
 };
 
 /// Bind one planned Record/Replay event to the still-mutable options accepted
@@ -83,18 +83,18 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     return std::nullopt;
   }
 
-  std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
+  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   if (!event_options.moi_owner_vgpr && !event_options.moi_persistent_sgprs.owner) {
     if (moi_record_uses_private_owner(event_options)) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)
         owner_resources.original_private_segment_size = *active_private_segment_size;
-      derived_owner = resolve_moi_private_record_owner(bytes, owner_resources, *private_layout,
-                                                       arch, result.warnings);
+      derived_owner = resolve_moi_private_workitem_owner(bytes, owner_resources, *private_layout,
+                                                         arch, result.warnings);
     } else {
       const auto shift = common_moi_workitem_owner_shift(bytes, resources, arch, result.warnings);
       if (shift) {
-        derived_owner = MoiRecordOwnerDerivationPlan{
+        derived_owner = MoiWorkitemOwnerDerivationPlan{
             .entry_workitem_x_private_offset = std::nullopt,
             .wave_size_shift = *shift,
         };

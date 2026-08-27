@@ -566,7 +566,6 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
-    std::optional<uint16_t> private_owner_shift;
     if (candidate_options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
           candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
@@ -587,16 +586,11 @@ void try_apply_first_light_access_record_patch(
                                                         /*include_workgroup_key=*/false,
                                                         /*include_record_replay_workgroup=*/true);
       }
-      if (private_layout && private_layout->owner_offset)
-        private_owner_shift =
-            common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
       if (!private_layout) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe could not build private epoch state");
         continue;
       }
-      if (private_layout->owner_offset && !private_owner_shift)
-        continue;
     }
     if (private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
@@ -610,6 +604,18 @@ void try_apply_first_light_access_record_patch(
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
       continue;
+    }
+    std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
+    if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner) {
+      const auto owner_shift =
+          common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
+      if (!owner_shift)
+        continue;
+      owner_derivation = MoiWorkitemOwnerDerivationPlan{
+          .entry_workitem_x_private_offset =
+              private_layout ? private_layout->owner_offset : std::nullopt,
+          .wave_size_shift = *owner_shift,
+      };
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
         record_replay_persistent_workgroup_sources(candidate_options, arch);
@@ -684,8 +690,8 @@ void try_apply_first_light_access_record_patch(
         bytes, candidate, candidate_options, arch, 0, 0, planned_logical_range_count, layout,
         spill_overlaps_guest_operands, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
+        owner_derivation, candidate_errors, &probe_guest_instruction_offset,
+        &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -974,11 +980,10 @@ void try_apply_first_light_access_record_patch(
     planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
-      planned.private_owner_offset = private_layout->owner_offset;
-      planned.private_owner_shift = private_owner_shift;
       planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
+    planned.owner_derivation = owner_derivation;
     planned.required_private_bytes = required_private_bytes;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
@@ -1250,7 +1255,7 @@ void try_apply_first_light_access_record_patch(
           planned_record_count, planned_patch.logical_range_index, layout,
           planned_patch.spill_overlaps_guest_operands,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
+          planned_patch.owner_derivation, result.errors);
       if (!words)
         return;
 
@@ -1615,8 +1620,7 @@ void try_apply_first_light_access_record_patch(
                 planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
                 layout, planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-                planned_patch.private_owner_shift, result.errors);
+                planned_patch.private_epoch_offset, planned_patch.owner_derivation, result.errors);
           },
           [](const PlannedAccessRecordPatch &planned_patch) {
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;

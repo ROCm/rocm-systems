@@ -165,7 +165,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
     uint64_t cave_text_offset, uint64_t return_text_offset,
-    const std::optional<MoiRecordOwnerDerivationPlan> &derived_owner,
+    const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
@@ -196,8 +196,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       return std::nullopt;
     }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner = build_moi_record_owner_derivation(*derived_owner, value_vgpr, arch,
-                                                         "barrier record patch", errors);
+    const auto owner = build_moi_workitem_owner_derivation(*derived_owner, value_vgpr, arch,
+                                                           "barrier record patch", errors);
     if (!owner)
       return std::nullopt;
     derived_owner_vgpr = owner->vgpr;
@@ -1039,7 +1039,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<uint16_t> scratch_vgpr;
     std::optional<uint32_t> private_epoch_offset;
-    std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
+    std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
     ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
@@ -1128,13 +1128,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
-        std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
+        std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
         if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner) {
           const auto owner_shift =
               common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           if (!owner_shift)
             continue;
-          derived_owner = MoiRecordOwnerDerivationPlan{
+          derived_owner = MoiWorkitemOwnerDerivationPlan{
               .entry_workitem_x_private_offset = access_patch->persistent_owner_private_offset,
               .wave_size_shift = *owner_shift,
           };

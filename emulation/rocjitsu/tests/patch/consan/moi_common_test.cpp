@@ -281,18 +281,18 @@ TEST(ConSanMoi, AtomicCounterIncrementRejectsInvalidRegistersTransactionally) {
   rejects(/*result_vgpr=*/42u, /*address_vgpr=*/40u, &invalid_target);
 }
 
-TEST(ConSanMoi, RecordOwnerDerivationPlanDefinesLiveAndEntryCapturedSources) {
-  using consan_detail::MoiRecordOwnerDerivationPlan;
-  using consan_detail::MoiRecordOwnerDerivationRequest;
-  const MoiRecordOwnerDerivationPlan live{
+TEST(ConSanMoi, WorkitemOwnerDerivationPlanDefinesLiveAndEntryCapturedSources) {
+  using consan_detail::MoiWorkitemOwnerDerivationPlan;
+  using consan_detail::MoiWorkitemOwnerDerivationRequest;
+  const MoiWorkitemOwnerDerivationPlan live{
       .entry_workitem_x_private_offset = std::nullopt,
       .wave_size_shift = 5u,
   };
-  const MoiRecordOwnerDerivationPlan captured{
+  const MoiWorkitemOwnerDerivationPlan captured{
       .entry_workitem_x_private_offset = 64u,
       .wave_size_shift = 6u,
   };
-  const MoiRecordOwnerDerivationPlan invalid_shift{
+  const MoiWorkitemOwnerDerivationPlan invalid_shift{
       .entry_workitem_x_private_offset = std::nullopt,
       .wave_size_shift = 32u,
   };
@@ -300,23 +300,23 @@ TEST(ConSanMoi, RecordOwnerDerivationPlanDefinesLiveAndEntryCapturedSources) {
   EXPECT_TRUE(captured.is_well_formed());
   EXPECT_FALSE(invalid_shift.is_well_formed());
   EXPECT_TRUE(
-      (MoiRecordOwnerDerivationRequest{.plan = live, .result_vgpr = 255u}).is_well_formed());
+      (MoiWorkitemOwnerDerivationRequest{.plan = live, .result_vgpr = 255u}).is_well_formed());
   EXPECT_FALSE(
-      (MoiRecordOwnerDerivationRequest{.plan = live, .result_vgpr = 256u}).is_well_formed());
+      (MoiWorkitemOwnerDerivationRequest{.plan = live, .result_vgpr = 256u}).is_well_formed());
 }
 
-TEST(ConSanMoi, RecordOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
-  using consan_detail::MoiRecordOwnerDerivationPlan;
-  using consan_detail::MoiRecordOwnerDerivationRequest;
+TEST(ConSanMoi, WorkitemOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
+  using consan_detail::MoiWorkitemOwnerDerivationPlan;
+  using consan_detail::MoiWorkitemOwnerDerivationRequest;
   constexpr uint16_t kResultVgpr = 42u;
   constexpr uint32_t kPrivateOffset = 64u;
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     for (const std::optional<uint32_t> private_offset :
          {std::optional<uint32_t>{}, std::optional<uint32_t>{kPrivateOffset}}) {
-      const MoiRecordOwnerDerivationRequest request{
+      const MoiWorkitemOwnerDerivationRequest request{
           .plan =
-              MoiRecordOwnerDerivationPlan{
+              MoiWorkitemOwnerDerivationPlan{
                   .entry_workitem_x_private_offset = private_offset,
                   .wave_size_shift = 6u,
               },
@@ -338,20 +338,21 @@ TEST(ConSanMoi, RecordOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
       expected.push_back(*shift);
 
       std::vector<uint32_t> words;
-      EXPECT_TRUE(consan_detail::append_moi_record_owner_derivation(words, request, target));
+      EXPECT_TRUE(consan_detail::append_moi_workitem_owner_derivation(words, request, target));
       EXPECT_EQ(words, expected);
     }
   }
 }
 
-TEST(ConSanMoi, RecordOwnerDerivationRejectsInvalidRequestsTransactionally) {
+TEST(ConSanMoi, WorkitemOwnerDerivationRejectsInvalidRequestsTransactionally) {
   const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(target, nullptr);
   const std::vector<uint32_t> prefix = {0x12345678u};
-  const auto rejects = [&](const consan_detail::MoiRecordOwnerDerivationRequest &request,
+  const auto rejects = [&](const consan_detail::MoiWorkitemOwnerDerivationRequest &request,
                            const ConSanTargetProfile &request_target) {
     std::vector<uint32_t> words = prefix;
-    EXPECT_FALSE(consan_detail::append_moi_record_owner_derivation(words, request, request_target));
+    EXPECT_FALSE(
+        consan_detail::append_moi_workitem_owner_derivation(words, request, request_target));
     EXPECT_EQ(words, prefix);
   };
   rejects({.plan = {.entry_workitem_x_private_offset = std::nullopt, .wave_size_shift = 32u},
