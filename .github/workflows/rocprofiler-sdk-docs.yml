@@ -74,7 +74,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-sdk
+          sparse-checkout: |
+            projects/rocprofiler-sdk
+            shared/sha256
           submodules: false
           set-safe-directory: true
       - name: Init/Update submodules
@@ -140,6 +142,7 @@ jobs:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
+            shared/sha256
             projects/rocr-runtime
             projects/clr
             projects/hip

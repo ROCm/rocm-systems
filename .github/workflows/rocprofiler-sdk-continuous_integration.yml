@@ -150,6 +150,7 @@ jobs:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
+            shared/sha256
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocprof-trace-decoder
@@ -383,6 +384,7 @@ jobs:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
+            shared/sha256
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocprof-trace-decoder
@@ -530,6 +532,7 @@ jobs:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
+          shared/sha256
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocprof-trace-decoder
