@@ -2667,8 +2667,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       const bool overlaps_existing_patch =
           displaced_size > std::numeric_limits<uint32_t>::max() ||
           occupied_anchors.overlaps(site.text_offset, static_cast<uint32_t>(displaced_size));
-      const bool crosses_control_flow_entry = !moi_borrowed_entry_window_is_single_entry(
-          standalone_resource_state, site.text_offset, displaced_size);
+      const bool crosses_control_flow_entry = !moi_entry_window_is_single_entry(
+          standalone_resource_state.block_index, site.text_offset, displaced_size);
       auto protected_range =
           std::ranges::lower_bound(borrowed_barrier_protected_ranges, site.text_offset, {},
                                    [](const auto &range) { return range.first; });

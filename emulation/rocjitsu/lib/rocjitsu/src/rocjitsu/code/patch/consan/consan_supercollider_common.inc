@@ -706,7 +706,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
                             uint16_t report_scratch_vgpr, std::vector<std::string> &errors,
                             std::string_view context) {
   if (!options.report_buffer_address) {
-    auto trap = build_s_trap_word(0, arch);
+    auto trap = instrumentation::build_s_trap(0, arch);
     if (!trap) {
       errors.emplace_back(std::string(context) + " could not encode s_trap");
       return std::nullopt;
@@ -880,7 +880,8 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
     errors.emplace_back("ConSan LDS check/trap proof mismatch action is too large");
     return std::nullopt;
   }
-  auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
+  auto skip_action =
+      instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kRdna4VccLo = 106;
   const std::optional<uint32_t> save_vcc =
       consan_uses_gfx9_cdna_encoding(arch)

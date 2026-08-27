@@ -298,15 +298,6 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint32_t> build_s_trap_word(uint16_t simm16, rj_code_arch_t arch) {
-  return instrumentation::build_s_trap(simm16, arch);
-}
-
-[[nodiscard]] std::optional<uint32_t> build_s_cbranch_vccz_word(int16_t offset_dwords,
-                                                                rj_code_arch_t arch) {
-  return instrumentation::build_s_cbranch_vccz(offset_dwords, arch);
-}
-
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3)
     return count == 0 ? instrumentation::build_s_wait_lds0(arch) : std::nullopt;

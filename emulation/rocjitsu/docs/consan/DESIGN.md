@@ -764,6 +764,14 @@ so the record ABI selected by an emission site is visible where its field
 address is computed. Diagnostic records retain their narrower address helper
 because they do not use the four event-record field transactions.
 
+Lowering code similarly calls the established owner directly for small
+operations that add no ConSan policy. SuperCollider uses its shared
+scalar-range and active-delay predicates plus the common instrumentation
+builders. MOI prologue and borrowed-entry placement use descriptor and
+single-entry CFG queries directly, and shared workgroup sources compare through
+their value type. A helper remains only when it adds a semantic rule, validates
+an input, or assembles a transaction; a private synonym is not a component.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

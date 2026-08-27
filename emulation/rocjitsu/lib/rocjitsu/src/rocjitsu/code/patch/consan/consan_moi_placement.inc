@@ -862,12 +862,6 @@ struct MoiSgprRange {
   return moi_descriptor_wavefront_size(desc) == 32 ? 5 : 6;
 }
 
-[[nodiscard]] std::optional<uint16_t> moi_kernel_owner_shift(std::span<const uint8_t> image,
-                                                             const ConSanKernelInfo &kernel,
-                                                             std::vector<std::string> &errors) {
-  return moi_descriptor_owner_shift(image, kernel.descriptor_file_offset, errors);
-}
-
 [[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
                                                        rj_code_arch_t arch,
                                                        bool proven_empty_accumulator_bank = false) {
@@ -3754,12 +3748,6 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   BasicBlock *block = block_for_offset(block_index, text_offset);
   return block != nullptr && text_offset >= block->start_offset() &&
          text_offset <= block->end_offset() && byte_count <= block->end_offset() - text_offset;
-}
-
-[[nodiscard]] bool moi_borrowed_entry_window_is_single_entry(MoiResourcePlanningState &state,
-                                                             uint64_t text_offset,
-                                                             uint64_t byte_count) {
-  return moi_entry_window_is_single_entry(state.block_index, text_offset, byte_count);
 }
 
 /// Finds one owner-common VGPR that is dead immediately before @p text_offset

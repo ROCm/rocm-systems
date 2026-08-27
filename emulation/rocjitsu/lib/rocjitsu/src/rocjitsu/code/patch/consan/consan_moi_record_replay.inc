@@ -319,8 +319,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
     }
     const uint64_t displaced_end = candidate->anchor() + displaced_words.size() * sizeof(uint32_t);
-    if (!moi_borrowed_entry_window_is_single_entry(resource_state, candidate->anchor(),
-                                                   displaced_words.size() * sizeof(uint32_t))) {
+    if (!moi_entry_window_is_single_entry(resource_state.block_index, candidate->anchor(),
+                                          displaced_words.size() * sizeof(uint32_t))) {
       return std::nullopt;
     }
     auto protected_range =

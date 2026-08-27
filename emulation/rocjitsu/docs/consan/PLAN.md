@@ -568,6 +568,12 @@ and event-index emitters; twenty record-kind pass-through wrappers are gone.
 The explicit layout argument preserves the only record-kind distinction while
 making every caller auditable against the ABI definition.
 
+The remaining obvious lowering pass-through aliases have also been removed.
+SuperCollider now consumes the shared scalar-range and delay-source predicates
+and the instrumentation builders directly; MOI uses the descriptor, CFG-window,
+and workgroup-source contracts directly. Nine one-line renames no longer hide
+which established component owns those operations.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

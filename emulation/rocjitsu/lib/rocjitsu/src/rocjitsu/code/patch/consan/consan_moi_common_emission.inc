@@ -170,11 +170,6 @@ struct MoiRecordOwnerDerivation {
   return derivation;
 }
 
-[[nodiscard]] bool same_workgroup_sources(const ConSanMoiWorkgroupSources &lhs,
-                                          const ConSanMoiWorkgroupSources &rhs) {
-  return lhs == rhs;
-}
-
 [[nodiscard]] std::optional<uint64_t>
 common_moi_record_owner_descriptor(std::span<const uint8_t> image,
                                    const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
@@ -193,8 +188,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     }
     const bool owner_shift_mismatch = common_shift && *common_shift != *shift;
     const bool workgroup_source_mismatch =
-        common_workgroup_sources &&
-        !same_workgroup_sources(*common_workgroup_sources, *workgroup_sources);
+        common_workgroup_sources && *common_workgroup_sources != *workgroup_sources;
     if (owner_shift_mismatch || workgroup_source_mismatch) {
       warnings.emplace_back("ConSan MOI shared record owner has incompatible descriptor ABI "
                             "inputs: " +

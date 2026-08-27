@@ -2953,7 +2953,7 @@ void try_apply_owner_epoch_prologue_patch(
         prologue_return_target = *prologue_return_relay;
     }
     const std::optional<uint16_t> owner_shift =
-        moi_kernel_owner_shift(active_bytes, kernel, result.errors);
+        moi_descriptor_owner_shift(active_bytes, kernel.descriptor_file_offset, result.errors);
     if (!owner_shift)
       return;
     auto words = build_owner_epoch_prologue_words(

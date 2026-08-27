@@ -6414,6 +6414,33 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DI: delete pass-through lowering synonyms
+
+- **Established owners exposed:** SuperCollider FLAT lowering now calls the
+  shared SuperCollider scalar-range and delay-source predicates and RocJitsu's
+  instruction builders directly. MOI prologue and borrowed-entry placement
+  call the descriptor-owner and CFG single-entry contracts directly, and
+  workgroup-source compatibility uses the value type's equality operation.
+- **Nine aliases deleted:** The removed helpers neither validated input nor
+  encoded policy, transactionality, target choice, or a distinct type
+  boundary. Their names only hid the component that implemented the operation.
+  Semantic helpers such as wait encoding, scratch selection, and owner-common
+  descriptor validation remain because they add real rules.
+- **Contract coverage:** 254 focused host tests spanning SuperCollider FLAT,
+  traps, scalar preservation, descriptor-derived identities, borrowed entries,
+  barriers, shared owners, and workgroup identity pass before the broader gate.
+  No public behavior or named type changed, so existing component and paired
+  device contracts provide stronger coverage than tests for the deleted
+  renames.
+- **Accounting:** Across the eight affected implementation files, physical
+  lines fall from 22,273 to 22,225, nonblank lines from 21,452 to 21,413, and
+  estimated comment-excluded code lines from 20,222 to 20,183. The slice adds
+  26 and deletes 74 physical implementation lines, a net deletion of 48.
+- **Checked-in gate:** Pending the complete build, all 1,531 ConSan host tests,
+  all 172 HSA-hook tests, all 2,878 generated simulator-device tests across the
+  five supported targets, and the 26-case physical-gfx950 cross-engine smoke
+  pass. E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

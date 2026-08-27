@@ -20,27 +20,6 @@ flat_check_trap_comparison_setup_words(const ConSanAccessInventorySite &access) 
   return 0u;
 }
 
-[[nodiscard]] std::optional<uint32_t>
-build_flat_check_trap_vcc_move(uint16_t dst_sgpr, uint16_t src_sgpr, rj_code_arch_t arch) {
-  return instrumentation::build_s_mov_b64(dst_sgpr, src_sgpr, arch);
-}
-
-[[nodiscard]] bool flat_check_trap_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width,
-                                                       uint16_t rhs_base, uint16_t rhs_width) {
-  return sc_sgpr_ranges_overlap(lhs_base, lhs_width, rhs_base, rhs_width);
-}
-
-[[nodiscard]] std::optional<uint16_t>
-flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
-  return sc_delay_source_sgpr(options);
-}
-
-[[nodiscard]] bool flat_check_trap_overlaps_delay_source(uint16_t base, uint16_t width,
-                                                         const ConSanOptions &options) {
-  const auto delay_source = flat_check_trap_delay_source_sgpr(options);
-  return delay_source && flat_check_trap_sgpr_ranges_overlap(base, width, *delay_source, 1u);
-}
-
 [[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_vcc_save_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options,
@@ -51,14 +30,13 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
   const auto find_pair = [&](uint16_t start) -> std::optional<uint16_t> {
     while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, start)) {
       const bool overlaps_dynamic_stack =
-          preserve_dynamic_stack_abi &&
-          flat_check_trap_sgpr_ranges_overlap(*pair, 2u, kDynamicStackTopSgpr, 2u);
+          preserve_dynamic_stack_abi && sc_sgpr_ranges_overlap(*pair, 2u, kDynamicStackTopSgpr, 2u);
       const RegisterRef ref{RegClass::SGPR, *pair, 2u};
       const bool dead_for_every_owner =
           std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
             return !liveness->any_live_before(*inst, ref);
           });
-      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options) && !overlaps_dynamic_stack &&
+      if (!sc_sgpr_range_overlaps_delay_source(*pair, 2u, options) && !overlaps_dynamic_stack &&
           dead_for_every_owner)
         return pair;
       if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -83,9 +61,8 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
   const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
   for (uint16_t pair = 0; static_cast<uint32_t>(pair) + 2u <= limit; pair += 2u) {
     const bool overlaps_dynamic_stack =
-        preserve_dynamic_stack_abi &&
-        flat_check_trap_sgpr_ranges_overlap(pair, 2u, kDynamicStackTopSgpr, 2u);
-    if (!flat_check_trap_overlaps_delay_source(pair, 2u, options) && !overlaps_dynamic_stack)
+        preserve_dynamic_stack_abi && sc_sgpr_ranges_overlap(pair, 2u, kDynamicStackTopSgpr, 2u);
+    if (!sc_sgpr_range_overlaps_delay_source(pair, 2u, options) && !overlaps_dynamic_stack)
       return pair;
   }
   return std::nullopt;
@@ -108,7 +85,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
   const auto search = [&](uint16_t start) -> std::optional<LdsCheckTrapIndirectScalarScratch> {
     uint16_t vcc_start = start;
     while (auto vcc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, vcc_start)) {
-      if (flat_check_trap_overlaps_delay_source(*vcc_pair, 2u, options) ||
+      if (sc_sgpr_range_overlaps_delay_source(*vcc_pair, 2u, options) ||
           !dead_for_every_owner(*vcc_pair, 2u)) {
         if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
           return std::nullopt;
@@ -118,8 +95,8 @@ choose_flat_check_trap_indirect_scalar_scratch(
 
       uint16_t pc_start = start;
       while (auto pc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, pc_start)) {
-        if (flat_check_trap_sgpr_ranges_overlap(*pc_pair, 2u, *vcc_pair, 2u) ||
-            flat_check_trap_overlaps_delay_source(*pc_pair, 2u, options) ||
+        if (sc_sgpr_ranges_overlap(*pc_pair, 2u, *vcc_pair, 2u) ||
+            sc_sgpr_range_overlaps_delay_source(*pc_pair, 2u, options) ||
             !dead_for_every_owner(*pc_pair, 2u)) {
           if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
             break;
@@ -129,9 +106,9 @@ choose_flat_check_trap_indirect_scalar_scratch(
 
         uint16_t scc_start = start;
         while (auto scc_save = owner_liveness.front()->find_free_sgpr(inst, scc_start)) {
-          if (!flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *vcc_pair, 2u) &&
-              !flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
-              !flat_check_trap_overlaps_delay_source(*scc_save, 1u, options) &&
+          if (!sc_sgpr_ranges_overlap(*scc_save, 1u, *vcc_pair, 2u) &&
+              !sc_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
+              !sc_sgpr_range_overlaps_delay_source(*scc_save, 1u, options) &&
               dead_for_every_owner(*scc_save, 1u)) {
             return LdsCheckTrapIndirectScalarScratch{*vcc_pair, *pc_pair, *scc_save};
           }
@@ -1243,9 +1220,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
     const auto save_vcc =
-        build_flat_check_trap_vcc_move(candidate.vcc_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kRdna4VccLo, arch);
     const auto restore_vcc =
-        build_flat_check_trap_vcc_move(kRdna4VccLo, candidate.vcc_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kRdna4VccLo, candidate.vcc_save_sgpr, arch);
     if (!save_vcc || !restore_vcc) {
       result.errors.emplace_back("ConSan flat check/trap proof could not preserve VCC");
       return;
@@ -1374,8 +1351,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
           compare_lhs_vgpr = comparison_scratch_vgpr;
         }
       }
-      const auto skip_action =
-          build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
+      const auto skip_action = instrumentation::build_s_cbranch_vccz(
+          static_cast<int16_t>(mismatch_action->size()), arch);
       if (!skip_action) {
         result.errors.emplace_back("ConSan flat check/trap proof could not encode "
                                    "mismatch-action branch");
@@ -1403,7 +1380,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             "ConSan flat check/trap proof runtime group gate is out of range");
         return;
       }
-      const auto skip_probe = build_s_cbranch_vccz_word(static_cast<int16_t>(distance), arch);
+      const auto skip_probe =
+          instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(distance), arch);
       if (!skip_probe) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof could not encode runtime group branch");
@@ -1916,7 +1894,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
 
-  auto trap = build_s_trap_word(0, arch);
+  auto trap = instrumentation::build_s_trap(0, arch);
   if (!trap) {
     result.errors.emplace_back("ConSan flat trap proof could not encode s_trap");
     return;
