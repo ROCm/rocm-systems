@@ -55,7 +55,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
 add_executable(rocattach-register-library-alias-test)
-target_sources(rocattach-register-library-alias-test PRIVATE register_library_alias.cpp)
+target_sources(rocattach-register-library-alias-test
+               PRIVATE register_library_alias_test.cpp)
 target_link_libraries(
     rocattach-register-library-alias-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
