@@ -261,10 +261,11 @@ tool_runner::build_description() const
         R"(
 @SUMMARY@
 QUICK REFERENCE:
-  Presets:  --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
-  Domains:  --gpu, --rocm, --cpu, --parallel (composable with presets)
-  Output:   Results saved to rocprof-sys-output/ directory
-  Default:  rocpd.db (SQLite database); use --preset=workload-trace for both rocpd + Perfetto
+  Presets:   --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
+  Domains:   --gpu, --rocm, --cpu, --parallel (composable with presets)
+  Output:    Results saved to rocprof-sys-output/ directory
+  Default:   rocpd.db (SQLite database)
+  View with: ROCm Optiq, sqlite3
 EXAMPLES:
   Quick Start:
     @CMD@ --preset=balanced -- ./myapp
