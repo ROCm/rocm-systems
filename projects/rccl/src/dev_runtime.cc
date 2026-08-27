@@ -1333,13 +1333,16 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   if (!comm->symmetricSupport) {
     // Host-backed VMM cannot be exported through the non-symmetric IPC
     // fallback. Probe its segment layout first so the common support check can
-    // reject it before windowRegisterNonSym attempts cudaIpcGetMemHandle.
-    // Ordinary non-VMM pointers are still handled by the existing fallback.
-    ncclResult_t probeRet =
-        ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments,
-                                 &hasSysmemSegment);
-    if (probeRet == ncclSuccess) {
-      NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
+    // reject it before windowRegisterNonSym attempts cudaIpcGetMemHandle. Do
+    // not probe ordinary allocations when cuMem is disabled: ROCm 7.0.2.2
+    // faults in hipMemRetainAllocationHandle instead of returning an error.
+    if (ncclCuMemEnable()) {
+      ncclResult_t probeRet =
+          ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments,
+                                   &hasSysmemSegment);
+      if (probeRet == ncclSuccess) {
+        NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
+      }
     }
     NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
     return ncclSuccess;
