@@ -80,6 +80,7 @@ partially written data. This framework automates that process:
 | `double_unsafe.hip` | Global vector | RAW (no bounds check) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `collatz.hip` | Global + control flow | RAW with loops/branches | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `atomic_inc.hip` | Global atomic | Atomic histogram | `s_wait_loadcnt`, `s_wait_kmcnt` |
+| `pointer_chase.hip` | Global vector | RAW (load result addresses the next load) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `war_pattern.hip` | Global vector | WAR (read then overwrite) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `waw_pattern.hip` | Global vector | WAW (two writes, same addr) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `scratch_access.hip` | Scratch (private) | RAW via scratch spills | `s_wait_loadcnt`, `s_wait_kmcnt` |
