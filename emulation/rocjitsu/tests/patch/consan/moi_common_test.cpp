@@ -403,15 +403,9 @@ TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
       0x00000000ffffff00ull,
       0x12345678fffffff0ull,
   };
-  constexpr std::array kArchitectures = {
-      ROCJITSU_CODE_ARCH_CDNA3,
-      ROCJITSU_CODE_ARCH_CDNA4,
-      ROCJITSU_CODE_ARCH_RDNA4,
-      ROCJITSU_CODE_ARCH_CDNA5,
-  };
-
   size_t case_index = 0;
-  for (rj_code_arch_t arch : kArchitectures) {
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    const rj_code_arch_t arch = target.arch;
     for (uint32_t stride_bytes : kStrideBytes) {
       for (uint32_t slot : kSlots) {
         for (uint64_t field_address : kFieldAddresses) {
@@ -419,8 +413,15 @@ TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
                        " stride=" + std::to_string(stride_bytes) + " slot=" + std::to_string(slot) +
                        " base=" + std::to_string(field_address));
           std::vector<uint32_t> words;
-          ASSERT_TRUE(consan_detail::append_dynamic_record_address(
-              words, field_address, stride_bytes, kAddressVgpr, kSlotVgpr, arch));
+          ASSERT_TRUE(
+              consan_detail::append_dynamic_record_address(words,
+                                                           {
+                                                               .field_address = field_address,
+                                                               .stride_bytes = stride_bytes,
+                                                               .address_vgpr = kAddressVgpr,
+                                                               .slot_vgpr = kSlotVgpr,
+                                                           },
+                                                           target));
 
           const std::string component =
               "consan_dynamic_record_address_" + std::to_string(case_index++);
@@ -479,21 +480,32 @@ TEST(ConSanMoi, DynamicRecordAddressRejectsInvalidRegistersWithoutPartialOutput)
   constexpr uint16_t kAddressVgpr = 40u;
   constexpr uint16_t kSlotVgpr = 42u;
   constexpr uint32_t kStrideBytes = sizeof(ConSanMoiAccessRecord);
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
   const auto rejects_without_appending = [&](uint32_t stride_bytes, uint16_t address_vgpr,
-                                             uint16_t slot_vgpr, rj_code_arch_t arch) {
+                                             uint16_t slot_vgpr,
+                                             const ConSanTargetProfile &request_target) {
     std::vector<uint32_t> words = {0x12345678u};
-    EXPECT_FALSE(consan_detail::append_dynamic_record_address(words, kFieldAddress, stride_bytes,
-                                                              address_vgpr, slot_vgpr, arch));
+    EXPECT_FALSE(consan_detail::append_dynamic_record_address(words,
+                                                              {
+                                                                  .field_address = kFieldAddress,
+                                                                  .stride_bytes = stride_bytes,
+                                                                  .address_vgpr = address_vgpr,
+                                                                  .slot_vgpr = slot_vgpr,
+                                                              },
+                                                              request_target));
     EXPECT_EQ(words, std::vector<uint32_t>{0x12345678u});
   };
 
-  rejects_without_appending(0u, kAddressVgpr, kSlotVgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  rejects_without_appending(kStrideBytes, kAddressVgpr, kAddressVgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(0u, kAddressVgpr, kSlotVgpr, *target);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, kAddressVgpr, *target);
   rejects_without_appending(kStrideBytes, kAddressVgpr, static_cast<uint16_t>(kAddressVgpr + 1u),
-                            ROCJITSU_CODE_ARCH_RDNA4);
-  rejects_without_appending(kStrideBytes, 255u, kSlotVgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  rejects_without_appending(kStrideBytes, kAddressVgpr, 256u, ROCJITSU_CODE_ARCH_RDNA4);
-  rejects_without_appending(kStrideBytes, kAddressVgpr, kSlotVgpr, ROCJITSU_CODE_ARCH_INVALID);
+                            *target);
+  rejects_without_appending(kStrideBytes, 255u, kSlotVgpr, *target);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, 256u, *target);
+  ConSanTargetProfile invalid_target = *target;
+  invalid_target.arch = ROCJITSU_CODE_ARCH_INVALID;
+  rejects_without_appending(kStrideBytes, kAddressVgpr, kSlotVgpr, invalid_target);
 }
 
 TEST(ConSanMoi, SpilledVgprReloadSelectsFixedAndDynamicTargetEncodings) {

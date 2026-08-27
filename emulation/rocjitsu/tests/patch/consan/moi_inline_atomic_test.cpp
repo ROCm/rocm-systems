@@ -60,9 +60,17 @@ expected_dynamic_fence_vgpr_store(uint64_t field_address, uint16_t value_vgpr, u
                                   uint16_t scratch_vgpr, rj_code_arch_t arch) {
   std::vector<uint32_t> words;
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
-  if (!store || !consan_detail::append_dynamic_record_address(words, field_address,
-                                                              sizeof(ConSanMoiFenceRecord),
-                                                              scratch_vgpr, slot_vgpr, arch))
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!store || target == nullptr ||
+      !consan_detail::append_dynamic_record_address(
+          words,
+          {
+              .field_address = field_address,
+              .stride_bytes = sizeof(ConSanMoiFenceRecord),
+              .address_vgpr = scratch_vgpr,
+              .slot_vgpr = slot_vgpr,
+          },
+          *target))
     return {};
   words.insert(words.end(), store->begin(), store->end());
   return words;
@@ -74,8 +82,16 @@ expected_dynamic_fence_literal_store(uint64_t field_address, uint32_t value, uin
   std::vector<uint32_t> words;
   constexpr uint16_t kValueOffset = 5u;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + kValueOffset);
-  if (!consan_detail::append_dynamic_record_address(
-          words, field_address, sizeof(ConSanMoiFenceRecord), scratch_vgpr, slot_vgpr, arch))
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr || !consan_detail::append_dynamic_record_address(
+                               words,
+                               {
+                                   .field_address = field_address,
+                                   .stride_bytes = sizeof(ConSanMoiFenceRecord),
+                                   .address_vgpr = scratch_vgpr,
+                                   .slot_vgpr = slot_vgpr,
+                               },
+                               *target))
     return {};
   const auto materialize = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch);
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
@@ -201,8 +217,7 @@ inline_ordinary_acquire_load(const InlineReleaseSequenceTarget &target) {
     };
   }
   return {
-      0xEE050004u,
-      4u | (2u << 18u),
+      0xEE050004u, 4u | (2u << 18u),
       2u, // global_load_b32 v4, v2, s[4:5], scope:device
   };
 }
@@ -3457,8 +3472,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
   for (const InlineReleaseSequenceTarget &target : targets) {
     SCOPED_TRACE(target.label);
     const std::array<uint32_t, 3> load = {
-        0xEE050004u,
-        2u | (2u << 18u),
+        0xEE050004u, 2u | (2u << 18u),
         2u, // global_load_b32 v2, v2, s[4:5], scope:device
     };
     std::vector<uint32_t> guest_words;

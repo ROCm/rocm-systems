@@ -675,18 +675,33 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
                                                  const ConSanMoiWorkgroupSource &source,
                                                  uint16_t value_vgpr, rj_code_arch_t arch);
 
-/// Append a dynamic-record address materialization for
-/// `field_address + slot * stride_bytes`.
+/// Semantic request to materialize one dynamically indexed report field.
 ///
-/// The address occupies `address_vgpr:address_vgpr+1`. The slot and offset
-/// must be distinct from that pair. The report-layout validator guarantees
-/// that `slot * stride_bytes` fits in 32 bits. The emitted plan uses only the
-/// address pair as temporary storage, preserves the slot, and clobbers VCC;
-/// production callers save and restore VCC around dynamic publication.
+/// `field_address` is the absolute address of field zero, `stride_bytes` is
+/// the report-layout distance between adjacent records, and `slot_vgpr` holds
+/// the runtime record index. `address_vgpr` names the consecutive output pair.
+/// Keeping these roles in one request prevents record kinds from reordering a
+/// positional address/slot pair or supplying an architecture as semantic
+/// input. The report-layout validator guarantees that `slot * stride_bytes`
+/// fits in 32 bits.
+struct MoiDynamicRecordAddressRequest {
+  uint64_t field_address = 0;
+  uint32_t stride_bytes = 0;
+  uint16_t address_vgpr = 0;
+  uint16_t slot_vgpr = 0;
+
+  bool operator==(const MoiDynamicRecordAddressRequest &) const = default;
+};
+
+/// Append the target sequence for `field_address + slot * stride_bytes`.
+///
+/// The address occupies `address_vgpr:address_vgpr+1`; the slot must be
+/// distinct from that pair. The operation uses only the address pair as
+/// temporary storage, preserves the slot, and clobbers VCC. Invalid requests
+/// or target encodings fail transactionally without partial output.
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
-                                                 uint64_t field_address, uint32_t stride_bytes,
-                                                 uint16_t address_vgpr, uint16_t slot_vgpr,
-                                                 rj_code_arch_t arch);
+                                                 const MoiDynamicRecordAddressRequest &request,
+                                                 const ConSanTargetProfile &target);
 
 /// Return the nearest emitted trampoline body strictly after `offset` across
 /// both already committed and current-pass patch inventories. Empty bodies do

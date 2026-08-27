@@ -869,8 +869,16 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
                                                  const DynamicRecordLayout &layout,
                                                  uint64_t field_address, uint16_t slot_vgpr,
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return consan_detail::append_dynamic_record_address(words, field_address, layout.stride_bytes,
-                                                      scratch_vgpr, slot_vgpr, arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target != nullptr &&
+         consan_detail::append_dynamic_record_address(words,
+                                                      {
+                                                          .field_address = field_address,
+                                                          .stride_bytes = layout.stride_bytes,
+                                                          .address_vgpr = scratch_vgpr,
+                                                          .slot_vgpr = slot_vgpr,
+                                                      },
+                                                      *target);
 }
 
 [[nodiscard]] bool append_dynamic_record_store_u32_vgpr(std::vector<uint32_t> &words,
@@ -974,8 +982,8 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
                                                             uint64_t address, uint16_t slot,
                                                             uint16_t address_vgpr,
                                                             rj_code_arch_t arch) {
-  return consan_detail::append_dynamic_record_address(
-      words, address, kDiagnosticRecordLayout.stride_bytes, address_vgpr, slot, arch);
+  return append_dynamic_record_address(words, kDiagnosticRecordLayout, address, slot, address_vgpr,
+                                       arch);
 }
 
 [[nodiscard]] bool overlaps_scratch_range(uint16_t value, uint16_t scratch_vgpr, uint16_t count) {

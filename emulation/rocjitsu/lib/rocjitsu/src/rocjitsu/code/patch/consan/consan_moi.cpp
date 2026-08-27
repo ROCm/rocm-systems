@@ -262,11 +262,11 @@ bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words
 }
 
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
-                                                  uint64_t field_address, uint32_t stride_bytes,
-                                                  uint16_t address_vgpr, uint16_t slot_vgpr,
-                                                  rj_code_arch_t arch) {
-  if (stride_bytes == 0u || address_vgpr > 254u || slot_vgpr > 255u || slot_vgpr == address_vgpr ||
-      slot_vgpr == static_cast<uint16_t>(address_vgpr + 1u)) {
+                                                  const MoiDynamicRecordAddressRequest &request,
+                                                  const ConSanTargetProfile &target) {
+  if (request.stride_bytes == 0u || request.address_vgpr > 254u || request.slot_vgpr > 255u ||
+      request.slot_vgpr == request.address_vgpr ||
+      request.slot_vgpr == static_cast<uint16_t>(request.address_vgpr + 1u)) {
     return false;
   }
 
@@ -275,21 +275,23 @@ bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
     words.resize(original_size);
     return false;
   };
-  const uint32_t highest_bit = std::bit_width(stride_bytes) - 1u;
+  const uint32_t highest_bit = std::bit_width(request.stride_bytes) - 1u;
   const auto scale_highest = instrumentation::build_v_lshlrev_b32(
-      address_vgpr, scalar_positive_inline_u32(highest_bit), slot_vgpr, arch);
+      request.address_vgpr, scalar_positive_inline_u32(highest_bit), request.slot_vgpr,
+      target.arch);
   if (!scale_highest)
     return reject();
   words.push_back(*scale_highest);
 
-  uint32_t remaining_bits = stride_bytes & ~(uint32_t{1} << highest_bit);
+  uint32_t remaining_bits = request.stride_bytes & ~(uint32_t{1} << highest_bit);
   while (remaining_bits != 0u) {
     const uint32_t bit = std::bit_width(remaining_bits) - 1u;
     const auto scale_term = instrumentation::build_v_lshlrev_b32(
-        static_cast<uint16_t>(address_vgpr + 1u), scalar_positive_inline_u32(bit), slot_vgpr, arch);
-    const auto add_term =
-        instrumentation::build_v_add_u32(address_vgpr, vector_source_vgpr(address_vgpr),
-                                         static_cast<uint16_t>(address_vgpr + 1u), arch);
+        static_cast<uint16_t>(request.address_vgpr + 1u), scalar_positive_inline_u32(bit),
+        request.slot_vgpr, target.arch);
+    const auto add_term = instrumentation::build_v_add_u32(
+        request.address_vgpr, vector_source_vgpr(request.address_vgpr),
+        static_cast<uint16_t>(request.address_vgpr + 1u), target.arch);
     if (!scale_term || !add_term)
       return reject();
     words.push_back(*scale_term);
@@ -297,9 +299,10 @@ bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
     remaining_bits &= ~(uint32_t{1} << bit);
   }
 
-  words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(address_vgpr + 1u),
-                                      scalar_positive_inline_u32(0), arch));
-  const auto add_base = instrumentation::build_v_add_u64_literal(address_vgpr, field_address, arch);
+  words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(request.address_vgpr + 1u),
+                                      scalar_positive_inline_u32(0), target.arch));
+  const auto add_base = instrumentation::build_v_add_u64_literal(
+      request.address_vgpr, request.field_address, target.arch);
   if (!add_base)
     return reject();
   words.insert(words.end(), add_base->begin(), add_base->end());
