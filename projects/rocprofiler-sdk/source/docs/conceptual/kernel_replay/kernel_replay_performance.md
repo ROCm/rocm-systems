@@ -2,9 +2,10 @@
 # Kernel Replay Performance Assessment
 
 This page states what kernel replay actually costs, why the current regression tests cannot detect
-the regressions that would matter in production, and how the cost behaves on MI250X, MI325X and
-MI455X. It is an assessment rather than a guide: several of the numbers below are derived from the
-code and from published hardware specifications, not measured, and each one says which it is.
+the regressions that would matter in production, and how the cost behaves as device capacity and
+host-link bandwidth diverge across accelerator generations. It is an assessment rather than a guide:
+the reasoning below is derived from the code and from the shape of the cost model rather than from
+any particular measurement.
 
 ## The cost model
 
@@ -77,21 +78,16 @@ that choice is load-bearing.
 
 A `pass_count_cb` returning `1` means the dispatch is **not replayed**: it takes the ordinary
 single-dispatch path with no snapshot and no restore (see `experimental/kernel_replay.h`). Timing
-P=1 therefore times a bare dispatch. Measured on MI325X (Debug, 64 MB ballast, 8 dispatches):
+P=1 therefore times a bare dispatch, with no snapshot and no restore in it at all.
 
-| Passes | Median wall time | Observed range (5 runs) | Spread | Replayed |
-|---|---|---|---|---|
-| 1 | 2.9 ms | -- | -- | no |
-| 2 | 836 ms | 745 -- 1240 ms | 1.66x | yes |
-| 3 | 763 ms | 759 -- 908 ms | 1.20x | yes |
-| 5 | 811 ms | 791 -- 862 ms | 1.09x | yes |
+Replay cost is dominated by the **fixed** cost of snapshot and restore rather than by the pass
+count, so a P=1 baseline does not measure pass scaling -- it measures the price of enabling replay
+at all. That ratio is bounded by how long a snapshot takes relative to a bare dispatch, which is
+orders of magnitude and cannot be expressed as a linear-scaling cap.
 
-Replay cost here is dominated by the **fixed** cost of snapshot/restore, not by the pass count. A
-P=5/P=1 ratio is therefore about **280x** -- and on the smaller `perf-small-footprint` configuration
-(16 MB, 6 dispatches) P=3/P=1 is about **58x**. Those ratios report the price of enabling replay at
-all, and no linear-scaling cap can express them. Against a P=2 baseline the same runs give roughly
-**1.0x**, comfortably inside the cap, and the number moves only when per-pass cost changes -- which
-is the regression the test exists to catch.
+The baseline is therefore P=2: the smallest pass count that is actually replayed. Both sides of the
+comparison then pay the same fixed snapshot cost, the ratio sits near unity, and it moves only when
+**per-pass** cost changes -- which is the regression the test exists to catch.
 
 ### The pass count barely moves wall time
 
@@ -193,23 +189,21 @@ records it, so the point at which replay becomes impossible on a given host is u
 ## Behavior across architectures
 
 Device capacity and the host link matter more than compute here, because the cost is a memory copy
-over the host link.
+over the host link. Two consequences follow from that alone, without reference to any particular
+part:
 
-- **MI250X (gfx90a)** -- 64 GB HBM2e per GCD, two GCDs per package, presented as two devices. On a
-  Frontier node there are four packages (eight GCDs, 512 GB of HBM total) against 512 GB of host
-  DDR4. Aggregate device memory equals host memory, so replaying on several GCDs at once is bounded
-  by host capacity before anything else.
-- **MI325X (gfx942)** -- 256 GB HBM3E. This is the only family that runs rocprofiler-sdk CI today.
-  A full-VRAM application needs 256 GB of host RAM for a single snapshot.
-- **MI455X (gfx125X)** -- 432 GB HBM4 at 23.3 TB/s. A full-VRAM snapshot needs 432 GB of host RAM,
-  which exceeds the host memory typically provisioned per GPU in a dense node. At an optimistic
-  50 GB/s that snapshot takes about **8.6 seconds**, once per dispatch.
+- **Host capacity, not device capacity, is the hard limit.** A snapshot of a full-VRAM application
+  needs host memory equal to the device footprint. On high-capacity accelerators that exceeds the
+  host memory typically provisioned per GPU in a dense node, and on multi-device packages replaying
+  on several devices at once is bounded by host capacity before anything else.
+- **Snapshot time scales with footprint over host-link bandwidth.** Since the copy happens once per
+  replayed dispatch, a large footprint turns into seconds of added latency per dispatch.
 
-The trend matters more than any single number. Device bandwidth is growing far faster than the host
-link: the HBM-to-PCIe ratio is roughly 100:1 on MI250X and MI325X, and roughly 360:1 on MI455X at
-23.3 TB/s against a Gen5 x16 link. Kernel replay's cost is paid on the slow side of that ratio while
-the value it delivers scales with the fast side, so **the technique gets relatively more expensive on
-each generation** unless the amount copied is decoupled from the footprint.
+The trend matters more than any single number. Device memory bandwidth and capacity are growing far
+faster than the host link, so the ratio between them widens with each generation. Kernel replay's
+cost is paid on the slow side of that ratio while the value it delivers scales with the fast side,
+which means **the technique gets relatively more expensive on each generation** unless the amount
+copied is decoupled from the footprint.
 
 The practical reading: kernel replay is well suited to small- and medium-footprint work, and
 application replay remains the better answer for large-footprint runs until dirty tracking exists.
@@ -240,7 +234,7 @@ would otherwise produce numbers that look fine while measuring almost nothing.
   and 16 dispatches, including the shapes that break the single-stream assumption.
 - Reporting of measured values -- achieved snapshot bandwidth, bytes copied, host RAM high-water --
   rather than only pass/fail against a loose ceiling, so drift is visible.
-- A path to run the same workloads on MI325X, MI455X and MI250X and compare, since the conclusion
+- A path to run the same workloads across accelerator generations and compare, since the conclusion
   above is architecture-dependent.
 
 ## See also
