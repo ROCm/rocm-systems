@@ -35,7 +35,7 @@ TARGETS = ("cpu", "real_gpu", "sim_gfx1250")
 TIMEOUT_SECONDS = {
     "cpu": 600.0,
     "real_gpu": 600.0,
-    "sim_gfx1250": 900.0,
+    "sim_gfx1250": 86400.0,
 }
 
 

@@ -1,8 +1,8 @@
 # Causal-LM Smoke Test
 
 This directory is a small harness for checking whether rocjitsu can run Hugging
-Face causal-LM models on simulated `gfx1250` and match CPU/real-GPU output for
-fixed one-token generation prompts.
+Face causal-LM models on a simulated AMD GPU target and match CPU/real-GPU
+output for fixed one-token generation prompts.
 
 The fixed workload is five prompts:
 
@@ -17,7 +17,7 @@ Each prompt uses:
 - generation: greedy, `max_new_tokens=1`
 - dtype: float32
 - attention: eager
-- validation: compare real GPU and simulated `gfx1250` against CPU token IDs and logits
+- validation: compare real GPU and the selected simulator target against CPU token IDs and logits
 
 ## Setup
 
@@ -47,6 +47,13 @@ cmake --build "$ROCJITSU_BUILD" \
   -j "$(nproc)"
 ```
 
+The default simulator config is `configs/gfx1250.json`. To run the same harness
+against simulated `gfx950`, override the config before launching:
+
+```bash
+export ROCJITSU_CONFIG="$ROCJITSU_ROOT/configs/gfx950_cdna4_kmd.json"
+```
+
 ## Run
 
 List the model keys in `models.json`, then run one:
@@ -64,9 +71,9 @@ The initial model keys are:
 - `qwen2p5_1p5b`
 - `llama32_1b`
 
-Each run downloads the model if needed, then runs CPU, real GPU, simulated
-`gfx1250`, and comparison. Results are written under `results/<model-key>/`.
-Current checked results are summarized in `RESULTS.md`.
+Each run downloads the model if needed, then runs CPU, real GPU, the selected
+simulator config, and comparison. Results are written under
+`results/<model-key>/`. Current checked results are summarized in `RESULTS.md`.
 
 ## Outputs
 
@@ -76,10 +83,16 @@ Current checked results are summarized in `RESULTS.md`.
 - `<model-key>_summary.json`
 - per-step stdout, stderr, and timing JSON files
 
+The current runner uses the `sim_gfx1250` output name for the simulator target;
+check the configured `ROCJITSU_CONFIG` in the summary to identify the simulated
+ISA target for a given run.
+
 ## Notes
 
 - `HSA_ENABLE_SDMA=1` is set for real GPU and simulator runs.
 - `HSA_HOTSWAP_DISABLE=1` is set for simulator runs so the selected rocjitsu
   launcher controls execution.
+- The simulator timeout is intentionally long because full model validation is
+  slow under instruction-level simulation.
 - Simulator runtime directories default to short paths under `$TMPDIR` or the
   system temporary directory to avoid daemon socket path-length issues.
