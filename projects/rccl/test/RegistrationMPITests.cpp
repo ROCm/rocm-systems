@@ -2227,7 +2227,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      size_t count   = halfSize / sizeof(T);
  
      ncclWindow_t win = nullptr;
-     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     ncclResult_t result = ncclCommWindowRegister(
+         getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
+     if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+         GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
+     }
+     ASSERT_MPI_EQ(ncclSuccess, result);
      auto winCleanup = makeScopeGuard([&]() {
          if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
      });
@@ -2287,10 +2292,13 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     ncclWindow_t win = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase,
-                                         buf.totalSize, &win,
-                                         NCCL_WIN_STRICT_ORDERING));
+    ncclResult_t result = ncclCommWindowRegister(
+        getActiveCommunicator(), buf.vaBase, buf.totalSize, &win,
+        NCCL_WIN_STRICT_ORDERING);
+    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, result);
     auto winCleanup = makeScopeGuard([&]() {
         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
     });
@@ -2357,9 +2365,13 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
         << "The hybrid test requires exactly two local ranks per node";
 
     ncclWindow_t win = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
+    ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
-        NCCL_WIN_STRICT_ORDERING));
+        NCCL_WIN_STRICT_ORDERING);
+    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, result);
     auto winCleanup = makeScopeGuard([&]() {
         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
     });
@@ -2414,6 +2426,9 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridElasticRegistrationDisabled)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
+    if (MPIHelpers::allRanksTrue(result == ncclUnhandledCudaError)) {
+        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
+    }
     EXPECT_EQ(result, ncclInvalidArgument);
     EXPECT_EQ(win, nullptr);
     if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
