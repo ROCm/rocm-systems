@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "gsl_assert.h"
 #include "stack_entry.h"
 #include "stats.h"
 #include "synchronized.hpp"
@@ -14,7 +13,6 @@
 #include <functional>
 #include <list>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace torch_trace_collector::detail
@@ -36,7 +34,7 @@ struct SnapshotKey
 
 // Sequence numbers are dense and thread ids are small, so both fields are mixed
 // to spread keys across buckets and shards.
-inline std::size_t hash_snapshot_key(const SnapshotKey& key) noexcept
+constexpr std::size_t hash_snapshot_key(const SnapshotKey& key) noexcept
 {
     constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
 
@@ -78,79 +76,15 @@ public:
     {
     }
 
-    static std::size_t shard_index(const SnapshotKey& key) noexcept
+    static constexpr std::size_t shard_index(const SnapshotKey& key) noexcept
     {
         return hash_snapshot_key(key) % kNumShards;
     }
 
-    void save(std::int64_t seq_nr, std::uint64_t thread_id, const std::vector<StackEntry>& stack)
-    {
-        const SnapshotKey key = {seq_nr, thread_id};
-        shard_for(key).wlock(
-            [&](Shard& shard)
-            {
-                auto it = shard.snapshots.find(key);
-                if (it != shard.snapshots.end())
-                {
-                    // Nested forward ops can report the same sequence number; the
-                    // most recent save wins.
-                    it->second = stack;
-                    lru_touch(shard, key);
-                    inc(stats_.snapshots_overwritten);
-                    inc(stats_.snapshots_saved);
-                    return;
-                }
-                while (shard.snapshots.size() >= kShardSoftCap)
-                {
-                    evict_oldest(shard);
-                }
-                shard.snapshots.emplace(key, stack);
-                lru_touch(shard, key);
-                inc(stats_.snapshots_saved);
-            });
-    }
-
-    bool consume(std::int64_t seq_nr, std::uint64_t thread_id, std::vector<StackEntry>* out_stack)
-    {
-        const SnapshotKey key = {seq_nr, thread_id};
-        return shard_for(key).wlock(
-            [&](Shard& shard)
-            {
-                auto it = shard.snapshots.find(key);
-                if (it == shard.snapshots.end())
-                    return false;
-                Expects(shard.lru_idx.find(key) != shard.lru_idx.end());
-                *out_stack = std::move(it->second);
-                shard.snapshots.erase(it);
-                lru_remove(shard, key);
-                inc(stats_.snapshots_consumed);
-                return true;
-            });
-    }
-
-    std::size_t pending() const
-    {
-        std::size_t total = 0;
-        for (const auto& guarded_shard : shards_)
-        {
-            total += guarded_shard.rlock([](const Shard& shard) { return shard.snapshots.size(); });
-        }
-        return total;
-    }
-
-    void clear()
-    {
-        for (auto& guarded_shard : shards_)
-        {
-            guarded_shard.wlock(
-                [](Shard& shard)
-                {
-                    shard.snapshots.clear();
-                    shard.lru_order.clear();
-                    shard.lru_idx.clear();
-                });
-        }
-    }
+    void save(std::int64_t seq_nr, std::uint64_t thread_id, const std::vector<StackEntry>& stack);
+    bool consume(std::int64_t seq_nr, std::uint64_t thread_id, std::vector<StackEntry>* out_stack);
+    std::size_t pending() const;
+    void        clear();
 
 private:
     // Every key in snapshots also holds a place in lru_order and an iterator to
@@ -162,37 +96,10 @@ private:
         std::unordered_map<SnapshotKey, std::list<SnapshotKey>::iterator> lru_idx;
     };
 
-    synchronized_t<Shard>& shard_for(const SnapshotKey& key) { return shards_[shard_index(key)]; }
-
-    static void lru_remove(Shard& shard, const SnapshotKey& key)
-    {
-        auto it = shard.lru_idx.find(key);
-        if (it == shard.lru_idx.end())
-            return;
-        shard.lru_order.erase(it->second);
-        shard.lru_idx.erase(it);
-    }
-
-    static void lru_touch(Shard& shard, const SnapshotKey& key)
-    {
-        lru_remove(shard, key);
-        shard.lru_order.push_back(key);
-        auto tail = shard.lru_order.end();
-        --tail;
-        shard.lru_idx.emplace(key, tail);
-    }
-
-    void evict_oldest(Shard& shard)
-    {
-        // save() evicts until the shard is under its cap, so an empty order
-        // would not terminate.
-        Expects(!shard.lru_order.empty());
-        const SnapshotKey oldest = shard.lru_order.front();
-        shard.lru_order.pop_front();
-        shard.lru_idx.erase(oldest);
-        shard.snapshots.erase(oldest);
-        inc(stats_.snapshots_dropped);
-    }
+    synchronized_t<Shard>& shard_for(const SnapshotKey& key);
+    static void            lru_remove(Shard& shard, const SnapshotKey& key);
+    static void            lru_touch(Shard& shard, const SnapshotKey& key);
+    void                   evict_oldest(Shard& shard);
 
     Stats&                                        stats_;
     std::array<synchronized_t<Shard>, kNumShards> shards_;
