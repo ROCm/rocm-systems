@@ -44,16 +44,18 @@ public:
                 static_cast<unsigned long long>(configured_cap));
   }
 
-  [[nodiscard]] bool
-  allocate(CoreApiTable *core, hsa_agent_t agent, uint64_t reader, uint64_t required_size,
-           uint64_t requested_size, uint64_t configured_cap,
-           const rocjitsu::ConSanMoiReportBufferLayout &layout, rocjitsu::ConSanMoiEngine engine,
-           bool track_barriers, bool track_atomics, bool test_seed_inline_exact_odd,
-           uint64_t *address, uint64_t *registered_size, uint64_t *registered_generation) {
+  [[nodiscard]] bool allocate(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
+                              uint64_t required_size, uint64_t requested_size,
+                              uint64_t configured_cap,
+                              const rocjitsu::ConSanMoiReportBufferLayout &layout,
+                              bool track_barriers, bool track_atomics,
+                              bool test_seed_inline_exact_odd, uint64_t *address,
+                              uint64_t *registered_size, uint64_t *registered_generation) {
     record_allocation_attempt(required_size);
-    const bool direct_sampled = engine == rocjitsu::ConSanMoiEngine::Sampled;
-    const bool inline_shadow = engine == rocjitsu::ConSanMoiEngine::InlineShadow;
-    const uint64_t engine_ceiling = rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(engine);
+    const bool direct_sampled = layout.engine == rocjitsu::ConSanMoiEngine::Sampled;
+    const bool inline_shadow = layout.engine == rocjitsu::ConSanMoiEngine::InlineShadow;
+    const uint64_t engine_ceiling =
+        rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(layout.engine);
     if (required_size > configured_cap || requested_size > configured_cap ||
         requested_size > engine_ceiling) {
       record_allocation_failure(required_size, /*capacity_failure=*/true);
@@ -163,7 +165,7 @@ public:
     const uint64_t generation = next_generation_.fetch_add(1, std::memory_order_relaxed) + 1u;
     auto *header = static_cast<rocjitsu::ConSanMoiReportHeader *>(ptr);
     *header = rocjitsu::make_consan_moi_report_header_for_layout(generation, /*dispatch_id=*/reader,
-                                                                 layout, engine);
+                                                                 layout);
     if (test_seed_inline_exact_odd && layout.exact_shadow_entry_capacity != 0) {
       auto *slot = reinterpret_cast<rocjitsu::ConSanMoiInlineExactShadowSlot *>(
           static_cast<uint8_t *>(ptr) + layout.exact_shadow_entries_offset);
@@ -2042,15 +2044,13 @@ void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64
 bool allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
                                      uint64_t required_size, uint64_t requested_size,
                                      uint64_t configured_cap,
-                                     const ConSanMoiReportBufferLayout &layout,
-                                     ConSanMoiEngine engine, bool track_barriers,
+                                     const ConSanMoiReportBufferLayout &layout, bool track_barriers,
                                      bool track_atomics, bool test_seed_inline_exact_odd,
                                      uint64_t *address, uint64_t *registered_size,
                                      uint64_t *registered_generation) {
   return AutoMoiReportBufferRegistry::instance().allocate(
-      core, agent, reader, required_size, requested_size, configured_cap, layout, engine,
-      track_barriers, track_atomics, test_seed_inline_exact_odd, address, registered_size,
-      registered_generation);
+      core, agent, reader, required_size, requested_size, configured_cap, layout, track_barriers,
+      track_atomics, test_seed_inline_exact_odd, address, registered_size, registered_generation);
 }
 
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,

@@ -102,6 +102,7 @@ consan_moi_report_buffer_layout_for_bytes(uint64_t report_buffer_size, bool incl
                                           bool include_atomics = false,
                                           bool include_fences = false) {
   ConSanMoiReportBufferLayout layout;
+  layout.engine = ConSanMoiEngine::RecordReplay;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())
     return layout;
@@ -142,6 +143,7 @@ consan_moi_report_buffer_layout_for_bytes(uint64_t report_buffer_size, bool incl
 [[nodiscard]] constexpr ConSanMoiReportBufferLayout
 consan_moi_direct_sampled_report_buffer_layout_for_bytes(uint64_t report_buffer_size) {
   ConSanMoiReportBufferLayout layout;
+  layout.engine = ConSanMoiEngine::Sampled;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())
     return layout;
@@ -455,6 +457,7 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
     uint64_t report_buffer_size,
     uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity) {
   ConSanMoiReportBufferLayout layout;
+  layout.engine = ConSanMoiEngine::InlineShadow;
   layout.inline_exact_dispatch_bank_count = kConSanMoiInlineMaximumDispatchBankCount;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())

@@ -10,6 +10,13 @@
 
 namespace rocjitsu {
 
+/// Evidence protocol encoded in one MOI report allocation.
+enum class ConSanMoiEngine : uint8_t {
+  RecordReplay,
+  InlineShadow,
+  Sampled,
+};
+
 enum class ConSanMoiShadowAccessKind : uint32_t {
   Empty = 0,
   Read = 1,

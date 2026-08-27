@@ -183,7 +183,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
       plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
   ASSERT_TRUE(plan.complete());
-  const auto layout = consan_moi_auto_report_layout_override(plan);
+  const auto layout = plan.complete_layout();
   ASSERT_TRUE(layout);
   live.moi_report_buffer_address = 0x123456780000ull;
   live.moi_report_buffer_size = plan.required_bytes;
@@ -250,7 +250,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
       plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
   ASSERT_TRUE(plan.complete());
-  const auto layout = consan_moi_auto_report_layout_override(plan);
+  const auto layout = plan.complete_layout();
   ASSERT_TRUE(layout);
 
   ConSanOptions live = inventory_options;

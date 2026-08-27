@@ -42,68 +42,17 @@ struct alignas(8) ConSanMoiCompactDiagnosticTokenMapping {
 };
 static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
 
-/// Concrete byte geometry of one legacy MOI report allocation.
-///
-/// Capacities state how many ABI records each region can hold; offsets name
-/// their aligned locations relative to the beginning of the allocation.
-/// Unused regions alias the end of the allocation and have zero capacity.
-/// This value contains no device address, allocation handle, generation, or
-/// lifetime. It is the current ABI-layout implementation detail of typed
-/// evidence requirements and remains independently revalidated at late bind.
-struct ConSanMoiReportBufferLayout {
-  uint32_t access_record_capacity = 0;
-  uint32_t record_replay_logical_access_range_count = 0;
-  uint32_t record_replay_dispatch_token_capacity = 0;
-  uint32_t record_replay_access_dispatch_bank_count = 1;
-  uint32_t record_replay_access_owner_bank_count = 1;
-  uint32_t record_replay_address_group_headroom = 1;
-  uint32_t barrier_record_capacity = 0;
-  uint32_t atomic_record_capacity = 0;
-  uint32_t fence_record_capacity = 0;
-  uint32_t diagnostic_capacity = 0;
-  uint32_t exact_shadow_entry_capacity = 0;
-  uint32_t inline_exact_dispatch_bank_count = 0;
-  uint32_t inline_atomic_release_capacity = 0;
-  uint32_t inline_acquired_epoch_token_capacity = 0;
-  uint32_t inline_causal_snapshot_capacity = 0;
-  uint32_t inline_compact_token_mapping_capacity = 0;
-  uint32_t sampled_watchpoint_capacity = 0;
-  uint32_t sampled_causal_window_capacity = 0;
-  uint32_t sampled_sync_metadata_capacity = 0;
-  uint32_t sampled_pending_acquire_capacity = 0;
-  size_t record_replay_dispatch_tokens_offset = sizeof(ConSanMoiReportHeader);
-  size_t access_records_offset = sizeof(ConSanMoiReportHeader);
-  size_t barrier_records_offset = sizeof(ConSanMoiReportHeader);
-  size_t atomic_records_offset = sizeof(ConSanMoiReportHeader);
-  size_t fence_records_offset = sizeof(ConSanMoiReportHeader);
-  size_t diagnostic_records_offset = sizeof(ConSanMoiReportHeader);
-  size_t exact_shadow_entries_offset = sizeof(ConSanMoiReportHeader);
-  size_t inline_atomic_release_slots_offset = sizeof(ConSanMoiReportHeader);
-  size_t inline_acquired_epoch_token_slots_offset = sizeof(ConSanMoiReportHeader);
-  size_t inline_causal_snapshots_offset = sizeof(ConSanMoiReportHeader);
-  size_t inline_compact_token_mappings_offset = sizeof(ConSanMoiReportHeader);
-  size_t sampled_watchpoints_offset = sizeof(ConSanMoiReportHeader);
-  size_t sampled_causal_windows_offset = sizeof(ConSanMoiReportHeader);
-  size_t sampled_sync_metadata_offset = sizeof(ConSanMoiReportHeader);
-  size_t sampled_pending_acquires_offset = sizeof(ConSanMoiReportHeader);
-  size_t required_bytes = sizeof(ConSanMoiReportHeader);
-  bool valid = false;
-
-  bool operator==(const ConSanMoiReportBufferLayout &) const = default;
-};
-
 /// Creates a header from the exact heterogeneous layout. The legacy
 /// make_consan_moi_report_header helper intentionally keeps its historical
 /// single Sampled capacity contract for explicit size-derived buffers.
 [[nodiscard]] constexpr ConSanMoiReportHeader
 make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_id,
-                                         const ConSanMoiReportBufferLayout &layout,
-                                         ConSanMoiEngine engine) {
+                                         const ConSanMoiReportBufferLayout &layout) {
   ConSanMoiReportHeader header;
   header.header_size = sizeof(ConSanMoiReportHeader);
   header.generation = generation;
   header.dispatch_id = dispatch_id;
-  header.engine = static_cast<uint32_t>(engine);
+  header.engine = static_cast<uint32_t>(layout.engine);
   header.record_replay_dispatch_token_capacity = layout.record_replay_dispatch_token_capacity;
   header.access_record_capacity = layout.access_record_capacity;
   header.barrier_record_capacity = layout.barrier_record_capacity;
@@ -118,7 +67,7 @@ make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_
   header.sampled_causal_window_capacity = layout.sampled_causal_window_capacity;
   header.sampled_sync_metadata_capacity = layout.sampled_sync_metadata_capacity;
   header.sampled_pending_acquire_capacity = layout.sampled_pending_acquire_capacity;
-  if (engine == ConSanMoiEngine::InlineShadow)
+  if (layout.engine == ConSanMoiEngine::InlineShadow)
     header.layout_flags = kConSanMoiReportKnownLayoutFlags;
   return header;
 }
@@ -326,13 +275,18 @@ enum class ConSanMoiAutoReportPlanReason : uint8_t {
 struct ConSanMoiAutoReportPlan {
   ConSanMoiAutoReportPlanOutcome outcome = ConSanMoiAutoReportPlanOutcome::Overflow;
   ConSanMoiAutoReportPlanReason reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
-  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
   uint64_t required_bytes = 0;
   uint64_t ceiling_bytes = kConSanMoiAutoReportBufferCeilingBytes;
   ConSanMoiReportBufferLayout layout;
 
   [[nodiscard]] constexpr bool complete() const {
     return outcome == ConSanMoiAutoReportPlanOutcome::Complete;
+  }
+  /// Return the canonical layout only when planning completed consistently.
+  [[nodiscard]] std::optional<ConSanMoiReportBufferLayout> complete_layout() const {
+    if (!complete() || !layout.valid || required_bytes != layout.required_bytes)
+      return std::nullopt;
+    return layout;
   }
 
   bool operator==(const ConSanMoiAutoReportPlan &) const = default;
@@ -615,17 +569,12 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
 [[nodiscard]] ConSanSuperColliderEvidenceRequirements
 plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan);
 
-/// Converts a complete planner result into the caller-carried exact layout.
-/// An incomplete plan produces std::nullopt.
-[[nodiscard]] std::optional<ConSanMoiReportLayoutOverride>
-consan_moi_auto_report_layout_override(const ConSanMoiAutoReportPlan &plan);
-
 /// Revalidates a caller-carried layout against the canonical planner and the
 /// registered allocation size. A malformed, noncanonical, wrong-engine, or
-/// undersized override returns an invalid layout.
+/// undersized candidate returns an invalid layout.
 [[nodiscard]] ConSanMoiReportBufferLayout
-consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &override_layout,
-                                       ConSanMoiEngine engine, uint64_t report_buffer_size);
+revalidate_consan_moi_report_layout(const ConSanMoiReportBufferLayout &candidate,
+                                    ConSanMoiEngine engine, uint64_t report_buffer_size);
 
 [[nodiscard]] constexpr std::string_view
 consan_moi_auto_report_plan_outcome_name(ConSanMoiAutoReportPlanOutcome outcome) {

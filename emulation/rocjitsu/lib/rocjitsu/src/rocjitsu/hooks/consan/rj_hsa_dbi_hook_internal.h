@@ -857,13 +857,11 @@ record_replay_pressure_telemetry(const ConSanMoiReportHeader &header, ConSanMoiE
 
 void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                                  std::string_view reason);
-[[nodiscard]] bool
-allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
-                                uint64_t required_size, uint64_t requested_size,
-                                uint64_t configured_cap, const ConSanMoiReportBufferLayout &layout,
-                                ConSanMoiEngine engine, bool track_barriers, bool track_atomics,
-                                bool test_seed_inline_exact_odd, uint64_t *address,
-                                uint64_t *registered_size, uint64_t *registered_generation);
+[[nodiscard]] bool allocate_auto_moi_report_buffer(
+    CoreApiTable *core, hsa_agent_t agent, uint64_t reader, uint64_t required_size,
+    uint64_t requested_size, uint64_t configured_cap, const ConSanMoiReportBufferLayout &layout,
+    bool track_barriers, bool track_atomics, bool test_seed_inline_exact_odd, uint64_t *address,
+    uint64_t *registered_size, uint64_t *registered_generation);
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        std::string_view input_fingerprint,
                                        std::span<const ConSanPatchInfo> patches);

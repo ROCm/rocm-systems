@@ -481,7 +481,7 @@ std::optional<hsa_status_t> g_reentrant_fault_load_status;
 std::vector<uint32_t> g_transform_override_runtime_sample_strides;
 std::vector<uint64_t> g_transform_override_report_sizes;
 std::vector<std::optional<uint64_t>> g_transform_override_sc_report_addresses;
-std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
+std::vector<std::optional<rocjitsu::ConSanMoiReportBufferLayout>>
     g_transform_override_report_layouts;
 bool g_seed_auto_replay_report_on_load = false;
 bool g_seed_auto_replay_report_succeeded = false;
@@ -1094,7 +1094,7 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
         !g_transform_override_report_layouts.back()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
-    const rocjitsu::ConSanMoiReportLayoutOverride &layout =
+    const rocjitsu::ConSanMoiReportBufferLayout &layout =
         *g_transform_override_report_layouts.back();
     if (layout.access_record_capacity < 2u)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1152,7 +1152,7 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
         !g_transform_override_report_layouts.back()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
-    const rocjitsu::ConSanMoiReportLayoutOverride &layout =
+    const rocjitsu::ConSanMoiReportBufferLayout &layout =
         *g_transform_override_report_layouts.back();
     const uint32_t visible_sampled_count =
         g_seed_auto_sampled_pending_release_scale || g_seed_auto_sampled_conflict_pair ? 2u : 1u;
@@ -3399,8 +3399,7 @@ TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRe
   inventory.record_replay_address_group_headroom = 1;
   const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(report.complete());
-  const auto header = rocjitsu::make_consan_moi_report_header_for_layout(
-      1, 2, report.layout, rocjitsu::ConSanMoiEngine::RecordReplay);
+  const auto header = rocjitsu::make_consan_moi_report_header_for_layout(1, 2, report.layout);
 
   const auto plan = rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
       header, report.layout, report.required_bytes, report.layout.access_record_capacity,

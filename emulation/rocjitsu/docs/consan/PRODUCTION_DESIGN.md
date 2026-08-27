@@ -5310,6 +5310,39 @@ analysis completed.
   the complete serialized physical matrix remains reserved for the final gate.
   E2E validation remains outside this work.
 
+### Slice 5BW: give report geometry one canonical representation
+
+- **One address-free layout:** `ConSanMoiReportBufferLayout` now carries its
+  evidence engine and is the sole representation of an MOI allocation's exact
+  capacities, offsets, and byte extent. Planning, late runtime binding, report
+  initialization, and lowering all exchange that same value. The duplicate
+  `ConSanMoiReportLayoutOverride` and its field-by-field copy and comparison
+  routines are deleted.
+- **One engine owner:** `ConSanMoiAutoReportPlan` no longer repeats the engine
+  already owned by its layout. Report-header construction and runtime
+  allocation likewise derive the evidence protocol from the layout rather
+  than accepting a second engine argument that could disagree. Late binding
+  reconstructs and replans candidate geometry, then accepts only exact
+  canonical equality for the requested engine and registered allocation size.
+- **Contract coverage:** Unit tests exercise complete, incomplete, invalid,
+  inconsistent, malformed-offset, wrong-engine, undersized-allocation, and
+  noncanonical-capacity cases. Evidence-requirement tests mutate the canonical
+  layout engine directly, preserving cross-type mismatch coverage after the
+  duplicate plan field is removed.
+- **Deletion accounting:** Implementation files add 186 and delete 335
+  physical lines, a net deletion of 149. Most additions are the 64-line
+  standalone canonical type moved out of an include fragment; most deletions
+  remove the 55-field duplicate representation and manual conversion and
+  equality code. Tests add 116 and delete 103 lines, a net addition of thirteen
+  for the focused consistency contract; the remaining test diff is mechanical
+  terminology and type migration.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in 68.78
+  seconds. Slice 5BM's physical-gfx950 smoke remains the periodic physical
+  gate; the complete serialized physical matrix remains reserved for the final
+  gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

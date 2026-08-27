@@ -3928,7 +3928,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       uint64_t required_report_size = 0;
       uint64_t requested_report_size = 0;
       rocjitsu::ConSanMoiReportBufferLayout report_layout;
-      std::optional<rocjitsu::ConSanMoiReportLayoutOverride> report_layout_override;
+      std::optional<rocjitsu::ConSanMoiReportBufferLayout> planned_report_layout;
       std::optional<rocjitsu::ConSanMoiAutoReportInventory> planned_report_inventory;
       std::optional<rocjitsu::RuntimeCapabilityRequirements> evidence_runtime_requirements;
       rocjitsu::ConSanMoiAutoReportInventory report_inventory;
@@ -3999,7 +3999,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         required_report_size = report_plan.required_bytes;
         requested_report_size = report_plan.required_bytes;
         report_layout = report_plan.layout;
-        report_layout_override = rocjitsu::consan_moi_auto_report_layout_override(report_plan);
+        planned_report_layout = report_plan.complete_layout();
         log_message(
             kLogInfo,
             "ConSan MOI auto report plan reader=%llu outcome=%s reason=%s "
@@ -4060,16 +4060,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
       if (auto_report_plan_available && report_runtime_capabilities_available &&
           !patch_result_storage &&
-          allocate_auto_moi_report_buffer(
-              layer().core_table(), agent, code_object_reader.handle, required_report_size,
-              requested_report_size, config->moi_auto_report_buffer_size, report_layout,
-              config->moi_engine, config->moi_track_barriers, config->moi_track_atomics,
-              config->test_seed_inline_exact_odd, &auto_report_address, &auto_report_size,
-              &auto_report_generation)) {
+          allocate_auto_moi_report_buffer(layer().core_table(), agent, code_object_reader.handle,
+                                          required_report_size, requested_report_size,
+                                          config->moi_auto_report_buffer_size, report_layout,
+                                          config->moi_track_barriers, config->moi_track_atomics,
+                                          config->test_seed_inline_exact_odd, &auto_report_address,
+                                          &auto_report_size, &auto_report_generation)) {
         runtime_resources.scope = rocjitsu::ConSanRuntimeResourceScope::Executable;
         runtime_resources.moi_report_buffer_address = auto_report_address;
         runtime_resources.moi_report_buffer_size = auto_report_size;
-        runtime_resources.moi_report_layout = report_layout_override;
+        runtime_resources.moi_report_layout = planned_report_layout;
         runtime_resources.moi_report_generation = auto_report_generation;
         registered_auto_moi_report_generation = auto_report_generation;
         auto_report_guard.note_moi(code_object_reader.handle, auto_report_generation);

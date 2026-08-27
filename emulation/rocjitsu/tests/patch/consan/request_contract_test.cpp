@@ -589,7 +589,7 @@ TEST(ConSanRuntimeResourceScopeTest, EnumeratesAndNamesEveryDeclaredValue) {
 }
 
 TEST(BoundRuntimeResourcesContractTest, OwnsLayoutGenerationAndDispatchValueSemantics) {
-  ConSanMoiReportLayoutOverride layout;
+  ConSanMoiReportBufferLayout layout;
   layout.engine = ConSanMoiEngine::Sampled;
   layout.access_record_capacity = 19;
   layout.required_bytes = 4096;
@@ -840,7 +840,7 @@ TEST(ConSanOptionsConstructionTest, PreservesEveryMutationAndBoundResourceFamily
   mutation.sc_perturb_max = 2;
   mutation.sc_perturb_sleep = 9;
   mutation.sc_perturb_required_count = 1;
-  ConSanMoiReportLayoutOverride layout;
+  ConSanMoiReportBufferLayout layout;
   layout.required_bytes = 4096;
   BoundRuntimeResources resources{
       .scope = ConSanRuntimeResourceScope::Executable,

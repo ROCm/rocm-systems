@@ -506,8 +506,8 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1, .barrier_event_count = 2});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
   inventory_options.moi_track_barriers = true;
@@ -518,7 +518,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   ConSanOptions options = inventory_options;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   const ConSanResult fresh = test_lower_consan(bytes, options);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options,
@@ -625,13 +625,13 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 2});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
@@ -942,13 +942,13 @@ TEST(ConSanMoi, AutoRecordReplayOneByOneHeadroomStillAddressesTheHashedSlot) {
   inventory.record_replay_address_group_headroom = 1u;
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
@@ -1008,13 +1008,13 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
@@ -1067,13 +1067,13 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
@@ -1141,13 +1141,13 @@ TEST(ConSanMoi, Gfx1100FullVgprRecordReplayUsesPersistentScalarState) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
@@ -1207,13 +1207,13 @@ TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 4u});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
@@ -1271,8 +1271,8 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
     const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
         {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
     ASSERT_TRUE(report_plan.complete());
-    const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-    ASSERT_TRUE(layout_override);
+    const auto bound_layout = report_plan.complete_layout();
+    ASSERT_TRUE(bound_layout);
 
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8;
@@ -1280,7 +1280,7 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
     options.moi_epoch_vgpr = 41;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = report_plan.required_bytes;
-    options.moi_report_layout = *layout_override;
+    options.moi_report_layout = *bound_layout;
     options.moi_track_barriers = false;
     options.moi_track_atomics = false;
     options.max_patches = 1;
@@ -1366,12 +1366,12 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.moi_exec_save_sgpr = 90u;
@@ -1401,8 +1401,8 @@ TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_owner_vgpr = 40u;
@@ -1410,7 +1410,7 @@ TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
 
   const ConSanResult result = test_lower_consan(bytes, options);
 
@@ -1893,13 +1893,13 @@ TEST(ConSanMoi, AutoRecordReplayBarrierRecordsCapturedWorkgroupIdentity) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1, .barrier_event_count = 1});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_track_barriers = true;
   options.max_patches = 4u;
 
@@ -4081,11 +4081,11 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGue
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
 
   const ConSanResult result = test_lower_consan(bytes, options);
 
@@ -7997,11 +7997,11 @@ TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
 
   const ConSanResult result = test_lower_consan(bytes, options);
 
@@ -11108,8 +11108,8 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
   report_inventory = fit_consan_moi_record_replay_auto_report_inventory(report_inventory);
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(report_inventory);
   ASSERT_TRUE(report_plan.complete());
-  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
-  ASSERT_TRUE(layout_override);
+  const auto bound_layout = report_plan.complete_layout();
+  ASSERT_TRUE(bound_layout);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.test_force_vgpr_spill = true;
@@ -11117,7 +11117,7 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
-  options.moi_report_layout = *layout_override;
+  options.moi_report_layout = *bound_layout;
   options.moi_runtime_sample_stride = 2u;
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;

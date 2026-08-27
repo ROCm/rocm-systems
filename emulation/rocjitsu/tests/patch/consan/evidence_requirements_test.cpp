@@ -470,7 +470,7 @@ TEST(ConSanEvidenceRequirements, WellFormedRejectsEveryCrossTypeContractMismatch
       [](auto &value) { ++*value.runtime_requirements.minimum_report_allocation_bytes; });
   expect_rejected([](auto &value) { value.sizing_inventory.engine = ConSanMoiEngine::Sampled; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.diagnostic_count; });
-  expect_rejected([](auto &value) { value.abi_plan.engine = ConSanMoiEngine::Sampled; });
+  expect_rejected([](auto &value) { value.abi_plan.layout.engine = ConSanMoiEngine::Sampled; });
   expect_rejected(
       [](auto &value) { value.abi_plan.outcome = ConSanMoiAutoReportPlanOutcome::Count; });
   expect_rejected(
@@ -601,7 +601,8 @@ TEST(ConSanEvidenceRequirements, SampledWellFormedChecksEveryCrossTypeInvariant)
   expect_rejected([](auto &value) { ++value.sizing_inventory.sampled_range_bank_count; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.sampled_sync_slot_count; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.sampled_watchpoint_count; });
-  expect_rejected([](auto &value) { value.abi_plan.engine = ConSanMoiEngine::InlineShadow; });
+  expect_rejected(
+      [](auto &value) { value.abi_plan.layout.engine = ConSanMoiEngine::InlineShadow; });
   expect_rejected(
       [](auto &value) { value.abi_plan.outcome = ConSanMoiAutoReportPlanOutcome::Count; });
   expect_rejected(
@@ -762,7 +763,7 @@ TEST(ConSanEvidenceRequirements, InlineWellFormedChecksEverySchemaSpecificInvari
       [](auto &value) { value.sizing_inventory.inline_compact_token_mapping_count = 2; });
   expect_rejected(
       [](auto &value) { value.sizing_inventory.inline_diagnostic_count_adaptive = false; });
-  expect_rejected([](auto &value) { value.abi_plan.engine = ConSanMoiEngine::Sampled; });
+  expect_rejected([](auto &value) { value.abi_plan.layout.engine = ConSanMoiEngine::Sampled; });
   expect_rejected(
       [](auto &value) { value.abi_plan.outcome = ConSanMoiAutoReportPlanOutcome::Count; });
   expect_rejected(

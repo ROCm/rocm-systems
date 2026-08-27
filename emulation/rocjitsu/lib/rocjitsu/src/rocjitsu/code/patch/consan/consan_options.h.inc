@@ -1,3 +1,5 @@
+#include "rocjitsu/code/patch/consan/consan_moi_report_buffer_layout.h"
+
 namespace rocjitsu {
 
 /// Default maximum additional ELF storage one ConSan transformation may
@@ -86,12 +88,6 @@ enum class ConSanFlavor : uint8_t {
   None,
   SuperCollider,
   Moi,
-};
-
-enum class ConSanMoiEngine : uint8_t {
-  RecordReplay,
-  InlineShadow,
-  Sampled,
 };
 
 enum class ConSanDelayMode : uint8_t {
@@ -191,52 +187,6 @@ struct ConSanPreappliedCodeRange {
 struct ConSanPreappliedReservedRange {
   uint64_t text_offset = 0;
   uint32_t size = 0;
-};
-
-/// Caller-supplied exact MOI report layout. Auto allocation inventories the
-/// final code, plans one heterogeneous ABI layout, and passes this same value
-/// to the transformer, allocator, and reader. Explicit user buffers leave it
-/// unset and retain the legacy size-derived layout contract.
-struct ConSanMoiReportLayoutOverride {
-  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
-  uint32_t access_record_capacity = 0;
-  uint32_t record_replay_logical_access_range_count = 0;
-  uint32_t record_replay_dispatch_token_capacity = 0;
-  uint32_t record_replay_access_dispatch_bank_count = 1;
-  uint32_t record_replay_access_owner_bank_count = 1;
-  uint32_t record_replay_address_group_headroom = 1;
-  uint32_t barrier_record_capacity = 0;
-  uint32_t atomic_record_capacity = 0;
-  uint32_t fence_record_capacity = 0;
-  uint32_t diagnostic_capacity = 0;
-  uint32_t exact_shadow_entry_capacity = 0;
-  uint32_t inline_exact_dispatch_bank_count = 0;
-  uint32_t inline_atomic_release_capacity = 0;
-  uint32_t inline_acquired_epoch_token_capacity = 0;
-  uint32_t inline_causal_snapshot_capacity = 0;
-  uint32_t inline_compact_token_mapping_capacity = 0;
-  uint32_t sampled_watchpoint_capacity = 0;
-  uint32_t sampled_causal_window_capacity = 0;
-  uint32_t sampled_sync_metadata_capacity = 0;
-  uint32_t sampled_pending_acquire_capacity = 0;
-  uint64_t record_replay_dispatch_tokens_offset = 0;
-  uint64_t access_records_offset = 0;
-  uint64_t barrier_records_offset = 0;
-  uint64_t atomic_records_offset = 0;
-  uint64_t fence_records_offset = 0;
-  uint64_t diagnostic_records_offset = 0;
-  uint64_t exact_shadow_entries_offset = 0;
-  uint64_t inline_atomic_release_slots_offset = 0;
-  uint64_t inline_acquired_epoch_token_slots_offset = 0;
-  uint64_t inline_causal_snapshots_offset = 0;
-  uint64_t inline_compact_token_mappings_offset = 0;
-  uint64_t sampled_watchpoints_offset = 0;
-  uint64_t sampled_causal_windows_offset = 0;
-  uint64_t sampled_sync_metadata_offset = 0;
-  uint64_t sampled_pending_acquires_offset = 0;
-  uint64_t required_bytes = 0;
-
-  bool operator==(const ConSanMoiReportLayoutOverride &) const = default;
 };
 
 /// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
@@ -658,7 +608,7 @@ struct BoundRuntimeResources {
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
-  std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
+  std::optional<ConSanMoiReportBufferLayout> moi_report_layout;
   uint64_t moi_report_generation = 0;
   uint64_t moi_report_dispatch_id = 0;
 

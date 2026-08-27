@@ -107,7 +107,7 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 [[nodiscard]] ConSanMoiReportBufferLayout
 resolve_inline_report_layout(const ConSanOptions &options) {
   if (options.moi_report_layout) {
-    return consan_moi_report_layout_from_override(
+    return revalidate_consan_moi_report_layout(
         *options.moi_report_layout, ConSanMoiEngine::InlineShadow, options.moi_report_buffer_size);
   }
   return consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
@@ -116,8 +116,8 @@ resolve_inline_report_layout(const ConSanOptions &options) {
 [[nodiscard]] ConSanMoiReportBufferLayout
 resolve_sampled_report_layout(const ConSanOptions &options) {
   if (options.moi_report_layout) {
-    return consan_moi_report_layout_from_override(
-        *options.moi_report_layout, ConSanMoiEngine::Sampled, options.moi_report_buffer_size);
+    return revalidate_consan_moi_report_layout(*options.moi_report_layout, ConSanMoiEngine::Sampled,
+                                               options.moi_report_buffer_size);
   }
   return consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
 }
@@ -126,7 +126,7 @@ resolve_sampled_report_layout(const ConSanOptions &options) {
 resolve_record_replay_report_layout(const ConSanOptions &options, bool include_barriers,
                                     bool include_atomics, bool include_fences) {
   if (options.moi_report_layout) {
-    return consan_moi_report_layout_from_override(
+    return revalidate_consan_moi_report_layout(
         *options.moi_report_layout, ConSanMoiEngine::RecordReplay, options.moi_report_buffer_size);
   }
   return consan_moi_report_buffer_layout_for_bytes(options.moi_report_buffer_size, include_barriers,
