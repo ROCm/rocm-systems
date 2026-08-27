@@ -3020,6 +3020,45 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
                        0xFFFF'FFFFu);
 }
 
+static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 1));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 4));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 8));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 16));
+static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 32));
+
+TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    constexpr uint32_t M = 16, N = 16, K = 4;
+    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+    if (!amdgpu::wmma_f32_f32_native_width_supported(N, width))
+      GTEST_SKIP() << "f32 WMMA shape is not divisible by the native SIMD width";
+
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu.get();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 64; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
+
+    amdgpu::exec_wmma_f32_f32_spec<M, N, K>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                            amdgpu::ACC_FROM_VGPR);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0 + 0, S0 + 1, S1 + 0, S1 + 1, ACC + 0, ACC + 1, ACC + 2, ACC + 3,
+                          ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                         0xFFFF'FFFFu);
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
