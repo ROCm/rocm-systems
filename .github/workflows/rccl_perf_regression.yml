@@ -11,6 +11,10 @@
 # these hosts have no GPUs). They must NOT carry the
 # tw-gfx950-ainic-ROCm-scale-runner label, or they will be handed GPU jobs they
 # cannot run. The `report` job needs no Slurm access and runs on ubuntu-latest.
+#
+# Those runners were registered with --no-default-labels, so each carries ONLY
+# its role label -- no self-hosted, Linux or X64. That is why the runs-on lists
+# below name the role label alone; see the long note on the build job.
 # The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
@@ -129,7 +133,21 @@ jobs:
     # hold a runner for 5h, for no reason at all. One runner per role today;
     # changing that count is a registration change on the runner host, not an
     # edit here.
-    runs-on: [self-hosted, rccl-build]
+    #
+    # Deliberately NOT [self-hosted, rccl-build]. runs-on is an AND across the
+    # list, and these runners were registered with --no-default-labels: they
+    # carry their role label and nothing else -- no self-hosted, no Linux, no
+    # X64. Asking for self-hosted as well matches no runner at all, and the
+    # failure is silent in the worst way: the job sits queued while the runner
+    # sits Idle, until timeout-minutes below kills it. Confirmed by dispatch on
+    # 2026-08-26 (run 33015416535: build queued 8min, runner_name empty, while
+    # all three role runners showed Idle and had never run a single job since
+    # they were registered on 2026-08-19).
+    #
+    # The role label is unique to these hosts, so it is sufficient by itself.
+    # If they are ever re-registered with default labels, self-hosted may be
+    # added back, but it buys nothing.
+    runs-on: [rccl-build]
     # Was 60, the same as rccl_build.sbatch's own --time=01:00:00, which left no
     # room for queue time: a build that waited 20min for a node and then
     # compiled for 13 was killed here at 60 even though Slurm was happy. Sit
@@ -315,7 +333,11 @@ jobs:
     # invisible to the timeout nest below, since timeout-minutes does not start
     # until a runner is assigned) and into Slurm's, which is logged and bounded
     # by MAX_QUEUE_SEC. Worth doing once there is queue data to justify it.
-    runs-on: [self-hosted, rccl-detect]
+    #
+    # Role label only, no self-hosted -- same reason as the build job above:
+    # these runners have no default labels, so an AND against self-hosted
+    # matches nothing and the job hangs until timeout instead of failing.
+    runs-on: [rccl-detect]
     # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
     # plus MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to
     # cancel the Slurm job and report *why* rather than being killed here with
