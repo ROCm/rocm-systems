@@ -14,7 +14,7 @@ payoff to a downstream tool is proportional to how many times that tool runs the
 
 | Tool | Application runs for a full counter profile today | Payoff |
 | --- | --- | --- |
-| rocprofiler-compute | 13 on MI200, 20 on MI350 | Large |
+| rocprofiler-compute | Between roughly 13 and 20, depending on architecture | Large |
 | rocprofiler-systems | 1 | Small |
 | rocprofv3 lite trace | Not applicable — collects no counters | None by design |
 
@@ -29,7 +29,7 @@ hardware pass, which it does not currently handle at all.
 For a default profile it bin-packs the requested counters into hardware-sized groups, writes one
 `perfmon/pmc_perf_<N>.yaml` per group, and then **runs the application once per file**. The loop is
 in `profiler_base.run_profiling()`. The test workloads in the repository record exactly this:
-`[Run 1/13]` through `[Run 13/13]` for `vcopy` on MI200, each one relaunching the binary.
+`[Run 1/13]` through `[Run 13/13]` for `vcopy`, each one relaunching the binary.
 
 That is the cost kernel replay exists to remove. Collapsing 13 or 20 runs to one is the single
 largest change available to compute's profiling time, and it also removes a correctness hazard that
