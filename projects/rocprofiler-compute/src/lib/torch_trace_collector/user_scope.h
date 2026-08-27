@@ -27,7 +27,8 @@ public:
     std::vector<StackEntry> chain;
 };
 
-inline const c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
+// ThreadLocalDebugInfo kind for the USER_SCOPE chain.
+extern const c10::DebugInfoKind kRoctxUserScopeKind;
 
 // Overlays the published USER_SCOPE chain onto the thread stack.
 std::size_t apply_userscope_overlay();
