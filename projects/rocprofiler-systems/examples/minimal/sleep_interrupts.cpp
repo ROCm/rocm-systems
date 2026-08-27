@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <limits>
 
 namespace
 {
@@ -17,6 +18,23 @@ elapsed_ns(timespec start, timespec stop)
 {
     return (stop.tv_sec - start.tv_sec) * NS_PER_SEC + (stop.tv_nsec - start.tv_nsec);
 }
+
+int
+parse_iterations(const char* arg)
+{
+    errno            = 0;
+    char*      end   = nullptr;
+    const long value = std::strtol(arg, &end, 10);
+
+    if(end == arg || *end != '\0' || errno == ERANGE || value <= 0 ||
+       value > std::numeric_limits<int>::max())
+    {
+        fprintf(stderr, "sleep_interrupts: invalid iteration count '%s'\n", arg);
+        std::exit(1);
+    }
+
+    return static_cast<int>(value);
+}
 }  // namespace
 
 // Uses nanosleep directly rather than std::this_thread::sleep_for, which
@@ -24,8 +42,7 @@ elapsed_ns(timespec start, timespec stop)
 int
 main(int argc, const char* const* argv)
 {
-    const int iterations =
-        (argc > 1) ? static_cast<int>(std::strtol(argv[1], nullptr, 10)) : 60;
+    const int iterations = (argc > 1) ? parse_iterations(argv[1]) : 60;
 
     int interrupted = 0;
     int short_sleep = 0;
