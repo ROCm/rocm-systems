@@ -350,11 +350,9 @@ if(BUILD_TESTS)
       # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
       # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
       # header shadow). Its body is guarded by NCCL_GIN_ROCSHMEM_GDA_ENABLE, which
-      # is 1 only when ENABLE_ROCSHMEM is defined -- and ENABLE_ROCSHMEM is added to
-      # this target under the same (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS)
-      # condition below. So it is built and run here (e.g. GIN_ANVIL_UNIT_TESTS)
-      # alongside the Anvil-SDMA template test, not in a pure ENABLE_ROCSHMEM_GIN
-      # build (where the body would compile out to zero test cases).
+      # gin_device_common.h sets when ENABLE_ROCSHMEM_GIN is defined on HIP.
+      # Built here alongside the Anvil-SDMA template test under GIN_ANVIL_UNIT_TESTS
+      # or when librccl is built with full ENABLE_ROCSHMEM.
       device/GinRocshmemGdaTemplate_test.cpp
       device/GinAnvilSdmaTemplate_test.cpp
     )
@@ -384,7 +382,10 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Match librccl.so ABI: ENABLE_ROCSHMEM changes ncclComm/ncclProxyState layout.
+  # GIN CI builds librccl with ENABLE_ROCSHMEM_GIN only; device templates need
+  # ENABLE_ROCSHMEM_GIN (above), not ENABLE_ROCSHMEM on this target.
+  if(ENABLE_ROCSHMEM_GIN AND ENABLE_ROCSHMEM)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
