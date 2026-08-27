@@ -737,7 +737,7 @@ class DevcommCopyOldToNewV22902Microtest : public DevcommMicrotest {
   uint8_t* dstBytes() { return reinterpret_cast<uint8_t*>(dst_.get()); }
   uint8_t* srcBytes() { return reinterpret_cast<uint8_t*>(src_.get()); }
 
-  ncclResult_t Invoke() {
+  ncclResult_t Run() {
     return ncclDevCommCopyOldToNew_v22902(comm_.get(), dst_.get(), src_.get());
   }
 };
@@ -747,7 +747,7 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, MovesLsaPrefixFromOldToNew_LeavesOldU
   ASSERT_NE(-1, FirstDiff(dstBytes() + kNewRankOff, srcBefore_.data() + kOldRankOff, kLsaLen))
       << "poison and source coincide; the copy would be unobservable";
 
-  EXPECT_EQ(ncclSuccess, Invoke());
+  EXPECT_EQ(ncclSuccess, Run());
 
   EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewRankOff, srcBefore_.data() + kOldRankOff, kLsaLen))
       << "destination LSA prefix does not match the source it was copied from";
@@ -761,7 +761,7 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, PreservesDestinationOutsideLsaPrefix)
   dst_->magic = NCCL_API_MAGIC;
   dst_->version = NCCL_VERSION_CODE;
 
-  EXPECT_EQ(ncclSuccess, Invoke());
+  EXPECT_EQ(ncclSuccess, Run());
 
   EXPECT_EQ(NCCL_API_MAGIC, dst_->magic);
   EXPECT_EQ(static_cast<unsigned int>(NCCL_VERSION_CODE), dst_->version);
@@ -777,7 +777,7 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, CopiesLastByteOfRange_NotTheByteAfter
   dstBytes()[kNewRankOff + kLsaLen - 1] = 0xC3;
   dstBytes()[kNewRailOff] = 0xC4;
 
-  EXPECT_EQ(ncclSuccess, Invoke());
+  EXPECT_EQ(ncclSuccess, Run());
 
   EXPECT_EQ(0x5A, dstBytes()[kNewRankOff + kLsaLen - 1]) << "last byte in range was not copied";
   EXPECT_EQ(0xC4, dstBytes()[kNewRailOff]) << "copy ran one byte past the LSA prefix";
@@ -792,7 +792,7 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, InvokesCopyLsaDataExactlyOnce_Destina
     seenSrc = s;
   });
 
-  EXPECT_EQ(ncclSuccess, Invoke());
+  EXPECT_EQ(ncclSuccess, Run());
 
   EXPECT_EQ(1, copy.calls);
   EXPECT_EQ(static_cast<void*>(&dst_->rank), seenDst);
@@ -843,7 +843,7 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, PinsInlinedResourceWindowTailSpillInt
   ASSERT_EQ(sizeof(struct ncclWindow_vidmem_v22902),
             sizeof(ncclResourceWindow_vidmem_t) + sizeof(ncclGinBarrierHandle_t));
 
-  EXPECT_EQ(ncclSuccess, Invoke());
+  EXPECT_EQ(ncclSuccess, Run());
 
   EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewHybrid,
                           srcBefore_.data() + kOldInl + sizeof(ncclResourceWindow_vidmem_t),
@@ -1069,9 +1069,10 @@ class DevcommReqsFilterV22907Microtest : public DevcommMicrotest {
 
   void SetUp() override {
     DevcommMicrotest::SetUp();
-    std::memset(&reqs_, 0, sizeof(reqs_));
     reqs_ = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs_.version = kCompiledVersion22907;
+    // nodes_ is declared without an initializer and nothing else writes it, so unlike reqs_ (which
+    // the line above fully overwrites) this memset is the only thing making the list well-defined.
     std::memset(nodes_, 0, sizeof(nodes_));
   }
 
@@ -1091,10 +1092,10 @@ class DevcommReqsFilterV22907Microtest : public DevcommMicrotest {
   bool ReqsUnchanged() const { return std::memcmp(reqsSnapshot_, &reqs_, sizeof(reqs_)) == 0; }
   bool NodesUnchanged() const { return std::memcmp(nodesSnapshot_, nodes_, sizeof(nodes_)) == 0; }
 
-  ncclResult_t Call() { return ncclDevCommRequirementsFilter_v22907(comm_.get(), &reqs_); }
+  ncclResult_t Run() { return ncclDevCommRequirementsFilter_v22907(comm_.get(), &reqs_); }
 
   // Rejecting configuration used only as a positive anchor, so a no-warn assertion cannot pass on a dead capture.
-  ncclResult_t CallRejectingProbe() {
+  ncclResult_t RunRejectingProbe() {
     ncclDevCommRequirements_t probe = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     probe.version = kCompiledVersion22907;
     probe.ginSignalCount = 1;
@@ -1113,7 +1114,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, SignalCountAloneRejects) {
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1128,7 +1129,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, CounterCountAloneRejects) {
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1146,7 +1147,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, BarrierCountAloneRejectsAndIsNotPromote
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1162,7 +1163,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, RailGinBarrierCountAloneRejectsAndIsNot
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1178,8 +1179,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, NoRequestEmptyListReturnsSuccessWithout
   Snapshot();
 
   ncclResult_t res = ncclInvalidUsage;
-  const std::string quiet = CaptureLog([&]() { res = Call(); });
-  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, CallRejectingProbe()); });
+  const std::string quiet = CaptureLog([&]() { res = Run(); });
+  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, RunRejectingProbe()); });
 
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(quiet, kWarnSite22907)) << quiet;
@@ -1195,8 +1196,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, AllZeroNodeListWalksToEndAndSucceeds) {
   Snapshot();
 
   ncclResult_t res = ncclInvalidUsage;
-  const std::string quiet = CaptureLog([&]() { res = Call(); });
-  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, CallRejectingProbe()); });
+  const std::string quiet = CaptureLog([&]() { res = Run(); });
+  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, RunRejectingProbe()); });
 
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(quiet, kWarnSite22907)) << quiet;
@@ -1214,7 +1215,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, MiddleNodeSignalCountRejectsAndLoopStop
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1230,7 +1231,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, MiddleNodeCounterCountRejects) {
   Snapshot();
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1250,8 +1251,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, GinRequestedWithoutConnectionOrForceSuc
   Snapshot();
 
   ncclResult_t res = ncclInvalidUsage;
-  const std::string quiet = CaptureLog([&]() { res = Call(); });
-  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, CallRejectingProbe()); });
+  const std::string quiet = CaptureLog([&]() { res = Run(); });
+  const std::string anchor = CaptureLog([&]() { EXPECT_EQ(ncclInvalidUsage, RunRejectingProbe()); });
 
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(quiet, kWarnSite22907)) << quiet;
@@ -1269,7 +1270,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, ConnectionFullWithoutForceRejects) {
   reqs_.ginForceEnable = false;
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1282,7 +1283,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, ConnectionRailWithoutForceRejects) {
   reqs_.ginForceEnable = false;
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1295,7 +1296,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, ForceEnableWithoutConnectionRejects) {
   reqs_.ginForceEnable = true;
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
@@ -1307,7 +1308,7 @@ TEST_F(DevcommReqsFilterV22907Microtest, WarnNamesCompiledThenRuntimeVersion) {
   reqs_.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 
   ncclResult_t res = ncclSuccess;
-  const std::string log = CaptureLog([&]() { res = Call(); });
+  const std::string log = CaptureLog([&]() { res = Run(); });
 
   EXPECT_EQ(ncclInvalidUsage, res);
   EXPECT_TRUE(LogHas(log, kWarnSite22907)) << log;
