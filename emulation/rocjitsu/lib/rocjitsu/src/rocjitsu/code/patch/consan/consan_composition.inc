@@ -293,10 +293,6 @@ const ConSanSyncSequence *find_consan_sync_sequence_for_event(const ConSanResult
 
 namespace {
 
-struct ConSanPristineMutationInventory {
-  ConSanResult result;
-};
-
 void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResult &result) {
   // The mutation stage must observe the reused result exactly as if semantic
   // analysis and fault planning had run, without inheriting a MOI lowering
@@ -345,7 +341,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 [[nodiscard]] ConSanResult try_patch_consan_impl(
     std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
     std::span<const CarriedPerturbationPlan> carried_plans = {},
-    std::optional<ConSanPristineMutationInventory> pristine_inventory = std::nullopt) {
+    std::optional<ConSanResult> pristine_inventory = std::nullopt) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanResult result;
@@ -389,7 +385,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       planning_options.fault_require_exactly_one = false;
     ConSanResult pristine_mutation_plan;
     if (pristine_inventory) {
-      pristine_mutation_plan = std::move(pristine_inventory->result);
+      pristine_mutation_plan = std::move(*pristine_inventory);
       reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
       build_fault_mutation_plan(planning_options, pristine_mutation_plan.program_inventory.arch(),
                                 pristine_mutation_plan);

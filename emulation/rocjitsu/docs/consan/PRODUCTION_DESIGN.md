@@ -4604,6 +4604,33 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 82.40 seconds. Slice 5AS completed the
   periodic physical-gfx950 gate. E2E validation remains outside this work.
 
+### Slice 5AV: delete the pristine-mutation result box
+
+- **Direct consumptive retry input:** The internal mutation retry now accepts
+  its optional pristine `ConSanResult` directly. The removed
+  `ConSanPristineMutationInventory` had no invariant, behavior, or independent
+  ownership: it contained exactly one `ConSanResult`, existed only in the
+  implementation file, and was immediately unwrapped after one move.
+- **No replacement abstraction:** The caller still transfers the already-built
+  pristine inventory exactly once, and the callee still resets only the
+  mutation-planning state before selecting and applying the late-bound fault.
+  Provenance and inventory-shape authorization remain at the typed pipeline
+  boundary; another internal wrapper would not strengthen either contract.
+- **Behavioral coverage:** Existing focused tests exercise live and rejected
+  late-bound fault retries, report-only retries, extended barrier-pair
+  preservation, pristine provenance rejection, and retry equivalence with a
+  fresh transform. They cover the ownership path that changed without retaining
+  a test for the deleted box itself.
+- **Deletion accounting:** Production changes add three and delete eight
+  physical lines, a net deletion of five lines. No test or production behavior
+  is added, renamed, or removed.
+- **Checked-in gate:** The focused retry/provenance gate passes all ten tests;
+  the host gate passes all 1,509 runnable tests with the two expected
+  benchmark-object skips; and all 172 HSA-hook and hook-lifecycle tests pass.
+  All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 84.62 seconds. Slice 5AS completed the
+  periodic physical-gfx950 gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

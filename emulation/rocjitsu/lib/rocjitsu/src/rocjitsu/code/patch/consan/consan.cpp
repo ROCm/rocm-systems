@@ -365,8 +365,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
     }
     ConSanResult result =
         has_late_fault
-            ? try_patch_consan_impl(code_object_bytes, options, {},
-                                    ConSanPristineMutationInventory{.result = std::move(inventory)})
+            ? try_patch_consan_impl(code_object_bytes, options, {}, std::move(inventory))
             : try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes);
