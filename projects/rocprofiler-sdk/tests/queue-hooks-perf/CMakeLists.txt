@@ -33,30 +33,37 @@ add_executable(queue-hooks-perf-testapp)
 target_sources(queue-hooks-perf-testapp PRIVATE main.cpp)
 target_link_libraries(queue-hooks-perf-testapp PRIVATE Threads::Threads)
 
-add_test(
-    NAME test-queue-hooks-perf-scaling
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
-        $<TARGET_FILE:queue-hooks-perf-testapp> --preload
-        $<TARGET_FILE:rocprofiler-sdk-json-tool> --ballast-mb 8 --launches-low 8
-        --launches-high 32 --max-scaling-ratio 6.0 --repeat 3 --warmup 1)
+# Wall-time scaling on a shared CI runner measures the neighbours as much as the code: the
+# launch counts here are small enough that fixed per-run cost dominates, and the ratio
+# moves with runner contention rather than with a regression. Registered only for the
+# nightly perf job, matching the sweep below and the convention that tests are disabled in
+# CMake rather than in the workflow.
+if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
+    add_test(
+        NAME test-queue-hooks-perf-scaling
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py
+            --testapp $<TARGET_FILE:queue-hooks-perf-testapp> --preload
+            $<TARGET_FILE:rocprofiler-sdk-json-tool> --ballast-mb 8 --launches-low 8
+            --launches-high 32 --max-scaling-ratio 6.0 --repeat 3 --warmup 1)
 
-set_tests_properties(
-    test-queue-hooks-perf-scaling
-    PROPERTIES TIMEOUT
-               420
-               LABELS
-               "integration-tests;queue-hooks;queue-hooks-perf"
-               RESOURCE_LOCK
-               GPU
-               DEPENDS
-               "queue-hooks-perf-testapp;rocprofiler-sdk-json-tool"
-               ENVIRONMENT
-               "QH_PERF_RESULTS_JSON=${CMAKE_CURRENT_BINARY_DIR}/qh_perf_scaling.json"
-               PASS_REGULAR_EXPRESSION
-               "\\[qh-perf-run\\] PASS"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    set_tests_properties(
+        test-queue-hooks-perf-scaling
+        PROPERTIES TIMEOUT
+                   420
+                   LABELS
+                   "integration-tests;queue-hooks;queue-hooks-perf;perf-nightly"
+                   RESOURCE_LOCK
+                   GPU
+                   DEPENDS
+                   "queue-hooks-perf-testapp;rocprofiler-sdk-json-tool"
+                   ENVIRONMENT
+                   "QH_PERF_RESULTS_JSON=${CMAKE_CURRENT_BINARY_DIR}/qh_perf_scaling.json"
+                   PASS_REGULAR_EXPRESSION
+                   "\\[qh-perf-run\\] PASS"
+                   FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endif()
 
 if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
     add_test(
