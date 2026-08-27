@@ -304,25 +304,13 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
 struct allow_empty_string
 {};
 
-template <typename Tp>
-struct is_optional : std::false_type
-{
-    using value_type = Tp;
-};
-
-template <typename Tp>
-struct is_optional<std::optional<Tp>> : std::true_type
-{
-    using value_type = Tp;
-};
-
 template <typename Tp, typename TraitT = int>
 sql_insert_value
 insert_value(std::string_view _name, const Tp& _value, TraitT = {})
 {
     using value_type = common::mpl::unqualified_type_t<Tp>;
 
-    static_assert(!is_optional<value_type>::value, "overload resolution failed");
+    static_assert(!common::mpl::is_optional<value_type>::value, "overload resolution failed");
 
     if constexpr(common::mpl::is_string_type<value_type>::value)
     {

@@ -31,8 +31,10 @@
 #include "lib/output/output_config.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/stream_info.hpp"
+#include "lib/rocprofiler-sdk-rocpd/details/operators.hpp"
 #include "lib/rocprofiler-sdk-tool/config.hpp"
 
+#include <rocprofiler-sdk-rocpd/types.h>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
 #include <string>
@@ -66,6 +68,7 @@ write_perfetto(
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
                                                      agent_data,
+    rocpd_version_triplet_t                          schema_version,
     const tool::generator<types::thread>&            thread_gen,
     const tool::generator<types::region>&            region_gen,
     const tool::generator<types::sample>&            sample_gen,
