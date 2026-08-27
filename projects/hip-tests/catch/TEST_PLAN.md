@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 608 | 608 | 0 |
-| **total** | **608** | **608** | **0** |
+| `contract` | 611 | 611 | 0 |
+| **total** | **611** | **611** | **0** |
 
 ## Tier: `contract`
 
@@ -135,11 +135,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (7 cases)
+### `device` (10 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBoolean` | hipDeviceGetExecAffinitySupport | the CU-count affinity query succeeds and reports a boolean |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_GranularityTypes_ReportBoolean` | hipDeviceGetExecAffinitySupport | each CU-mask granularity query reports a boolean |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutput_ReturnsInvalidValue` | hipDeviceGetExecAffinitySupport | a null output pointer is rejected with hipErrorInvalidValue |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
 | `Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty` | hipGetDeviceProperties | the device name string is non-empty |
