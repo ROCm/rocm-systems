@@ -83,8 +83,8 @@ PyTorch copies the launching thread's debug info into the autograd graph task
 and restores it on the worker. When a worker's stack is empty at op entry, the
 callback overlays that chain so structural scopes appear under backward ops.
 
-The debug-info slot is a private string key when the Torch build supports it;
-otherwise the build falls back to `TEST_INFO_2`.
+User-scope chains are stored in `ThreadLocalDebugInfo` under the private
+`c10::DebugInfoKind` `rocprofiler-compute.user_scope`.
 
 ---
 
@@ -142,5 +142,3 @@ Operator ranges always use `|torch`. Rows without a backend suffix are tagged
 
 - Inductor/Triton launches below `RecordFunction` attribute to the enclosing
   torch scope, not a distinct Triton operator.
-- On builds without a private debug-info slot, the shared `TEST_INFO_2` slot
-  may collide with other users of that slot.

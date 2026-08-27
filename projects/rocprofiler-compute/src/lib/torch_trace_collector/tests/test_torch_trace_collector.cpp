@@ -503,7 +503,7 @@ TEST_F(TorchTraceCollectorTest, CopiesParentChain)
 {
     auto info = std::make_shared<RoctxUserScopeChain>(
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
-    c10::DebugInfoGuard guard(kRoctxDbgKind, info);
+    c10::DebugInfoGuard guard(kRoctxUserScopeKind, info);
 
     ASSERT_TRUE(thread_state().stack.empty());
     EXPECT_EQ(apply_userscope_overlay(), 2u);
@@ -519,7 +519,7 @@ TEST_F(TorchTraceCollectorTest, DedupesIdenticalPrefix)
 {
     auto info = std::make_shared<RoctxUserScopeChain>(
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
-    c10::DebugInfoGuard guard(kRoctxDbgKind, info);
+    c10::DebugInfoGuard guard(kRoctxUserScopeKind, info);
 
     thread_state().stack.push_back(StackEntry{"P1", "c1"});
     thread_state().stack.push_back(StackEntry{"P2", "c2"});

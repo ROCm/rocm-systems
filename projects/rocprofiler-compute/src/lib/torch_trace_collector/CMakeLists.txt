@@ -151,7 +151,6 @@ set(_ttc_headers
     process_state.h
     record_function_callback.h
     record_function_installation.h
-    scope_guard.h
     snapshot_store.h
     stack_entry.h
     stats.h

@@ -7,7 +7,6 @@
 #include "process_state.h"
 #include "record_function_callback.h"
 #include "record_function_installation.h"
-#include "scope_guard.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
@@ -23,6 +22,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -36,10 +36,14 @@ namespace torch_trace_collector::detail
 namespace
 {
 
-void inc(std::atomic<std::uint64_t>& counter)
+constexpr std::string_view kRoctxUserScopeKindName = "rocprofiler-compute.user_scope";
+
+}  // namespace
+
+const c10::DebugInfoKind kRoctxUserScopeKind{&kRoctxUserScopeKindName};
+
+namespace
 {
-    counter.fetch_add(1, std::memory_order_relaxed);
-}
 
 constexpr const char* kRecordFnBackend = "torch";
 
@@ -56,25 +60,12 @@ void encode_marker_segment(const std::string& name, std::string& out)
     }
 }
 
-template<typename SelectField>
-void append_joined_frames(const std::vector<StackEntry>& stack, std::string& out, SelectField select_field)
-{
-    bool first = true;
-    for (const auto& entry : stack)
-    {
-        if (!first)
-            out += '/';
-        select_field(entry, out);
-        first = false;
-    }
-}
-
-std::unique_ptr<c10::DebugInfoGuard> make_userscope_guard(const std::vector<StackEntry>& stack)
+std::unique_ptr<c10::DebugInfoGuard> publish_userscope_chain(const std::vector<StackEntry>& stack)
 {
     try
     {
         auto info = std::make_shared<RoctxUserScopeChain>(stack);
-        return std::make_unique<c10::DebugInfoGuard>(kRoctxDbgKind, std::move(info));
+        return std::make_unique<c10::DebugInfoGuard>(kRoctxUserScopeKind, std::move(info));
     }
     catch (...)
     {
@@ -90,7 +81,7 @@ void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool coun
         roctxRangePop();
         if (count_pop)
         {
-            inc(process_state().stats.pops);
+            process_state().stats.pops.fetch_add(1, std::memory_order_relaxed);
         }
     }
     if (observer_ctx.pushed_leaf && !stack.empty())
@@ -153,21 +144,26 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     std::string out;
     out.reserve(marker_len + ctx_len + 1);
 
-    append_joined_frames(stack,
-                         out,
-                         [](const StackEntry& entry, std::string& dst)
-                         { encode_marker_segment(entry.marker, dst); });
+    for (std::size_t i = 0; i < stack.size(); ++i)
+    {
+        if (i != 0)
+            out += '/';
+        encode_marker_segment(stack[i].marker, out);
+    }
     out += ':';
-    append_joined_frames(stack,
-                         out,
-                         [](const StackEntry& entry, std::string& dst) { dst += entry.context; });
+    for (std::size_t i = 0; i < stack.size(); ++i)
+    {
+        if (i != 0)
+            out += '/';
+        out += stack[i].context;
+    }
     return out;
 }
 
 std::size_t apply_userscope_overlay()
 {
-    auto* base       = c10::ThreadLocalDebugInfo::get(kRoctxDbgKind);
-    auto* chain_info = dynamic_cast<const RoctxUserScopeChain*>(base);
+    auto* chain_info = dynamic_cast<const RoctxUserScopeChain*>(
+        c10::ThreadLocalDebugInfo::get(kRoctxUserScopeKind));
     if (chain_info == nullptr || chain_info->chain.empty())
     {
         return 0;
@@ -176,40 +172,27 @@ std::size_t apply_userscope_overlay()
     const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
     if (pushed > 0)
     {
-        inc(process_state().stats.user_scope_inherits);
+        process_state().stats.user_scope_inherits.fetch_add(1, std::memory_order_relaxed);
     }
     return pushed;
 }
 
 void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
 {
+    ProcessState& state        = process_state();
+    ThreadState&  thread       = thread_state();
+    bool          pushed_frame = false;
+    bool          pushed_guard = false;
     try
     {
-        ProcessState& state  = process_state();
-        ThreadState&  thread = thread_state();
-
         StackEntry entry;
         entry.marker  = marker;
         entry.context = context;
         thread.stack.push_back(std::move(entry));
-        auto stack_rollback = make_scope_guard(
-            [&thread]
-            {
-                if (!thread.stack.empty())
-                {
-                    thread.stack.pop_back();
-                }
-            });
+        pushed_frame = true;
 
-        thread.guards.push_back(make_userscope_guard(thread.stack));
-        auto guards_rollback = make_scope_guard(
-            [&thread]
-            {
-                if (!thread.guards.empty())
-                {
-                    thread.guards.pop_back();
-                }
-            });
+        thread.guards.push_back(publish_userscope_chain(thread.stack));
+        pushed_guard = true;
 
         std::string wire_string = build_marker_string(thread.stack);
         if (!backend.empty())
@@ -218,15 +201,20 @@ void push_user_scope(const std::string& marker, const std::string& context, cons
             wire_string += backend;
         }
         roctxRangePushA(wire_string.c_str());
-        inc(state.stats.user_scope_pushes);
-        inc(state.stats.pushes);
-
-        guards_rollback.dismiss();
-        stack_rollback.dismiss();
+        state.stats.user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
+        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
     }
     catch (...)
     {
-        inc(process_state().stats.callback_errors);
+        if (pushed_guard && !thread.guards.empty())
+        {
+            thread.guards.pop_back();
+        }
+        if (pushed_frame && !thread.stack.empty())
+        {
+            thread.stack.pop_back();
+        }
+        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
         throw;
     }
 }
@@ -240,28 +228,27 @@ void pop_user_scope()
 
         if (thread.stack.empty() || thread.guards.empty())
         {
-            inc(state.stats.callback_errors);
+            state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         roctxRangePop();
-        inc(state.stats.user_scope_pops);
-        inc(state.stats.pops);
+        state.stats.user_scope_pops.fetch_add(1, std::memory_order_relaxed);
+        state.stats.pops.fetch_add(1, std::memory_order_relaxed);
         thread.stack.pop_back();
         thread.guards.pop_back();
     }
     catch (...)
     {
-        inc(process_state().stats.callback_errors);
+        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
 {
+    std::unique_ptr<RoctxObserverContext> observer_ctx;
     try
     {
-        auto observer_ctx = std::make_unique<RoctxObserverContext>();
-        auto rollback     = make_scope_guard(
-            [&] { unwind_observer_context(*observer_ctx, /*count_pop=*/false); });
+        observer_ctx = std::make_unique<RoctxObserverContext>();
 
         ProcessState&            state = process_state();
         std::vector<StackEntry>& stack = thread_state().stack;
@@ -316,14 +303,23 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());
         observer_ctx->pushed_roctx_range = true;
-        inc(state.stats.pushes);
+        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
 
-        rollback.dismiss();
         return observer_ctx;
     }
     catch (...)
     {
-        inc(process_state().stats.callback_errors);
+        if (observer_ctx)
+        {
+            try
+            {
+                unwind_observer_context(*observer_ctx, /*count_pop=*/false);
+            }
+            catch (...)
+            {
+            }
+        }
+        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
     }
 }
@@ -341,7 +337,7 @@ void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ct
     }
     catch (...)
     {
-        inc(process_state().stats.callback_errors);
+        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -412,7 +408,7 @@ void SnapshotStore::evict_oldest(Shard& shard)
     shard.lru_order.pop_front();
     shard.lru_idx.erase(oldest);
     shard.snapshots.erase(oldest);
-    inc(stats_.snapshots_dropped);
+    stats_.snapshots_dropped.fetch_add(1, std::memory_order_relaxed);
 }
 
 void SnapshotStore::save(std::int64_t seq_nr, std::uint64_t thread_id, const std::vector<StackEntry>& stack)
@@ -426,8 +422,8 @@ void SnapshotStore::save(std::int64_t seq_nr, std::uint64_t thread_id, const std
             {
                 it->second = stack;
                 lru_touch(shard, key);
-                inc(stats_.snapshots_overwritten);
-                inc(stats_.snapshots_saved);
+                stats_.snapshots_overwritten.fetch_add(1, std::memory_order_relaxed);
+                stats_.snapshots_saved.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
             while (shard.snapshots.size() >= kShardSoftCap)
@@ -436,7 +432,7 @@ void SnapshotStore::save(std::int64_t seq_nr, std::uint64_t thread_id, const std
             }
             shard.snapshots.emplace(key, stack);
             lru_touch(shard, key);
-            inc(stats_.snapshots_saved);
+            stats_.snapshots_saved.fetch_add(1, std::memory_order_relaxed);
         });
 }
 
@@ -453,7 +449,7 @@ bool SnapshotStore::consume(std::int64_t seq_nr, std::uint64_t thread_id, std::v
             *out_stack = std::move(it->second);
             shard.snapshots.erase(it);
             lru_remove(shard, key);
-            inc(stats_.snapshots_consumed);
+            stats_.snapshots_consumed.fetch_add(1, std::memory_order_relaxed);
             return true;
         });
 }
