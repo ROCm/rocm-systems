@@ -1,11 +1,21 @@
 # Metric Counter Correction Methods — Design Guidance
 
-**Status:** Draft design guidance  
-**Context:** Percent and ratio metrics that violate expected bounds (e.g. > 100%, negative splits) due to multi-pass profiling variance, counter pairing semantics, or potential hardware counter issues — observed across CDNA/RDNA architectures during full-panel analyze runs.  
-**Audience:** Primary — designers and maintainers choosing correction methods for metric YAML; secondary — source material for enduser-facing explanations.  
-**Related code (shipped):** `src/utils/metrics/noise_clamper.py`, `src/utils/utils_analysis.py`, `src/rocprof_compute_soc/soc_base.py`, `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`, `src/utils/metrics/common.py` (`ValuDualIssueDetector`)
+**Status:** Draft design guidance (maintainer / PR normative rules)  
+**Audience:** Designers and maintainers choosing correction methods for metric YAML  
+**JIRA:** AIPROFCOMP-78
 
-**Related code (shipped in follow-up PR):** `src/utils/metrics/aggregation.py` (`BOUND_RATIO` / `to_bound_ratio`, element-wise `MIN`/`MAX` on Series — PR #10717)
+## Document map
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| **[Problem statement](metric-counter-correction-problem-statement.md)** | Symptoms, root causes, evidence from CPX workloads | **Whole team** — start here |
+| **[Single-pass grouping evaluation](single-pass-counter-grouping-evaluation.md)** | Pass-count cost, grouping policy trade-offs | Designers / profiling owners |
+| **[Multi-pass root-cause report](../reports/aiprofcomp78-multipass-root-cause-report.md)** | Data showing multi-pass stitching (`cpx_fix` branch) | Reviewers |
+| **[Grouping policy evaluation](../reports/aiprofcomp78-grouping-policy-evaluation.md)** | Simulated policy cost and co-location (`cpx_fix` branch) | Reviewers |
+| **This file** | **§0 MUST rules**, method reference, PR checklist | PR authors and reviewers |
+
+**Related code (shipped):** `noise_clamper.py`, `utils_analysis.py`, `soc_base.py`, `profiling_counter_grouping_policy.yaml`, `ValuDualIssueDetector`  
+**Related code (shipped PR #10717):** `aggregation.py` (`BOUND_RATIO`, element-wise `MIN`/`MAX`)
 
 ---
 
@@ -81,54 +91,26 @@ This table tracks **implementation state of related components** — not a one-t
 | **Multi-pass imputation** | **Shipped** | `utils_analysis.py` — stitches counters across passes | Root-cause context (§1.2) — not a correction |
 | **`ValuDualIssueDetector`** (VALU > 100% exception) | **Shipped** | `utils/metrics/common.py` — warnings, no clamp | Documented exception (§0 Rule 7) |
 | **`BOUND_RATIO`** (`to_bound_ratio`) | **Shipped** | `aggregation.py`; min/max on panel YAML (gfx940–942) | Correction method (§1.3) |
-| **Aggregate cap** on partition avg (`min(100, SUM(a)/SUM(b))`) | **Proposed** | Preferred avg fix — §2.4.2; may use `MIN(100, …)` in YAML | Correction method — avg rollout (§1.3) |
-| **Per-row `SUM(MIN(a,b))/SUM(b)`** on partition avg | **Shipped (interim)** | `1700_l2_cache.yaml`, CPF Util avg — follow-up PR #10717; prefer aggregate cap for new work | Correction method — avg alternative (§2.4.3) |
+| **Aggregate cap** on partition avg (`min(100, SUM(a)/SUM(b))`) | **Proposed** | Preferred avg fix — §2.4.1; may use `MIN(100, …)` in YAML | Correction method — avg rollout (§1) |
+| **Per-row `SUM(MIN(a,b))/SUM(b)`** on partition avg | **Shipped (interim)** | `1700_l2_cache.yaml`, CPF Util avg — PR #10717; prefer aggregate cap for new work | Correction method — avg alternative (§2.4.2) |
 | **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Shipped** | Panel YAML updates — PR #10717 | Correction method — min/max rollout (§1.3) |
 | **Clamp diagnostics** (`BOUND_RATIO`, aggregate cap, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today | Planned tooling (§6) |
 
 ---
 
-## 1. Target Problems, Root Causes, and Correction Methods
+## 1. Target problems and methods (summary)
 
-### 1.1 Target problems
+Full team context: **[problem statement](metric-counter-correction-problem-statement.md)**. Collection cost: **[grouping evaluation](single-pass-counter-grouping-evaluation.md)**.
 
-| Symptom | Typical metric types | User impact |
-|---|---|---|
-| **Percent avg > 100%** | HBM Read/Write Traffic, CPF Utilization | Aggregate fraction looks physically impossible |
-| **Percent min/max > 100%** (often extreme) | Workgroup Manager Utilization, CPC Stall Rate, Data-Return Busy | Max column dominated by one bad dispatch (e.g. 739%) |
-| **Negative derived values** | Remote Read/Write Traffic, cache split metrics | Subset subtraction goes negative |
-| **Complementary parts do not sum to 100%** | HBM + Remote traffic | After independent corrections, totals may drift |
+| Method | Layer | Fixes | Details |
+|--------|-------|-------|---------|
+| Single-pass grouping | Profile | Cross-pass stitching | Grouping evaluation doc |
+| `NOISE_CLAMP` | Analyze | Negative subtractions | §2.2 |
+| `BOUND_RATIO` | Analyze | Per-row ratio before min/max | §2.3 |
+| Aggregate cap | Analyze | Partition avg >100% | §2.4.1 |
+| Per-row `SUM(MIN)/SUM(b)` | Analyze | Partition avg (interim #10717) | §2.4.2 |
 
-These symptoms appear across architectures more or less.
-
-### 1.2 Root causes
-
-| Root cause | Mechanism | When it dominates |
-|---|---|---|
-| **Multi-pass profiling** | Hardware perfmon slot limits require multiple re-run passes; analyze **imputes** counters from different passes onto the same dispatch row (`utils_analysis.py`) | Default full analyze (`--block` all panels) |
-| **Asynchronous counter sampling** | Counters in different IP blocks are not sample-aligned even within one pass | Short dispatches, low event counts |
-| **Non-partition counter pairs** | Numerator and denominator measure different semantics (not strict subset) | Workgroup Manager Utilization: `GRBM_SPI_BUSY / GRBM_GUI_ACTIVE` |
-| **Aggregate ratio inflation** | `SUM(a)/SUM(b)` exceeds 100% when some rows have `a > b`, even if most rows are valid | HBM avg on noisy workloads |
-| **Potential hardware counter bugs** | Counter definition mismatch, overflow/wrap, incorrect event pairing, driver/firmware sampling defects, or IP-block timing that violates expected subset relationships | Persistent violations under **single-pass** collection on stable workloads; reproducible across runs, drivers, or partition modes |
-| **Intentional hardware behavior** | gfx942 VALU dual-issue can exceed 100% utilization | VALU Utilization (documented exception) |
-
-**Key insight:** A single PMC table row does **not** guarantee that all counters on that row were measured simultaneously unless they were collected in **one profiling pass**.
-
-**Noise vs hardware bug:** See §0 Definitions (*sporadic* vs *systematic*). Multi-pass variance and async sampling usually produce sporadic violations. Suspect a **potential hardware counter bug** when violations remain systematic after single-pass validation. Correction methods address sporadic noise; they must not become the only signal for systematic issues.
-
-### 1.3 Correction methods (overview)
-
-**Scope:** §2–§3 below cover **correction methods** designers apply to metric YAML. **Implementation status** (§0) lists additional related components (imputation, VALU exception, diagnostics). Partition **avg** has multiple analyze-time options (§2.4); **`BOUND_RATIO`** covers min/max.
-
-| Method | Layer | What it fixes | Primary lever |
-|---|---|---|---|
-| **Single-pass counter grouping** | Profile (collection) | Prevents cross-pass stitching for related counters | `profiling_counter_grouping_policy.yaml`, `--set`, greedy coalescing in `soc_base.py` |
-| **`NOISE_CLAMP`** | Analyze (formula) | Negative values from subtracting counters (`a − b < 0`) | Lower bound → 0, with diagnostics |
-| **`BOUND_RATIO`** | Analyze (formula) | Per-row ratio > 100% before min/max aggregation | Upper bound → 100% (silent today) |
-| **Aggregate cap** | Analyze (formula) | Volume-weighted avg `SUM(a)/SUM(b)` > 100% | `min(100, 100 × SUM(a)/SUM(b))` — partition avg only (§2.4.2) |
-| **Per-row `SUM(MIN(a,b))/SUM(b)`** | Analyze (formula) | Same symptom as aggregate cap; per-row invariant enforcement | Cap numerator per row before summing — partition avg alternative (§2.4.3) |
-
-Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are downstream guards when multi-pass or noise remains unavoidable. None of the analyze-time helpers **prove** a violation is noise — see §2.5 (masking risk) and §5 (validation per §0 Rule 3).
+Multi-pass imputation: `utils_analysis.py`. Evidence: [root-cause report](../reports/aiprofcomp78-multipass-root-cause-report.md).
 
 ---
 
@@ -136,22 +118,7 @@ Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are dow
 
 ### 2.1 Single-pass counter grouping
 
-**Definition:** Place counters that appear together in ratio or subtraction formulas into the same PMC perfmon bucket so they are collected during the same kernel re-run pass.
-
-**Implementation today:**
-
-- Greedy coalescing allocator in `soc_base.py` packs counters into `pmc_perf` files.
-- `profiling_counter_grouping_policy.yaml` assigns **tier-0 priority** to metric IDs that should coalesce first (`same_bucket_priority_metric_ids`).
-- User-facing shortcuts: `--set <name>` (predefined single-pass subsets), reduced `--block` selections.
-
-| Pros | Cons |
-|---|---|
-| Fixes the problem at the source — row-level counters are co-temporal | Cannot fit all panel counters in one pass on most workloads |
-| No analyze-time distortion | Requires ongoing policy maintenance per arch and metric |
-| Best accuracy for partition counters (`dram ⊆ total`) | Does not help non-partition pairs (e.g. Workgroup Manager Utilization) |
-| Reduces need for silent clamping | Many arches (e.g. gfx942) have empty `same_bucket_priority_metric_ids` today |
-
-**Masking risk (HW bugs):** **Lowest among analyze-time methods.** Single-pass grouping does not alter counter values; violations visible in raw PMC data remain visible in analyze output. This is the preferred way to **validate** whether remaining anomalies are collection artifacts or potential hardware/driver issues.
+**Summary only** — see **[single-pass grouping evaluation](single-pass-counter-grouping-evaluation.md)** for pass-count data, gfx942 policy simulation, and recommendations.
 
 ---
 
@@ -289,6 +256,8 @@ How much each method can hide a **potential hardware counter bug** (persistent w
 
 ## 3. Examples
 
+See **[problem statement §3](metric-counter-correction-problem-statement.md#3-evidence-from-aiprofcomp-78-workloads-gfx942-cpx)** for workload evidence. Key formula examples below.
+
 ### 3.1 Abstract examples
 
 Assume three dispatches. All formulas use Percent scale (× 100).
@@ -390,17 +359,9 @@ All methods agree; clamping is a no-op. Residual violations (> 100%) should be r
 
 Examples below include **shipped** and **proposed** patterns — see **Implementation status** in §0.
 
-#### Single-pass grouping *(shipped infrastructure; arch policy varies)*
+#### Single-pass grouping
 
-**Goal:** Collect `TCC_EA0_RDREQ_DRAM_sum` and `TCC_EA0_RDREQ_sum` in the same pass.
-
-| Approach | Example |
-|---|---|
-| Policy (gfx115x pattern) | Add metric id to `same_bucket_priority_metric_ids` in `profiling_counter_grouping_policy.yaml` |
-| User shortcut | `rocprof-compute profile --set <l2_subset> ...` when the set includes both counters |
-| Today on gfx942 | Policy map is `{}` — no arch-specific coalescing priorities for HBM traffic metrics |
-
-**Real metric:** *HBM Read Traffic* (panel 1700, gfx942 `1700_l2_cache.yaml`)
+See [grouping evaluation](single-pass-counter-grouping-evaluation.md). gfx942 policy is `{}` today.
 
 ---
 
