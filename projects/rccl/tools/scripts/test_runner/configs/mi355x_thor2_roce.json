@@ -4287,7 +4287,7 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_All_Core",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
@@ -4407,6 +4407,9 @@
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2"
       },
@@ -4414,6 +4417,13 @@
         {
           "name": "MultiSegment_Transport_All_MultiNode",
           "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        },
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment",
+          "env_variables": {
+            "NCCL_GIN_ENABLE": "0"
+          }
         }
       ]
     }
