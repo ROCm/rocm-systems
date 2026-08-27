@@ -78,14 +78,14 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b32");
   EXPECT_EQ(result.moi_candidates[0].text_offset, 0u);
   EXPECT_EQ(result.moi_candidates[0].file_offset, 0x100u);
-  ASSERT_TRUE(result.moi_candidates[0].addr_vgpr);
-  EXPECT_EQ(*result.moi_candidates[0].addr_vgpr, 0u);
-  ASSERT_TRUE(result.moi_candidates[0].data_vgpr);
-  EXPECT_EQ(*result.moi_candidates[0].data_vgpr, 0u);
+  ASSERT_TRUE(result.moi_candidates[0].operands.address_vgpr);
+  EXPECT_EQ(*result.moi_candidates[0].operands.address_vgpr, 0u);
+  ASSERT_TRUE(result.moi_candidates[0].operands.data_vgpr);
+  EXPECT_EQ(*result.moi_candidates[0].operands.data_vgpr, 0u);
   EXPECT_EQ(result.moi_candidates[1].kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
-  ASSERT_TRUE(result.moi_candidates[1].dst_vgpr);
-  EXPECT_EQ(*result.moi_candidates[1].dst_vgpr, 0u);
+  ASSERT_TRUE(result.moi_candidates[1].operands.destination_vgpr);
+  EXPECT_EQ(*result.moi_candidates[1].operands.destination_vgpr, 0u);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (size_t plan_index = 0; plan_index < result.resource_plans.size(); ++plan_index) {
     const ConSanCandidateResourcePlan &plan = result.resource_plans[plan_index];
@@ -3113,14 +3113,14 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
     EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
     EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
-    ASSERT_TRUE(result.moi_candidates.front().addr_vgpr);
-    EXPECT_EQ(*result.moi_candidates.front().addr_vgpr, expected_addr_vgpr);
+    ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
+    EXPECT_EQ(*result.moi_candidates.front().operands.address_vgpr, expected_addr_vgpr);
     if (expected_kind == ConSanLdsAccessKind::Read) {
-      ASSERT_TRUE(result.moi_candidates.front().dst_vgpr);
-      EXPECT_EQ(*result.moi_candidates.front().dst_vgpr, expected_value_vgpr);
+      ASSERT_TRUE(result.moi_candidates.front().operands.destination_vgpr);
+      EXPECT_EQ(*result.moi_candidates.front().operands.destination_vgpr, expected_value_vgpr);
     } else {
-      ASSERT_TRUE(result.moi_candidates.front().data_vgpr);
-      EXPECT_EQ(*result.moi_candidates.front().data_vgpr, expected_value_vgpr);
+      ASSERT_TRUE(result.moi_candidates.front().operands.data_vgpr);
+      EXPECT_EQ(*result.moi_candidates.front().operands.data_vgpr, expected_value_vgpr);
     }
     EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
@@ -6742,10 +6742,10 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  ASSERT_TRUE(result.moi_candidates.front().data_vgpr);
-  EXPECT_EQ(*result.moi_candidates.front().data_vgpr, 29u);
-  ASSERT_TRUE(result.moi_candidates.front().second_data_vgpr);
-  EXPECT_EQ(*result.moi_candidates.front().second_data_vgpr, 38u);
+  ASSERT_TRUE(result.moi_candidates.front().operands.data_vgpr);
+  EXPECT_EQ(*result.moi_candidates.front().operands.data_vgpr, 29u);
+  ASSERT_TRUE(result.moi_candidates.front().operands.second_data_vgpr);
+  EXPECT_EQ(*result.moi_candidates.front().operands.second_data_vgpr, 38u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
            patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore;
@@ -10285,7 +10285,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
-  EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 16);
+  EXPECT_EQ(result.moi_candidates.front().operands.raw_ioffset, 16);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());

@@ -987,13 +987,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       !options.automatic_moi_record_replay_sgpr_spill &&
       moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
   if (runtime_workgroup_gate) {
-    ConSanMoiCandidate atomic_guest;
-    atomic_guest.file_offset = candidate.site.file_offset;
-    atomic_guest.size = candidate.site.size;
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes, atomic_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.site.file_offset, candidate.site.size), options, workgroup_sources,
+        cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
-            atomic_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+            candidate.site.size, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);
     if (!gate) {
       errors.emplace_back(

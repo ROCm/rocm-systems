@@ -230,13 +230,11 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       options.moi_runtime_sample_stride > 1u && !options.automatic_moi_record_replay_sgpr_spill &&
       moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
   if (runtime_workgroup_gate) {
-    ConSanMoiCandidate barrier_guest;
-    barrier_guest.file_offset = candidate.site.file_offset;
-    barrier_guest.size = candidate.site.size;
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes, barrier_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.site.file_offset, candidate.site.size), options, workgroup_sources,
+        cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
-            barrier_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+            candidate.site.size, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);
     if (!gate) {
       errors.emplace_back(

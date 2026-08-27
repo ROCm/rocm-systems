@@ -168,10 +168,10 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
     const ConSanMoiCandidate &candidate = result.moi_candidates.front();
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
     EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-    EXPECT_EQ(candidate.raw_saddr, 14u);
-    EXPECT_EQ(candidate.raw_ioffset, 12);
-    ASSERT_TRUE(candidate.raw_scale_offset);
-    EXPECT_EQ(*candidate.raw_scale_offset, arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(candidate.operands.raw_saddr, 14u);
+    EXPECT_EQ(candidate.operands.raw_ioffset, 12);
+    ASSERT_TRUE(candidate.operands.raw_scale_offset);
+    EXPECT_EQ(*candidate.operands.raw_scale_offset, arch == ROCJITSU_CODE_ARCH_CDNA5);
     EXPECT_EQ(
         std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind), 1u)
         << testing::PrintToString(result.warnings);

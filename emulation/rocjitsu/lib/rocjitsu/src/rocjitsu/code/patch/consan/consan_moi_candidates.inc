@@ -370,25 +370,12 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
   candidate.file_offset = access.file_offset;
   candidate.size = access.instruction_size;
   candidate.width_bits = access.decoded_width_bits;
-  candidate.dst_vgpr = access.operands.destination_vgpr;
-  candidate.addr_vgpr = access.operands.address_vgpr;
-  candidate.data_vgpr = access.operands.data_vgpr;
-  candidate.second_data_vgpr = access.operands.second_data_vgpr;
+  candidate.operands = access.operands;
   if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
     candidate.kernel_descriptor_file_offset =
         access.execution_owner_descriptor_file_offsets.front();
   }
   candidate.uses_gfx1250_cluster_workgroup_id = access.container.uses_gfx1250_cluster_workgroup_id;
-  candidate.raw_op = access.operands.raw_op;
-  candidate.raw_saddr = access.operands.raw_saddr;
-  candidate.raw_scale_offset = access.operands.raw_scale_offset;
-  candidate.raw_vaddr = access.operands.raw_vaddr;
-  candidate.raw_vsrc = access.operands.raw_vsrc;
-  candidate.raw_vdst = access.operands.raw_vdst;
-  candidate.raw_ioffset = access.operands.raw_ioffset;
-  candidate.raw_segment = access.operands.raw_segment;
-  candidate.raw_scope = access.operands.raw_scope;
-  candidate.raw_th = access.operands.raw_th;
   candidate.mnemonic = access.mnemonic;
   for (const ConSanAccessRange &range : access.ranges) {
     if (access.origin == ConSanAccessOrigin::Flat) {

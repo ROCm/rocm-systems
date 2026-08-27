@@ -2647,8 +2647,8 @@
     return std::nullopt;
   }
   if (materialize_flat_address) {
-    if (!append_materialize_gfx12_flat_access_address(words, candidate, *candidate.addr_vgpr,
-                                                      *lds_byte_offset_vgpr, arch)) {
+    if (!append_materialize_gfx12_flat_access_address(
+            words, candidate, *candidate.operands.address_vgpr, *lds_byte_offset_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT address");
       return std::nullopt;
     }
@@ -2763,7 +2763,7 @@
     // later rejoin for the displaced guest access.
     uint16_t address_hi_source = materialize_flat_address
                                      ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
-                                     : static_cast<uint16_t>(*candidate.addr_vgpr + 1u);
+                                     : static_cast<uint16_t>(*candidate.operands.address_vgpr + 1u);
     if (!materialize_flat_address && source_is_spilled(address_hi_source)) {
       const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
       const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
@@ -3236,7 +3236,7 @@
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   const uint16_t guest_address_vgpr =
-      capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
+      capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
   const auto guest_words = build_moi_relocated_guest_access_words(
       bytes, candidate, arch, guest_address_vgpr,
       reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(

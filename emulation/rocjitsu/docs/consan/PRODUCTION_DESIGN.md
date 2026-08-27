@@ -3940,6 +3940,37 @@ analysis completed.
   representation cutover preserves the selected access set and emitted bytes.
   E2E validation remains outside this work.
 
+### Slice 5AA: reuse normalized access operands in MOI lowering
+
+- **One operand record, not selected field copies:** `ProgramInventory`
+  already retains the decoder operands needed by access policy and temporary
+  compatibility lowering in `ConSanAccessOperandFacts`. The temporary MOI
+  candidate now embeds that record directly. Planning and emission consume its
+  named normalized fields rather than a parallel set of destination, address,
+  data, and raw-encoding members.
+- **Narrower non-access boundary:** The runtime workgroup-selection gate only
+  needs the guest instruction bytes that it may execute on the unselected
+  path. It now accepts that byte span directly. Atomic, barrier, and fence
+  lowering no longer fabricate partially initialized `ConSanMoiCandidate`
+  objects merely to pass a file offset and size through this helper.
+- **Contract coverage:** Host tests continue to assert normalized register and
+  raw-encoding facts for native LDS, FLAT, and direct-to-LDS accesses, now
+  through the shared operand record. Existing paired device contracts cover
+  relocation, runtime sampling gates, operand overlap, gfx12 FLAT address
+  materialization, and gfx1250 high-bank/direct-to-LDS cases across the five
+  supported targets.
+- **Deletion result:** Production source is 16 physical lines smaller. Eleven
+  candidate operand members, their individual projection assignments, and
+  three fake access-candidate construction paths are gone. No compatibility
+  accessor or second operand schema was introduced; test source has no net
+  line growth.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 74.04
+  seconds. The complete physical-gfx950 gate was exercised in Slice 5X; this
+  representation cutover preserves the selected access set and emitted bytes.
+  E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

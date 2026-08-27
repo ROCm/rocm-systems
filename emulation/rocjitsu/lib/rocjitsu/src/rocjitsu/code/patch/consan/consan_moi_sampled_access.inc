@@ -1559,8 +1559,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               workgroup_errors);
           if (workgroup_sources) {
             auto gate = build_moi_runtime_workgroup_gate_call_words(
-                bytes, candidate, candidate_options, *workgroup_sources, cave_text_offset,
-                planned_patch.placement.return_target, access_island_word_count, arch);
+                bytes.subspan(candidate.file_offset, candidate.size), candidate_options,
+                *workgroup_sources, cave_text_offset, planned_patch.placement.return_target,
+                access_island_word_count, arch);
             if (gate)
               entry_prefix_words.insert(entry_prefix_words.end(), gate->begin(), gate->end());
           }
@@ -1591,7 +1592,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               (candidate_options.moi_sampled_check ? 7u : 5u) +
               (candidate_options.moi_runtime_sample_stride > 1u || window_bank_count > 1u ? 1u
                                                                                           : 0u));
-          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
           body_options.gfx1250_high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }

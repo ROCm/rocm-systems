@@ -240,33 +240,6 @@ struct ConSanAccessRange {
   bool operator==(const ConSanAccessRange &) const = default;
 };
 
-/// Decoder operands retained by normalized access inventory for later policy
-/// and compatibility lowering.
-///
-/// Optional fields preserve “not encoded/not decoded” rather than inventing a
-/// register or immediate. Raw FLAT fields remain target-neutral facts here;
-/// interpreting whether a particular combination is instrumentable belongs to
-/// engine policy and target lowering.
-struct ConSanAccessOperandFacts {
-  std::optional<uint16_t> destination_vgpr;
-  std::optional<uint16_t> destination_accvgpr;
-  std::optional<uint16_t> address_vgpr;
-  std::optional<uint16_t> data_vgpr;
-  std::optional<uint16_t> second_data_vgpr;
-  std::optional<uint32_t> raw_op;
-  std::optional<uint32_t> raw_saddr;
-  std::optional<bool> raw_scale_offset;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<int32_t> raw_ioffset;
-  std::optional<uint32_t> raw_segment;
-  std::optional<uint32_t> raw_scope;
-  std::optional<uint32_t> raw_th;
-
-  bool operator==(const ConSanAccessOperandFacts &) const = default;
-};
-
 /// Immutable normalized access fact for one container interpretation of a
 /// physical instruction.
 ///

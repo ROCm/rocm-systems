@@ -832,11 +832,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
 
   const bool load = candidate.kind == ConSanLdsAccessKind::Read;
-  const std::optional<uint16_t> first_data_vgpr = load ? candidate.dst_vgpr : candidate.data_vgpr;
+  const std::optional<uint16_t> first_data_vgpr =
+      load ? candidate.operands.destination_vgpr : candidate.operands.data_vgpr;
   const std::optional<uint16_t> second_data_vgpr =
       load && first_data_vgpr
           ? std::optional<uint16_t>(static_cast<uint16_t>(*first_data_vgpr + element_dwords))
-          : candidate.second_data_vgpr;
+          : candidate.operands.second_data_vgpr;
   if (!first_data_vgpr || !second_data_vgpr || *first_data_vgpr > 255u ||
       *second_data_vgpr > 255u ||
       (element_dwords == 2u && (*first_data_vgpr > 254u || *second_data_vgpr > 254u))) {
@@ -1074,12 +1075,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   } else if (materialize_flat_address && options.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
-                                        vector_source_vgpr(*candidate.addr_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        materialized_address_vgpr, vector_source_vgpr(*candidate.operands.address_vgpr), arch));
     if (!candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
       words.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(materialized_address_vgpr + 1u),
-          vector_source_vgpr(static_cast<uint16_t>(*candidate.addr_vgpr + 1u)), arch));
+          vector_source_vgpr(static_cast<uint16_t>(*candidate.operands.address_vgpr + 1u)), arch));
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
   } else if (save_clobbered_address) {
@@ -1097,7 +1098,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
+        capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
         bytes, candidate, arch, guest_address_vgpr,
         reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(

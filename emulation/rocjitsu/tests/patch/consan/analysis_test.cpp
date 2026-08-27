@@ -64,7 +64,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
     EXPECT_EQ(candidate.width_bits, expected_widths[index]);
-    EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
+    EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
 }
 
@@ -121,7 +121,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
     const ConSanMoiCandidate &candidate = result.moi_candidates[index];
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
     EXPECT_EQ(candidate.width_bits, expected_widths[index]);
-    EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
+    EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
 }
 
@@ -1602,7 +1602,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
-  EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
+  EXPECT_EQ(result.moi_candidates.front().operands.raw_segment, 0u);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
 }
 
@@ -2598,10 +2598,10 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
               ConSanFlatAddressSpaceHint::Group);
     EXPECT_EQ(result.moi_candidates.front().size, 2u * sizeof(uint32_t));
     EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_dword");
-    EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
-    ASSERT_TRUE(result.moi_candidates.front().addr_vgpr);
-    EXPECT_EQ(*result.moi_candidates.front().addr_vgpr, 0u);
-    EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 0);
+    EXPECT_EQ(result.moi_candidates.front().operands.raw_segment, 0u);
+    ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
+    EXPECT_EQ(*result.moi_candidates.front().operands.address_vgpr, 0u);
+    EXPECT_EQ(result.moi_candidates.front().operands.raw_ioffset, 0);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     if (engine == ConSanMoiEngine::InlineShadow) {

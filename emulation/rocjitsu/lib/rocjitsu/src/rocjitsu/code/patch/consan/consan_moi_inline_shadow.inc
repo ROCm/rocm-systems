@@ -1826,7 +1826,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                 : std::span<const uint32_t>{};
         body_options.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
         if (moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) {
-          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
           body_options.gfx1250_high_bank_address_destination = static_cast<uint16_t>(
               consan_detail::inline_shadow_loop_counter_vgpr(
                   planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),
@@ -2709,7 +2709,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     // Metadata consumes the low-bank captured address, while the guest still
     // names its original encoded SRC0 under the restored application mode.
     const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
+        capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
         bytes, candidate, arch, guest_address_vgpr,
         reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
@@ -3315,9 +3315,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       return std::nullopt;
     const bool spilled_address =
         range_overlaps(*lds_byte_offset_vgpr, 1u, spill->vgpr_base, spill->vgpr_count);
-    if (candidate.dst_vgpr &&
-        range_overlaps(*candidate.dst_vgpr, candidate_payload_vgpr_count(candidate),
-                       spill->vgpr_base, spill->vgpr_count)) {
+    if (candidate.operands.destination_vgpr &&
+        range_overlaps(*candidate.operands.destination_vgpr,
+                       candidate_payload_vgpr_count(candidate), spill->vgpr_base,
+                       spill->vgpr_count)) {
       errors.emplace_back(
           "ConSan MOI sampled spill-backed operand recovery overlaps the load destination");
       return std::nullopt;
@@ -3335,7 +3336,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     const uint16_t replay_address_vgpr =
-        preserved_lds_byte_offset_vgpr.value_or(*candidate.addr_vgpr);
+        preserved_lds_byte_offset_vgpr.value_or(*candidate.operands.address_vgpr);
     const auto guest_words = build_moi_relocated_guest_access_words(
         bytes, candidate, arch, replay_address_vgpr,
         reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
@@ -3664,10 +3665,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanOptions &options, const ConSanMoiWorkgroupSources &workgroup_sources,
-    uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
-    rj_code_arch_t arch) {
+    std::span<const uint8_t> guest_bytes, const ConSanOptions &options,
+    const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,
+    uint64_t return_text_offset, uint64_t reserved_word_count, rj_code_arch_t arch) {
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
       moi_runtime_workgroup_selection_source(options, arch);
   const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
@@ -3756,9 +3756,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   const size_t selected_branch_index = words.size();
   words.push_back(build_s_nop(0, arch));
   words.push_back(*restore_scc);
-  for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
+  for (uint64_t offset = 0; offset < guest_bytes.size(); offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
+    std::memcpy(&word, guest_bytes.data() + offset, sizeof(word));
     words.push_back(word);
   }
   if (!append_moi_scc_preserving_indirect_jump(words, gate_text_offset, return_text_offset,

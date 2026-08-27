@@ -1959,9 +1959,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return;
           }
           auto gate = build_moi_runtime_workgroup_gate_call_words(
-              bytes, candidate, candidate_options, *planned_patch.runtime_workgroup_sources,
-              cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
-              arch);
+              bytes.subspan(candidate.file_offset, candidate.size), candidate_options,
+              *planned_patch.runtime_workgroup_sources, cave_text_offset,
+              planned_patch.placement.return_target, runtime_gate_island_words, arch);
           if (!gate) {
             const auto describe_source = [](const ConSanMoiWorkgroupSource &source) {
               if (source.scalar_src)
@@ -1999,7 +1999,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                   candidate_options, layout.record_replay_dispatch_token_capacity)
                   ? 10u
                   : 6u;
-          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
           body_options.gfx1250_high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }

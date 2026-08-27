@@ -1052,11 +1052,11 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   // into dedicated scratch before this placeholder can be consumed.
   if (candidate.origin == ConSanAccessOrigin::DirectToLds)
     return 0u;
-  if (!candidate.addr_vgpr) {
+  if (!candidate.operands.address_vgpr) {
     errors.emplace_back("ConSan MOI probe requires an LDS address VGPR");
     return std::nullopt;
   }
-  return *candidate.addr_vgpr;
+  return *candidate.operands.address_vgpr;
 }
 
 [[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
@@ -1070,10 +1070,11 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
   // in an ordinary VGPR. Preserve it before relocating the guest instruction.
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 256u || result_vgpr >= 256u)
+    if (!candidate.operands.address_vgpr || *candidate.operands.address_vgpr >= 256u ||
+        result_vgpr >= 256u)
       return false;
-    words.push_back(
-        build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*candidate.addr_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        result_vgpr, vector_source_vgpr(*candidate.operands.address_vgpr), arch));
     return true;
   }
   if (!consan_uses_gfx9_cdna_encoding(arch))
@@ -1115,16 +1116,18 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 candidate_uses_gfx12_scalar_vector_flat_address(const ConSanMoiCandidate &candidate,
                                                 rj_code_arch_t arch) {
   return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
-         candidate.raw_saddr && !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
+         candidate.operands.raw_saddr &&
+         !is_vector_flat_no_saddr(*candidate.operands.raw_saddr, arch);
 }
 
 [[nodiscard]] bool
 candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &candidate,
                                                       rj_code_arch_t arch) {
   return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
-         candidate.raw_saddr && candidate.raw_ioffset && candidate.raw_scale_offset &&
+         candidate.operands.raw_saddr && candidate.operands.raw_ioffset &&
+         candidate.operands.raw_scale_offset &&
          (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch) ||
-          *candidate.raw_ioffset != 0);
+          *candidate.operands.raw_ioffset != 0);
 }
 
 [[nodiscard]] uint16_t gfx12_flat_access_address_scratch_count(const ConSanMoiCandidate &candidate,
@@ -1149,16 +1152,16 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
                                                                 uint16_t result_vgpr,
                                                                 rj_code_arch_t arch) {
   const uint16_t scratch_count = gfx12_flat_access_address_scratch_count(candidate, arch);
-  if (scratch_count == 0u || !candidate.addr_vgpr || input_vgpr >= 255u || result_vgpr >= 255u ||
-      static_cast<uint32_t>(result_vgpr) + scratch_count > 256u)
+  if (scratch_count == 0u || !candidate.operands.address_vgpr || input_vgpr >= 255u ||
+      result_vgpr >= 255u || static_cast<uint32_t>(result_vgpr) + scratch_count > 256u)
     return false;
 
   if (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
-    if (*candidate.raw_saddr > 104u || (*candidate.raw_saddr & 1u) != 0u ||
+    if (*candidate.operands.raw_saddr > 104u || (*candidate.operands.raw_saddr & 1u) != 0u ||
         candidate.width_bits == 0u)
       return false;
     const uint16_t offset_vgpr = static_cast<uint16_t>(result_vgpr + 2u);
-    if (*candidate.raw_scale_offset) {
+    if (*candidate.operands.raw_scale_offset) {
       const uint32_t byte_count = (candidate.width_bits + 7u) / 8u;
       const auto scale = instrumentation::build_v_mul_lo_u32_literal(offset_vgpr, offset_vgpr,
                                                                      byte_count, input_vgpr, arch);
@@ -1168,10 +1171,11 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
     } else {
       words.push_back(build_v_mov_b32_e32(offset_vgpr, vector_source_vgpr(input_vgpr), arch));
     }
-    words.push_back(
-        build_v_mov_b32_e32(result_vgpr, static_cast<uint16_t>(*candidate.raw_saddr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        result_vgpr, static_cast<uint16_t>(*candidate.operands.raw_saddr), arch));
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(result_vgpr + 1u),
-                                        static_cast<uint16_t>(*candidate.raw_saddr + 1u), arch));
+                                        static_cast<uint16_t>(*candidate.operands.raw_saddr + 1u),
+                                        arch));
     const auto add_vector_offset =
         instrumentation::build_v_add_u64_vgpr_offset(result_vgpr, offset_vgpr, arch);
     if (!add_vector_offset)
@@ -1183,9 +1187,9 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
                                         vector_source_vgpr(static_cast<uint16_t>(input_vgpr + 1u)),
                                         arch));
   }
-  if (*candidate.raw_ioffset != 0) {
-    const auto add =
-        instrumentation::build_v_add_u64_signed_i24(result_vgpr, *candidate.raw_ioffset, arch);
+  if (*candidate.operands.raw_ioffset != 0) {
+    const auto add = instrumentation::build_v_add_u64_signed_i24(
+        result_vgpr, *candidate.operands.raw_ioffset, arch);
     if (!add)
       return false;
     words.insert(words.end(), add->begin(), add->end());
@@ -1212,10 +1216,11 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
 }
 
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
-  if (!candidate.addr_vgpr || !candidate.dst_vgpr)
+  if (!candidate.operands.address_vgpr || !candidate.operands.destination_vgpr)
     return false;
   const uint16_t address_vgpr_count = candidate.origin == ConSanAccessOrigin::Flat ? 2u : 1u;
-  return range_overlaps(*candidate.addr_vgpr, address_vgpr_count, *candidate.dst_vgpr,
+  return range_overlaps(*candidate.operands.address_vgpr, address_vgpr_count,
+                        *candidate.operands.destination_vgpr,
                         candidate_payload_vgpr_count(candidate));
 }
 
@@ -1228,7 +1233,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   // SRC0 bank must be copied while that bank is still selected. The appended
   // probe subsequently selects bank zero for its own scratch registers.
   return arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.origin != ConSanAccessOrigin::Flat &&
-         candidate.addr_vgpr && (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
+         candidate.operands.address_vgpr &&
+         (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
 }
 
 // A Sampled store executes its displaced guest instruction before the probe
@@ -1241,7 +1247,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
 // that the final restore would overwrite.
 [[nodiscard]] bool sampled_access_can_emit_spill_over_guest_operands(
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.dst_vgpr &&
+  return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.operands.destination_vgpr &&
          candidate.origin != ConSanAccessOrigin::DirectToLds && options.moi_owner_vgpr &&
          !options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
@@ -1251,7 +1257,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   if (sampled_access_can_emit_spill_over_guest_operands(options, candidate, arch))
     return true;
-  if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.dst_vgpr ||
+  if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.operands.destination_vgpr ||
       candidate.origin == ConSanAccessOrigin::DirectToLds || options.automatic_moi_private_epoch ||
       moi_uses_scalar_persistent_state(options) ||
       candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
@@ -1394,21 +1400,23 @@ struct SampledAtomicScratchLayout {
     return true;
   }
   const uint16_t payload_vgpr_count = candidate_payload_vgpr_count(candidate);
-  if (candidate.dst_vgpr &&
-      range_overlaps(*candidate.dst_vgpr, payload_vgpr_count, scratch_vgpr, scratch_count)) {
+  if (candidate.operands.destination_vgpr &&
+      range_overlaps(*candidate.operands.destination_vgpr, payload_vgpr_count, scratch_vgpr,
+                     scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the destination VGPRs");
     return true;
   }
-  const uint16_t data_vgpr_count = candidate.second_data_vgpr
+  const uint16_t data_vgpr_count = candidate.operands.second_data_vgpr
                                        ? candidate_payload_vgpr_count_per_address(candidate)
                                        : payload_vgpr_count;
-  if (candidate.data_vgpr &&
-      range_overlaps(*candidate.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
+  if (candidate.operands.data_vgpr &&
+      range_overlaps(*candidate.operands.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the data VGPRs");
     return true;
   }
-  if (candidate.second_data_vgpr &&
-      range_overlaps(*candidate.second_data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
+  if (candidate.operands.second_data_vgpr &&
+      range_overlaps(*candidate.operands.second_data_vgpr, data_vgpr_count, scratch_vgpr,
+                     scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the second data VGPRs");
     return true;
   }
@@ -2938,22 +2946,25 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   // expose the first destination register, so supplement them before choosing
   // a liveness-dead window rather than rejecting the chosen window later.
   if (access_candidate != nullptr) {
-    if (access_candidate->addr_vgpr) {
+    if (access_candidate->operands.address_vgpr) {
       const uint8_t address_count = access_candidate->origin == ConSanAccessOrigin::Flat ? 2u : 1u;
-      request.forbidden.expand({RegClass::VGPR, *access_candidate->addr_vgpr, address_count});
+      request.forbidden.expand(
+          {RegClass::VGPR, *access_candidate->operands.address_vgpr, address_count});
     }
     const uint8_t payload_count =
         static_cast<uint8_t>(candidate_payload_vgpr_count(*access_candidate));
-    if (access_candidate->dst_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *access_candidate->dst_vgpr, payload_count});
+    if (access_candidate->operands.destination_vgpr)
+      request.forbidden.expand(
+          {RegClass::VGPR, *access_candidate->operands.destination_vgpr, payload_count});
     const uint8_t data_count =
-        access_candidate->second_data_vgpr
+        access_candidate->operands.second_data_vgpr
             ? static_cast<uint8_t>(candidate_payload_vgpr_count_per_address(*access_candidate))
             : payload_count;
-    if (access_candidate->data_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *access_candidate->data_vgpr, data_count});
-    if (access_candidate->second_data_vgpr) {
-      request.forbidden.expand({RegClass::VGPR, *access_candidate->second_data_vgpr, data_count});
+    if (access_candidate->operands.data_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *access_candidate->operands.data_vgpr, data_count});
+    if (access_candidate->operands.second_data_vgpr) {
+      request.forbidden.expand(
+          {RegClass::VGPR, *access_candidate->operands.second_data_vgpr, data_count});
     }
   }
   // Atomic address/payload widths come from ConSan's decoded atomic site.
@@ -3108,9 +3119,9 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     if (options.moi_engine == ConSanMoiEngine::Sampled && access_candidate != nullptr &&
         sampled_access_supports_spill_backed_operand_recovery(options, *access_candidate,
                                                               state.arch) &&
-        access_candidate->dst_vgpr) {
+        access_candidate->operands.destination_vgpr) {
       spill_request.forbidden.expand(
-          {RegClass::VGPR, *access_candidate->dst_vgpr,
+          {RegClass::VGPR, *access_candidate->operands.destination_vgpr,
            static_cast<uint8_t>(candidate_payload_vgpr_count(*access_candidate))});
     }
     register_plan = plan_consan_registers(spill_request, live_before_all_owners);

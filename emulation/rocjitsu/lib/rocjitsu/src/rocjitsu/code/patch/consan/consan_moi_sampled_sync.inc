@@ -3245,13 +3245,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI pre-acquire fence capture does not support a runtime workgroup gate");
       return std::nullopt;
     }
-    ConSanMoiCandidate fence_guest;
-    fence_guest.file_offset = candidate.patch_file_offset;
-    fence_guest.size = static_cast<uint32_t>(candidate.patch_size + displaced_tail_bytes);
+    const uint32_t guest_byte_count =
+        static_cast<uint32_t>(candidate.patch_size + displaced_tail_bytes);
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes, fence_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.patch_file_offset, guest_byte_count), options, workgroup_sources,
+        cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
-            fence_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+            guest_byte_count, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);
     if (!gate) {
       errors.emplace_back(

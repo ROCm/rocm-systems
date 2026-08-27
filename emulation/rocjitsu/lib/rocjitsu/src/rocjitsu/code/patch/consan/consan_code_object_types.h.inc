@@ -384,6 +384,34 @@ inline constexpr std::array<ConSanAccessOrigin, 3> kConSanAccessOrigins = {
 
 static_assert(kConSanAccessOrigins.size() == static_cast<size_t>(ConSanAccessOrigin::Count));
 
+/// Decoder operands retained by normalized access inventory and temporary
+/// compatibility lowering.
+///
+/// Optional fields preserve “not encoded/not decoded” rather than inventing a
+/// register or immediate. Raw FLAT fields remain target-neutral facts here;
+/// interpreting whether a particular combination is instrumentable belongs to
+/// engine policy and target lowering. The temporary MOI candidate embeds this
+/// same record rather than copying selected operands into a parallel schema.
+struct ConSanAccessOperandFacts {
+  std::optional<uint16_t> destination_vgpr;
+  std::optional<uint16_t> destination_accvgpr;
+  std::optional<uint16_t> address_vgpr;
+  std::optional<uint16_t> data_vgpr;
+  std::optional<uint16_t> second_data_vgpr;
+  std::optional<uint32_t> raw_op;
+  std::optional<uint32_t> raw_saddr;
+  std::optional<bool> raw_scale_offset;
+  std::optional<uint32_t> raw_vaddr;
+  std::optional<uint32_t> raw_vsrc;
+  std::optional<uint32_t> raw_vdst;
+  std::optional<int32_t> raw_ioffset;
+  std::optional<uint32_t> raw_segment;
+  std::optional<uint32_t> raw_scope;
+  std::optional<uint32_t> raw_th;
+
+  bool operator==(const ConSanAccessOperandFacts &) const = default;
+};
+
 /// One normalized byte range retained by the temporary MOI lowering operand.
 ///
 /// This is a compact projection of `ConSanAccessRange`: policy and inventory
@@ -408,22 +436,9 @@ struct ConSanMoiCandidate {
   uint64_t file_offset = 0;
   uint32_t size = 0;
   uint32_t width_bits = 0;
-  std::optional<uint16_t> dst_vgpr;
-  std::optional<uint16_t> addr_vgpr;
-  std::optional<uint16_t> data_vgpr;
-  std::optional<uint16_t> second_data_vgpr;
+  ConSanAccessOperandFacts operands;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   bool uses_gfx1250_cluster_workgroup_id = false;
-  std::optional<uint32_t> raw_op;
-  std::optional<uint32_t> raw_saddr;
-  std::optional<bool> raw_scale_offset;
-  std::optional<uint32_t> raw_vaddr;
-  std::optional<uint32_t> raw_vsrc;
-  std::optional<uint32_t> raw_vdst;
-  std::optional<int32_t> raw_ioffset;
-  std::optional<uint32_t> raw_segment;
-  std::optional<uint32_t> raw_scope;
-  std::optional<uint32_t> raw_th;
   std::string mnemonic;
   /// Normalized ranges copied from the admitted `ProgramInventory` site.
   /// Lowering must not reopen pristine bytes to classify or decode them.
