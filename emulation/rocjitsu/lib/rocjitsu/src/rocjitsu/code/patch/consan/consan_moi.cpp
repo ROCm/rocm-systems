@@ -503,7 +503,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_record_replay_workgroup_sgprs = {};
   result.resolved_moi_exec_save_sgpr.reset();
   result.resolved_moi_transient_sgpr_assignments.clear();
-  result.resolved_moi_owner_sgpr.reset();
   result.resolved_moi_dispatch_id_sgpr.reset();
   result.resolved_moi_dispatch_id_vgpr.reset();
   result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
@@ -811,8 +810,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;
-  if (!result.resolved_moi_owner_sgpr)
-    result.resolved_moi_owner_sgpr = effective_options.moi_owner_sgpr;
   if (!result.resolved_moi_dispatch_id_sgpr)
     result.resolved_moi_dispatch_id_sgpr = effective_options.moi_dispatch_id_sgpr;
   if (!result.resolved_moi_dispatch_id_vgpr)

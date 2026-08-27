@@ -217,7 +217,6 @@ struct ConSanResult {
   ConSanMoiPersistentWorkgroupRegisters resolved_moi_record_replay_workgroup_sgprs;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
-  std::optional<uint16_t> resolved_moi_owner_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
   uint64_t moi_report_dispatch_id = 0;

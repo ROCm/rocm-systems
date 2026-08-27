@@ -5249,7 +5249,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     }
     options.moi_owner_sgpr = static_cast<uint16_t>(sgpr);
     options.automatic_moi_owner_sgpr = true;
-    result.resolved_moi_owner_sgpr = options.moi_owner_sgpr;
     result.warnings.emplace_back("ConSan MOI automatically assigned hw_id owner temporary s" +
                                  std::to_string(sgpr));
     return true;
@@ -5269,18 +5268,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   }
   options.moi_owner_sgpr = *options.moi_exec_save_sgpr;
   options.automatic_moi_owner_sgpr = true;
-  std::optional<uint16_t> resolved_owner = options.moi_owner_sgpr;
-  if (!options.moi_transient_sgpr_assignments.empty()) {
-    resolved_owner = options.moi_transient_sgpr_assignments.front().owner_sgpr;
-    for (const ConSanMoiTransientSgprAssignment &assignment :
-         options.moi_transient_sgpr_assignments) {
-      if (!resolved_owner || assignment.owner_sgpr != resolved_owner) {
-        resolved_owner.reset();
-        break;
-      }
-    }
-  }
-  result.resolved_moi_owner_sgpr = resolved_owner;
   result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
   result.warnings.emplace_back(
       "ConSan MOI assigned its Inline resident-wave owner inside the saved scalar window");

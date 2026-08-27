@@ -4298,11 +4298,11 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
 
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t owner_sgpr = *result.resolved_moi_exec_save_sgpr;
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
-  const auto owner_init =
-      build_s_getreg_b32(*result.resolved_moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto owner_init = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
   ASSERT_GE(prologue_words.size(), 11u);
@@ -4316,11 +4316,11 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   const std::array<uint32_t, 6> owner_sequence = {
       *owner_init,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
-      build_s_add_u32(*result.resolved_moi_owner_sgpr, *result.resolved_moi_owner_sgpr,
-                      scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1),
+                      ROCJITSU_CODE_ARCH_RDNA4),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4),
-      build_v_mov_b32_e32(1, *result.resolved_moi_owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(1, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
   EXPECT_TRUE(contains_subsequence(prologue_words, owner_sequence));
@@ -5030,7 +5030,6 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  EXPECT_EQ(result.resolved_moi_owner_sgpr, result.resolved_moi_exec_save_sgpr);
   EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 20);
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 22);
 
@@ -5045,9 +5044,9 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
-  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto get_hw_id =
-      build_s_getreg_b32(*result.resolved_moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_getreg_b32(*result.resolved_moi_exec_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
   EXPECT_TRUE(std::find(prologue_words.begin(), prologue_words.end(), *get_hw_id) !=
               prologue_words.end());
@@ -5086,7 +5085,8 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   ASSERT_NE(access, result.patches.end());
   ASSERT_EQ(access->scratch_vgpr, 1);
   EXPECT_FALSE(access->persistent_owner_private_offset);
-  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t owner_sgpr = *result.resolved_moi_exec_save_sgpr;
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5095,12 +5095,11 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   const auto get_hw_id =
-      hwreg ? build_s_getreg_b32(*result.resolved_moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4)
-            : std::nullopt;
+      hwreg ? build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4) : std::nullopt;
   const auto save_owner = instrumentation::build_v_writelane_b32(
-      /*owner backup=*/4u, *result.resolved_moi_owner_sgpr, 0u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_owner = instrumentation::build_v_readlane_b32(
-      *result.resolved_moi_owner_sgpr, /*owner backup=*/4u, 0u, ROCJITSU_CODE_ARCH_RDNA4);
+      /*owner backup=*/4u, owner_sgpr, 0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_owner = instrumentation::build_v_readlane_b32(owner_sgpr, /*owner backup=*/4u,
+                                                                   0u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
   ASSERT_TRUE(save_owner);
   ASSERT_TRUE(restore_owner);
@@ -5108,14 +5107,13 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   expected_owner.insert(expected_owner.end(), save_owner->begin(), save_owner->end());
   expected_owner.push_back(*get_hw_id);
   expected_owner.push_back(build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
-  expected_owner.push_back(
-      build_s_add_u32(*result.resolved_moi_owner_sgpr, *result.resolved_moi_owner_sgpr,
-                      scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_RDNA4));
+  expected_owner.push_back(build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1),
+                                           ROCJITSU_CODE_ARCH_RDNA4));
   expected_owner.push_back(build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
   expected_owner.push_back(
       *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4));
-  expected_owner.push_back(build_v_mov_b32_e32(/*owner field=*/5u, *result.resolved_moi_owner_sgpr,
-                                               ROCJITSU_CODE_ARCH_RDNA4));
+  expected_owner.push_back(
+      build_v_mov_b32_e32(/*owner field=*/5u, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   expected_owner.insert(expected_owner.end(), restore_owner->begin(), restore_owner->end());
   expected_owner.push_back(
       *instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4));

@@ -3616,6 +3616,29 @@ analysis completed.
   device tests across the five supported targets pass in 70.45 seconds. E2E
   validation remains outside this work.
 
+### Slice 5O: delete the transient owner-SGPR mirror
+
+- **Authoritative owners:** Explicit owner-SGPR requests remain in lowering
+  options. Automatic InlineShadow owner computation uses the already-owned
+  EXEC-save allocation and per-owner transient assignments. Those values feed
+  emission directly; the completed transform does not need a separate scalar
+  claiming that all owners happened to choose one register.
+- **Completed deletion:** `ConSanResult::resolved_moi_owner_sgpr`, its reset and
+  fallback copy, two early writes, and an 11-line reconciliation pass used only
+  to publish the test observation are gone. No production consumer read the
+  field. Tests with explicit input use that input; automatic-allocation tests
+  use the authoritative EXEC-save result while continuing to match the emitted
+  owner acquisition, nonzero bias, scalar backup/restore, and VALU transfer
+  sequences.
+- **Deletion result:** Production source is 17 lines smaller, source plus tests
+  is 19 lines smaller, and each result loses the redundant optional scalar. No
+  replacement field or test adapter was added.
+- **Completed checked-in gate:** All five affected instruction-level tests
+  pass. The complete host gate passes 1,509 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878 simulator-
+  device tests across the five supported targets pass in 76.24 seconds. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -2002,11 +2002,11 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
             4u);
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
   const auto owner_init =
-      build_s_getreg_b32(*result.resolved_moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_getreg_b32(*result.resolved_moi_exec_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
 }
@@ -2987,14 +2987,14 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(options.moi_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
-  const uint16_t owner_sgpr = *result.resolved_moi_owner_sgpr;
+  const uint16_t owner_sgpr = *options.moi_owner_sgpr;
   const auto get_hw_id = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
   const std::array<uint32_t, 7> expected_prefix = {
