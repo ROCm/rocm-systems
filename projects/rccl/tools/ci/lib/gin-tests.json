@@ -42,7 +42,7 @@
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
-      "env": [],
+      "env": ["NCCL_DEBUG=WARN"],
       "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:GinAnvilIpcDeviceTest.*"
     }
   ]

@@ -42,12 +42,14 @@
 // (via the inlined template) call them.
 // --------------------------------------------------------------------------
 __device__ unsigned long long g_gdaStubQuietCount = 0;
+__device__ unsigned long long g_gdaStubPutNbiCount = 0;
 
 namespace rocshmem {
 
 __device__ void QueuePair::put_nbi(void* raddr, uint32_t /*rkey*/, const void* laddr, uint32_t /*lkey*/,
                                    size_t length, ActiveWFInfo& /*wf_info*/, bool /*ring_db*/) {
-  if (raddr == nullptr || laddr == nullptr || length == 0) return;
+  if (raddr == nullptr || laddr == nullptr) return;
+  atomicAdd(&g_gdaStubPutNbiCount, 1ULL);
   auto* d = static_cast<char*>(raddr);
   const auto* s = static_cast<const char*>(laddr);
   for (size_t i = 0; i < length; ++i) d[i] = s[i];
@@ -159,6 +161,17 @@ static unsigned long long readQuietCount() {
   return q;
 }
 
+static void resetPutNbiCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubPutNbiCount), &z, sizeof(z)));
+}
+
+static unsigned long long readPutNbiCount() {
+  unsigned long long n = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaStubPutNbiCount), sizeof(n)));
+  return n;
+}
+
 // G1: Put with data (no signal) copies src -> peer's remote buffer.
 __global__ void kernelPutData(GdaHarness* h, size_t bytes) {
   ncclGinCtx ginCtx{};
@@ -207,8 +220,10 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_ZeroByteSkipsDataStillSignals) {
   env.src.copyFrom(src);
   env.dst.zero();
   env.build();
+  resetPutNbiCount();
   kernelPutZeroBytes<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
+  EXPECT_EQ(readPutNbiCount(), 0ULL);  // production skips put_nbi when bytes==0
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], 0u);  // data write skipped
   auto sigs = env.signals.copyTo();
