@@ -8,6 +8,7 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce — no GPU hardware required.
 """
 
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -528,3 +529,56 @@ def test_membw_analysis_counter_selection(
 
     assert counters & FIXTURE_COUNTERS == expected_counters
     assert effective_filter_blocks == filter_blocks
+
+
+# =============================================================================
+# post_profiling: roofline gating
+# =============================================================================
+
+
+def _make_roofline_soc(tmp_path: Path, filter_blocks: list[str]) -> OmniSoC_Base:
+    """Build a benchmark-capable SoC with the given effective filter blocks."""
+    args = SimpleNamespace(
+        device=0,
+        filter_blocks=filter_blocks,
+        no_roof=False,
+        output_directory=str(tmp_path),
+    )
+    mspec = SimpleNamespace(cache_sizes={}, rocminfo_lines=None)
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, mspec)
+    soc.set_arch("gfx942")
+    return soc
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "expect_benchmark"),
+    [
+        pytest.param([], True, id="no_filter_runs_benchmark"),
+        pytest.param(["4"], True, id="block_4_runs_benchmark"),
+        pytest.param(["roof"], True, id="roof_alias_runs_benchmark"),
+        pytest.param(["11.2.3", "11.2.4"], False, id="set_metrics_skip_benchmark"),
+        pytest.param(["2"], False, id="unrelated_block_skips_benchmark"),
+    ],
+)
+def test_post_profiling_roofline_gating(
+    tmp_path: Path, filter_blocks: list[str], expect_benchmark: bool
+) -> None:
+    """Roofline runs only when the effective filter blocks cover block 4."""
+    soc = _make_roofline_soc(tmp_path, filter_blocks)
+
+    with ExitStack() as patch_stack:
+        mock_benchmark = patch_stack.enter_context(
+            patch("rocprof_compute_soc.soc_base.run_roofline_benchmark")
+        )
+        patch_stack.enter_context(
+            patch(
+                "rocprof_compute_soc.soc_base.validate_roofline_csv",
+                return_value=(True, ""),
+            )
+        )
+        patch_stack.enter_context(patch("rocprof_compute_soc.soc_base.console_log"))
+        patch_stack.enter_context(patch("rocprof_compute_soc.soc_base.console_debug"))
+        soc.post_profiling()
+
+    assert mock_benchmark.called is expect_benchmark

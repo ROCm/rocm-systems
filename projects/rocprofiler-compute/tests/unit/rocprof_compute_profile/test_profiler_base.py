@@ -696,6 +696,7 @@ def test_pre_processing_persists_membw_analysis_config(
     )
     assert profiling_config["membw_analysis"] is True
     assert profiling_config["filter_blocks"] == effective_filter_blocks
+    assert profiling_args.filter_blocks == effective_filter_blocks
 
 
 # ---------------------------------------------------------------------------
