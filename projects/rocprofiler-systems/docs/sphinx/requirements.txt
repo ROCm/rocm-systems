@@ -228,8 +228,8 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference,llms]==1.39.0
-    # via -r docs/sphinx/requirements.in
+rocm-docs-core[api-reference,llms]==1.40.0
+    # via -r requirements.in
 rpds-py==0.22.3
     # via
     #   jsonschema
