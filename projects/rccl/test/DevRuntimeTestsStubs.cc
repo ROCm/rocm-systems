@@ -27,9 +27,12 @@
 #include "nccl_device/lsa_barrier.h"
 #include "nccl_device/gin_barrier.h"
 
+#include "DevRuntimeTestsStubs.h"
+
 #include <cassert>
 #include <cstdarg>
 #include <cstdlib>
+#include <functional>
 #include <sys/mman.h>
 
 // ---------------------------------------------------------------------------
@@ -257,17 +260,35 @@ HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hi
   if (granularity) *granularity = 4096;
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
-                                                           hipMemGenericAllocationHandle_t) {
+// Seams, not plain stubs: these three sit on error paths a test needs to drive.
+// Each default lives in a named function so the hook's initialiser and
+// ResetDevRuntimeFakes() share one definition instead of drifting copies.
+static hipError_t DefaultMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+                                                              hipMemGenericAllocationHandle_t) {
   if (prop) {
     *prop = hipMemAllocationProp{};
     prop->location.type = hipMemLocationTypeDevice;
   }
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemExportToShareableHandle(void*, hipMemGenericAllocationHandle_t,
-                                                  hipMemAllocationHandleType, unsigned long long) {
+std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>
+    g_hipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
+
+HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+                                                           hipMemGenericAllocationHandle_t handle) {
+  return g_hipMemGetAllocationPropertiesFromHandle(prop, handle);
+}
+
+static hipError_t DefaultMemExportToShareableHandle(void*, hipMemGenericAllocationHandle_t,
+                                                    hipMemAllocationHandleType, unsigned long long) {
   return hipSuccess;
+}
+std::function<hipError_t(void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long)>
+    g_hipMemExportToShareableHandle = DefaultMemExportToShareableHandle;
+
+HIP_FAKE hipError_t hipMemExportToShareableHandle(void* shareable, hipMemGenericAllocationHandle_t handle,
+                                                  hipMemAllocationHandleType type, unsigned long long flags) {
+  return g_hipMemExportToShareableHandle(shareable, handle, type, flags);
 }
 HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void*,
                                                     hipMemAllocationHandleType) {
@@ -277,7 +298,18 @@ HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandl
 HIP_FAKE hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
+static hipError_t DefaultMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
+std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> g_hipMemSetAccess = DefaultMemSetAccess;
+
+HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count) {
+  return g_hipMemSetAccess(ptr, size, desc, count);
+}
+
+void ResetDevRuntimeFakes() {
+  g_hipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
+  g_hipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
+  g_hipMemSetAccess                         = DefaultMemSetAccess;
+}
 HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
