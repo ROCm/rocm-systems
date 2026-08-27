@@ -767,6 +767,36 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
                                              : ConSanInstallAction::LoadOriginal);
 }
 
+TEST(ConSanPipeline, ExtendedBarrierInventoryShapeUsesOnlyTypedSemanticInputs) {
+  ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  ConSanDebugOverrides debug;
+  MutationRequest mutation;
+  EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+
+  mutation.fault_drop_barrier = true;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  mutation = {};
+  mutation.fault_move_barrier = true;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  mutation = {};
+  mutation.fault_mutate_barrier_id_scope = true;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  mutation = {};
+  mutation.fault_mutate_barrier_participants = true;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+
+  mutation = {};
+  debug.abort_unmatched_barrier_wait = true;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  debug = {};
+  request.moi_track_barriers = true;
+  EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  EXPECT_TRUE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+  request.moi_track_barriers = false;
+  EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
+}
+
 TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrierPairs) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1

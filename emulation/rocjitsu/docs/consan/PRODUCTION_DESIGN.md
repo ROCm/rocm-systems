@@ -3681,6 +3681,32 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 66.06
   seconds. E2E validation remains outside this work.
 
+### Slice 5R: derive extended-barrier inventory from typed inputs
+
+- **Semantic shape owner:** A pure typed predicate now decides whether program
+  inventory must retain extended barrier pairs. Its inputs are exactly the
+  observation request, debug override, and mutation request. Runtime bindings,
+  target mechanics, and legacy lowering options cannot influence this semantic
+  inventory choice.
+- **Completed control-plane cutover:** The HSA automatic-report path no longer
+  constructs a complete `ConSanOptions` merely to ask this question and no
+  longer names `ConSanOptions` or `LegacyOptionsAdapter` at all. The cutover
+  also exposed and deleted the raw-options mutation enable/disable overloads,
+  their 11-entry pointer-to-member table, and its alias; no caller remained
+  after hook mutation control moved to `MutationRequest`.
+- **Contract coverage:** A focused truth-table test covers the four barrier
+  mutations, unmatched-barrier abort, the Sampled-plus-barrier conjunction,
+  and the negative Record/Replay and untracked-barrier cases. The existing
+  pristine-inventory test still proves the resulting choice changes actual
+  extended-pair inventory without installing a replacement.
+- **Deletion result:** Production source is 25 physical lines smaller despite
+  the documented typed predicate. No compatibility projection or replacement
+  mutation table was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 64.97
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

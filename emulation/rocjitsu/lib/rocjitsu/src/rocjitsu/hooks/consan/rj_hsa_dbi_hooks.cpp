@@ -806,14 +806,6 @@ private:
   bool reserved_ = false;
 };
 
-[[nodiscard]] bool fault_mutations_enabled(const rocjitsu::ConSanOptions &options) {
-  return rocjitsu::consan_fault_mutations_enabled(options);
-}
-
-void disable_fault_mutations(rocjitsu::ConSanOptions *options) {
-  rocjitsu::disable_consan_fault_mutations(*options);
-}
-
 [[nodiscard]] bool fault_mutations_enabled(const rocjitsu::MutationRequest &request) {
   return request.has_fault_mutation();
 }
@@ -3904,12 +3896,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (request.flavor == rocjitsu::ConSanFlavor::Moi &&
         !runtime_resources.moi_report_buffer_address && request.moi_auto_report_buffer_size != 0) {
       rocjitsu::MutationRequest inventory_mutation = mutation_request;
-      rocjitsu::BoundRuntimeResources inventory_resources = runtime_resources;
-      const rocjitsu::ConSanOptions live_inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
-          request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
-          runtime_capabilities, inventory_resources);
-      const bool preserve_extended_barrier_pairs =
-          rocjitsu::consan_qualifies_extended_barrier_pairs(live_inventory_options);
+      const bool preserve_extended_barrier_pairs = rocjitsu::consan_requires_extended_barrier_pairs(
+          request, debug_overrides, inventory_mutation);
       const bool live_fault_transform =
           fault_mutations_enabled(mutation_request) && !mutation_request.fault_dry_run;
       // A report-sizing pass is pristine MOI inventory, never the live
@@ -3924,7 +3912,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const auto inventory_begin = std::chrono::steady_clock::now();
       rocjitsu::TransformResult inventory = run_consan_pristine_moi_inventory(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
-          debug_overrides, inventory_mutation, runtime_capabilities, inventory_resources,
+          debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources,
           preserve_extended_barrier_pairs);
       log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
                   static_cast<unsigned long long>(code_object_reader.handle),

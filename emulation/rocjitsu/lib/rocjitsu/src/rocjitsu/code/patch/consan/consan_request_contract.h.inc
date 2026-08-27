@@ -281,6 +281,22 @@ without_consan_fault_mutations(const MutationRequest &request) {
   return result;
 }
 
+/// Return whether semantic inventory must retain extended barrier pairs.
+///
+/// Extended pairs are needed by barrier mutations, unmatched-barrier abort
+/// diagnostics, and Sampled barrier observation. This query deliberately uses
+/// only typed semantic inputs: runtime bindings, target mechanics, and legacy
+/// lowering options cannot change the inventory shape.
+[[nodiscard]] constexpr bool
+consan_requires_extended_barrier_pairs(const ConSanRequest &request,
+                                       const ConSanDebugOverrides &debug,
+                                       const MutationRequest &mutation) {
+  return mutation.fault_drop_barrier || mutation.fault_move_barrier ||
+         mutation.fault_mutate_barrier_id_scope || mutation.fault_mutate_barrier_participants ||
+         debug.abort_unmatched_barrier_wait ||
+         (request.moi_engine == ConSanMoiEngine::Sampled && request.moi_track_barriers);
+}
+
 /// Provenance of the runtime facts supplied to one ConSan transformation.
 ///
 /// This identifies the query mechanism, not the GPU architecture and not the

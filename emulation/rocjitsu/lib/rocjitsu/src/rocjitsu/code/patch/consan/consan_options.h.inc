@@ -637,35 +637,6 @@ struct ConSanOptions {
          (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
 }
 
-using ConSanFaultMutationMember = bool ConSanOptions::*;
-inline constexpr std::array<ConSanFaultMutationMember, 11> kConSanFaultMutationMembers = {
-    &ConSanOptions::fault_drop_barrier,
-    &ConSanOptions::fault_move_barrier,
-    &ConSanOptions::fault_mutate_barrier_id_scope,
-    &ConSanOptions::fault_mutate_barrier_participants,
-    &ConSanOptions::fault_atomic_wrong_address,
-    &ConSanOptions::fault_atomic_weaken_order,
-    &ConSanOptions::fault_atomic_weaken_scope,
-    &ConSanOptions::fault_lds_wrong_address,
-    &ConSanOptions::fault_ordinary_wrong_address,
-    &ConSanOptions::fault_ordinary_weaken_order,
-    &ConSanOptions::fault_ordinary_weaken_scope,
-};
-
-[[nodiscard]] inline bool consan_fault_mutations_enabled(const ConSanOptions &options) {
-  for (ConSanFaultMutationMember member : kConSanFaultMutationMembers) {
-    if (options.*member)
-      return true;
-  }
-  return false;
-}
-
-inline void disable_consan_fault_mutations(ConSanOptions &options) {
-  for (ConSanFaultMutationMember member : kConSanFaultMutationMembers)
-    options.*member = false;
-  options.fault_require_exactly_one = false;
-}
-
 /// Runtime report-buffer state that may change after an immutable MOI semantic
 /// inventory has been built. Retry does not accept another full ConSanOptions
 /// object, so parser, CFG, ownership, and admission semantics cannot drift
