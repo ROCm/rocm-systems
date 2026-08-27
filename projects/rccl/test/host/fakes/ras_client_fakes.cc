@@ -16,11 +16,9 @@
 #include <cstring>
 #include <new>
 
-// LogCapture.hpp declares these; nothing in this binary links RCCL's debug
-// layer, so define them here. client.cc reports via plain fprintf(stderr), so
-// CaptureLog works without raising the level.
-int ncclDebugLevel = 0;
-uint64_t ncclDebugMask = 0;
+// LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
+// which this binary already links. client.cc reports via plain fprintf(stderr),
+// so CaptureLog works without raising the level.
 
 std::string g_writtenData;
 std::string g_stdoutData;
