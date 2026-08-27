@@ -36,9 +36,15 @@ class TestSet(TestCliBase):
         cmds = self.CreateCmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
+        # Registered before the sweep: RunCmds raises on the first failure, and a
+        # sweep that aborts partway is exactly when the GPU is left mid-change.
+        self.addCleanup(self._restore_starting_values, power_profile)
         self.RunCmds(cmds)
 
-        # Restore starting values
+        return
+
+    def _restore_starting_values(self, power_profile):
+        """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
             # Validate max fan speed is sensible; gpu_od GPUs must report <= 100
@@ -60,12 +66,6 @@ class TestSet(TestCliBase):
             if fan_speed != "N/A":
                 cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
 
-            # set --perf-level defaults
-            perf_level = self.metric_data["gpu_data"][index]["perf_level"]
-            if perf_level != "N/A":
-                perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
-                cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
-
             # set --profile defaults
             if power_profile[index]:
                 profile = _strip_prefix(power_profile[index]["current"], "AMDSMI_PWR_PROF_PRST_")
@@ -81,7 +81,7 @@ class TestSet(TestCliBase):
                 cmds.append(
                     (
                         f"amd-smi set --perf-determinism {clock_freq} --gpu {index}",
-                        self.PASS_OR_UNSUPPORTED,
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
                     )
                 )
 
@@ -93,6 +93,7 @@ class TestSet(TestCliBase):
                 )
 
             # set --memory-partition defaults
+            # Safe to write back: the mode only takes effect after a driver reload.
             memory_partition = self.partition_data["current_partition"][index]["memory"]
             if memory_partition != "N/A":
                 cmds.append(
@@ -114,35 +115,11 @@ class TestSet(TestCliBase):
                     )
                 )
 
-            # set --power-cap defaults
-            for power_type in self.power_types:
-                _power_type = self.static_data["gpu_data"][index]["limit"][power_type]
-                socket_power_limit = _power_type["socket_power_limit"]
-                if socket_power_limit != "N/A":
-                    socket_power = socket_power_limit["value"]
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {socket_power} {power_type} --gpu {index}",
-                            self.PASS,
-                        )
-                    )
-                    # Both bounds are inclusive: the exact min and max must
-                    # succeed. A reported min of 0 means the technical minimum
-                    # is 1, since setting 0 reads back the current cap.
-                    min_power = max(_power_type["min_power_limit"]["value"], 1)
-                    max_power = _power_type["max_power_limit"]["value"]
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {min_power} {power_type} --gpu {index}",
-                            self.PASS,
-                        )
-                    )
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {max_power} {power_type} --gpu {index}",
-                            self.PASS,
-                        )
-                    )
+            # reset --power-cap
+            # Writes each supported sensor's default_power_cap. Replaying the recorded
+            # value did not restore it: min and max were written after it, so the cap
+            # was left at max.
+            cmds.append((f"amd-smi reset --power-cap --gpu {index}", self.PASS))
 
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
@@ -176,56 +153,36 @@ class TestSet(TestCliBase):
             # set --clk-limit defaults
             clock = self.metric_data["gpu_data"][index]["clock"]
             for clk_type in self.clk_limits:
-                if clk_type == "SCLK":
-                    clk_type_name = "socclk_0"
-                else:
-                    clk_type_name = "mem_0"
                 for limit_type in self.limit_types:
-                    if limit_type == "MIN":
-                        clk_limit_name = "min_clk"
-                    else:
-                        clk_limit_name = "max_clk"
-                    clk_type_limit_name = clock[clk_type_name][clk_limit_name]
-                    if type(clk_type_limit_name) is dict:
-                        value = clk_type_limit_name["value"]
+                    value = self._clk_limit_value(clock, clk_type, limit_type)
+                    if value is not None:
                         # A readable min/max clock does not imply the device
                         # supports setting a limit on it.
                         cmds.append(
                             (
                                 f"amd-smi set --clk-limit {clk_type} {limit_type} {value} --gpu {index}",
-                                self.PASS_OR_UNSUPPORTED,
+                                [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
                             )
                         )
 
-            # set --clk-level defaults
-            clock = self.static_data["gpu_data"][index]["clock"]
-            for clk_type in self.clk_levels:
-                value = -1
-                clk_type_name = ""
-                if clk_type == "SCLK":
-                    clk_type_name = "sys"
-                elif clk_type == "MCLK":
-                    clk_type_name = "mem"
-                elif clk_type == "FCLK":
-                    clk_type_name = "df"
-                elif clk_type == "SOCCLK":
-                    clk_type_name = "soc"
-                else:
-                    bus = self.static_data["gpu_data"][index]["bus"]
-                    pcie_levels = bus["pcie_levels"]
-                    if type(pcie_levels) is dict:
-                        value = len(pcie_levels)
-                        if value > 0:
-                            value -= 1
-                if clk_type != "PCIE" and value < 0:
-                    clk_type_name = clock[clk_type_name]
-                    if type(clk_type_name) is dict:
-                        current_level = clk_type_name["current_level"]
-                        value = current_level
-                if value >= 0:
-                    cmds.append(
-                        (f"amd-smi set --clk-level {clk_type} {value} --gpu {index}", self.PASS)
-                    )
+            # reset --clocks
+            # A clk-level write is a bitmask, so replaying the recorded level would pin DPM
+            # to that one level; only AUTO hands every level back. Overdrive is reset too,
+            # and reports NOT_SUPPORTED on parts that lack it even though the rest worked.
+            cmds.append(
+                (
+                    f"amd-smi reset --clocks --gpu {index}",
+                    [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                )
+            )
+
+            # set --perf-level defaults
+            # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
+            # --perf-determinism each leave the device on a level of their own.
+            perf_level = self.metric_data["gpu_data"][index]["perf_level"]
+            if perf_level not in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
+                perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
+                cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
             # set --process-isolation defaults
             process_isolation = self.static_data["gpu_data"][index]["process_isolation"]
             # Put back whatever value the sweep left; "N/A" means unreadable, so
@@ -235,7 +192,7 @@ class TestSet(TestCliBase):
                 cmds.append(
                     (
                         f"amd-smi set --process-isolation {original} --gpu {index}",
-                        self.PASS_OR_UNSUPPORTED,
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
                     )
                 )
 
