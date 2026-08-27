@@ -2198,6 +2198,26 @@ if(HSA_RUNTIME64)
             )
         endif()
 
+        # Pin the FAIL_ON_SKIP guard, the way GtestFilterGuard.RejectsMissingTest
+        # pins the zero-test guard. Launching the gfx90a fixture against a
+        # simulated gfx942 selects one test, find_gfx90a_agent() finds no match,
+        # and GoogleTest exits 0 after skipping it -- so success here means the
+        # wrapper turned that skip into a failure instead of a false pass.
+        add_test(
+            NAME GtestFilterGuard.RejectsSkippedTest
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_asm_test>"
+                "-DTEST_FILTER=HsaDbiNopAsmHardware.PatchedElfLoadsAndValidatesInHsaExecutable"
+                "-DTEST_LAUNCHER=${RJ_CLI}"
+                "-DTEST_CONFIG=${RJ_CDNA3_KMD_CONFIG}" -DFAIL_ON_SKIP=ON -P
+                "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        )
+        set_tests_properties(
+            GtestFilterGuard.RejectsSkippedTest
+            PROPERTIES WILL_FAIL TRUE TIMEOUT 300
+        )
+
         # --- HSA DBI nop-probe smoke test: gfx90a kernel patched to CALL the
         # compiled rj_nop_probe via an s_swappc_b64 trampoline (PC01-B). Needs
         # the compiled probe fixture (amdclang++ + clang-offload-bundler), so it
