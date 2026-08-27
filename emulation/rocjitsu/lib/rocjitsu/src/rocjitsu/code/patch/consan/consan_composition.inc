@@ -790,8 +790,12 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         build_sync_event_identity_index(synchronization_inventory.sync_events);
     const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
     build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
-    associate_barrier_sync_sequences(sync_blocks, consan_qualifies_extended_barrier_pairs(options),
-                                     synchronization_inventory);
+    associate_barrier_sync_sequences(
+        sync_blocks,
+        consan_requires_extended_barrier_pairs(static_cast<const ConSanRequest &>(options),
+                                               static_cast<const ConSanDebugOverrides &>(options),
+                                               static_cast<const MutationRequest &>(options)),
+        synchronization_inventory);
     associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
                                     result);
     build_barrier_lifecycle_group_inventory(synchronization_inventory);

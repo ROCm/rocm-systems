@@ -580,6 +580,11 @@ same descriptor queries as shared analysis, SuperCollider, and final
 validation. The one remaining MOI-specific unified-VGPR query deliberately
 answers a different question needed to distinguish a live accumulator bank.
 
+Synchronization inventory shape now comes directly from the typed request,
+debug, and mutation contract. The mutable `ConSanOptions` compatibility object
+no longer carries a second implementation of the extended-barrier-pair rule;
+the cast at its one remaining consumer makes that temporary boundary visible.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

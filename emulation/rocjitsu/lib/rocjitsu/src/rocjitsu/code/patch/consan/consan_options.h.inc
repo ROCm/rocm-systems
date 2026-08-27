@@ -844,13 +844,6 @@ struct ConSanOptions : ConSanRequest,
   std::optional<size_t> patched_image_growth_input_bytes;
 };
 
-[[nodiscard]] inline bool consan_qualifies_extended_barrier_pairs(const ConSanOptions &options) {
-  return options.fault_drop_barrier || options.fault_move_barrier ||
-         options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
-         options.abort_unmatched_barrier_wait ||
-         (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
-}
-
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
   return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
 }

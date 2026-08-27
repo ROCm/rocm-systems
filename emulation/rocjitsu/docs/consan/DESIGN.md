@@ -782,6 +782,13 @@ unified allocation count only where it must decide whether that boundary backs
 a live accumulator bank; this is a distinct resource fact rather than another
 decoder for the ordinary allocation.
 
+Inventory-shape decisions use the typed caller inputs even while the old
+lowerer remains mutable. In particular,
+`consan_requires_extended_barrier_pairs` receives `ConSanRequest`,
+`ConSanDebugOverrides`, and `MutationRequest`; the compatibility lowerer
+projects those base subobjects at its remaining call site instead of
+reimplementing the rule over `ConSanOptions`.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

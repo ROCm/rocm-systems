@@ -6464,6 +6464,26 @@ for nominal line-count reductions.
   the current deletion tranche so several bisectable semantic-preserving
   commits share one test run. E2E validation remains outside this work.
 
+### Slice 5DK: delete the mutable inventory-shape rule
+
+- **Typed authority:** The composition lowerer now asks
+  `consan_requires_extended_barrier_pairs` whether synchronization analysis
+  needs extended pairs. The query consumes only `ConSanRequest`,
+  `ConSanDebugOverrides`, and `MutationRequest`, as its contract promises.
+- **Compatibility boundary exposed:** The one legacy call projects those three
+  base subobjects from `ConSanOptions`. Its duplicated mutable-state predicate
+  is deleted, so future removal of the compatibility object cannot change
+  inventory shape by leaving a second rule behind.
+- **Contract coverage:** The focused typed-contract test independently toggles
+  every barrier mutation, unmatched-wait debug control, Sampled barrier
+  observation, and disabled engine case. This cutover adds no behavior or type.
+- **Accounting:** Across the two affected implementation files, physical lines
+  fall from 1,827 to 1,824, nonblank lines from 1,703 to 1,701, and estimated
+  comment-excluded code lines from 1,349 to 1,347. The slice adds six and
+  deletes nine physical implementation lines, a net deletion of three.
+- **Batched gate:** Compilation and the broader checked-in gate are deferred to
+  the current deletion tranche. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
