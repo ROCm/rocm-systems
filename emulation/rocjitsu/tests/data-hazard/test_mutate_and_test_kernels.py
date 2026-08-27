@@ -63,12 +63,12 @@ from mutate_and_test import (  # noqa: E402
     discover_shaders,
     find_tool,
     process_shader,
+    select_rocm_path,
     shader_required_archs,
     shader_supports_arch,
     write_csv_report,
     write_json_report,
 )
-from mutate_and_test.__main__ import _detect_rocm_path  # noqa: E402
 
 
 def _all_kernel_paths() -> list[Path]:
@@ -82,11 +82,7 @@ def target_arch() -> str:
 
 @pytest.fixture(scope="session")
 def rocm_path() -> str:
-    return (
-        os.environ.get("ROCM_PATH")
-        or os.environ.get("ROCM_HOME")
-        or _detect_rocm_path()
-    )
+    return select_rocm_path()
 
 
 @pytest.fixture(scope="session")
