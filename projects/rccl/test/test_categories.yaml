@@ -36,6 +36,7 @@ test_categories:
       - "AllReduce.Channels"
       - "AllReduce.ManagedMemGraph"
       - "AllReduce.PreMultScalar"
+      - "AllReduce.Fp8Avg"
       - "AllReduce.UserBufferRegistration"
       - "AllReduce.ManagedMemUserBufferRegistration"
       - "AllGather.OutOfPlace"

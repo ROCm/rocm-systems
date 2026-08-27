@@ -3257,12 +3257,11 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
       break;
 #if defined(RCCL_FLOAT8)
     case ncclFloat8e4m3:
-      opFull->op = ncclDevPreMulSum;
-      f8 = static_cast<rccl_float8>(float(1.0 / comm->nRanks));
-      break;
     case ncclFloat8e5m2:
+      // The scalar travels as float: FuncPreMulSum<fp8> accumulates in float, and the
+      // host fp8 types are OCP while gfx942 device code is FNUZ.
       opFull->op = ncclDevPreMulSum;
-      bf8 = static_cast<rccl_bfloat8>(float(1.0 / comm->nRanks));
+      f32 = float(1.0 / comm->nRanks);
       break;
 #endif
     case ncclFloat16:
@@ -4141,6 +4140,14 @@ ncclResult_t ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDa
     int size = ncclTypeSize(datatype);
     if (size < 1) return ncclInternalError;
     user->opFull.scalarArgIsPtr = false;
+#if defined(RCCL_FLOAT8)
+    // Match hostToDevRedOp: fp8 scalars are promoted to float, not copied as bits.
+    if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+      float s = (datatype == ncclFloat8e4m3) ? (float)*(const rccl_float8*)scalar
+                                             : (float)*(const rccl_bfloat8*)scalar;
+      std::memcpy(&user->opFull.scalarArg, &s, sizeof(s));
+    } else
+#endif
     std::memcpy(&user->opFull.scalarArg, scalar, size);
   } else {
     user->opFull.scalarArgIsPtr = true;

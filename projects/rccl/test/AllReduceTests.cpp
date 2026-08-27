@@ -221,6 +221,23 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // The PreMulSum scalar for FP8 avg is packed as float on the host and decoded as
+  // float on the device. If either side reverts to fp8 bits the two disagree and
+  // every element comes out scaled wrong, which this catches numerically.
+  // E5M2 is deliberately not swept here: with two mantissa bits, pre-scaling by
+  // 1/nRanks and rounding back to fp8 differs from the harness reference, which
+  // sums and then divides. That mismatch predates this fix and reproduces on an
+  // unpatched build, so including e5m2 would only make the test fail for a reason
+  // the fix has nothing to do with.
+  TEST(AllReduce, Fp8Avg)
+  {
+    TestBed testBed;
+    testBed.RunSimpleSweep({ncclCollAllReduce}, {ncclFloat8e4m3}, {ncclAvg},
+                           /*roots=*/{0}, /*numElements=*/{384, 1024}, /*inPlaceList=*/{false},
+                           /*managedMemList=*/{false}, /*useHipGraphList=*/{false});
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, UserBufferRegistration)
   {
     const int nranks = 8;
