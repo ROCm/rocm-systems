@@ -1,12 +1,19 @@
 # AMD SMI C++ tests (`amdsmitst`)
 
 All C++ tests compile into a single GoogleTest binary, `amdsmitst`. Tests are
-split into two tiers:
+split into three tiers:
 
-- **Unit** (`unit/`) — exercise the public `amdsmi.h` API surface, including
-  invalid-parameter and per-enum / per-device cases. No root required.
-- **Functional** (`functional/`) — run against live hardware. Read-only suites
-  need no root; read-write suites mutate device state and typically require root.
+- **Unit** (`unit/`) — pure logic and static data. No device, no `amdsmi_init`,
+  no root. CPER parsing, metric struct versioning, the library loader.
+- **Integration** (`integration/`) — the public `amdsmi.h` API surface against a
+  live library: every API's invalid-input cases, plus getters driven with valid
+  input and checked for valid output. No root required.
+- **Functional** (`functional/`) — setters, and APIs that need setup from another
+  API. Read-only suites need no root; read-write suites mutate device state,
+  require root, and are opt-in (see "Controlling destructive writes").
+
+Invalid-input cases run even when the matching device is absent. Positive cases
+skip when there is no device to drive.
 
 For the full design (directory layout, naming rules, component taxonomy) see
 [`docs/conceptual/test-design.md`](../../docs/conceptual/test-design.md). This
@@ -31,13 +38,14 @@ GoogleTest suite names follow `<Component><Type>[<Operation>]`, so a single
 
 | Suite pattern | Meaning |
 | :--- | :--- |
-| `<Component>Unit` | Unit tests (e.g. `GpuUnit`, `CpuUnit`, `NicUnit`, `SystemUnit`) |
+| `<Component>Unit` | Unit tests, no device (`GpuUnit`, `SystemUnit`) |
+| `<Component>Integration` | API surface on a live library — no root needed |
 | `<Component>FunctionalReadOnly` | Functional, reads only — no root needed |
-| `<Component>FunctionalReadWrite` | Functional, mutates state — root usually needed |
+| `<Component>FunctionalReadWrite` | Functional, mutates state — root and opt-in |
 
 `<Component>` is one of `Gpu`, `Cpu`, `Nic`, `Ifoe`, `System`. Individual test
-names carry the feature (e.g. `GpuUnit.GetClkFreq_AllGpusAllTypes`), so you can
-also filter by feature across suites.
+names carry the feature (e.g. `GpuIntegration.GetClkFreq_AllGpusAllTypes`), so
+you can also filter by feature across suites.
 
 ## Running
 
@@ -56,11 +64,14 @@ sudo ./amdsmitst
 ### By tier
 
 ```shell
-# Unit only — no root, minimal hardware dependence
+# Unit only — no device needed at all
 ./amdsmitst --gtest_filter="*Unit*"
 
+# Integration only — no root, needs a live library
+./amdsmitst --gtest_filter="*Integration*"
+
 # All functional (read-only + read-write) — root for the read-write suites
-sudo ./amdsmitst --gtest_filter="*Functional*"
+sudo AMDSMI_TEST_ALLOW_MUTATION=1 ./amdsmitst --gtest_filter="*Functional*"
 
 # Functional read-only only (safe, no root)
 ./amdsmitst --gtest_filter="*FunctionalReadOnly*"
@@ -69,7 +80,7 @@ sudo ./amdsmitst --gtest_filter="*Functional*"
 ### By component
 
 ```shell
-./amdsmitst --gtest_filter="GpuUnit*"            # GPU unit tests
+./amdsmitst --gtest_filter="GpuIntegration*"     # GPU API-surface tests
 sudo ./amdsmitst --gtest_filter="Cpu*"           # all CPU tests
 sudo ./amdsmitst --gtest_filter="GpuFunctional*" # GPU functional tests
 ```
@@ -92,7 +103,7 @@ sudo ./amdsmitst --gtest_filter="*.*Freq*"           # clocks / frequency
 sudo ./amdsmitst --gtest_filter="*Functional*:-*.*Partition*"
 
 # One exact test
-./amdsmitst --gtest_filter="GpuUnit.GetClkFreq_AllGpusAllTypes"
+./amdsmitst --gtest_filter="GpuIntegration.GetClkFreq_AllGpusAllTypes"
 ```
 
 ## ASIC-specific exclusions (recommended for full runs)
@@ -101,7 +112,7 @@ Some tests do not apply to every ASIC. The helper scripts build a combined
 exclusion filter for the detected hardware:
 
 ```shell
-cd /opt/rocm/share/amd_smi/tests        # or build/tests/amd_smi_test
+cd /opt/rocm/share/amd_smi/tests
 source amdsmitst.exclude
 source detect_asic_filter.sh
 sudo ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" -v 1
@@ -112,19 +123,31 @@ then sets `GTEST_EXCLUDE` from the global blacklist plus the device-specific
 list in `amdsmitst.exclude`. To apply only the global blacklist, filter on
 `-${BLACKLIST_ALL_ASICS}` instead.
 
+Neither file is copied into the build tree. Running from a build directory,
+source them from the source tree (`tests/amd_smi_test/`) instead.
+
 ## Controlling destructive writes
 
-Read-write functional tests (and unit setter tests) modify device state. They
-follow a store → change → verify → restore pattern, so a normal run is
-non-destructive. To skip every mutating write entirely — e.g. on shared
-hardware — set:
+Every device write lives in a `*FunctionalReadWrite` suite behind
+`AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`, and **writes are off by default**: a
+plain run skips them and never disturbs a shared GPU or CPU. Opt in explicitly:
 
 ```shell
-AMDSMI_TEST_DISALLOW_MUTATION=1 ./amdsmitst --gtest_filter="*Unit*"
-
-# Also works across all test types:
-AMDSMI_TEST_DISALLOW_MUTATION=1 ./amdsmitst
+sudo AMDSMI_TEST_ALLOW_MUTATION=1 ./amdsmitst --gtest_filter="*FunctionalReadWrite*"
 ```
+
+Three conditions must all hold or the write is skipped:
+
+| Condition | Effect when unmet |
+|-----------|-------------------|
+| `AMDSMI_TEST_ALLOW_MUTATION` is set | skipped (the default) |
+| `AMDSMI_NON_PRIVILEGED` is **not** set | skipped — overrides the opt-in above |
+| process is root | skipped |
+
+Each write test stores the original value, sets a different one, verifies the
+readback against what it set, then restores the original and confirms the
+restore took. A setter with no corresponding getter is marked write-only in a
+comment and is not verified rather than being verified misleadingly.
 
 ## Known test skips
 

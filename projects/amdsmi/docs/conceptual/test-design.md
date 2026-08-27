@@ -40,8 +40,20 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` macro · Python: `unittest` |
+| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` on a plain fixture · Python: `unittest` |
+| **Integration** | `integration/` | Yes — needs a live library and device | C++: `TEST_F()` on `ApiTest` · Python: `unittest` |
 | **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
+
+The **integration** tier owns the public `amdsmi.h` API surface: every API's
+invalid-input cases (null pointer, invalid handle), and every **getter** driven
+with valid input and checked for valid output. Invalid-input cases run even when
+the matching device is absent, since argument validation does not depend on the
+device; positive cases skip when there is nothing to drive.
+
+The **functional** tier owns **setters** and any API needing setup from another
+API. Every read-write test stores the original value, sets a different one,
+verifies the readback against what it set, restores the original and confirms the
+restore took. Writes are opt-in behind `AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
 meaningful timing data.
@@ -62,7 +74,9 @@ tests/amd_smi_test/
 ├── amdsmitst.exclude                # Global ASIC blacklist for --gtest_filter
 ├── detect_asic_filter.sh            # ASIC detection and per-ASIC exclusion
 │
-├── unit/                            # No hardware required; pure TEST_F() macro tests
+├── api_test_framework.h              # Shared fixtures, status helpers, getter macros
+│
+├── unit/                            # No hardware required; no amdsmi_init
 │   ├── gpu/
 │   │   ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
 │   │   ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
@@ -75,9 +89,16 @@ tests/amd_smi_test/
 │   │       ├── cper_mixed.cper
 │   │       └── cper_uncorrected.cper
 │   └── system/
-│       └── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
+│       ├── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
+│       └── status_string_test.cc    # amdsmi_status_code_to_string coverage
 │
-└── functional/                      # Requires live hardware; uses TestBase lifecycle
+├── integration/                     # API surface: invalid inputs for every API, getters
+│   ├── cpu/                         #   <component>/<feature>/<feature>_test.cc
+│   ├── gpu/
+│   ├── nic/
+│   └── system/
+│
+└── functional/                      # Setters and multi-API workflows; TestBase lifecycle
     ├── gpu/
     │   ├── clock/
     │   │   ├── frequencies_read{.h,_test.cc}
@@ -192,14 +213,17 @@ then fails every `TEST()` case in that suite at runtime. `check_test_conventions
 | :--- | :--- | :--- |
 | `<Component>FunctionalReadOnly` | functional | Only reads device/host state; no root required |
 | `<Component>FunctionalReadWrite` | functional | Modifies device/host state; root typically required |
+| `<Component>Integration` | integration | API surface on a live library; no root required |
 | `<Component>Unit` | unit | Pure logic; no device required |
 
 `<Component>` is the PascalCase name from the source path — one of `Gpu`, `Cpu`, `Nic`, `Ifoe`, or
 `System` (see [Component taxonomy](#component-taxonomy)). Functional suites always carry a `ReadOnly`
-or `ReadWrite` operation suffix; unit suites omit it. Only combinations that have tests are
-registered — currently `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`, `SystemFunctionalReadOnly`,
-`IfoeFunctionalReadOnly`, `GpuUnit`, `NicUnit`, and `SystemUnit`. This keeps component, type, and operation
-independently filterable via `--gtest_filter` wildcards.
+or `ReadWrite` operation suffix; unit and integration suites omit it. Only combinations that have
+tests are registered — currently `GpuUnit`, `SystemUnit`, `GpuIntegration`, `CpuIntegration`,
+`NicIntegration`, `SystemIntegration`, `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`,
+`CpuFunctionalReadWrite`, `NicFunctionalReadOnly`, `SystemFunctionalReadOnly` and
+`IfoeFunctionalReadOnly`. This keeps component, type, and operation independently filterable via
+`--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures
 
@@ -297,11 +321,14 @@ sudo ./amdsmitst --gtest_filter="Gpu*"
 # GPU functional only
 sudo ./amdsmitst --gtest_filter="GpuFunctional*"
 
-# GPU unit only
-./amdsmitst --gtest_filter="GpuUnit*"
+# GPU API-surface tests only
+./amdsmitst --gtest_filter="GpuIntegration*"
 
-# Any component unit tests
+# Any component unit tests (no device needed)
 ./amdsmitst --gtest_filter="*Unit*"
+
+# Any component integration tests
+./amdsmitst --gtest_filter="*Integration*"
 
 # CPU tests (when added)
 ./amdsmitst --gtest_filter="Cpu*"
