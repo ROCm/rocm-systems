@@ -1070,7 +1070,6 @@ ib_recv_dev_list:
   }
   trafficClass = ncclIbGetTrafficClass(ctx);
   meta.addr = (uint64_t)comm->ctsFifo;
-  meta.caps = NCCL_IB_CAP_MULTISEG;
   meta.sl = (ncclParamIbSl() != -1)                        ? ncclParamIbSl() :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_SL_DEFAULT;
@@ -1080,6 +1079,7 @@ ib_recv_dev_list:
   meta.remSpeedBufAddr = comm->remoteSpeedMr ? (uint64_t)&comm->remoteSpeedBuf : 0;
   meta.remSpeedBufRkey = comm->remoteSpeedMr ? comm->remoteSpeedMr->rkey : 0;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1104,7 +1104,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
-  comm->peerCaps = remMeta.caps;
+  comm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1717,7 +1717,7 @@ ib_recv:
   }
 
   // Store the remote CTS FIFO info provided by the remote peer
-  rComm->peerCaps = remMeta.caps;
+  rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
   rComm->remCtsFifo.addr = remMeta.addr;
   rComm->remSegLayout.addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
@@ -1889,8 +1889,8 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
-  meta.caps = NCCL_IB_CAP_MULTISEG;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
