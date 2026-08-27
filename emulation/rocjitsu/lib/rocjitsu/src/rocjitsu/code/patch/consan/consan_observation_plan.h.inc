@@ -659,36 +659,6 @@ inline constexpr std::array<ConSanProbePosition, 2> kConSanProbePositions = {
 
 static_assert(kConSanProbePositions.size() == static_cast<size_t>(ConSanProbePosition::Count));
 
-/// Which lanes a probe must observe when it executes.
-///
-/// Access policy currently requires the complete active execution mask. The
-/// named type leaves room for later single-lane control probes without letting
-/// a lowerer silently weaken an access intent.
-enum class ConSanLaneMaskPolicy : uint8_t {
-  /// Observe every lane active at the original instruction.
-  ActiveExecutionMask,
-  /// One-past-the-end iteration bound; never a lane policy.
-  Count,
-};
-
-/// Complete iterable set of lane-mask policies.
-inline constexpr std::array<ConSanLaneMaskPolicy, 1> kConSanLaneMaskPolicies = {
-    ConSanLaneMaskPolicy::ActiveExecutionMask,
-};
-
-/// Return the stable diagnostic spelling of a lane-mask policy.
-[[nodiscard]] constexpr std::string_view consan_lane_mask_policy_name(ConSanLaneMaskPolicy policy) {
-  switch (policy) {
-  case ConSanLaneMaskPolicy::ActiveExecutionMask:
-    return "active-execution-mask";
-  case ConSanLaneMaskPolicy::Count:
-    break;
-  }
-  return "invalid-lane-mask-policy";
-}
-
-static_assert(kConSanLaneMaskPolicies.size() == static_cast<size_t>(ConSanLaneMaskPolicy::Count));
-
 /// Whether losing an admitted intent invalidates the requested static contract.
 ///
 /// Required intents must lower successfully for ConSan to claim complete
@@ -840,7 +810,8 @@ struct ConSanFenceSiteDecision {
 /// instruction or every event in one logical barrier sequence. That coalescing
 /// is explicit and keeps placement capacity at one insertion point. The intent
 /// contains no chosen registers, report addresses, machine words, branch route,
-/// or patch kind.
+/// or patch kind. Every intent observes every lane active at the guest
+/// instruction; no engine may silently narrow that execution mask.
 struct ConSanProbeIntent {
   /// Stable plan-local identifier cited by semantic decisions.
   ConSanProbeIntentId id;
@@ -854,8 +825,6 @@ struct ConSanProbeIntent {
   ConSanProbeIntentKind kind = ConSanProbeIntentKind::Count;
   /// Required ordering relative to the guest instruction.
   ConSanProbePosition position = ConSanProbePosition::Count;
-  /// Lanes whose original behavior the probe must observe.
-  ConSanLaneMaskPolicy lane_mask = ConSanLaneMaskPolicy::Count;
   /// Whether losing this intent creates a contract coverage gap.
   ConSanProbeRequirement requirement = ConSanProbeRequirement::Count;
   /// Complete synchronization sequence implemented by this probe, if any.

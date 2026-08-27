@@ -64,10 +64,6 @@ namespace {
   return static_cast<uint8_t>(position) < static_cast<uint8_t>(ConSanProbePosition::Count);
 }
 
-[[nodiscard]] bool valid_lane_policy(ConSanLaneMaskPolicy policy) {
-  return static_cast<uint8_t>(policy) < static_cast<uint8_t>(ConSanLaneMaskPolicy::Count);
-}
-
 [[nodiscard]] bool valid_requirement(ConSanProbeRequirement requirement) {
   return static_cast<uint8_t>(requirement) < static_cast<uint8_t>(ConSanProbeRequirement::Count);
 }
@@ -384,8 +380,8 @@ bool ConSanObservationPlan::valid() const {
     const ConSanProbeIntent &probe = probe_intents[index];
     if (probe.id.value != index || probe.engine != engine || !probe.physical_site.valid() ||
         probe.covered_semantic_sites.empty() || !valid_intent_kind(probe.kind) ||
-        !valid_position(probe.position) || !valid_lane_policy(probe.lane_mask) ||
-        !valid_requirement(probe.requirement) || !valid_dynamic_result(probe.dynamic_result) ||
+        !valid_position(probe.position) || !valid_requirement(probe.requirement) ||
+        !valid_dynamic_result(probe.dynamic_result) ||
         std::ranges::any_of(probe.covered_semantic_sites,
                             [](const SemanticSiteId &site) { return !site.valid(); })) {
       return false;
@@ -673,7 +669,6 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
           .covered_semantic_sites = ids,
           .kind = intent_kind(request.engine),
           .position = ConSanProbePosition::Before,
-          .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
           .requirement = ConSanProbeRequirement::Required,
           .synchronization_association = std::nullopt,
           .dynamic_result = ConSanDynamicResultRequirement::None,

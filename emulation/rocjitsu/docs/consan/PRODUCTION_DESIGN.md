@@ -3824,6 +3824,31 @@ analysis completed.
   simulator-device tests across the five supported targets pass in 68.62
   seconds. E2E validation remains outside this work.
 
+### Slice 5W: make full active-EXEC observation an invariant
+
+- **One contract, not a one-choice option:** Every target-neutral probe intent
+  observes every lane active at its guest instruction. This is now stated by
+  `ConSanProbeIntent` itself instead of encoded as a `lane_mask` field whose
+  enum admitted exactly one valid value.
+- **Completed speculative deletion:** The single-value
+  `ConSanLaneMaskPolicy`, its iterable array, diagnostic formatter, validation
+  helper, intent field, and every forced initializer are gone. No current
+  engine selected or consumed an alternative; the abstraction existed only to
+  reserve a possible future extension point.
+- **Contract coverage:** Observation-plan validation still rejects every
+  malformed property that can vary, and access, barrier, atomic, fence,
+  evidence, pipeline, and hook tests still exercise the resulting intents.
+  Device tests continue to cover actual lane-sensitive behavior; deleting an
+  unvarying metadata field does not change emitted EXEC handling.
+- **Deletion result:** Production source is 38 physical lines smaller and tests
+  are 16 physical lines smaller. No boolean, enum replacement, or compatibility
+  default was introduced.
+- **Completed checked-in gate:** The focused observation-policy gate passes all
+  105 tests. The complete host gate passes 1,510 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 67.46
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

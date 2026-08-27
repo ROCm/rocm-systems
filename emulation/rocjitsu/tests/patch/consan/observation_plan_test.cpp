@@ -117,8 +117,6 @@ TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValue
                                    consan_probe_intent_kind_name, "invalid-probe-intent-kind");
   expect_observation_enum_contract(kConSanProbePositions, ConSanProbePosition::Count,
                                    consan_probe_position_name, "invalid-probe-position");
-  expect_observation_enum_contract(kConSanLaneMaskPolicies, ConSanLaneMaskPolicy::Count,
-                                   consan_lane_mask_policy_name, "invalid-lane-mask-policy");
   expect_observation_enum_contract(kConSanProbeRequirements, ConSanProbeRequirement::Count,
                                    consan_probe_requirement_name, "invalid-probe-requirement");
   expect_observation_enum_contract(
@@ -345,7 +343,6 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
           }},
           .kind = ConSanProbeIntentKind::BarrierRecord,
           .position = ConSanProbePosition::After,
-          .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
           .requirement = ConSanProbeRequirement::Required,
           .synchronization_association = std::nullopt,
           .dynamic_result = ConSanDynamicResultRequirement::None,
@@ -402,8 +399,6 @@ TEST(ConSanAccessPolicy, AllFourEnginesMapOneAccessToTheirOwnEvidenceIntent) {
     EXPECT_EQ(policy.plan.site_decisions.front().reason, ConSanAccessPolicyReason::None);
     EXPECT_EQ(policy.plan.probe_intents.front().kind, expected_kind);
     EXPECT_EQ(policy.plan.probe_intents.front().position, ConSanProbePosition::Before);
-    EXPECT_EQ(policy.plan.probe_intents.front().lane_mask,
-              ConSanLaneMaskPolicy::ActiveExecutionMask);
     EXPECT_EQ(policy.plan.probe_intents.front().requirement, ConSanProbeRequirement::Required);
   }
 }
