@@ -92,6 +92,7 @@ jobs:
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
       - name: Driver / GPU sanity check
+        if: ${{ !fromJSON(inputs.component).linux_cpu_runner }}
         timeout-minutes: 3
         run: |
           python ./build_tools/print_driver_gpu_info.py
