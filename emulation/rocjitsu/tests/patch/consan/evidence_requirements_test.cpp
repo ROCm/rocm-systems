@@ -69,7 +69,6 @@ private:
     intent.kind = kind;
     intent.position = kind == ConSanProbeIntentKind::AccessRecord ? ConSanProbePosition::Before
                                                                   : ConSanProbePosition::After;
-    intent.requirement = ConSanProbeRequirement::Required;
     if (associated)
       intent.synchronization_association = {"sequence-" + std::to_string(intent.id.value)};
     for (size_t ordinal = 0; ordinal < semantic_count; ++ordinal) {
@@ -107,7 +106,6 @@ public:
     intent.position = kind == ConSanProbeIntentKind::AtomicAddressCapture
                           ? ConSanProbePosition::Before
                           : ConSanProbePosition::After;
-    intent.requirement = ConSanProbeRequirement::Required;
     if (associated)
       intent.synchronization_association = {"evidence-sequence-" + std::to_string(intent.id.value)};
     for (size_t ordinal = 0; ordinal < semantic_count; ++ordinal) {
@@ -194,7 +192,6 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
   intent.physical_site = site.physical_id;
   intent.kind = ConSanProbeIntentKind::ExactShadowAccess;
   intent.position = ConSanProbePosition::Before;
-  intent.requirement = ConSanProbeRequirement::Required;
   for (const ConSanAccessRange &range : site.ranges)
     intent.covered_semantic_sites.push_back(range.id);
   fixture.plan.probe_intents.push_back(std::move(intent));

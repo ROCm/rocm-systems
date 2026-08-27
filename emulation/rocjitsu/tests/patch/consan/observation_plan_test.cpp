@@ -117,8 +117,6 @@ TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValue
                                    consan_probe_intent_kind_name, "invalid-probe-intent-kind");
   expect_observation_enum_contract(kConSanProbePositions, ConSanProbePosition::Count,
                                    consan_probe_position_name, "invalid-probe-position");
-  expect_observation_enum_contract(kConSanProbeRequirements, ConSanProbeRequirement::Count,
-                                   consan_probe_requirement_name, "invalid-probe-requirement");
   expect_observation_enum_contract(
       kConSanDynamicResultRequirements, ConSanDynamicResultRequirement::Count,
       consan_dynamic_result_requirement_name, "invalid-dynamic-result-requirement");
@@ -291,13 +289,13 @@ TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPl
   ASSERT_TRUE(std::ranges::equal(ledger.site_decisions(), policy.plan.site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), 1u);
   EXPECT_EQ(ledger.intent_entries().front().lowering, ConSanLoweringOutcomeKind::Pending);
-  EXPECT_FALSE(ledger.all_required_intents_instrumented());
+  EXPECT_FALSE(ledger.all_intents_instrumented());
 
   EXPECT_FALSE(ledger.set_lowering_outcome({}, ConSanLoweringOutcomeKind::Instrumented));
   EXPECT_FALSE(ledger.set_lowering_outcome({7}, ConSanLoweringOutcomeKind::Instrumented));
   EXPECT_FALSE(ledger.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::Count));
   EXPECT_TRUE(ledger.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::Instrumented, "placed"));
-  EXPECT_TRUE(ledger.all_required_intents_instrumented());
+  EXPECT_TRUE(ledger.all_intents_instrumented());
   ASSERT_NE(ledger.intent_entry({0}), nullptr);
   EXPECT_EQ(ledger.intent_entry({0})->detail, "placed");
 
@@ -343,7 +341,6 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
           }},
           .kind = ConSanProbeIntentKind::BarrierRecord,
           .position = ConSanProbePosition::After,
-          .requirement = ConSanProbeRequirement::Required,
           .synchronization_association = std::nullopt,
           .dynamic_result = ConSanDynamicResultRequirement::None,
       }},
@@ -399,7 +396,6 @@ TEST(ConSanAccessPolicy, AllFourEnginesMapOneAccessToTheirOwnEvidenceIntent) {
     EXPECT_EQ(policy.plan.site_decisions.front().reason, ConSanAccessPolicyReason::None);
     EXPECT_EQ(policy.plan.probe_intents.front().kind, expected_kind);
     EXPECT_EQ(policy.plan.probe_intents.front().position, ConSanProbePosition::Before);
-    EXPECT_EQ(policy.plan.probe_intents.front().requirement, ConSanProbeRequirement::Required);
   }
 }
 

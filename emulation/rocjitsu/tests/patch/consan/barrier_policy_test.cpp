@@ -148,7 +148,6 @@ TEST(ConSanBarrierPolicy, AllEnginesExpressTheirBarrierContract) {
     EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason, ConSanBarrierPolicyReason::None);
     EXPECT_EQ(policy.plan.probe_intents.front().kind, intent_kind);
     EXPECT_EQ(policy.plan.probe_intents.front().position, ConSanProbePosition::After);
-    EXPECT_EQ(policy.plan.probe_intents.front().requirement, ConSanProbeRequirement::Required);
   }
 }
 

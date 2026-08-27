@@ -1880,7 +1880,6 @@ void install_test_access_coverage(
           .covered_semantic_sites = {semantic},
           .kind = intent_kind,
           .position = rocjitsu::ConSanProbePosition::Before,
-          .requirement = rocjitsu::ConSanProbeRequirement::Required,
           .synchronization_association = std::nullopt,
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
       });
@@ -4753,7 +4752,6 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
                .covered_semantic_sites = {barrier},
                .kind = rocjitsu::ConSanProbeIntentKind::BarrierRecord,
                .position = rocjitsu::ConSanProbePosition::After,
-               .requirement = rocjitsu::ConSanProbeRequirement::Required,
                .synchronization_association = std::nullopt,
                .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None},
               {.id = {1u},
@@ -4762,7 +4760,6 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
                .covered_semantic_sites = {atomic},
                .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
                .position = rocjitsu::ConSanProbePosition::After,
-               .requirement = rocjitsu::ConSanProbeRequirement::Required,
                .synchronization_association = atomic_association},
               {.id = {2u},
                .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
@@ -4770,7 +4767,6 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
                .covered_semantic_sites = {fence},
                .kind = rocjitsu::ConSanProbeIntentKind::FenceRecord,
                .position = rocjitsu::ConSanProbePosition::After,
-               .requirement = rocjitsu::ConSanProbeRequirement::Required,
                .synchronization_association = fence_association},
           },
   };
@@ -4823,7 +4819,6 @@ rocjitsu::ConSanResult typed_coverage_transform_result() {
           .covered_semantic_sites = {semantic},
           .kind = rocjitsu::ConSanProbeIntentKind::AccessRecord,
           .position = rocjitsu::ConSanProbePosition::Before,
-          .requirement = rocjitsu::ConSanProbeRequirement::Required,
           .synchronization_association = std::nullopt,
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
       }},
@@ -5135,7 +5130,6 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
           .covered_semantic_sites = {semantic},
           .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
           .position = rocjitsu::ConSanProbePosition::After,
-          .requirement = rocjitsu::ConSanProbeRequirement::Required,
           .synchronization_association =
               rocjitsu::ConSanSynchronizationAssociationId{"auto-report-atomic"},
       }},

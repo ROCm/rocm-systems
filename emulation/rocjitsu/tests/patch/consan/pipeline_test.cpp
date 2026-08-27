@@ -312,7 +312,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .covered_semantic_sites = {semantic},
       .kind = ConSanProbeIntentKind::AccessRecord,
       .position = ConSanProbePosition::Before,
-      .requirement = ConSanProbeRequirement::Required,
       .synchronization_association = std::nullopt,
       .dynamic_result = ConSanDynamicResultRequirement::None,
   });
@@ -331,7 +330,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       .covered_semantic_sites = {barrier.semantic_id},
       .kind = ConSanProbeIntentKind::BarrierRecord,
       .position = ConSanProbePosition::Before,
-      .requirement = ConSanProbeRequirement::Required,
       .synchronization_association = std::nullopt,
       .dynamic_result = ConSanDynamicResultRequirement::None,
   });

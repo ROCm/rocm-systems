@@ -659,43 +659,6 @@ inline constexpr std::array<ConSanProbePosition, 2> kConSanProbePositions = {
 
 static_assert(kConSanProbePositions.size() == static_cast<size_t>(ConSanProbePosition::Count));
 
-/// Whether losing an admitted intent invalidates the requested static contract.
-///
-/// Required intents must lower successfully for ConSan to claim complete
-/// static instrumentation. Best-effort intents may be lost without that claim,
-/// but their loss remains visible in the coverage ledger.
-enum class ConSanProbeRequirement : uint8_t {
-  /// Lowering failure is a coverage gap for the requested engine contract.
-  Required,
-  /// Lowering may reject the enhancement while retaining minimum behavior.
-  BestEffort,
-  /// One-past-the-end iteration bound; never an intent requirement.
-  Count,
-};
-
-/// Complete iterable set of probe requirements.
-inline constexpr std::array<ConSanProbeRequirement, 2> kConSanProbeRequirements = {
-    ConSanProbeRequirement::Required,
-    ConSanProbeRequirement::BestEffort,
-};
-
-/// Return the stable diagnostic spelling of a probe requirement.
-[[nodiscard]] constexpr std::string_view
-consan_probe_requirement_name(ConSanProbeRequirement requirement) {
-  switch (requirement) {
-  case ConSanProbeRequirement::Required:
-    return "required";
-  case ConSanProbeRequirement::BestEffort:
-    return "best-effort";
-  case ConSanProbeRequirement::Count:
-    break;
-  }
-  return "invalid-probe-requirement";
-}
-
-static_assert(kConSanProbeRequirements.size() ==
-              static_cast<size_t>(ConSanProbeRequirement::Count));
-
 /// One engine-policy decision for one normalized semantic access range.
 ///
 /// Container aliases are attribution only and are retained as names for
@@ -811,7 +774,9 @@ struct ConSanFenceSiteDecision {
 /// is explicit and keeps placement capacity at one insertion point. The intent
 /// contains no chosen registers, report addresses, machine words, branch route,
 /// or patch kind. Every intent observes every lane active at the guest
-/// instruction; no engine may silently narrow that execution mask.
+/// instruction; no engine may silently narrow that execution mask. Every
+/// admitted intent is part of the requested engine contract, so losing any
+/// intent during lowering is a coverage gap.
 struct ConSanProbeIntent {
   /// Stable plan-local identifier cited by semantic decisions.
   ConSanProbeIntentId id;
@@ -825,8 +790,6 @@ struct ConSanProbeIntent {
   ConSanProbeIntentKind kind = ConSanProbeIntentKind::Count;
   /// Required ordering relative to the guest instruction.
   ConSanProbePosition position = ConSanProbePosition::Count;
-  /// Whether losing this intent creates a contract coverage gap.
-  ConSanProbeRequirement requirement = ConSanProbeRequirement::Count;
   /// Complete synchronization sequence implemented by this probe, if any.
   /// Access and barrier intents leave this absent; atomic/fence intents use it
   /// to join before- and after-operation work without relying on patch order.
@@ -1107,10 +1070,10 @@ public:
                                                      ConSanLoweringOutcomeKind outcome,
                                                      std::string detail = {});
 
-  /// Return whether every required admitted intent has been instrumented.
+  /// Return whether every admitted intent has been instrumented.
   /// This deliberately makes no claim about runtime selection or retained
   /// evidence, which are separate later ledger axes.
-  [[nodiscard]] bool all_required_intents_instrumented() const;
+  [[nodiscard]] bool all_intents_instrumented() const;
 
   bool operator==(const ConSanCoverageLedger &) const = default;
 

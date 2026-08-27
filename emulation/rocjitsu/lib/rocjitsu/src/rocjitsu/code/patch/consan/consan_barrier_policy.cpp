@@ -283,7 +283,6 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
               .covered_semantic_sites = std::move(covered),
               .kind = barrier_intent_kind(request.engine),
               .position = ConSanProbePosition::After,
-              .requirement = ConSanProbeRequirement::Required,
               .synchronization_association = std::nullopt,
               .dynamic_result = ConSanDynamicResultRequirement::None,
           });

@@ -973,21 +973,18 @@ over inventory; it does not extend the core inventory with live mutation state.
 #### `ObservationPlan`
 
 `ObservationPlan` is the engine's complete target-neutral statement of what one
-transform intends to observe. A **lane-mask policy** says whether a probe
-observes all currently active lanes, one elected lane, or another explicitly
-defined subset. An **evidence kind** names the logical record or state update
-the probe must produce. A **required** intent makes failure a contract gap; a
-**best-effort** intent may be rejected without invalidating the minimum
-requested behavior, but its loss still appears in coverage. An
-**evidence schema** defines the typed fields and meaning of an evidence kind
-independently of its concrete byte offsets.
+transform intends to observe. Every probe observes every lane active at its
+guest instruction, and every admitted probe is part of the requested engine
+contract: losing one during lowering is a coverage gap. An **evidence kind**
+names the logical record or state update the probe must produce. An **evidence
+schema** defines the typed fields and meaning of an evidence kind independently
+of its concrete byte offsets.
 
 The plan contains:
 
 - a `SiteDecision` for every relevant semantic site;
 - admitted `ProbeIntent`s keyed to physical sites, with before/after position,
-  guest values required, lane-mask policy, evidence kind, and required versus
-  best-effort status;
+  guest values required, and evidence kind;
 - engine state requirements such as entry identity, epoch, sampling selector,
   exact shadow, ordering tables, or sticky marker;
 - the logical evidence schema and capacity inputs; and
@@ -2271,7 +2268,7 @@ not regress or conceal that limitation.
   require duplicate internal state.
 - **Alias and aggregate contracts:** synchronization canonicalization retains
   every equivalent source-container name. A multi-intent decision is complete
-  only when all required intents are instrumented; resource or placement loss
+  only when all of its intents are instrumented; resource or placement loss
   remains visible when another intent at the same semantic site succeeded.
 - **Test gate:** focused policy/retry/partial-lowering units, the complete
   ConSan host suite, all HSA hook tests, and the complete simulator and physical
@@ -3849,6 +3846,35 @@ analysis completed.
   simulator-device tests across the five supported targets pass in 67.46
   seconds. E2E validation remains outside this work.
 
+### Slice 5X: make admitted-intent coverage intrinsically required
+
+- **One coverage contract, not an unused grading axis:** Every intent admitted
+  by current ConSan policy is part of the selected engine contract. Any pending,
+  resource-rejected, or placement-rejected intent therefore makes static
+  coverage incomplete; no current engine produces or consumes an optional
+  enhancement intent.
+- **Completed speculative deletion:** `ConSanProbeRequirement`, its iterable
+  array, diagnostic formatter, validation helper, `ConSanProbeIntent` field,
+  and every forced `Required` initializer are gone. The coverage-ledger query
+  is now `all_intents_instrumented()` and checks every entry directly, so the
+  former `BestEffort` branch cannot silently excuse lost instrumentation.
+- **Contract coverage:** The ledger unit still proves that pending and rejected
+  outcomes are incomplete and only an instrumented outcome is complete.
+  Access, barrier, atomic/fence, evidence, pipeline, analysis, and hook tests
+  continue to exercise the intents without asserting an unvarying metadata
+  field.
+- **Deletion result:** Production source is 46 physical lines smaller and tests
+  are 16 physical lines smaller. No boolean, default, compatibility alias, or
+  replacement grading policy was introduced.
+- **Completed checked-in gate:** The focused observation-policy gate passes all
+  105 tests. The complete host gate passes 1,510 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 70.89
+  seconds. In the 587-row physical-gfx950 run, 585 rows passed and two rows hit
+  the 60-second process timeout; those timeout-only rows passed immediately
+  when rerun alone in 1.22 and 0.44 seconds. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
@@ -4063,7 +4089,7 @@ Terms used in the comparison table are:
   before editing bytes. **All-or-nothing** rejects the entire request if any
   site fails. **Graded per-site outcomes** permit each request to report
   instrumented or a typed rejection independently, subject to the client's
-  required/best-effort policy.
+  coverage policy.
 - An **offset request** names an instruction by byte offset. A selection
   **predicate** describes a property to match. **Symbol selection** names a
   function/kernel; **block selection** names a basic block, a straight-line CFG
@@ -4111,7 +4137,7 @@ Terms used in the comparison table are:
 | --- | --- | --- | --- |
 | Decode/CFG/liveness | Reusable decoder, CFG and liveness; current instrumentor consumes them | Shared RocJitsu substrate | Inventory and resource components depend on semantic/property interfaces, not ConSan raw decoders |
 | Transactional ELF patching | Preflights all sites then performs one patch; current single-text cave model | Code-object-to-code-object transforms, composable variants | Reuse final validation now; require arbitrary input images and explicit original mapping later |
-| Site selection | Offset requests, `BeforeInst`, all-or-nothing rejection | predicate/symbol/block selection and per-site graded outcomes | ConSan supplies semantic IDs and required/best-effort requests; every rejection returns a reason |
+| Site selection | Offset requests, `BeforeInst`, all-or-nothing rejection | predicate/symbol/block selection and per-site graded outcomes | ConSan supplies required semantic IDs; every rejection returns a reason |
 | Before/after | Before only today | Both intended and unblocked | Required for addresses before an access and atomic outcomes after it |
 | Probe bodies | Copied compiled no-op probe, fixed call envelope | Fixed verified catalogue, compiled per target/wave size; host-side analysis | Record/Replay needs typed access/synchronization probes and context arguments; descriptor/calling convention must be data |
 | Device state | Probe call is stateless; no LDS/persistent state | Near-term no on-device aggregation | Compatible with RR; future framework model needed for Sampled/SC/Inline |

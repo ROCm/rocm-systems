@@ -791,7 +791,7 @@ The production client should contain only:
    itself.
 2. **Selection and mode policy** mapping those semantic events and user
    configuration to DBI sites, provided probe kinds, payloads, dispatch filters,
-   and required-versus-best-effort coverage.
+   and required coverage.
 3. **ConSan payload schemas** within DBI's stable record envelope. Device work
    should capture the minimum evidence needed by the selected client policy,
    not embed general instrumentation machinery.

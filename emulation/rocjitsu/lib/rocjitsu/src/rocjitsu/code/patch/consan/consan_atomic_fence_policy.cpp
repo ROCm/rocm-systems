@@ -498,7 +498,6 @@ add_intent(ConSanObservationPlan &plan, const PhysicalSiteId &physical_site,
       .covered_semantic_sites = std::move(covered_sites),
       .kind = kind,
       .position = position,
-      .requirement = ConSanProbeRequirement::Required,
       .synchronization_association = association,
       .dynamic_result = dynamic_result,
   });
