@@ -293,6 +293,33 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
         std::cerr << "\nTo visualize trace:\n"
                   << "  Open " << output_dir
                   << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
+    // Results will be available in:
+    std::cerr << "\nResults will be available in:\n";
+    if(profiling_on)
+    {
+        std::cerr << "  \u2022 Text profile:   " << output_dir << "/wall_clock.txt\n"
+                  << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n";
+    }
+    if(rocpd_on)
+    {
+        std::cerr << "  \u2022 rocpd output:   " << output_dir << "/rocpd.db\n";
+    }
+    if(tracing_on)
+    {
+        std::cerr << "  \u2022 Perfetto trace: " << output_dir
+                  << "/perfetto-trace.proto\n";
+    }
+
+    // To visualize results:
+    std::cerr << "\nTo visualize results:\n";
+    if(rocpd_on)
+    {
+        std::cerr << "  \u2022 rocpd:    Open " << output_dir << "/rocpd.db in ROCm Optiq.\n";
+    }
+    if(tracing_on)
+    {
+        std::cerr << "  \u2022 Perfetto: Open " << output_dir
+                  << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
     }
     std::cerr << "\n";
 }
