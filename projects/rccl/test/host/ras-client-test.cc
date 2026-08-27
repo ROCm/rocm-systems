@@ -940,3 +940,338 @@ TEST_F(RasClientMicrotest, SocketWrite_ZeroCountEintr_DoesNotRetryAndReturnsZero
   EXPECT_EQ(1, writeHook.calls);
   EXPECT_EQ("0/0", FormatWriteCalls(rec.calls));
 }
+
+
+// ===========================================================================
+// printUsage, plus parseArgs' three exiting arms: case 'e' (--help, exit 0),
+// case 'r' (--version, exit 0) and default: (bad option, exit 1).
+// ===========================================================================
+
+namespace {
+
+// printUsage echoes argv[0], and getopt prefixes its own diagnostics with it,
+// so a distinctive value separates "the unit printed it" from "it was there".
+constexpr const char kUsageProg[] = "ras-client-argv0-probe";
+
+// Runs parseArgs over a caller-supplied argv (argv[0] included) and records both
+// the status the default exit seam threw and everything written to stderr.
+ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
+  ParseArgsOutcome out;
+  RasArgv argv(args);
+  out.log = CaptureLog([&]() {
+    try {
+      parseArgs(argv.argc(), argv.argv());
+    } catch (const RasClientExit& e) {
+      out.exitStatus = e.status;
+    }
+  });
+  return out;
+}
+
+// The text between `needle` and the following '\n'; "" when `needle` is absent.
+std::string LineAfter(const std::string& log, const char* needle) {
+  const size_t at = log.find(needle);
+  if (at == std::string::npos) return "";
+  const size_t start = at + std::strlen(needle);
+  const size_t end = log.find('\n', start);
+  return log.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+size_t CountChar(const std::string& s, char c) {
+  size_t n = 0;
+  for (char ch : s) {
+    if (ch == c) ++n;
+  }
+  return n;
+}
+
+// Every global parseArgs can write, still at its compiled-in default. The exiting
+// arms must reach exit without touching any of them.
+void ExpectAllGlobalsAtDefault() {
+  EXPECT_STREQ(kDefaultHost, hostName);
+  EXPECT_STREQ(kDefaultPort, port);
+  EXPECT_EQ(-1, timeout);
+  EXPECT_FALSE(verbose);
+  EXPECT_FALSE(monitorMode);
+  EXPECT_EQ(nullptr, format);
+  EXPECT_EQ(nullptr, events);
+}
+
+}  // namespace
+
+// --- printUsage, called directly -------------------------------------------
+
+// Whole-line needles: "  -f, --format=FMT" and "  -p, --port=PORT" share a prefix,
+// so anything shorter than a full line cannot see one line replacing another.
+TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_EmitsEveryLineOfTheUsageText) {
+  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
+
+  EXPECT_TRUE(LogHas(log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << log;
+  EXPECT_TRUE(LogHas(log, "Query the state of a running NCCL job.\n")) << log;
+  EXPECT_TRUE(LogHas(log, "\nOptions:\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -f, --format=FMT    Output format: text or json (text by default)\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -h, --host=HOST     Host name or IP address of the RAS client socket of the\n")) << log;
+  EXPECT_TRUE(LogHas(log, "                      NCCL job to connect to (localhost by default)\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -m, --monitor[=GROUPS] Monitor mode: continuously watch for peer changes.\n")) << log;
+  EXPECT_TRUE(LogHas(log, "                      Optional GROUPS: lifecycle, trace, all, or\n")) << log;
+  EXPECT_TRUE(LogHas(log, "                      combinations like lifecycle,trace (lifecycle by default)\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -p, --port=PORT     TCP port of the RAS client socket of the NCCL job\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -t, --timeout=SECS  Maximum time for the local NCCL process to wait for\n")) << log;
+  EXPECT_TRUE(LogHas(log, "                      responses from other NCCL processes\n")) << log;
+  EXPECT_TRUE(LogHas(log, "  -v, --verbose       Increase the verbosity level of the RAS output\n")) << log;
+  EXPECT_TRUE(LogHas(log, "      --help          Print this help and exit\n")) << log;
+  EXPECT_TRUE(LogHas(log, "      --version       Print the version number and exit\n")) << log;
+}
+
+// The two macro interpolations, asserted with their surrounding text so a dropped
+// substitution (or a wrong macro) dies rather than merely printing a bare paren.
+TEST_F(RasClientMicrotest, PrintUsage_MacroDefaults_AreInterpolatedWithSurroundingText) {
+  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
+
+  char portLine[160];
+  char timeoutLine[160];
+  std::snprintf(portLine, sizeof(portLine), "                      (%d by default)\n", NCCL_RAS_CLIENT_PORT);
+  std::snprintf(timeoutLine, sizeof(timeoutLine), "                      (%d secs by default; 0 disables the timeout)\n",
+                RAS_COLLECTIVE_LEG_TIMEOUT_SEC);
+
+  EXPECT_TRUE(LogHas(log, portLine)) << portLine << "\n--- log ---\n" << log;
+  EXPECT_TRUE(LogHas(log, timeoutLine)) << timeoutLine << "\n--- log ---\n" << log;
+}
+
+// Ordering: the whole-line checks above are position-blind, so a reordered block
+// would keep them all green.
+TEST_F(RasClientMicrotest, PrintUsage_OptionBlock_IsEmittedInDeclarationOrder) {
+  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
+
+  const size_t usage = log.find("Usage: ras-client-argv0-probe [OPTION]...\n");
+  const size_t fmt = log.find("  -f, --format=FMT ");
+  const size_t host = log.find("  -h, --host=HOST ");
+  const size_t mon = log.find("  -m, --monitor[=GROUPS] ");
+  const size_t prt = log.find("  -p, --port=PORT ");
+  const size_t tmo = log.find("  -t, --timeout=SECS ");
+  const size_t verb = log.find("  -v, --verbose ");
+  const size_t help = log.find("      --help ");
+  const size_t vers = log.find("      --version ");
+
+  ASSERT_NE(std::string::npos, vers) << log;
+  EXPECT_LT(usage, fmt);
+  EXPECT_LT(fmt, host);
+  EXPECT_LT(host, mon);
+  EXPECT_LT(mon, prt);
+  EXPECT_LT(prt, tmo);
+  EXPECT_LT(tmo, verb);
+  EXPECT_LT(verb, help);
+  EXPECT_LT(help, vers);
+}
+
+// printUsage takes argv0 as a parameter, so a different value must show up.
+TEST_F(RasClientMicrotest, PrintUsage_DifferentArgv0_IsEchoedVerbatim) {
+  const std::string log = CaptureLog([]() { printUsage("/opt/rocm/bin/rccl-ras-other"); });
+
+  EXPECT_TRUE(LogHas(log, "Usage: /opt/rocm/bin/rccl-ras-other [OPTION]...\n")) << log;
+  EXPECT_FALSE(LogHas(log, kUsageProg)) << log;
+}
+
+// printUsage writes nowhere but stderr and changes no parse state; without this
+// the two exiting arms cannot be told apart from the function they call.
+TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesNotExit) {
+  const std::string log = CaptureLog([]() { printUsage(kUsageProg); });
+
+  EXPECT_TRUE(LogHas(log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << log;
+  EXPECT_FALSE(LogHas(log, "RCCL RAS client version ")) << log;
+  ExpectAllGlobalsAtDefault();
+}
+
+// --- case 'e': --help ------------------------------------------------------
+
+// 'e' is not in the short optstring "f:h:m::p:t:v", so only the long option
+// reaches it; getopt_long returns 'e' from the longOpts val field.
+TEST_F(RasClientMicrotest, ParseArgsHelp_LongForm_PrintsUsageWithArgv0AndExitsZero) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "      --version       Print the version number and exit\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "unrecognized option")) << out.log;
+  ExpectAllGlobalsAtDefault();
+}
+
+// --help must exit before any option after it is looked at.
+TEST_F(RasClientMicrotest, ParseArgsHelp_FollowedByOtherOptions_ExitsBeforeApplyingThem) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help", "-v", "-p", "31337"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(verbose);
+  EXPECT_STREQ(kDefaultPort, port);
+}
+
+// --help is no_argument: an earlier option's value must not be swallowed by it.
+TEST_F(RasClientMicrotest, ParseArgsHelp_AfterAnAppliedOption_StillExitsZeroWithUsage) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-p", "31337", "--help"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_STREQ("31337", port);
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "requires an argument")) << out.log;
+}
+
+// A unique long-option abbreviation still resolves to 'e'; "--hel" is not a
+// prefix of "--host", so it is unambiguous.
+TEST_F(RasClientMicrotest, ParseArgsHelp_UniqueAbbreviation_ReachesTheHelpArmNotDefault) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--hel"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "is ambiguous")) << out.log;
+}
+
+// --- case 'r': --version ---------------------------------------------------
+
+// The components are checked positionally against the macros rather than against
+// a re-spelled STR() concatenation, so swapping NCCL_MINOR and NCCL_PATCH in the
+// production string lands 7 where 30 is expected and this test fails.
+TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_PrintsComponentsInOrderAndExitsZero) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  ASSERT_TRUE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+
+  const std::string version = LineAfter(out.log, "RCCL RAS client version ");
+  int major = -1;
+  int minor = -1;
+  int patch = -1;
+  ASSERT_EQ(3, std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch)) << version;
+  EXPECT_EQ(NCCL_MAJOR, major) << version;
+  EXPECT_EQ(NCCL_MINOR, minor) << version;
+  EXPECT_EQ(NCCL_PATCH, patch) << version;
+  EXPECT_EQ(2u, CountChar(version, '.')) << version;
+  ExpectAllGlobalsAtDefault();
+}
+
+// The version arm must not print the usage text; that is what separates it from
+// case 'e' and from default:.
+TEST_F(RasClientMicrotest, ParseArgsVersion_LongForm_DoesNotPrintTheUsageText) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "Usage: ")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "      --version       Print the version number and exit\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, kUsageProg)) << out.log;
+}
+
+// --version exits before later options are applied, and 'r' is unreachable via
+// any short option, so "-r" is an unknown option instead.
+TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeApplyingThem) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version", "-v"});
+
+  EXPECT_EQ(0, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+  EXPECT_FALSE(verbose);
+}
+
+TEST_F(RasClientMicrotest, ParseArgsVersion_ShortDashR_IsNotAnOptionAndFallsToDefault) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-r"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: invalid option -- 'r'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+}
+
+// --- default: the four distinct getopt routes ------------------------------
+// The optstring has no leading ':', so getopt_long reports every one of these as
+// '?'; ':' is never produced and there is no separate arm for it.
+
+TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownShortOption_PrintsUsageAndExitsOne) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-z"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: invalid option -- 'z'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "      --help          Print this help and exit\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+  ExpectAllGlobalsAtDefault();
+}
+
+TEST_F(RasClientMicrotest, ParseArgsDefault_UnknownLongOption_PrintsUsageAndExitsOne) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--bogus"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: unrecognized option '--bogus'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+  ExpectAllGlobalsAtDefault();
+}
+
+// "--ver" prefixes both "--verbose" and "--version", so getopt refuses to guess.
+TEST_F(RasClientMicrotest, ParseArgsDefault_AmbiguousLongAbbreviation_PrintsUsageAndExitsOne) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--ver"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log,
+                     "ras-client-argv0-probe: option '--ver' is ambiguous; "
+                     "possibilities: '--verbose' '--version'\n"))
+      << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_FALSE(verbose);
+  EXPECT_FALSE(LogHas(out.log, "RCCL RAS client version ")) << out.log;
+}
+
+TEST_F(RasClientMicrotest, ParseArgsDefault_ShortOptionMissingItsArgument_PrintsUsageAndExitsOne) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-p"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: option requires an argument -- 'p'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_STREQ(kDefaultPort, port);
+}
+
+TEST_F(RasClientMicrotest, ParseArgsDefault_LongOptionMissingItsArgument_PrintsUsageAndExitsOne) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--port"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: option '--port' requires an argument\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+  EXPECT_STREQ(kDefaultPort, port);
+}
+
+// An applied option before the bad one proves default: aborts the loop rather
+// than the loop never having run.
+TEST_F(RasClientMicrotest, ParseArgsDefault_AfterAnAppliedOption_ExitsOneAndStopsParsing) {
+  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-v", "-z", "-p", "31337"});
+
+  EXPECT_EQ(1, out.exitStatus);
+  EXPECT_TRUE(verbose);
+  EXPECT_STREQ(kDefaultPort, port);
+  EXPECT_TRUE(LogHas(out.log, "ras-client-argv0-probe: invalid option -- 'z'\n")) << out.log;
+  EXPECT_TRUE(LogHas(out.log, "Usage: ras-client-argv0-probe [OPTION]...\n")) << out.log;
+}
+
+// --- death tests: production really terminates -----------------------------
+
+TEST_F(RasClientMicrotest, ParseArgsHelp_RealExit_TerminatesProcessWithStatusZero) {
+  ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
+  RasArgv args{"ras-client-death-probe", "--help"};
+
+  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(0),
+              "Usage: ras-client-death-probe \\[OPTION\\]\\.\\.\\.");
+}
+
+TEST_F(RasClientMicrotest, ParseArgsVersion_RealExit_TerminatesProcessWithStatusZero) {
+  ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
+  RasArgv args{"ras-client-death-probe", "--version"};
+
+  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(0),
+              "RCCL RAS client version [0-9]+\\.[0-9]+\\.[0-9]+");
+}
+
+TEST_F(RasClientMicrotest, ParseArgsDefault_RealExit_TerminatesProcessWithStatusOne) {
+  ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
+  RasArgv args{"ras-client-death-probe", "--bogus"};
+
+  EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(1),
+              "unrecognized option '--bogus'");
+}
