@@ -248,6 +248,29 @@ metric_group_mask(std::string_view group) noexcept
     return mask;
 }
 
+/**
+ * @brief Bit mask of the metric whose track suffix is @p suffix, or 0 when unknown.
+ *
+ * Complements @c metric_group_mask: a group token selects a read/write pair, this
+ * selects a single track by the suffix that appears in the Perfetto name.
+ */
+[[nodiscard]] constexpr std::uint32_t
+metric_bit_mask(std::string_view suffix) noexcept
+{
+    for(const auto& metric : METRIC_TABLE)
+    {
+        if(suffix == metric.suffix)
+        {
+            return 1U << metric.bit;
+        }
+    }
+    return 0U;
+}
+
+static_assert(metric_bit_mask("Read Bytes") == (1U << 0));
+static_assert(metric_bit_mask("Write Bytes") == (1U << 1));
+static_assert(metric_bit_mask("nonsense") == 0U);
+
 /// @brief Perfetto/RocPD track name for a metric on a given GPU.
 [[nodiscard]] inline std::string
 track_name(std::size_t gpu_id, const char* suffix)
