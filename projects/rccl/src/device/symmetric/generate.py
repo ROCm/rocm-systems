@@ -168,11 +168,17 @@ def kernel_conds(k):
 def instantiate(k):
   form_red_ty = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  #if CUDART_VERSION >= 12030 && __CUDA_ARCH__ >= 900\n"
+    "    cudaGridDependencySynchronize();\n"
+    "  #endif\n"
     "  ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
     "}}"
   )
   form = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  #if CUDART_VERSION >= 12030 && __CUDA_ARCH__ >= 900\n"
+    "    cudaGridDependencySynchronize();\n"
+    "  #endif\n"
     "  ncclSymkRun_{id}(&args4K.args);\n"
     "}}"
   )
