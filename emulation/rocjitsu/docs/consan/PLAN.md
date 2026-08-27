@@ -444,6 +444,11 @@ planned access patch and passed directly to emission instead of being mirrored
 through global mutable lowerer options. Record/Replay, Sampled, and Inline
 Shadow now also pass each access patch's scratch/spill overlap fact directly;
 there is no code-object-wide candidate-overlap flag.
+Inline Shadow's workgroup-local shadow is now the ordinary attempted
+representation rather than a mutable rollout mode: each planned patch owns
+the optional local layout, and semantic fallbacks select the external shadow
+without a parallel global flag. The unreachable external-only capacity
+preflight and its mechanism-only test are gone.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

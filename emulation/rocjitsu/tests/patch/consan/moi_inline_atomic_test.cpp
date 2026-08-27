@@ -1387,7 +1387,6 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1024u; });
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
-  options.moi_inline_workgroup_shadow = true;
   options.scratch_vgpr = 16;
   options.moi_owner_vgpr = 48;
   options.moi_epoch_vgpr = 49;
@@ -4908,7 +4907,6 @@ TEST(ConSanMoi, InlineAtomicOnlyObjectOmitsUnusedWorkgroupFilterSgprs) {
   ASSERT_FALSE(bytes.empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
-  options.moi_inline_workgroup_shadow = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -4924,10 +4922,6 @@ TEST(ConSanMoi, InlineAtomicOnlyObjectOmitsUnusedWorkgroupFilterSgprs) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
-  EXPECT_NE(std::ranges::find(
-                result.warnings,
-                "ConSan MOI inline shadow omitted unused access-only workgroup-filter state"),
-            result.warnings.end());
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("could not place a fresh automatic EXEC-save SGPR window") !=
            std::string::npos;
@@ -4944,7 +4938,6 @@ TEST(ConSanMoi, InlineAtomicFitsAboveMetadataOwnedOddSgprCount) {
   ASSERT_EQ(original.kernels().size(), 1u);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
-  options.moi_inline_workgroup_shadow = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -5032,7 +5025,6 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
-  options.moi_inline_workgroup_shadow = false;
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 80;
   options.moi_dispatch_id_sgpr = 60;
@@ -5072,7 +5064,6 @@ TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseCompari
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
-  options.moi_inline_workgroup_shadow = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
@@ -5163,7 +5154,6 @@ TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
-  options.moi_inline_workgroup_shadow = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
@@ -5252,7 +5242,6 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
-  options.moi_inline_workgroup_shadow = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_dispatch_id_sgpr = 80u;
@@ -5319,7 +5308,6 @@ TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlo
   options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
-  options.moi_inline_workgroup_shadow = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_dispatch_id_sgpr = 80u;

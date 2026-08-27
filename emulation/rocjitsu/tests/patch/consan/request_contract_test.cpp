@@ -663,7 +663,7 @@ TEST(ConSanContractIssueTest, EveryValueHasAStableUniqueNameAndInvalidValuesFail
             "invalid-contract-issue");
 }
 
-TEST(ConSanOptionsConstructionTest, PreservesRequestAndDerivesInlineModeWithoutMutatingInput) {
+TEST(ConSanOptionsConstructionTest, PreservesRequestWithoutMutatingInput) {
   ConSanRequest request = valid_moi_request(ConSanMoiEngine::InlineShadow);
   request.moi_owner_source = ConSanMoiOwnerSource::HwId;
   request.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -695,7 +695,6 @@ TEST(ConSanOptionsConstructionTest, PreservesRequestAndDerivesInlineModeWithoutM
   EXPECT_TRUE(options.moi_init_owner_epoch);
   EXPECT_TRUE(options.moi_track_barriers);
   EXPECT_TRUE(options.moi_track_atomics);
-  EXPECT_TRUE(options.moi_inline_workgroup_shadow);
   EXPECT_EQ(options.moi_sample_stride, 11u);
   EXPECT_EQ(options.moi_sample_offset, 7u);
   EXPECT_EQ(options.moi_runtime_sample_stride, 16u);
@@ -713,7 +712,6 @@ TEST(ConSanOptionsConstructionTest, PreservesEngineSpecificRequestControls) {
                         physical_runtime_capabilities(), BoundRuntimeResources{});
   EXPECT_TRUE(options.moi_dynamic_access_records);
   EXPECT_FALSE(options.moi_sampled_check);
-  EXPECT_FALSE(options.moi_inline_workgroup_shadow);
 
   ConSanRequest sampled = valid_moi_request(ConSanMoiEngine::Sampled);
   sampled.moi_sampled_check = true;
@@ -721,7 +719,6 @@ TEST(ConSanOptionsConstructionTest, PreservesEngineSpecificRequestControls) {
                           physical_runtime_capabilities(), BoundRuntimeResources{});
   EXPECT_FALSE(options.moi_dynamic_access_records);
   EXPECT_TRUE(options.moi_sampled_check);
-  EXPECT_FALSE(options.moi_inline_workgroup_shadow);
 }
 
 TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFields) {

@@ -3589,10 +3589,6 @@ class MoiPatchOwnerIndex {
 public:
   explicit MoiPatchOwnerIndex(const ConSanTransformArtifacts &result) {
     for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.workgroup_shadow_size != 0u) {
-        workgroup_shadow_owners_.insert(patch.owner_descriptor_file_offsets.begin(),
-                                        patch.owner_descriptor_file_offsets.end());
-      }
       if (!is_persistent_access_patch(patch))
         continue;
       for (uint64_t owner : patch.owner_descriptor_file_offsets)
@@ -3626,11 +3622,6 @@ public:
     return match;
   }
 
-  [[nodiscard]] bool has_workgroup_shadow_for_any(std::span<const uint64_t> owners) const {
-    return std::ranges::any_of(
-        owners, [&](uint64_t owner) { return workgroup_shadow_owners_.contains(owner); });
-  }
-
 private:
   [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -3642,7 +3633,6 @@ private:
 
   std::unordered_map<uint64_t, std::vector<const ConSanPatchInfo *>>
       persistent_access_patches_by_owner_;
-  std::unordered_set<uint64_t> workgroup_shadow_owners_;
   std::map<std::vector<uint64_t>, const ConSanPatchInfo *> persistent_access_cache_;
 };
 
@@ -3837,8 +3827,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
 
 [[nodiscard]] std::optional<uint16_t>
 inline_shadow_visible_evidence_sgpr(const ConSanOptions &options) {
-  if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_inline_workgroup_shadow ||
-      !options.moi_exec_save_sgpr) {
+  if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_exec_save_sgpr) {
     return std::nullopt;
   }
   if (options.automatic_moi_inline_sgpr_spill)
@@ -4830,7 +4819,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
       continue;
     }
     options.moi_exec_save_sgpr = base;
-    options.moi_exec_save_sgprs_persistent = options.moi_inline_workgroup_shadow;
+    options.moi_exec_save_sgprs_persistent =
+        options.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_inline_access_present;
     result.warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
                                  std::to_string(base) + ":s" + std::to_string(base + count - 1u));
     return true;

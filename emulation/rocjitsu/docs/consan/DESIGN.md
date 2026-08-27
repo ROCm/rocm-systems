@@ -619,6 +619,15 @@ Record/Replay, Sampled, and Inline Shadow cannot observe another candidate's
 overlap through global mutable state. The same ownership rule guides the
 remaining resource-state cleanup.
 
+Inline Shadow applies that rule to its shadow representation as well. Every
+eligible access first attempts a workgroup-local LDS shadow and records the
+successful layout directly on its planned patch; subword, dynamic-LDS,
+spill-backed, and capacity-limited components retain the external exact-shadow
+fallback. Emission receives the optional local layout and explicit local-cell
+properties, so no code-object-wide rollout flag can select a legacy layout or
+be reconstructed from an unrelated patch. Atomic-only objects use the
+independent access-inventory fact to avoid reserving access-only scalar state.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

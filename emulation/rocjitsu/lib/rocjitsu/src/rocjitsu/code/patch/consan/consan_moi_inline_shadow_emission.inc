@@ -82,7 +82,7 @@
   // only the narrowed EXEC matters. Reuse one pair instead of consuming the
   // VCC/SCC preservation window at higher offsets as predicates are reordered.
   const uint16_t predicate_exec_save_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u);
-  if (!options.moi_inline_workgroup_shadow || generation_tagged_local_shadow) {
+  if (!workgroup_local_shadow || generation_tagged_local_shadow) {
     if (!append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr, old_value_hi_vgpr,
                                                 address_lo_vgpr, arch) ||
         !append_extract_exact_shadow_generation(words, current_field_vgpr, current_value_vgpr,
@@ -532,8 +532,7 @@
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool compact_local_diagnostic =
-      options.moi_inline_workgroup_shadow && !options.moi_track_atomics;
+  const bool compact_local_diagnostic = workgroup_local_shadow && !options.moi_track_atomics;
   // The first-diagnostic claim uses SLOT as both the returned value and the
   // low half of the compare-swap data tuple. Keep it in the dead tail of the
   // ordinary transaction window on every target: exact-range construction

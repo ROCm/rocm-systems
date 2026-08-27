@@ -760,7 +760,8 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 
 [[nodiscard]] std::optional<MoiReservedBarrierIslandLayout>
 find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
-                                                 const ConSanTransformArtifacts &result, rj_code_arch_t arch,
+                                                 const ConSanTransformArtifacts &result,
+                                                 rj_code_arch_t arch,
                                                  const MoiRecordReplayAccessOutput &access_output,
                                                  size_t barrier_count,
                                                  uint64_t reserved_barrier_count) {
@@ -1226,9 +1227,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     if (candidate_options.automatic_moi_private_epoch)
       continue;
-    candidate_options.moi_inline_workgroup_shadow =
-        options.moi_inline_workgroup_shadow &&
-        patch_owner_index.has_workgroup_shadow_for_any(owners);
     std::optional<uint16_t> scratch_vgpr;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;

@@ -88,13 +88,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const ConSanMoiReportBufferLayout layout = resolve_inline_report_layout(options);
   if (options.max_patches == 0)
     return;
-  if (!options.moi_inline_workgroup_shadow &&
-      layout.exact_shadow_entry_capacity < kConSanMoiInlineShadowConservativeExactShadowEntries) {
-    result.warnings.emplace_back(
-        "ConSan MOI inline-shadow probe requires exact-shadow capacity for the full 64 KiB "
-        "LDS address range");
-    return;
-  }
   if (!validate_inline_shadow_exec_save_sgpr(options, arch, result.warnings))
     return;
   if (!options.moi_owner_vgpr && options.moi_persistent_vgpr_assignments.empty() &&
@@ -130,7 +123,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           return range.byte_width < consan_moi_exact_shadow::granule_bytes;
         });
       });
-  if (options.moi_inline_workgroup_shadow && requires_wave_partitioned_exact_shadow) {
+  if (requires_wave_partitioned_exact_shadow) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow subword traffic uses the wave-partitioned external exact-shadow "
         "table");
@@ -538,8 +531,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // external exact-shadow table for every spill-backed component, whether
     // or not it also found a fresh visible-evidence latch.
     const bool spill_backed_scalar_state = candidate_options.automatic_moi_inline_sgpr_spill;
-    if (options.moi_inline_workgroup_shadow && !requires_wave_partitioned_exact_shadow &&
-        !has_unspilled_component_override && !spill_backed_scalar_state) {
+    if (!requires_wave_partitioned_exact_shadow && !has_unspilled_component_override &&
+        !spill_backed_scalar_state) {
       uint16_t next_compact_token = 0u;
       if (candidate.container.is_kernel() && candidate.kernel_descriptor_file_offset) {
         uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
@@ -727,7 +720,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
 
-    candidate_options.moi_inline_workgroup_shadow = workgroup_shadow.has_value();
     candidate_options.scratch_vgpr = resources->base;
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
@@ -1223,7 +1215,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
         return;
       }
-      candidate_options.moi_inline_workgroup_shadow = planned_patch.workgroup_shadow.has_value();
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       if (planned_patch.private_dispatch_id_offset) {
         const auto reload = moi_indirect_jump_sgprs(candidate_options);
@@ -1693,8 +1684,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
-            candidate_options.moi_inline_workgroup_shadow =
-                planned_patch.workgroup_shadow.has_value();
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             if (planned_patch.private_dispatch_id_offset) {
               const auto reload = moi_indirect_jump_sgprs(candidate_options);

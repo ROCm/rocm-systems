@@ -669,16 +669,6 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_inline_access_present = !inline_access_candidates.empty();
     inline_atomic_without_access = inline_access_candidates.empty() &&
                                    effective_options.moi_track_atomics && atomic_or_fence_relevant;
-    if (effective_options.moi_inline_workgroup_shadow && inline_access_candidates.empty()) {
-      // The final EXEC-save pair belongs exclusively to the workgroup-filtered
-      // exact-shadow access path. Atomic publication uses masks through +20:+21
-      // and must not reserve +22:+23 when no access probe can consume them.
-      // Besides avoiding dead state, this leaves the complete s0:s105 RDNA4
-      // scalar file usable by high-pressure atomic-only helpers.
-      effective_options.moi_inline_workgroup_shadow = false;
-      result.warnings.emplace_back(
-          "ConSan MOI inline shadow omitted unused access-only workgroup-filter state");
-    }
   }
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts

@@ -735,19 +735,13 @@ struct ConSanOptions : ConSanRequest,
       : ConSanRequest(request), ConSanDebugOverrides(debug), MutationRequest(mutation),
         RuntimeCapabilities(capabilities), BoundRuntimeResources(resources),
         TransformPolicy(transform_policy),
-        collect_barrier_move_destinations(mutation.fault_move_barrier),
-        moi_inline_workgroup_shadow(request.flavor == ConSanFlavor::Moi &&
-                                    request.moi_engine == ConSanMoiEngine::InlineShadow) {}
+        collect_barrier_move_destinations(mutation.fault_move_barrier) {}
 
   /// Build the potentially expensive all-instruction destination inventory
   /// used only by markerless barrier movement. Direct library callers retain
   /// the complete analysis by default; production hooks may disable it when
   /// no move fault is requested.
   bool collect_barrier_move_destinations = true;
-  /// Internal rollout marker for the collision-free per-workgroup Inline
-  /// shadow. The hook enables this for InlineShadow; direct patcher tests may
-  /// leave it disabled while exercising the legacy global layout.
-  bool moi_inline_workgroup_shadow = false;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal per-owner assignments used when one CDNA4 code-object-wide

@@ -5915,6 +5915,33 @@ analysis completed.
   generated simulator-device tests across the five supported targets also
   pass. E2E validation remains outside this deletion work.
 
+### Slice 5CT: delete the Inline Shadow rollout mode
+
+- **One patch, one shadow representation:** Every eligible Inline Shadow
+  access attempts the collision-free workgroup-local LDS representation. Its
+  planned patch owns the optional successful layout; subword, dynamic-LDS,
+  spill-backed, and no-fit cases retain their explicit external exact-shadow
+  fallback. Emission consumes that layout and its existing local-cell
+  parameters directly.
+- **Completed deletion:** The mutable `moi_inline_workgroup_shadow` rollout
+  marker, constructor derivation, candidate reconstructions, owner-indexed
+  shadow lookup, external-only full-aperture capacity preflight, and atomic-only
+  rollout warning are gone. Atomic-only resource sizing now uses the semantic
+  access-inventory fact instead of disabling a mode flag.
+- **Contract audit:** Local-shadow, no-fit, dynamic-LDS, atomic-only, and CDNA4
+  spill-reload host contracts remain. The spill test now counts the one local
+  cell's publication and diagnostic reloads instead of the unreachable two-
+  cell legacy external representation. The test that required rejection by
+  the deleted external-only capacity preflight is gone.
+- **Accounting:** Implementation files add 11 and delete 51 physical lines
+  after formatting, a net deletion of 40. Tests add three and delete 70
+  physical lines, a net deletion of 67.
+- **Checked-in gate:** All 1,530 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,878 generated simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass. The 26-case physical-gfx950
+  cross-engine smoke also passes. E2E validation remains outside this deletion
+  work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
