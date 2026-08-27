@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Thin wrapper so the viewer runs as a plain script.
 
 The implementation lives in the ``openspec_viewer`` package next to this file;

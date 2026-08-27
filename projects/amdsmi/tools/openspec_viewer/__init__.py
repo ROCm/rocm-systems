@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Browsable HTML view of one or more OpenSpec directories.
 
 Run as ``python3 -m openspec_viewer`` or through the ``openspec_viewer.py``

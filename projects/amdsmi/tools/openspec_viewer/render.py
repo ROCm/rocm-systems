@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Assemble the self-contained HTML page from a parsed :class:`Site`.
 
 One page holds one or more projects. Each project contributes a pane with its

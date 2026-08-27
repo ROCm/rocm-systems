@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Parse an OpenSpec directory into a data model.
 
 Owns every filesystem and markdown-structure concern: discovering

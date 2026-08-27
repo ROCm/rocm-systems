@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Inlined CSS and JS for the generated page.
 
 Kept in one module so the visual language lives in a single place. The page is

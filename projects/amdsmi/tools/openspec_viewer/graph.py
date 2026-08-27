@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Graph layout and SVG emission, computed here rather than by JS.
 
 Three diagrams live here.  Two share one layout engine:

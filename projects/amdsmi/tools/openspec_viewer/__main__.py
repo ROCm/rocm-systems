@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Command line entry point: ``python3 -m openspec_viewer [roots...]``."""
 
 from __future__ import annotations

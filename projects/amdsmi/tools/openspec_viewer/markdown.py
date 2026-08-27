@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """The small markdown subset OpenSpec bodies actually use.
 
 Paragraphs, bullet and ordered lists, pipe tables, inline code, bold, italic
