@@ -13,11 +13,11 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <cerrno>
-#include <cstdio>
 #include <cstdlib>
 #include <optional>
-#include <vector>
+#include <string>
 #include "hipGetProcAddressHelpers.hh"
+#include "hipIpcHandleHex.hh"
 
 /**
  * Test Description
@@ -120,129 +120,44 @@ namespace {
 
 void runIpcEventProcAddressTest(std::optional<int> parentDeviceId,
                                 std::optional<int> childDeviceId) {
-  int fd[2];
-  REQUIRE(pipe(fd) == 0);
-
-  auto pid = fork();
-  REQUIRE(pid >= 0);
-
-  if (pid != 0) {  // parent process: exports the interprocess event handle
-    if (parentDeviceId) {
-      HIP_CHECK(hipSetDevice(*parentDeviceId));
-    }
-
-    void* hipIpcGetEventHandle_ptr = nullptr;
-
-    int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
-
-    HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr,
-                                currentHipVersion, 0, nullptr));
-    REQUIRE(hipIpcGetEventHandle_ptr != nullptr);
-
-    auto dyn_hipIpcGetEventHandle_ptr =
-        reinterpret_cast<hipError_t (*)(hipIpcEventHandle_t*, hipEvent_t)>(
-            hipIpcGetEventHandle_ptr);
-
-    // Interprocess events must disable timing.
-    hipEvent_t event = nullptr;
-    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
-    REQUIRE(event != nullptr);
-
-    hipIpcEventHandle_t handle{};
-    HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, event));
-
-    // The parent only writes to the pipe.
-    REQUIRE(close(fd[0]) == 0);
-
-    REQUIRE(hip::writeAll(fd[1], &handle, sizeof(handle)));
-    REQUIRE(close(fd[1]) == 0);
-
-    // Surface any consumer-side failure (a forked child's REQUIREs do not
-    // propagate to this process).
-    int status = 0;
-    REQUIRE(waitpid(pid, &status, 0) == pid);
-    REQUIRE(WIFEXITED(status));
-    REQUIRE(WEXITSTATUS(status) == EXIT_SUCCESS);
-
-    HIP_CHECK(hipEventDestroy(event));
-
-  } else { // child process: imports the event handle in a separate process
-    bool ok = false;
-    try {
-      void* hipIpcOpenEventHandle_ptr = nullptr;
-
-      int currentHipVersion = 0;
-      HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
-
-      HIP_CHECK(hipGetProcAddress("hipIpcOpenEventHandle", &hipIpcOpenEventHandle_ptr,
-                                  currentHipVersion, 0, nullptr));
-      REQUIRE(hipIpcOpenEventHandle_ptr != nullptr);
-
-      auto dyn_hipIpcOpenEventHandle_ptr =
-          reinterpret_cast<hipError_t (*)(hipEvent_t*, hipIpcEventHandle_t)>(
-              hipIpcOpenEventHandle_ptr);
-
-      // The child only reads from the pipe.
-      REQUIRE(close(fd[1]) == 0);
-
-      hipIpcEventHandle_t handle{};
-      REQUIRE(hip::readAll(fd[0], &handle, sizeof(handle)));
-      REQUIRE(close(fd[0]) == 0);
-
-      if (childDeviceId) {
-        HIP_CHECK(hipSetDevice(*childDeviceId));
-      }
-
-      // The call under test: import the handle exported by the parent through the
-      // proc-address-resolved pointer.
-      hipEvent_t event = nullptr;
-      HIP_CHECK(dyn_hipIpcOpenEventHandle_ptr(&event, handle));
-      REQUIRE(event != nullptr);
-
-      // Exercise the imported event in a real GPU workload to confirm it is a
-      // usable event object. All work is issued on a single stream and the
-      // imported event is used as the completion sync point.
-      constexpr int N = 40;
-      constexpr int Nbytes = N * sizeof(int);
-
-      hipStream_t stream = nullptr;
-      HIP_CHECK(hipStreamCreate(&stream));
-
-      std::vector<int> hostMem(N, 10);
-
-      int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
-      REQUIRE(devMem != nullptr);
-
-      HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes, hipMemcpyHostToDevice, stream));
-      addOneKernel<<<1, 1, 0, stream>>>(devMem, N);
-      HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes, hipMemcpyDeviceToHost, stream));
-
-      // Record the imported event on the same stream and wait on it. The wait
-      // covers the whole pipeline above, so the results are ready to validate and
-      // the buffer is safe to read once it returns.
-      HIP_CHECK(hipEventRecord(event, stream));
-      HIP_CHECK(hipEventSynchronize(event));
-
-      REQUIRE(validateHostArray(hostMem.data(), N, 11));
-
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipEventDestroy(event));
-      ok = true;
-    } catch (const std::exception& e) {
-      // A forked child's REQUIRE/HIP_CHECK failures do not reach the Catch2
-      // reporter, so log the reason to stderr before signalling it through the
-      // exit code -- otherwise CI only shows an opaque "Subprocess aborted".
-      fprintf(stderr, "[IPC_Event child] failure: %s\n", e.what());
-      _exit(EXIT_FAILURE);
-    } catch (...) {
-      fprintf(stderr, "[IPC_Event child] failure: unknown exception\n");
-      _exit(EXIT_FAILURE);
-    }
-    _exit(ok ? EXIT_SUCCESS : EXIT_FAILURE);
+  if (parentDeviceId) {
+    HIP_CHECK(hipSetDevice(*parentDeviceId));
   }
+
+  void* hipIpcGetEventHandle_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr, currentHipVersion,
+                              0, nullptr));
+  REQUIRE(hipIpcGetEventHandle_ptr != nullptr);
+
+  auto dyn_hipIpcGetEventHandle_ptr =
+      reinterpret_cast<hipError_t (*)(hipIpcEventHandle_t*, hipEvent_t)>(hipIpcGetEventHandle_ptr);
+
+  // Interprocess events must disable timing.
+  hipEvent_t event = nullptr;
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
+  REQUIRE(event != nullptr);
+
+  hipIpcEventHandle_t handle{};
+  HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, event));
+
+  std::string args = ipcHandleToHex(handle);
+  if (childDeviceId) {
+    args += " " + std::to_string(*childDeviceId);
+  }
+
+  // The event must stay alive until the child has attached to it.
+  hip::SpawnProc proc("hipGetProcAddressIpcEventImport", true);
+  REQUIRE(proc.spawn(args) == 0);
+
+  int childExit = proc.wait();
+  INFO("Child process output:\n" << proc.getOutput());
+  REQUIRE(childExit == 0);
+
+  HIP_CHECK(hipEventDestroy(event));
 }
 }  // namespace
 
