@@ -3152,11 +3152,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     info.entry_prologue_chained_trampoline_offset = composed_entry_trampoline_offset;
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
-    info.persistent_owner_vgpr = kernel_options.moi_owner_vgpr;
-    info.persistent_epoch_vgpr = kernel_options.moi_epoch_vgpr;
-    info.persistent_workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr;
-    info.persistent_record_replay_workgroup_vgprs =
-        kernel_options.moi_record_replay_workgroup_vgprs;
+    note_moi_persistent_vgpr_state(info, kernel_options);
     info.persistent_sgpr_state = moi_persistent_sgpr_state(kernel_options);
     info.required_sgpr_count = item.required_sgpr_count;
     if (item.entry_scalar_backup) {

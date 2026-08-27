@@ -2636,7 +2636,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     if (engine == ConSanMoiEngine::InlineShadow) {
-      EXPECT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+      EXPECT_TRUE(test_moi_workgroup_key_vgpr(result));
       EXPECT_EQ(std::ranges::count(result.patches,
                                    ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                    &ConSanPatchInfo::kind),

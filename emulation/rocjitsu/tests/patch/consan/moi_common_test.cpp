@@ -1395,9 +1395,9 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
@@ -3040,7 +3040,7 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(options.moi_owner_sgpr);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3056,7 +3056,7 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
                       ROCJITSU_CODE_ARCH_RDNA4),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4),
-      build_v_mov_b32_e32(*result.resolved_moi_owner_vgpr, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(*test_moi_owner_vgpr(result), owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
   };
   const std::vector<uint32_t> actual_words =
@@ -3138,8 +3138,8 @@ TEST(ConSanMoi, AutomaticScalarPersistentStatePreservesGuestVgprAllocation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  EXPECT_FALSE(test_moi_owner_vgpr(result));
+  EXPECT_FALSE(test_moi_epoch_vgpr(result));
   ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
   ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,

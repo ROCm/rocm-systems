@@ -697,7 +697,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
@@ -1194,7 +1194,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
   ASSERT_GT(atomic->sampled_window_bank_count, 1u);
   ASSERT_TRUE(atomic->scratch_vgpr);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
   EXPECT_NE(*access->relocated_guest_instruction_offset,
             *atomic->relocated_guest_instruction_offset);
@@ -1206,7 +1206,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   // causal windows. SampledAtomicScratchLayout::kBank is 8.
   const uint16_t atomic_bank = static_cast<uint16_t>(*atomic->scratch_vgpr + 8u);
   const auto owner_bank_mix = instrumentation::build_v_xor_b32(
-      atomic_bank, vector_source_vgpr(*result.resolved_moi_owner_vgpr), atomic_bank,
+      atomic_bank, vector_source_vgpr(*test_moi_owner_vgpr(result)), atomic_bank,
       ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(owner_bank_mix);
   EXPECT_NE(std::ranges::find(atomic_body, *owner_bank_mix), atomic_body.end());
@@ -1647,7 +1647,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
         EXPECT_TRUE(test_moi_persistent_sgpr_state(result).record_replay_workgroup.empty())
             << testing::PrintToString(result.warnings);
-        EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.empty())
+        EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).empty())
             << testing::PrintToString(result.warnings);
         const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
           return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -4197,8 +4197,8 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
           return plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
                  plan.scalar_tail_floor >= 40u;
         }));
-    EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-    EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+    EXPECT_FALSE(test_moi_owner_vgpr(result));
+    EXPECT_FALSE(test_moi_epoch_vgpr(result));
     EXPECT_TRUE(
         std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
           return plan.source == ConSanRegisterAllocationSource::SpillRequired;
@@ -6452,8 +6452,8 @@ TEST(ConSanMoi, SampledRejectedBarriersStillPreserveAccessOwnerAtEntry) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -6487,8 +6487,8 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                               &ConSanPatchInfo::kind),
             result.patches.end());
@@ -6517,11 +6517,11 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
   // scratch+5; the barrier layout uses scratch+6.
   const auto access_owner_mix = instrumentation::build_v_xor_b32(
       static_cast<uint16_t>(*access->scratch_vgpr + 5u),
-      vector_source_vgpr(*result.resolved_moi_owner_vgpr),
+      vector_source_vgpr(*test_moi_owner_vgpr(result)),
       static_cast<uint16_t>(*access->scratch_vgpr + 5u), ROCJITSU_CODE_ARCH_RDNA4);
   const auto barrier_owner_mix = instrumentation::build_v_xor_b32(
       static_cast<uint16_t>(*barrier->scratch_vgpr + 6u),
-      vector_source_vgpr(*result.resolved_moi_owner_vgpr),
+      vector_source_vgpr(*test_moi_owner_vgpr(result)),
       static_cast<uint16_t>(*barrier->scratch_vgpr + 6u), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(access_owner_mix);
   ASSERT_TRUE(barrier_owner_mix);
@@ -8495,8 +8495,8 @@ TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  EXPECT_FALSE(test_moi_owner_vgpr(result));
+  EXPECT_FALSE(test_moi_epoch_vgpr(result));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
            item.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore;

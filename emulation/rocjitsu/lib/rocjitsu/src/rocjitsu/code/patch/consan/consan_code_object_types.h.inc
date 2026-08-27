@@ -598,6 +598,14 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> persistent_epoch_vgpr;
   std::optional<uint16_t> persistent_workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters persistent_record_replay_workgroup_vgprs;
+  /// Whether the vector-persistent tuple was selected for this owner rather
+  /// than as the code-object-wide register ABI. This keeps derived reporting
+  /// from conflating one per-owner prologue with a global selection.
+  bool persistent_vgpr_state_owner_local = false;
+  /// Whether owner/epoch in this patch remain live as the persistent vector
+  /// ABI after entry. Scalar-persistent prologues use entry-local VGPR scratch
+  /// for initialization and therefore leave this false.
+  bool persistent_vgpr_state_is_abi = false;
   /// Scalar-persistent state initialized by this entry prologue. Access and
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.

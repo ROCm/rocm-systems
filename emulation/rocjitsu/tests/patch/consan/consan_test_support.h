@@ -143,7 +143,8 @@ test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
 test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
   std::vector<ConSanMoiPersistentVgprAssignment> assignments;
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (!patch.persistent_owner_vgpr || !patch.persistent_epoch_vgpr)
+    if (!patch.persistent_vgpr_state_is_abi || !patch.persistent_vgpr_state_owner_local ||
+        !patch.persistent_owner_vgpr || !patch.persistent_epoch_vgpr)
       continue;
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
       if (std::ranges::find(assignments, owner,
@@ -162,6 +163,41 @@ test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
   }
   std::ranges::sort(assignments, {}, &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
   return assignments;
+}
+
+/// Return the code-object-wide vector-persistent ABI recorded by an emitted
+/// initializer or consumer. Owner-local tuples are deliberately excluded;
+/// callers that need that matrix use `test_moi_persistent_vgpr_assignments`.
+[[nodiscard]] const ConSanPatchInfo *
+test_moi_global_persistent_vgpr_patch(const ConSanTransformArtifacts &result) {
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.persistent_vgpr_state_is_abi && !candidate.persistent_vgpr_state_owner_local &&
+           candidate.persistent_owner_vgpr && candidate.persistent_epoch_vgpr;
+  });
+  return patch == result.patches.end() ? nullptr : &*patch;
+}
+
+[[nodiscard]] std::optional<uint16_t> test_moi_owner_vgpr(const ConSanTransformArtifacts &result) {
+  const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
+  return patch == nullptr ? std::nullopt : patch->persistent_owner_vgpr;
+}
+
+[[nodiscard]] std::optional<uint16_t> test_moi_epoch_vgpr(const ConSanTransformArtifacts &result) {
+  const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
+  return patch == nullptr ? std::nullopt : patch->persistent_epoch_vgpr;
+}
+
+[[nodiscard]] std::optional<uint16_t>
+test_moi_workgroup_key_vgpr(const ConSanTransformArtifacts &result) {
+  const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
+  return patch == nullptr ? std::nullopt : patch->persistent_workgroup_key_vgpr;
+}
+
+[[nodiscard]] ConSanMoiPersistentWorkgroupRegisters
+test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
+  const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
+  return patch == nullptr ? ConSanMoiPersistentWorkgroupRegisters{}
+                          : patch->persistent_record_replay_workgroup_vgprs;
 }
 
 /// Reconstruct the admitted access projection from the durable inventory and

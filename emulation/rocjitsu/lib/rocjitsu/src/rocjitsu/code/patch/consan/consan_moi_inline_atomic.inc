@@ -732,6 +732,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
           info.scratch_vgpr = planned.resources.base;
           info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+          note_moi_persistent_vgpr_state(info, group_options);
+          info.persistent_sgpr_state = moi_persistent_sgpr_state(group_options);
           if (planned.spill) {
             info.spilled_vgpr_count = planned.spill->vgpr_count;
             info.required_private_segment_size = planned.spill->total_private_bytes;
@@ -858,6 +860,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    note_moi_persistent_vgpr_state(info, candidate_options);
     info.persistent_sgpr_state = moi_persistent_sgpr_state(candidate_options);
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;

@@ -3729,8 +3729,8 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       // resource plan. Derive the owner from that plan rather than duplicating
       // an architecture-specific scratch-window size in validation.
       owner_vgpr = static_cast<uint16_t>(scratch + resource_plan->scratch_vgpr_count - 4u);
-    } else if (result.resolved_moi_owner_vgpr) {
-      owner_vgpr = *result.resolved_moi_owner_vgpr;
+    } else if (patch.persistent_owner_vgpr) {
+      owner_vgpr = *patch.persistent_owner_vgpr;
     } else {
       errors.emplace_back(
           "ConSan final validation could not resolve release-transaction owner state");

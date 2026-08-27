@@ -186,6 +186,19 @@ record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &option
   };
 }
 
+/// Record vector-persistent state on the emitted mechanism that initializes
+/// or consumes it. Options remain the planner's mutable selection; the patch
+/// is the durable mechanism contract used after lowering returns.
+void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanOptions &options) {
+  patch.persistent_owner_vgpr = options.moi_owner_vgpr;
+  patch.persistent_epoch_vgpr = options.moi_epoch_vgpr;
+  patch.persistent_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
+  patch.persistent_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
+  patch.persistent_vgpr_state_owner_local = !options.moi_persistent_vgpr_assignments.empty();
+  patch.persistent_vgpr_state_is_abi =
+      options.moi_owner_vgpr && options.moi_epoch_vgpr && !options.automatic_moi_persistent_sgprs;
+}
+
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }

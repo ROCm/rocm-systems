@@ -873,8 +873,8 @@ TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             1);
@@ -903,9 +903,9 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Barrier;
   }));
@@ -930,9 +930,9 @@ TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
 }
 
 TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {

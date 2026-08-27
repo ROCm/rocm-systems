@@ -6338,8 +6338,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           options.moi_init_owner_epoch = true;
           options.automatic_moi_persistent_vgprs = true;
           options.moi_prologue_scratch_vgpr_assignments.clear();
-          result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
-          result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
           result.warnings.emplace_back(
               "ConSan MOI assigned hybrid persistent vector owner/epoch and scalar "
               "exact-workgroup-tuple state to proven-unused CDNA register holes" +
@@ -6913,10 +6911,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   }
   options.moi_init_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;
-  result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
-  result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
-  result.resolved_moi_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
-  result.resolved_moi_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
   result.resolved_moi_dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent " +

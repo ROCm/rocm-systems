@@ -5748,6 +5748,32 @@ analysis completed.
   and hook gates remain unchanged from Slice 5CK and are rerun at the next
   mechanism boundary; E2E validation remains outside this work.
 
+### Slice 5CM: make vector-persistent state patch-local
+
+- **Initializers and consumers name the same ABI:** A shared metadata helper
+  records owner, epoch, compact workgroup key, and exact workgroup-coordinate
+  VGPRs on every relevant entry prologue and Inline atomic consumer. Release-
+  transaction validation now reads the exact atomic patch instead of a
+  code-object-wide result mirror.
+- **Persistent state is distinguished from entry scratch:** Patch metadata
+  says whether its VGPR tuple is the lasting mechanism ABI and whether that ABI
+  is owner-local. This prevents a scalar-persistent prologue's temporary entry
+  VGPR carrier from masquerading as vector persistence, while retaining hybrid
+  vector-owner/scalar-workgroup configurations.
+- **Tests consume durable contracts:** Global and per-owner test reporting
+  helpers derive their views only from emitted patches. Existing placement and
+  instruction tests continue to cover explicit and automatic registers,
+  code-object-wide versus owner-local selection, scalar and hybrid fallbacks,
+  descriptor growth, collision avoidance, and all five target architectures.
+- **Deletion accounting:** Four optional/aggregate fields and their reset,
+  publication, and fallback logic leave `ConSanResult`. Implementation files
+  add 27 and delete 31 physical lines, a net deletion of four. Only transient
+  scalar assignments and dispatch-selection mirrors remain in the
+  compatibility result.
+- **Checked-in gate:** All 1,530 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

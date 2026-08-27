@@ -712,9 +712,9 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
-  ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
-  EXPECT_EQ(*result.resolved_moi_workgroup_key_vgpr, *result.resolved_moi_epoch_vgpr + 1u);
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
+  ASSERT_TRUE(test_moi_workgroup_key_vgpr(result));
+  EXPECT_EQ(*test_moi_workgroup_key_vgpr(result), *test_moi_epoch_vgpr(result) + 1u);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -726,7 +726,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto zero_invalid = instrumentation::build_v_mov_b32_literal(
-      *result.resolved_moi_workgroup_key_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA4);
+      *test_moi_workgroup_key_vgpr(result), 0u, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(zero_invalid);
   // Entry composition can select an owner-local scalar window distinct from
   // the object-wide default. Prove the invariant that one such window uses
@@ -1692,9 +1692,9 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                    << " plans=" << testing::PrintToString(result.resource_plans);
-    EXPECT_EQ(result.resolved_moi_owner_vgpr, 29u);
-    EXPECT_EQ(result.resolved_moi_epoch_vgpr, 30u);
-    EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 31u);
+    EXPECT_EQ(test_moi_owner_vgpr(result), 29u);
+    EXPECT_EQ(test_moi_epoch_vgpr(result), 30u);
+    EXPECT_EQ(test_moi_workgroup_key_vgpr(result), 31u);
     const auto prologue = std::ranges::find(
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
@@ -2808,9 +2808,9 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
-  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
-  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+  EXPECT_TRUE(test_moi_owner_vgpr(result));
+  EXPECT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_TRUE(test_moi_workgroup_key_vgpr(result));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -3040,13 +3040,13 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
-  const uint16_t initializer_address = *result.resolved_moi_owner_vgpr;
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
+  const uint16_t initializer_address = *test_moi_owner_vgpr(result);
   ASSERT_TRUE(result.program_inventory.kernels().front().required_workgroup_size);
   EXPECT_EQ(*result.program_inventory.kernels().front().required_workgroup_size,
             (std::array<uint32_t, 3>{64u, 1u, 1u}));
-  const uint16_t initializer_offset = static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u);
+  const uint16_t initializer_offset = static_cast<uint16_t>(*test_moi_epoch_vgpr(result) + 1u);
   const auto extract_x = ib::build_v_and_b32_literal(
       initializer_offset, 0x3ffu, /*packed_workitem_id=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto select_initialization_x_lanes = ib::build_v_cmp_gt_u32_vcc(
@@ -3067,8 +3067,8 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   const auto end_address = ib::build_v_cmp_gt_u32_literal_vcc(
       /*13080-byte base + 288-byte validity state=*/13368u, initializer_address,
       ROCJITSU_CODE_ARCH_CDNA5);
-  const auto store_wide = ib::build_ds_store_b128(
-      initializer_address, *result.resolved_moi_epoch_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto store_wide = ib::build_ds_store_b128(initializer_address, *test_moi_epoch_vgpr(result),
+                                                  0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto count_lanes =
       ib::build_s_bcnt1_i32_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
                                 /*exec=*/126u, ROCJITSU_CODE_ARCH_CDNA5);
@@ -3097,7 +3097,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   for (uint16_t i = 0u; i < 4u; ++i) {
     EXPECT_NE(std::ranges::find(
                   prologue_words,
-                  build_v_mov_b32_e32(static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + i),
+                  build_v_mov_b32_e32(static_cast<uint16_t>(*test_moi_epoch_vgpr(result) + i),
                                       scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_CDNA5)),
               prologue_words.end());
   }
@@ -3866,8 +3866,8 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   });
@@ -3881,14 +3881,12 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  const auto store_pair =
-      ib::build_ds_store_b64(*result.resolved_moi_owner_vgpr, *result.resolved_moi_epoch_vgpr, 0u,
-                             ROCJITSU_CODE_ARCH_CDNA5);
-  const auto store_quad =
-      ib::build_ds_store_b128(*result.resolved_moi_owner_vgpr, *result.resolved_moi_epoch_vgpr, 0u,
-                              ROCJITSU_CODE_ARCH_CDNA5);
+  const auto store_pair = ib::build_ds_store_b64(
+      *test_moi_owner_vgpr(result), *test_moi_epoch_vgpr(result), 0u, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto store_quad = ib::build_ds_store_b128(
+      *test_moi_owner_vgpr(result), *test_moi_epoch_vgpr(result), 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto scale_x = ib::build_v_lshlrev_b32(
-      static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u), scalar_positive_inline_u32(3u),
+      static_cast<uint16_t>(*test_moi_epoch_vgpr(result) + 1u), scalar_positive_inline_u32(3u),
       /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(store_pair);
   ASSERT_TRUE(store_quad);
@@ -4040,7 +4038,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+  ASSERT_TRUE(test_moi_workgroup_key_vgpr(result));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4056,9 +4054,9 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   bool copies_workgroup_key = false;
   for (uint16_t destination = *access->scratch_vgpr;
        destination < static_cast<uint16_t>(*access->scratch_vgpr + 25u); ++destination) {
-    const uint32_t copy = build_v_mov_b32_e32(
-        destination, vector_source_vgpr(*result.resolved_moi_workgroup_key_vgpr),
-        ROCJITSU_CODE_ARCH_CDNA5);
+    const uint32_t copy =
+        build_v_mov_b32_e32(destination, vector_source_vgpr(*test_moi_workgroup_key_vgpr(result)),
+                            ROCJITSU_CODE_ARCH_CDNA5);
     copies_workgroup_key |= std::ranges::find(body, copy) != body.end();
   }
   EXPECT_TRUE(copies_workgroup_key);
@@ -4110,7 +4108,7 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+  ASSERT_TRUE(test_moi_workgroup_key_vgpr(result));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4125,9 +4123,9 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
   bool copies_workgroup_key = false;
   for (uint16_t destination = *access->scratch_vgpr;
        destination < static_cast<uint16_t>(*access->scratch_vgpr + 25u); ++destination) {
-    const uint32_t copy = build_v_mov_b32_e32(
-        destination, vector_source_vgpr(*result.resolved_moi_workgroup_key_vgpr),
-        ROCJITSU_CODE_ARCH_CDNA5);
+    const uint32_t copy =
+        build_v_mov_b32_e32(destination, vector_source_vgpr(*test_moi_workgroup_key_vgpr(result)),
+                            ROCJITSU_CODE_ARCH_CDNA5);
     copies_workgroup_key |= std::ranges::find(body, copy) != body.end();
   }
   EXPECT_TRUE(copies_workgroup_key);
@@ -4252,9 +4250,9 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
                                  << " plans=" << result.resource_plans.size()
                                  << " patches=" << result.patches.size()
                                  << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
-  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
-  EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
+  EXPECT_EQ(test_moi_owner_vgpr(result), 1);
+  EXPECT_EQ(test_moi_epoch_vgpr(result), 2);
+  EXPECT_EQ(test_moi_workgroup_key_vgpr(result), 3);
   ASSERT_EQ(result.patches.size(), 2u);
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -4398,9 +4396,9 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesScratchAndPersistentVgprs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
-  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
-  EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
+  EXPECT_EQ(test_moi_owner_vgpr(result), 1);
+  EXPECT_EQ(test_moi_epoch_vgpr(result), 2);
+  EXPECT_EQ(test_moi_workgroup_key_vgpr(result), 3);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4426,9 +4424,9 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsInsteadOfReloadingHotOwnerState)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_GT(*result.resolved_moi_owner_vgpr, 11u);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_GT(*test_moi_owner_vgpr(result), 11u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -4455,10 +4453,10 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsForDynamicStackOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_GT(*result.resolved_moi_owner_vgpr, 11u);
-  EXPECT_EQ(*result.resolved_moi_epoch_vgpr, *result.resolved_moi_owner_vgpr + 1u);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
+  EXPECT_GT(*test_moi_owner_vgpr(result), 11u);
+  EXPECT_EQ(*test_moi_epoch_vgpr(result), *test_moi_owner_vgpr(result) + 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -5251,8 +5249,8 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  EXPECT_FALSE(test_moi_owner_vgpr(result));
+  EXPECT_FALSE(test_moi_epoch_vgpr(result));
 
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -6163,7 +6161,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
+  EXPECT_FALSE(test_moi_owner_vgpr(result));
   ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
   const auto plan = std::ranges::find(result.resource_plans, ConSanResourceSiteKind::Access,
                                       &ConSanCandidateResourcePlan::site_kind);
@@ -8248,8 +8246,8 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
-  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(test_moi_owner_vgpr(result));
+  ASSERT_TRUE(test_moi_epoch_vgpr(result));
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
                           [](const ConSanPatchInfo &patch) {
                             return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -8296,7 +8294,7 @@ TEST(ConSanMoi, SharedInlineShadowCapturesFullKeyAcrossDescriptorCoordinateViews
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+  ASSERT_TRUE(test_moi_workgroup_key_vgpr(result));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
