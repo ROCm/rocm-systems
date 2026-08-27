@@ -160,12 +160,27 @@ sentinel replaces the whole value, including a `{"value", "unit"}` object; in
 the individual element. The underlying library error SHALL be recorded at debug
 log level only.
 
+The sentinel is not always the bare token. A field may instead render `N/A`
+followed by a parenthesised reason, as `static --vram` does with
+`N/A (UMA carveout is not supported on this ASIC/VBIOS)`. That form is part of
+the same substitution and carries the same meaning, but it defeats a consumer
+that compares for equality with `N/A`. A consumer SHALL therefore test for the
+`N/A` prefix rather than for the whole cell.
+
 For a field the library returns inside a successful call, the substitution is
 performed by [amdsmi-python-api] against the all-ones sentinel for that field's
 declared width, so `N/A` appears here only when the C layer presented the
 sentinel at that width — the obligation stated in [amdsmi-c-api-abi]. A field
 that loses its sentinel below this layer is rendered as a number, not as `N/A`,
 and no part of the CLI can recover it.
+
+#### Scenario: A qualified sentinel defeats an equality check
+
+- **WHEN** a consumer filters rows with `value == "N/A"` and the field renders
+  `N/A (UMA carveout is not supported on this ASIC/VBIOS)`
+- **THEN** the row survives the filter and the reason string is carried into
+  whatever consumes it as though it were a reading, which is why the prefix and
+  not the whole cell is the thing to test
 
 #### Scenario: A consumer-class GPU reports most enterprise fields as N/A
 
