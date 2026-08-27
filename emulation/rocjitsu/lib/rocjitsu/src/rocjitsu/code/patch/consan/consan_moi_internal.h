@@ -11,6 +11,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 
 #include <algorithm>
 #include <array>
@@ -33,7 +34,6 @@
 namespace rocjitsu {
 
 struct MoiOptions;
-struct VgprSpillSequence;
 
 /// One scalar, vector, or entry-captured private-state source for a
 /// workgroup-coordinate component.
@@ -83,6 +83,47 @@ struct ConSanMoiWorkgroupSource {
   auto operator<=>(const ConSanMoiWorkgroupSource &) const = default;
 };
 
+/// Complete descriptor-resolved launch-coordinate view for one kernel entry.
+///
+/// The four coordinate members use the same typed scalar, vector, private, or
+/// absent representation so prologue and event emitters cannot disagree about
+/// operand interpretation. The CDNA payload members describe a temporary
+/// expanded system-SGPR suffix: an entry prologue may capture coordinates from
+/// that suffix and then restore the packed suffix expected by guest code.
+struct ConSanMoiWorkgroupSources {
+  /// Source of the mandatory x workgroup coordinate.
+  ConSanMoiWorkgroupSource x;
+
+  /// Source of y, or an absent source for a one-dimensional launch.
+  ConSanMoiWorkgroupSource y;
+
+  /// Source of z, or an absent source for a one- or two-dimensional launch.
+  ConSanMoiWorkgroupSource z;
+
+  /// Source of the gfx1250 cluster-local workgroup coordinate, or absent when
+  /// the launch ABI does not expose one.
+  ConSanMoiWorkgroupSource cluster_workgroup_id;
+
+  /// First SGPR of an expanded CDNA x/y/z system payload, when planning had to
+  /// enable the complete tuple in the descriptor.
+  std::optional<uint16_t> cdna_full_payload_base;
+
+  /// First SGPR of the guest-visible packed CDNA payload restored after entry
+  /// instrumentation.
+  std::optional<uint16_t> cdna_guest_payload_base;
+
+  /// Descriptor bit mask naming the packed CDNA dimensions guest code expects.
+  uint8_t cdna_guest_payload_mask = 0;
+
+  /// Return whether no coordinate names multiple simultaneous representations.
+  [[nodiscard]] bool is_well_formed() const {
+    return x.is_well_formed() && y.is_well_formed() && z.is_well_formed() &&
+           cluster_workgroup_id.is_well_formed();
+  }
+
+  auto operator<=>(const ConSanMoiWorkgroupSources &) const = default;
+};
+
 namespace consan_detail {
 
 /// Selects the one persistent representation that receives a dispatch ID at
@@ -102,6 +143,101 @@ struct ConSanMoiDispatchIdCapture {
   }
 
   bool operator==(const ConSanMoiDispatchIdCapture &) const = default;
+};
+
+/// Complete semantic input to one private-state entry-initialization body.
+///
+/// Placement constructs this plan after it has resolved the private layout,
+/// temporary register window, guest-state preservation, launch ABI sources,
+/// and optional dispatch and runtime-selection behavior for one kernel. The
+/// native emitter receives this plan plus only the body and return addresses,
+/// which may differ between paired kernarg-preload entries. It therefore
+/// cannot independently reinterpret `MoiOptions`, patch metadata, or the
+/// kernel descriptor while emitting those bodies.
+struct MoiPrivateEpochPrologueEmissionPlan {
+  /// First VGPR in the entry-local temporary window.
+  uint16_t scratch_vgpr = 0;
+
+  /// Private-memory byte offset initialized to epoch zero.
+  uint32_t epoch_offset = 0;
+
+  /// Optional private-memory byte offset receiving entry workitem-x.
+  std::optional<uint32_t> owner_offset;
+
+  /// Optional private-memory byte offset receiving the compact workgroup key.
+  std::optional<uint32_t> workgroup_key_offset;
+
+  /// Optional first private-memory byte offset receiving the 64-bit dispatch
+  /// identity. The high half occupies the next private slot.
+  std::optional<uint32_t> dispatch_id_offset;
+
+  /// Private slots receiving the exact x/y/z/cluster workgroup tuple used by
+  /// Record/Replay evidence.
+  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
+
+  /// Owned save/restore program for the borrowed temporary VGPR window.
+  VgprSpillSequence spill;
+
+  /// Owned optional save/restore program for entry ABI SGPRs borrowed by the
+  /// prologue.
+  std::optional<SgprSpillSequence> entry_scalar_spill;
+
+  /// Optional LDS shadow region initialized cooperatively at kernel entry.
+  std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
+
+  /// Resolved launch-coordinate sources needed by workgroup identity and
+  /// runtime-selection initialization.
+  std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+
+  /// Descriptor-derived dispatch preload transformation fixed by planning.
+  std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
+
+  /// Unique register representation that receives the dispatch identity.
+  ConSanMoiDispatchIdCapture dispatch_capture;
+
+  /// Optional launch-coordinate source controlling runtime workgroup
+  /// selection for sampled and Record/Replay instrumentation.
+  std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source;
+
+  /// First SGPR in the entry-local scalar scratch window, when required.
+  std::optional<uint16_t> return_pc_sgpr;
+
+  /// Power-of-two modulus used by runtime workgroup selection.
+  uint32_t runtime_sample_stride = 1u;
+
+  /// Selected residue in `[0, runtime_sample_stride)`.
+  uint32_t runtime_sample_offset = 0u;
+
+  /// Stable report identity mixed into runtime workgroup selection.
+  uint64_t runtime_report_dispatch_id = 0u;
+
+  /// Number of consecutive temporary VGPRs required by the selected semantic
+  /// operations, independent of their target instruction encodings.
+  [[nodiscard]] uint16_t required_scratch_vgpr_count() const {
+    if (workgroup_key_offset)
+      return 3u;
+    if (dispatch_id_offset || workgroup_shadow)
+      return 2u;
+    return 1u;
+  }
+
+  /// Return whether the address-free structural contract is safe to lower.
+  /// Target-specific instruction availability remains the emitter's concern.
+  [[nodiscard]] bool is_well_formed() const {
+    const uint32_t scratch_end =
+        static_cast<uint32_t>(scratch_vgpr) + required_scratch_vgpr_count();
+    if (spill.vgpr_base != scratch_vgpr || spill.vgpr_count < required_scratch_vgpr_count() ||
+        scratch_end > 256u || (dispatch_capture.present() && !dispatch_capture.unambiguous())) {
+      return false;
+    }
+    if (dispatch_id_offset && (!dispatch_plan || dispatch_capture.sgpr ||
+                               dispatch_capture.vgpr != std::optional<uint16_t>{scratch_vgpr})) {
+      return false;
+    }
+    return runtime_sample_stride != 0u &&
+           (runtime_sample_stride & (runtime_sample_stride - 1u)) == 0u &&
+           runtime_sample_offset < runtime_sample_stride;
+  }
 };
 
 /// Register window copied into one entry-local VGPR while a prologue borrows

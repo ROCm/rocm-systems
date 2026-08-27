@@ -483,6 +483,55 @@ TEST(ConSanMoi, DispatchCaptureRequiresExactlyOnePersistentRepresentation) {
   EXPECT_FALSE(ambiguous.unambiguous());
 }
 
+TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
+  consan_detail::MoiPrivateEpochPrologueEmissionPlan plan;
+  plan.scratch_vgpr = 255u;
+  plan.spill.vgpr_base = plan.scratch_vgpr;
+  plan.spill.vgpr_count = 1u;
+  EXPECT_EQ(plan.required_scratch_vgpr_count(), 1u);
+  EXPECT_TRUE(plan.is_well_formed());
+
+  plan.workgroup_shadow = ConSanMoiWorkgroupShadowLayout{};
+  plan.spill.vgpr_count = 2u;
+  EXPECT_EQ(plan.required_scratch_vgpr_count(), 2u);
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.workgroup_shadow = std::nullopt;
+
+  plan.scratch_vgpr = 253u;
+  plan.spill.vgpr_base = plan.scratch_vgpr;
+  plan.workgroup_key_offset = 64u;
+  plan.spill.vgpr_count = 3u;
+  EXPECT_EQ(plan.required_scratch_vgpr_count(), 3u);
+  EXPECT_TRUE(plan.is_well_formed());
+
+  plan.workgroup_key_offset = std::nullopt;
+  plan.dispatch_id_offset = 96u;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.dispatch_plan = ConSanMoiDispatchIdPreloadPlan{};
+  plan.dispatch_capture = {.sgpr = std::nullopt, .vgpr = plan.scratch_vgpr};
+  EXPECT_EQ(plan.required_scratch_vgpr_count(), 2u);
+  EXPECT_TRUE(plan.is_well_formed());
+  plan.dispatch_capture.sgpr = 40u;
+  EXPECT_FALSE(plan.is_well_formed());
+}
+
+TEST(ConSanMoi, PrivateEpochProloguePlanValidatesRuntimeSelectionDomain) {
+  consan_detail::MoiPrivateEpochPrologueEmissionPlan plan;
+  plan.scratch_vgpr = 20u;
+  plan.spill.vgpr_base = plan.scratch_vgpr;
+  plan.spill.vgpr_count = 1u;
+  plan.runtime_sample_stride = 8u;
+  plan.runtime_sample_offset = 7u;
+  EXPECT_TRUE(plan.is_well_formed());
+  plan.runtime_sample_offset = 8u;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.runtime_sample_offset = 0u;
+  plan.runtime_sample_stride = 0u;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.runtime_sample_stride = 6u;
+  EXPECT_FALSE(plan.is_well_formed());
+}
+
 TEST(ConSanMoi, EntryScalarBackupValidatesCarrierAndScalarWindow) {
   using consan_detail::MoiEntryScalarBackup;
   constexpr uint16_t kVgprLimit = 256u;
@@ -571,6 +620,23 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   EXPECT_FALSE(ambiguous.has_value());
   EXPECT_FALSE(ambiguous.is_well_formed());
   EXPECT_FALSE(ambiguous.operand());
+}
+
+TEST(ConSanMoi, WorkgroupSourcesRejectAnyAmbiguousCoordinate) {
+  ConSanMoiWorkgroupSources sources{
+      .x = ConSanMoiWorkgroupSource::scalar(17u),
+      .y = ConSanMoiWorkgroupSource::vector(23u),
+      .z = {},
+      .cluster_workgroup_id = ConSanMoiWorkgroupSource::private_state(64u),
+      .cdna_full_payload_base = std::nullopt,
+      .cdna_guest_payload_base = std::nullopt,
+      .cdna_guest_payload_mask = 0u,
+  };
+  EXPECT_TRUE(sources.is_well_formed());
+  const ConSanMoiWorkgroupSources copy = sources;
+  EXPECT_EQ(copy, sources);
+  sources.y.scalar_src = 19u;
+  EXPECT_FALSE(sources.is_well_formed());
 }
 
 TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {

@@ -1411,20 +1411,34 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_private_epoch_prologue_words(
-    uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
-    uint32_t epoch_offset, std::optional<uint32_t> owner_offset,
-    std::optional<uint32_t> workgroup_key_offset, std::optional<uint32_t> dispatch_id_offset,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets,
-    const VgprSpillSequence &spill, const std::optional<SgprSpillSequence> &entry_scalar_spill,
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
-    std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
-    std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
-    ConSanMoiDispatchIdCapture dispatch_capture,
-    std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source,
-    std::optional<uint16_t> return_pc_sgpr, uint32_t runtime_sample_stride,
-    uint32_t runtime_sample_offset, uint64_t runtime_report_dispatch_id, rj_code_arch_t arch,
-    std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_private_epoch_prologue_words(uint64_t prologue_text_offset,
+                                   uint64_t original_entry_text_offset,
+                                   const MoiPrivateEpochPrologueEmissionPlan &plan,
+                                   rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!plan.is_well_formed()) {
+    errors.emplace_back("ConSan MOI private-epoch prologue has an invalid emission plan");
+    return std::nullopt;
+  }
+  const uint16_t scratch_vgpr = plan.scratch_vgpr;
+  const uint32_t epoch_offset = plan.epoch_offset;
+  const std::optional<uint32_t> owner_offset = plan.owner_offset;
+  const std::optional<uint32_t> workgroup_key_offset = plan.workgroup_key_offset;
+  const std::optional<uint32_t> dispatch_id_offset = plan.dispatch_id_offset;
+  const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets =
+      plan.record_replay_workgroup_offsets;
+  const VgprSpillSequence &spill = plan.spill;
+  const std::optional<SgprSpillSequence> &entry_scalar_spill = plan.entry_scalar_spill;
+  const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow = plan.workgroup_shadow;
+  const std::optional<ConSanMoiWorkgroupSources> &workgroup_sources = plan.workgroup_sources;
+  const std::optional<ConSanMoiDispatchIdPreloadPlan> &dispatch_plan = plan.dispatch_plan;
+  const ConSanMoiDispatchIdCapture dispatch_capture = plan.dispatch_capture;
+  const std::optional<ConSanMoiWorkgroupSource> &runtime_workgroup_selection_source =
+      plan.runtime_workgroup_selection_source;
+  const std::optional<uint16_t> return_pc_sgpr = plan.return_pc_sgpr;
+  const uint32_t runtime_sample_stride = plan.runtime_sample_stride;
+  const uint32_t runtime_sample_offset = plan.runtime_sample_offset;
+  const uint64_t runtime_report_dispatch_id = plan.runtime_report_dispatch_id;
   const auto epoch_store =
       instrumentation::build_private_store_b32(scratch_vgpr, epoch_offset, arch);
   std::optional<std::vector<uint32_t>> owner_store;
@@ -1876,16 +1890,9 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     const ConSanKernelInfo *kernel = nullptr;
     uint64_t active_descriptor_file_offset = 0;
     uint64_t active_entry_text_offset = 0;
-    uint16_t scratch_vgpr = 0;
-    MoiOptions kernel_options;
-    MoiPrivateEpochLayout layout;
-    VgprSpillSequence spill;
-    std::optional<SgprSpillSequence> entry_scalar_spill;
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
-    std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+    MoiPrivateEpochPrologueEmissionPlan emission;
+    uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
-    std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
-    ConSanMoiDispatchIdCapture dispatch_capture;
     bool has_kernarg_preload = false;
   };
   std::vector<PlannedPrivateEpochPrologue> planned;
@@ -2142,11 +2149,40 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
             std::max(required_private_bytes, patch.required_private_segment_size);
     }
     private_requirements[kernel.descriptor_file_offset] = required_private_bytes;
-    planned.push_back({&kernel, active_kernel->descriptor_file_offset,
-                       active_kernel->entry_text_offset, *access_patch->scratch_vgpr,
-                       std::move(kernel_options), layout, *spill, entry_scalar_spill,
-                       workgroup_shadow, workgroup_sources, required_private_bytes, dispatch_plan,
-                       dispatch_capture, has_kernarg_preload});
+    std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
+    if (prologue_workgroup_shadow) {
+      prologue_workgroup_shadow->visible_evidence_sgpr =
+          inline_shadow_visible_evidence_sgpr(kernel_options);
+    }
+    MoiPrivateEpochPrologueEmissionPlan emission{
+        .scratch_vgpr = *access_patch->scratch_vgpr,
+        .epoch_offset = layout.epoch_offset,
+        .owner_offset = layout.owner_offset,
+        .workgroup_key_offset = layout.workgroup_key_offset,
+        .dispatch_id_offset = layout.dispatch_id_offset,
+        .record_replay_workgroup_offsets = layout.record_replay_workgroup_offsets,
+        .spill = std::move(*spill),
+        .entry_scalar_spill = std::move(entry_scalar_spill),
+        .workgroup_shadow = std::move(prologue_workgroup_shadow),
+        .workgroup_sources = std::move(workgroup_sources),
+        .dispatch_plan = dispatch_plan,
+        .dispatch_capture = dispatch_capture,
+        .runtime_workgroup_selection_source =
+            moi_runtime_workgroup_selection_source(kernel_options, arch),
+        .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
+        .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
+        .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = kernel_options.moi_report_dispatch_id,
+    };
+    planned.push_back({
+        .kernel = &kernel,
+        .active_descriptor_file_offset = active_kernel->descriptor_file_offset,
+        .active_entry_text_offset = active_kernel->entry_text_offset,
+        .emission = std::move(emission),
+        .persistent_private_state_end = layout.ephemeral_base,
+        .required_private_bytes = required_private_bytes,
+        .has_kernarg_preload = has_kernarg_preload,
+    });
   }
 
   if (planned.empty()) {
@@ -2157,11 +2193,11 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
                                            private_requirements, result.errors))
     return;
   for (const PlannedPrivateEpochPrologue &item : planned) {
-    if (item.dispatch_capture.present() &&
-        (!item.dispatch_plan ||
+    if (item.emission.dispatch_capture.present() &&
+        (!item.emission.dispatch_plan ||
          !apply_moi_dispatch_id_descriptor(patcher, item.active_descriptor_file_offset,
-                                           *item.dispatch_plan, item.dispatch_capture, arch,
-                                           result.errors))) {
+                                           *item.emission.dispatch_plan,
+                                           item.emission.dispatch_capture, arch, result.errors))) {
       return;
     }
   }
@@ -2172,21 +2208,8 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
   for (const PlannedPrivateEpochPrologue &item : planned) {
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
-    std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = item.workgroup_shadow;
-    if (prologue_workgroup_shadow) {
-      prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(item.kernel_options);
-    }
     auto words = build_private_epoch_prologue_words(
-        prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
-        item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-        item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
-        item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
-        item.dispatch_plan, item.dispatch_capture,
-        moi_runtime_workgroup_selection_source(item.kernel_options, arch),
-        item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
-        item.kernel_options.moi_runtime_sample_offset, item.kernel_options.moi_report_dispatch_id,
-        arch, result.errors);
+        prologue_text_offset, item.active_entry_text_offset, item.emission, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
@@ -2202,14 +2225,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
           prologue_text_offset + words->size() * sizeof(uint32_t), kAmdhsaKernelEntryAlignment);
       auto secondary_words = build_private_epoch_prologue_words(
           secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
-          item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-          item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
-          item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
-          prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-          item.dispatch_capture, moi_runtime_workgroup_selection_source(item.kernel_options, arch),
-          item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
-          item.kernel_options.moi_runtime_sample_offset, item.kernel_options.moi_report_dispatch_id,
-          arch, result.errors);
+          item.emission, arch, result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -2220,30 +2236,15 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
       } else {
         constexpr uint64_t kPairedEntryWindow = 2u * kAmdhsaKernelEntryAlignment;
         primary_body_offset = prologue_text_offset + kPairedEntryWindow;
-        words = build_private_epoch_prologue_words(
-            *primary_body_offset, item.active_entry_text_offset, item.scratch_vgpr,
-            item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-            item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
-            item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
-            item.dispatch_plan, item.dispatch_capture,
-            moi_runtime_workgroup_selection_source(item.kernel_options, arch),
-            item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
-            item.kernel_options.moi_runtime_sample_offset,
-            item.kernel_options.moi_report_dispatch_id, arch, result.errors);
+        words =
+            build_private_epoch_prologue_words(*primary_body_offset, item.active_entry_text_offset,
+                                               item.emission, arch, result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_private_epoch_prologue_words(
             *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
-            item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-            item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
-            item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
-            prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-            item.dispatch_capture,
-            moi_runtime_workgroup_selection_source(item.kernel_options, arch),
-            item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
-            item.kernel_options.moi_runtime_sample_offset,
-            item.kernel_options.moi_report_dispatch_id, arch, result.errors);
+            item.emission, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -2272,19 +2273,20 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     info.trampoline_size = static_cast<uint32_t>(words->size() * sizeof(uint32_t));
     info.dispatch_id_primary_prologue_offset = primary_body_offset;
     info.dispatch_id_secondary_prologue_offset = secondary_body_offset;
-    info.scratch_vgpr = item.scratch_vgpr;
-    info.persistent_epoch_private_offset = item.layout.epoch_offset;
-    info.persistent_owner_private_offset = item.layout.owner_offset;
-    info.persistent_workgroup_key_private_offset = item.layout.workgroup_key_offset;
-    info.persistent_dispatch_id_private_offset = item.layout.dispatch_id_offset;
+    info.scratch_vgpr = item.emission.scratch_vgpr;
+    info.persistent_epoch_private_offset = item.emission.epoch_offset;
+    info.persistent_owner_private_offset = item.emission.owner_offset;
+    info.persistent_workgroup_key_private_offset = item.emission.workgroup_key_offset;
+    info.persistent_dispatch_id_private_offset = item.emission.dispatch_id_offset;
     info.persistent_record_replay_workgroup_private_offsets =
-        item.layout.record_replay_workgroup_offsets;
-    info.persistent_private_state_end = item.layout.ephemeral_base;
-    info.spilled_vgpr_count = item.spill.vgpr_count;
+        item.emission.record_replay_workgroup_offsets;
+    info.persistent_private_state_end = item.persistent_private_state_end;
+    info.spilled_vgpr_count = item.emission.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
-    note_dynamic_stack_private_requirement(info, &item.spill);
-    if (item.dispatch_plan && item.dispatch_capture.present())
-      note_dispatch_id_patch_info(info, *item.dispatch_plan, item.dispatch_capture);
+    note_dynamic_stack_private_requirement(info, &item.emission.spill);
+    if (item.emission.dispatch_plan && item.emission.dispatch_capture.present())
+      note_dispatch_id_patch_info(info, *item.emission.dispatch_plan,
+                                  item.emission.dispatch_capture);
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.owner_descriptor_file_offsets.push_back(item.kernel->descriptor_file_offset);
     patches.push_back(info);

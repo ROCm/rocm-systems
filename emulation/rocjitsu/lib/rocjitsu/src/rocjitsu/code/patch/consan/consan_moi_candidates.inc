@@ -151,22 +151,6 @@ void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const MoiOptions &op
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
 
-struct ConSanMoiWorkgroupSources {
-  ConSanMoiWorkgroupSource x;
-  ConSanMoiWorkgroupSource y;
-  ConSanMoiWorkgroupSource z;
-  ConSanMoiWorkgroupSource cluster_workgroup_id;
-  // CDNA exposes descriptor-selected system SGPRs as a packed suffix after
-  // the user-SGPR window. Exact Record/Replay capture requests a full x/y/z
-  // launch payload, then restores the guest's original packed suffix before
-  // returning from the entry prologue.
-  std::optional<uint16_t> cdna_full_payload_base;
-  std::optional<uint16_t> cdna_guest_payload_base;
-  uint8_t cdna_guest_payload_mask = 0;
-
-  auto operator<=>(const ConSanMoiWorkgroupSources &) const = default;
-};
-
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
