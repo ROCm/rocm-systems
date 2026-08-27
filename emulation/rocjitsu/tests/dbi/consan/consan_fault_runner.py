@@ -556,7 +556,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             supported_sites += _integer(fields, "supported_lds_sites")
             supported_sites += _integer(fields, "function_supported_lds_sites")
             skipped_sites += _integer(fields, "skips")
-            rejected_sites += _integer(fields, "rejects")
+            rejected_sites += _integer(fields, "blocked")
         elif record.startswith("MOI resources "):
             spill_patch_count += _integer(fields, "emitted_spill_patches")
             spill_slot_bytes += _integer(fields, "emitted_spill_slot_bytes")

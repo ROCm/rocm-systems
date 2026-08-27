@@ -326,9 +326,8 @@ TransformResult transform_consan_pristine_moi_inventory(
     const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
     bool preserve_extended_barrier_pairs) {
-  ConSanOptions legacy_options =
-      LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
-                                  disabled_mutation, capabilities, unbound_resources);
+  ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
+      request, transform_policy, debug, disabled_mutation, capabilities, unbound_resources);
   legacy_options.moi_report_buffer_address.reset();
   legacy_options.moi_report_buffer_size = 0;
   legacy_options.moi_report_layout.reset();
@@ -349,11 +348,10 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
     TransformResult inventory) {
-  const ConSanOptions options = LegacyOptionsAdapter::adapt(
-      request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-  ConSanOptions inventory_options =
-      LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
-                                  MutationRequest{}, capabilities, BoundRuntimeResources{});
+  const ConSanOptions options = LegacyOptionsAdapter::adapt(request, transform_policy, debug,
+                                                            mutation, capabilities, resources);
+  ConSanOptions inventory_options = LegacyOptionsAdapter::adapt(
+      request, transform_policy, debug, MutationRequest{}, capabilities, BoundRuntimeResources{});
   inventory_options.qualify_extended_barrier_pairs =
       inventory.moi_retry_preserves_extended_barrier_pairs_;
   const ConSanMoiInventoryRetryConfig retry{
@@ -452,7 +450,7 @@ TransformResult TransformResult::publish_optional(
     legacy = std::move(*supplied_mechanism);
   } else {
     const ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
-        request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
+        request, transform_policy, debug, mutation, capabilities, resources);
     legacy = try_patch_consan(code_object_bytes, legacy_options);
   }
   result.program_inventory = legacy.program_inventory;

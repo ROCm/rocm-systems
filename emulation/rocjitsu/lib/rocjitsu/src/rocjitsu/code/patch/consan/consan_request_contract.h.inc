@@ -110,9 +110,7 @@ struct TransformPolicy {
 /// This type decides whether instrumentation is active, whether an inability
 /// to install it rejects a load, and how much process-wide storage may remain
 /// live. It contains no sanitizer-site policy and is intentionally not an
-/// semantic input to the production transformer. The temporary legacy adapter
-/// still projects `fail_closed` because the prototype preflight path has not
-/// yet moved its typed skip/reject outcome to the runtime boundary.
+/// semantic input to the production transformer.
 struct RuntimePolicy {
   /// Whether the ConSan hook participates in code-object loads.
   bool enabled = false;
@@ -817,12 +815,10 @@ class LegacyOptionsAdapter {
 public:
   [[nodiscard]] static ConSanOptions
   adapt(const ConSanRequest &request, const TransformPolicy &transform_policy,
-        const RuntimePolicy &runtime_policy, const ConSanDebugOverrides &debug,
-        const MutationRequest &mutation, const RuntimeCapabilities &capabilities,
-        const BoundRuntimeResources &resources) {
+        const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+        const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
     ConSanOptions options;
     options.flavor = request.flavor.value_or(ConSanFlavor::None);
-    options.fail_closed = runtime_policy.fail_closed;
     options.moi_engine = request.moi_engine;
     options.moi_owner_source = request.moi_owner_source;
     options.flat_provenance_mode = request.flat_provenance_mode;
@@ -941,7 +937,6 @@ public:
         "request.moi_* policy and sampling->moi_* policy and sampling",
         "request.delay/report values->delay/report values",
         "transform_policy.*->growth, patch, and planning-work limits",
-        "runtime_policy.fail_closed->fail_closed (temporary preflight seam)",
         "debug probe controls->legacy probe controls",
         "debug allocation controls->legacy test/resource overrides",
         "mutation.*->legacy fault and perturbation controls",

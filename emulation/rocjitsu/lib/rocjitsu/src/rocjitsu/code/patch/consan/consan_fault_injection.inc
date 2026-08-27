@@ -2078,7 +2078,7 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 find_first_supported_lds_read_b32_site(const ConSanResult &result) {
   const ConSanLdsSite *best = nullptr;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
+    if (kernel.preflight_action == ConSanPreflightAction::Blocked)
       continue;
     for (const ConSanLdsSite &site : kernel.lds_sites) {
       if (site.kind == ConSanLdsAccessKind::Read && site.supported_mvp && site.width_bits == 32 &&

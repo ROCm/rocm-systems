@@ -4573,7 +4573,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     size_t candidate_kernel_count = 0;
     size_t skipped_kernel_count = 0;
-    size_t rejected_kernel_count = 0;
+    size_t blocked_kernel_count = 0;
     size_t supported_lds_site_count = 0;
     size_t flat_site_count = 0;
     size_t flat_group_hint_count = 0;
@@ -4599,8 +4599,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       case rocjitsu::ConSanPreflightAction::Skip:
         ++skipped_kernel_count;
         break;
-      case rocjitsu::ConSanPreflightAction::Reject:
-        ++rejected_kernel_count;
+      case rocjitsu::ConSanPreflightAction::Blocked:
+        ++blocked_kernel_count;
         break;
       case rocjitsu::ConSanPreflightAction::NotRun:
         break;
@@ -4635,7 +4635,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     log_message(
         kLogInfo,
         "ConSan summary reader=%llu kernels=%zu candidates=%zu skips=%zu "
-        "rejects=%zu supported_lds_sites=%zu flat_sites=%zu flat_group_hints=%zu "
+        "blocked=%zu supported_lds_sites=%zu flat_sites=%zu flat_group_hints=%zu "
         "flat_private_hints=%zu flat_maybe_group_hints=%zu "
         "flat_maybe_private_hints=%zu flat_global_hints=%zu "
         "flat_unknown_hints=%zu functions=%zu function_lds_sites=%zu "
@@ -4646,7 +4646,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "modified=%s",
         static_cast<unsigned long long>(code_object_reader.handle),
         transform_result.program_inventory.kernels().size(), candidate_kernel_count,
-        skipped_kernel_count, rejected_kernel_count, supported_lds_site_count, flat_site_count,
+        skipped_kernel_count, blocked_kernel_count, supported_lds_site_count, flat_site_count,
         flat_group_hint_count, flat_private_hint_count, flat_maybe_group_hint_count,
         flat_maybe_private_hint_count, flat_global_hint_count, flat_unknown_hint_count,
         transform_result.program_inventory.functions().size(), function_lds_site_count,

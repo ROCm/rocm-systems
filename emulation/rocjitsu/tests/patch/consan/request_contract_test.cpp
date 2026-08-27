@@ -32,6 +32,7 @@ static_assert(!HasReportBufferAddress<ConSanRequest>);
 static_assert(!HasFaultDropBarrier<ConSanRequest>);
 static_assert(!HasTestKernelFilter<ConSanRequest>);
 static_assert(!HasFailClosed<ConSanRequest>);
+static_assert(!HasFailClosed<ConSanOptions>);
 static_assert(!HasReportBufferAddress<TransformPolicy>);
 static_assert(!HasFaultDropBarrier<RuntimePolicy>);
 static_assert(!HasReportBufferAddress<MutationRequest>);
@@ -682,10 +683,8 @@ TEST(LegacyOptionsAdapterTest, ProjectsRequestAndDerivesInlineModeWithoutMutatin
   request.report_marker = 17;
   const ConSanRequest original = request;
 
-  RuntimePolicy runtime;
-  runtime.fail_closed = true;
   const ConSanOptions options = LegacyOptionsAdapter::adapt(
-      request, TransformPolicy{}, runtime, ConSanDebugOverrides{}, MutationRequest{},
+      request, TransformPolicy{}, ConSanDebugOverrides{}, MutationRequest{},
       physical_runtime_capabilities(), BoundRuntimeResources{});
   EXPECT_EQ(request, original);
   EXPECT_EQ(options.flavor, ConSanFlavor::Moi);
@@ -706,14 +705,13 @@ TEST(LegacyOptionsAdapterTest, ProjectsRequestAndDerivesInlineModeWithoutMutatin
   EXPECT_EQ(options.delay_nops, 13u);
   EXPECT_EQ(options.delay_var_ssrc, 99u);
   EXPECT_EQ(options.report_marker, 17u);
-  EXPECT_TRUE(options.fail_closed);
 }
 
 TEST(LegacyOptionsAdapterTest, ProjectsEngineSpecificRequestControls) {
   ConSanRequest record_replay = valid_moi_request(ConSanMoiEngine::RecordReplay);
   record_replay.moi_dynamic_access_records = true;
   ConSanOptions options = LegacyOptionsAdapter::adapt(
-      record_replay, TransformPolicy{}, RuntimePolicy{}, ConSanDebugOverrides{}, MutationRequest{},
+      record_replay, TransformPolicy{}, ConSanDebugOverrides{}, MutationRequest{},
       physical_runtime_capabilities(), BoundRuntimeResources{});
   EXPECT_TRUE(options.moi_dynamic_access_records);
   EXPECT_FALSE(options.moi_sampled_check);
@@ -721,9 +719,9 @@ TEST(LegacyOptionsAdapterTest, ProjectsEngineSpecificRequestControls) {
 
   ConSanRequest sampled = valid_moi_request(ConSanMoiEngine::Sampled);
   sampled.moi_sampled_check = true;
-  options = LegacyOptionsAdapter::adapt(sampled, TransformPolicy{}, RuntimePolicy{},
-                                        ConSanDebugOverrides{}, MutationRequest{},
-                                        physical_runtime_capabilities(), BoundRuntimeResources{});
+  options = LegacyOptionsAdapter::adapt(sampled, TransformPolicy{}, ConSanDebugOverrides{},
+                                        MutationRequest{}, physical_runtime_capabilities(),
+                                        BoundRuntimeResources{});
   EXPECT_FALSE(options.moi_dynamic_access_records);
   EXPECT_TRUE(options.moi_sampled_check);
   EXPECT_FALSE(options.moi_inline_workgroup_shadow);
@@ -758,9 +756,9 @@ TEST(LegacyOptionsAdapterTest, ProjectsTransformDebugAndRuntimeCapabilityFields)
   capabilities.backend = ConSanRuntimeBackend::RocJitsuSimulator;
   capabilities.max_workgroup_lds_bytes = 327680;
 
-  const ConSanOptions options = LegacyOptionsAdapter::adapt(
-      valid_moi_request(ConSanMoiEngine::RecordReplay), transform, RuntimePolicy{}, debug,
-      MutationRequest{}, capabilities, BoundRuntimeResources{});
+  const ConSanOptions options =
+      LegacyOptionsAdapter::adapt(valid_moi_request(ConSanMoiEngine::RecordReplay), transform,
+                                  debug, MutationRequest{}, capabilities, BoundRuntimeResources{});
   EXPECT_EQ(options.patched_image_growth_limit.absolute_bytes, 1234u);
   EXPECT_EQ(options.max_patches, 23u);
   EXPECT_FALSE(options.max_patches_is_expert_limit);
@@ -845,8 +843,8 @@ TEST(LegacyOptionsAdapterTest, ProjectsEveryMutationAndBoundResourceFamily) {
   };
 
   const ConSanOptions options = LegacyOptionsAdapter::adapt(
-      valid_moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{}, RuntimePolicy{},
-      ConSanDebugOverrides{}, mutation, physical_runtime_capabilities(), resources);
+      valid_moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{}, ConSanDebugOverrides{},
+      mutation, physical_runtime_capabilities(), resources);
   EXPECT_TRUE(options.fault_drop_barrier);
   EXPECT_TRUE(options.fault_allow_destructive_incomplete_barrier_drop);
   EXPECT_TRUE(options.fault_move_barrier);
@@ -900,17 +898,17 @@ TEST(LegacyOptionsAdapterTest, ProjectsEveryMutationAndBoundResourceFamily) {
 TEST(LegacyOptionsAdapterTest, ProducesFreshValuesAndHasAUniqueReviewedFieldInventory) {
   const ConSanRequest request = valid_moi_request(ConSanMoiEngine::RecordReplay);
   ConSanOptions first = LegacyOptionsAdapter::adapt(
-      request, TransformPolicy{}, RuntimePolicy{}, ConSanDebugOverrides{}, MutationRequest{},
+      request, TransformPolicy{}, ConSanDebugOverrides{}, MutationRequest{},
       physical_runtime_capabilities(), BoundRuntimeResources{});
   ConSanOptions second = LegacyOptionsAdapter::adapt(
-      request, TransformPolicy{}, RuntimePolicy{}, ConSanDebugOverrides{}, MutationRequest{},
+      request, TransformPolicy{}, ConSanDebugOverrides{}, MutationRequest{},
       physical_runtime_capabilities(), BoundRuntimeResources{});
   first.moi_sample_stride = 99;
   EXPECT_EQ(second.moi_sample_stride, 1u);
   EXPECT_EQ(request.moi_sample_stride, 1u);
 
   constexpr auto fields = LegacyOptionsAdapter::projected_field_names();
-  EXPECT_EQ(fields.size(), 15u);
+  EXPECT_EQ(fields.size(), 14u);
   std::unordered_set<std::string_view> unique;
   for (const std::string_view field : fields) {
     EXPECT_FALSE(field.empty());

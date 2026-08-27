@@ -771,7 +771,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {
     for (ConSanKernelInfo &kernel : inventory_builder.kernels())
-      preflight_kernel(kernel, options, result.errors, result.warnings);
+      preflight_kernel(kernel, result.warnings);
   }
   reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, options,
                                      inventory_builder.kernels(), inventory_builder.functions(),

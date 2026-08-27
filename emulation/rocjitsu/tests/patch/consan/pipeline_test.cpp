@@ -480,6 +480,40 @@ TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
   EXPECT_FALSE(result.issues.empty());
 }
 
+TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
+  constexpr std::array<uint8_t, 4> bytes = {0x7f, 'E', 'L', 'F'};
+  RuntimePolicy fail_open = enabled_runtime_policy();
+  RuntimePolicy fail_closed = fail_open;
+  fail_closed.fail_closed = true;
+
+  const TransformResult open =
+      transform_consan(bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+                       fail_open, ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
+  const TransformResult closed =
+      transform_consan(bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+                       fail_closed, ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
+
+  ASSERT_TRUE(open.well_formed()) << testing::PrintToString(open.issues);
+  ASSERT_TRUE(closed.well_formed()) << testing::PrintToString(closed.issues);
+  EXPECT_EQ(open.code_object, closed.code_object);
+  EXPECT_EQ(open.stages, closed.stages);
+  EXPECT_EQ(open.program_inventory.code_object_id(), closed.program_inventory.code_object_id());
+  EXPECT_EQ(open.program_inventory.code_object_parsed(),
+            closed.program_inventory.code_object_parsed());
+  EXPECT_EQ(open.program_inventory.arch(), closed.program_inventory.arch());
+  EXPECT_EQ(open.program_inventory.target(), closed.program_inventory.target());
+  EXPECT_EQ(open.observation_plan, closed.observation_plan);
+  EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
+  EXPECT_EQ(open.replacement_bytes, closed.replacement_bytes);
+  EXPECT_EQ(open.outcome, closed.outcome);
+  EXPECT_EQ(open.configuration_issue, closed.configuration_issue);
+  EXPECT_EQ(open.issues, closed.issues);
+  EXPECT_EQ(open.warnings, closed.warnings);
+  EXPECT_EQ(open.mutation, closed.mutation);
+  EXPECT_EQ(open.install_action(/*fail_closed=*/false), ConSanInstallAction::LoadOriginal);
+  EXPECT_EQ(closed.install_action(/*fail_closed=*/true), ConSanInstallAction::Reject);
+}
+
 TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) {
   struct ModeCase {
     ConSanRequest request;

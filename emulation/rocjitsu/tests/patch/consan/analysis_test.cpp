@@ -4753,11 +4753,34 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, FailClosedAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
+TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8500000u,
+      0x00000000u, // ds_nop: a decoded DS operation with no access semantics.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "preflight_decode_blocker");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_TRUE(result.errors.empty());
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Blocked);
+  EXPECT_EQ(kernel.stats.ds_other_count, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("ConSan preflight blocked kernel") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSan, PreflightAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  options.fail_closed = true;
 
   const auto result = try_patch_consan(bytes, options);
 

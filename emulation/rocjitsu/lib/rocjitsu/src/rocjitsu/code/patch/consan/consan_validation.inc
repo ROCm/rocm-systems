@@ -146,21 +146,11 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
                                " statically unmatched barrier wait(s)");
 }
 
-[[nodiscard]] bool has_rejected_kernel(const ConSanResult &result) {
+[[nodiscard]] bool has_blocked_kernel(const ConSanResult &result) {
   return std::ranges::any_of(result.program_inventory.kernels(),
                              [](const ConSanKernelInfo &kernel) {
-                               return kernel.preflight_action == ConSanPreflightAction::Reject;
+                               return kernel.preflight_action == ConSanPreflightAction::Blocked;
                              });
-}
-
-[[nodiscard]] bool has_unsupported_preflight(const ConSanResult &result) {
-  return std::ranges::any_of(
-      result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
-        if (kernel.preflight_action != ConSanPreflightAction::Skip)
-          return false;
-        return !kernel.has_text_range || !kernel.decoded || kernel.stats.decode_error_count != 0 ||
-               kernel.stats.ds_other_count != 0;
-      });
 }
 
 template <typename Entity>
@@ -4556,7 +4546,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     ProgramInventoryBuilder inventory_builder(original_bytes);
     result.program_inventory = inventory_builder.view();
   }
-  if (has_rejected_kernel(result)) {
+  if (has_blocked_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.modified = false;
     result.elf_bytes.clear();
@@ -4608,8 +4598,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       summarize_consan_resource_plans(result.resource_plans, result.patches).unsupported_plans !=
-          0 ||
-      has_unsupported_preflight(result)) {
+          0) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.mutation.applied_fault_logical_identity.reset();
   } else {

@@ -3735,6 +3735,36 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 64.44
   seconds. E2E validation remains outside this work.
 
+### Slice 5T: move failure policy entirely to installation
+
+- **Policy-independent transformation:** Preflight now records `Blocked` when
+  static code-object facts make a kernel unsafe to transform. `Blocked` is a
+  transform fact that produces `Unsupported`; it never decides whether the
+  pristine image is loaded or the code-object load is rejected. Only
+  `TransformResult::install_action` combines the completed static outcome with
+  runtime `fail_closed` policy.
+- **Completed compatibility deletion:** `ConSanOptions::fail_closed`, its
+  `LegacyOptionsAdapter` projection and field-inventory entry, and the
+  adapter's entire `RuntimePolicy` parameter are gone. The old `Reject`
+  preflight state and error-producing branch are replaced by the
+  policy-neutral `Blocked` state and warning. Hook summary diagnostics report
+  blocked transforms rather than presenting runtime rejection as an analysis
+  fact.
+- **Contract coverage:** A compile-time assertion prevents `fail_closed` from
+  returning to raw lowering options. A focused preflight test exercises a
+  decoded but unsupported DS operation and requires `Blocked` plus an
+  `Unsupported` result. A pipeline test runs the same invalid image under both
+  runtime policies, requires identical identities, stages, inventories,
+  observation and coverage artifacts, outcomes, issues, warnings, and mutation
+  facts, then proves that only their installation actions differ.
+- **Deletion result:** Production source is 14 physical lines smaller despite
+  adding the explanatory preflight type contract. No replacement option,
+  policy adapter, or mirrored rejection flag was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,512 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 67.86
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

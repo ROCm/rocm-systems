@@ -792,7 +792,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               : find_instruction_at_text_offset(KernelBlockScope(owner_context->scope.blocks),
                                                 site.text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
-          owner_kernel->second->preflight_action == ConSanPreflightAction::Reject ||
+          owner_kernel->second->preflight_action == ConSanPreflightAction::Blocked ||
           owner_context == nullptr || owner_context->liveness == nullptr ||
           owner_site_inst != site_inst || refs == max_refs_by_descriptor.end() ||
           !allocated_vgprs || owner > original_bytes.size() ||
@@ -1981,7 +1981,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 
   std::vector<const ConSanFlatSite *> candidates;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
+    if (kernel.preflight_action == ConSanPreflightAction::Blocked)
       continue;
     for (const ConSanFlatSite &site : kernel.flat_sites) {
       if (is_supported_flat_trap_site(site, options.flat_provenance_mode))

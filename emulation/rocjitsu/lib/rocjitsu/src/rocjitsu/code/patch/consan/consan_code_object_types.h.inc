@@ -59,11 +59,23 @@ enum class ConSanAtomicAddressSpaceHint : uint8_t {
   Scalar,
 };
 
+/// Static disposition of one kernel after ConSan has inventoried its code.
+///
+/// This is a transformation fact, not loader policy. In particular, `Blocked`
+/// does not decide whether the runtime loads the pristine image or rejects the
+/// code-object load; `RuntimePolicy` makes that decision from the completed
+/// transform outcome.
 enum class ConSanPreflightAction : uint8_t {
+  /// Inventory has not yet assigned a disposition.
   NotRun,
+  /// The kernel contains at least one supported native-LDS candidate.
   Candidate,
+  /// The kernel has no native-LDS candidate, but another access family may
+  /// still be instrumentable and the kernel does not invalidate the image.
   Skip,
-  Reject,
+  /// Static facts make the complete code object unsafe to transform. The
+  /// resulting transform is `Unsupported`, independent of loader policy.
+  Blocked,
 };
 
 enum class ConSanTransformOutcome : uint8_t {

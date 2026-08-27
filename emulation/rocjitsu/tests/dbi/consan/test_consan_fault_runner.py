@@ -970,7 +970,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                     "print('[rocjitsu-dbi-hooks] ConSan proof patch reader=7 kind=inline-atomic-address-rewrite anchor=0x10')",
                     "print('[rocjitsu-dbi-hooks] ConSan proof patch reader=7 kind=trampoline-moi-atomic-record anchor=0x20 spilled_vgprs=2 private_bytes=96 workgroup_shadow_bytes=128 group_bytes=512')",
                     "print('[rocjitsu-dbi-hooks] ConSan patch end reader=7 patches=2')",
-                    "print('[rocjitsu-dbi-hooks] ConSan summary reader=7 supported_lds_sites=3 function_supported_lds_sites=2 skips=4 rejects=1')",
+                    "print('[rocjitsu-dbi-hooks] ConSan summary reader=7 supported_lds_sites=3 function_supported_lds_sites=2 skips=4 blocked=1')",
                     "print('[rocjitsu-dbi-hooks] ConSan coverage_site reader=7 kind=atomic disposition=supported reason=none outcome=patched lowering_reason=none resource_reason=none container=atomic_kernel scope=kernel text=0x20 mnemonic=global_atomic_add')",
                     "print('[rocjitsu-dbi-hooks] ConSan coverage_site reader=7 kind=access disposition=unsupported reason=unsupported_mnemonic outcome=unsupported lowering_reason=semantic_unsupported resource_reason=none container=unsupported_helper scope=function text=0x30 mnemonic=ds_load_b96')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 emitted_spill_patches=2 emitted_spill_slot_bytes=24 alternative_attempts=5 alternative_selected=1 alternative_rejected=1 alternative_superseded=1 alternative_contributed=1 alternative_vetoed=1')",

@@ -372,7 +372,6 @@ struct ConSanOptions {
   /// and the entry workitem identity used by the other engines.
   ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
   ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
-  bool fail_closed = false;
   bool probe_nop = false;
   bool probe_trampoline_nop = false;
   bool probe_endpgm = false;

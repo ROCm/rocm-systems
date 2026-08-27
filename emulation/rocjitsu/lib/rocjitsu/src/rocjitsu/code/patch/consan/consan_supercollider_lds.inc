@@ -73,7 +73,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   const bool has_plannable_supported_site = [&] {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      if (kernel.preflight_action == ConSanPreflightAction::Reject)
+      if (kernel.preflight_action == ConSanPreflightAction::Blocked)
         continue;
       if (std::ranges::any_of(kernel.lds_sites, [&](const auto &site) {
             return is_supported_check_trap_site(site, arch);
@@ -89,7 +89,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
               const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner,
                                                     &ConSanKernelInfo::descriptor_file_offset);
               return kernel != result.program_inventory.kernels().end() &&
-                     kernel->preflight_action != ConSanPreflightAction::Reject;
+                     kernel->preflight_action != ConSanPreflightAction::Blocked;
             });
         if (every_owner_is_plannable)
           return true;
@@ -442,7 +442,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
   };
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    index_container(kernel, kernel.preflight_action != ConSanPreflightAction::Reject);
+    index_container(kernel, kernel.preflight_action != ConSanPreflightAction::Blocked);
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     index_container(function, true);
   selected_container_ranges.finalize();
@@ -816,7 +816,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           context.instruction == nullptr || owner_site_inst != context.instruction ||
           !allocated_vgprs || !unified_vgprs || owner > original_bytes.size() ||
           sizeof(KD) > original_bytes.size() - owner ||
-          owner_kernel->second->preflight_action == ConSanPreflightAction::Reject) {
+          owner_kernel->second->preflight_action == ConSanPreflightAction::Blocked) {
         complete = false;
         break;
       }

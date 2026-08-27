@@ -2877,8 +2877,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
   return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
-void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
-                      std::vector<std::string> &errors, std::vector<std::string> &warnings) {
+void preflight_kernel(ConSanKernelInfo &kernel, std::vector<std::string> &warnings) {
   std::vector<std::string> blockers;
   if (!kernel.has_text_range)
     blockers.emplace_back("function text range unavailable");
@@ -2894,16 +2893,10 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
         count_reason("unsupported or unclassified ds_* instructions", kernel.stats.ds_other_count));
   const uint64_t supported_lds_sites = kernel.stats.lds_read_count + kernel.stats.lds_write_count;
   if (!blockers.empty()) {
-    kernel.preflight_action =
-        options.fail_closed ? ConSanPreflightAction::Reject : ConSanPreflightAction::Skip;
+    kernel.preflight_action = ConSanPreflightAction::Blocked;
     kernel.preflight_reasons = std::move(blockers);
-    const std::string message = "ConSan preflight " +
-                                std::string(options.fail_closed ? "rejected" : "skipped") +
-                                " kernel '" + kernel.name + "': " + preflight_summary(kernel);
-    if (options.fail_closed)
-      errors.push_back(message);
-    else
-      warnings.push_back(message);
+    warnings.emplace_back("ConSan preflight blocked kernel '" + kernel.name +
+                          "': " + preflight_summary(kernel));
     return;
   }
 
@@ -2939,7 +2932,7 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
   // duplicating the access.  Replaying an atomic as an ordinary load/store
   // would change program semantics, but the atomic is itself indivisible and
   // is not a race candidate.  Keep it as a typed exclusion without rejecting
-  // co-resident ordinary LDS accesses under fail-closed policy.
+  // co-resident ordinary LDS accesses.
   if (kernel.stats.lds_atomic_count > 0)
     kernel.preflight_reasons.push_back(
         count_reason("atomic LDS accesses excluded", kernel.stats.lds_atomic_count));
