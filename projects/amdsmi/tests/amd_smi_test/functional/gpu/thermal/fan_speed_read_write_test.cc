@@ -23,10 +23,10 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_fan_speed / amdsmi_set_gpu_fan_speed (sensor 0).
 TEST_F(GpuFunctionalReadWrite, SetFanSpeed_InvalidHandle) {
@@ -41,7 +41,7 @@ TEST_F(GpuFunctionalReadWrite, SetFanSpeed_InvalidHandle) {
 TEST_F(GpuFunctionalReadWrite, FanSpeed_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_gpu_fan_speed");
+  amdsmi::test::StatusCollector col("amdsmi_set_gpu_fan_speed");
   for (size_t i = 0; i < gpus().size(); ++i) {
     int64_t initial = 0;
     if (amdsmi_get_gpu_fan_speed(gpus()[i], 0, &initial) != AMDSMI_STATUS_SUCCESS) continue;
@@ -60,7 +60,7 @@ TEST_F(GpuFunctionalReadWrite, FanSpeed_SetVerifyRestore) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
                           AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                    AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 

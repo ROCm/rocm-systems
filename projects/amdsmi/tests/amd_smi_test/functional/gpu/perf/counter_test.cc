@@ -23,10 +23,10 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // GPU performance-event counters: amdsmi_gpu_counter_group_supported /
 // amdsmi_get_gpu_available_counters / amdsmi_gpu_create_counter /
@@ -107,7 +107,7 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
                   "under investigation";
 
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_gpu_counter_lifecycle");
+  amdsmi::test::StatusCollector col("amdsmi_gpu_counter_lifecycle");
   for (size_t i = 0; i < gpus().size(); ++i) {
     const std::string g = "gpu=" + std::to_string(i);
 
@@ -116,9 +116,9 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, serr, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record(g + " group_supported", serr,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(serr, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(serr, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
 
     uint32_t available = 0;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_available_counters", g + " grp=XGMI", kVerbose);
@@ -126,9 +126,9 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, aerr, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record(g + " available_counters", aerr,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(aerr, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(aerr, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
 
     amdsmi_event_handle_t handle = 0;
     DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", g + " evt=XGMI_0_NOP_TX", kVerbose);
@@ -137,7 +137,7 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
                           AMDSMI_STATUS_NO_PERM);
     col.Record(g + " create_counter", cerr,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    cerr, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                    AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
     if (cerr != AMDSMI_STATUS_SUCCESS) continue;  // control/read need a real handle
@@ -147,7 +147,7 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, st, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
     col.Record(g + " control_start", st,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    st, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
 
     amdsmi_counter_value_t value;
@@ -158,15 +158,15 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
     col.Record(
         g + " read_counter", rerr,
-        ::amdsmi::unittest::AmdsmiStatusIsExpected(
-            rerr, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
+        ::amdsmi::test::AmdsmiStatusIsExpected(rerr, AMDSMI_STATUS_SUCCESS,
+                                               AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
 
     DISPLAY_AMDSMI_API("amdsmi_gpu_control_counter", g + " cmd=STOP", kVerbose);
     st = amdsmi_gpu_control_counter(handle, AMDSMI_CNTR_CMD_STOP, nullptr);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, st, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
     col.Record(g + " control_stop", st,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    st, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
 
     // Always release the counter that create() allocated.
@@ -176,8 +176,8 @@ TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
     col.Record(
         g + " destroy_counter", derr,
-        ::amdsmi::unittest::AmdsmiStatusIsExpected(
-            derr, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
+        ::amdsmi::test::AmdsmiStatusIsExpected(derr, AMDSMI_STATUS_SUCCESS,
+                                               AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM));
   }
   col.ExpectNoFailures();
 }

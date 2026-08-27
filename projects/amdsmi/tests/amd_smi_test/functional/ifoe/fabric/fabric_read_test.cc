@@ -17,8 +17,8 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "api_test_framework.h"
 #include "test_common.h"
-#include "unit/unit_test_framework.h"
 
 // Category mask covering all telemetry categories
 static constexpr uint32_t kAllCategories =

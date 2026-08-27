@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_lib_loader.h"
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
 namespace {
 

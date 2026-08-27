@@ -9,9 +9,9 @@
 #include <fstream>
 #include <vector>
 
+#include "api_test_framework.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "test_common.h"
-#include "unit/unit_test_framework.h"
 
 namespace amd::smi {
 

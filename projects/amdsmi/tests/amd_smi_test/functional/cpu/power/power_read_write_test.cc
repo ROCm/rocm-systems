@@ -22,17 +22,18 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::AmdsmiStatusIsExpected;
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::AmdsmiStatusIsExpected;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // amdsmi_get_cpu_socket_power_cap / amdsmi_set_cpu_socket_power_cap.
 // amdsmi_get_cpu_pwr_efficiency_mode / amdsmi_set_cpu_pwr_efficiency_mode.
 // amdsmi_get_cpu_sdps_limit / amdsmi_set_cpu_sdps_limit.
-// amdsmi_set_cpu_socket_boostlimit (setter only, no getter).
+// amdsmi_set_cpu_socket_boostlimit (no socket getter; reads back per core).
 // ---- amdsmi_set_cpu_socket_power_cap ----
 TEST_F(CpuFunctionalReadWrite, SetSocketPowerCap_InvalidHandle) {
   RequireInit();
@@ -46,7 +47,7 @@ TEST_F(CpuFunctionalReadWrite, SetSocketPowerCap_InvalidHandle) {
 TEST_F(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_cpu_socket_power_cap");
+  amdsmi::test::StatusCollector col("amdsmi_set_cpu_socket_power_cap");
   for (size_t i = 0; i < cpus().size(); ++i) {
     uint32_t initial = 0;
     if (amdsmi_get_cpu_socket_power_cap(cpus()[i], &initial) != AMDSMI_STATUS_SUCCESS) continue;
@@ -102,13 +103,13 @@ TEST_F(CpuFunctionalReadWrite, SetPwrEfficiencyMode_NullOutput) {
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_pwr_efficiency_mode", "utilization=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_set_cpu_pwr_efficiency_mode(cpus()[0], 0, nullptr, &ppt);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 TEST_F(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_cpu_pwr_efficiency_mode");
+  amdsmi::test::StatusCollector col("amdsmi_set_cpu_pwr_efficiency_mode");
   for (size_t i = 0; i < cpus().size(); ++i) {
     uint32_t initial = 0;
     uint32_t util = 0;
@@ -163,7 +164,7 @@ TEST_F(CpuFunctionalReadWrite, SetSdpsLimit_InvalidHandle) {
 TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_cpu_sdps_limit");
+  amdsmi::test::StatusCollector col("amdsmi_set_cpu_sdps_limit");
   for (size_t i = 0; i < cpus().size(); ++i) {
     uint32_t initial = 0;
     if (amdsmi_get_cpu_sdps_limit(cpus()[i], &initial) != AMDSMI_STATUS_SUCCESS) continue;
@@ -196,7 +197,7 @@ TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// ---- amdsmi_set_cpu_socket_boostlimit (setter only, no getter) ----
+// ---- amdsmi_set_cpu_socket_boostlimit ----
 TEST_F(CpuFunctionalReadWrite, SetSocketBoostlimit_InvalidHandle) {
   RequireInit();
   DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_boostlimit", "handle=invalid", kVerbose);
@@ -206,20 +207,50 @@ TEST_F(CpuFunctionalReadWrite, SetSocketBoostlimit_InvalidHandle) {
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
-TEST_F(CpuFunctionalReadWrite, SocketBoostlimit_Set) {
+// There is no socket-level boostlimit getter; the per-core getter reports the
+// limit a socket write enforces, and attributing the enumerated cores to a
+// socket is only unambiguous when the host has exactly one.
+TEST_F(CpuFunctionalReadWrite, SocketBoostlimit_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_cpu_socket_boostlimit");
-  for (size_t i = 0; i < cpus().size(); ++i) {
-    DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_boostlimit", "cpu=" + std::to_string(i), kVerbose);
-    amdsmi_status_t err = amdsmi_set_cpu_socket_boostlimit(cpus()[i], 0);
-    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM,
-                          AMDSMI_STATUS_NO_HSMP_MSG_SUP, AMDSMI_STATUS_INVAL);
-    col.Record("cpu=" + std::to_string(i), err,
-               AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
-                                      AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_NO_HSMP_MSG_SUP,
-                                      AMDSMI_STATUS_INVAL));
+  if (cpus().size() != 1 || cpu_cores().empty())
+    GTEST_SKIP() << "socket boostlimit readback needs a single socket and its cores";
+
+  std::vector<uint32_t> initial(cpu_cores().size(), 0);
+  for (size_t c = 0; c < cpu_cores().size(); ++c) {
+    if (amdsmi_get_cpu_core_boostlimit(cpu_cores()[c], &initial[c]) != AMDSMI_STATUS_SUCCESS)
+      GTEST_SKIP() << "core boostlimit unreadable, so the socket write cannot be verified";
+  }
+  uint32_t target = (initial[0] > 100) ? (initial[0] - 100) : (initial[0] + 100);
+
+  amdsmi::test::StatusCollector col("amdsmi_set_cpu_socket_boostlimit");
+  DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_boostlimit", "cpu=0 set=" + std::to_string(target),
+                     kVerbose);
+  amdsmi_status_t err = amdsmi_set_cpu_socket_boostlimit(cpus()[0], target);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM,
+                        AMDSMI_STATUS_NO_HSMP_MSG_SUP, AMDSMI_STATUS_INVAL);
+  col.Record("cpu=0", err,
+             AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
+                                    AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_NO_HSMP_MSG_SUP,
+                                    AMDSMI_STATUS_INVAL));
+
+  if (err == AMDSMI_STATUS_SUCCESS) {
+    for (size_t c = 0; c < cpu_cores().size(); ++c) {
+      uint32_t readback = 0;
+      if (amdsmi_get_cpu_core_boostlimit(cpu_cores()[c], &readback) == AMDSMI_STATUS_SUCCESS) {
+        EXPECT_EQ(readback, target) << "core=" << c << " socket set did not take effect";
+      }
+    }
+    for (size_t c = 0; c < cpu_cores().size(); ++c) {
+      amdsmi_status_t rerr = amdsmi_set_cpu_core_boostlimit(cpu_cores()[c], initial[c]);
+      EXPECT_EQ(rerr, AMDSMI_STATUS_SUCCESS) << "core=" << c << " failed to restore boostlimit";
+      uint32_t readback = 0;
+      if (rerr == AMDSMI_STATUS_SUCCESS &&
+          amdsmi_get_cpu_core_boostlimit(cpu_cores()[c], &readback) == AMDSMI_STATUS_SUCCESS) {
+        EXPECT_EQ(readback, initial[c]) << "core=" << c << " restore did not take effect";
+      }
+    }
   }
   col.ExpectNoFailures();
 }

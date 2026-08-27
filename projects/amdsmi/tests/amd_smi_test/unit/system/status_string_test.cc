@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "amd_smi/amdsmi.h"
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
 TEST_F(SystemUnit, StatusCodeToStringRejectsNullOutPtr) {
   EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);

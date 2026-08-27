@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "api_test_framework.h"
 #include "functional/gpu/clock/clock_limit_read_write.h"
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
@@ -56,7 +57,6 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
-#include "unit/unit_test_framework.h"
 
 static AMDSMITstGlobals* sRSMIGlvalues = nullptr;
 
