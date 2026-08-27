@@ -882,9 +882,14 @@ processor_loop()
         // reader's release so the following pipe.empty() is guaranteed to see it.
         // Covers only copied-but-unpublished EOPs (F4); an EOP still in the ring is
         // the accepted R10 residual and is not gated here.
-        const uint64_t _gc_now = common::timestamp_ns();
-        if(gc_gate_open(st.reader_copied_unpublished.load(std::memory_order_acquire),
-                        st.pipe.empty()) &&
+        // Sequenced into named locals rather than passed inline: the order of
+        // evaluation of function arguments is UNSPECIFIED, so the required
+        // "in-flight load, THEN pipe.empty()" ordering cannot be expressed by
+        // argument position.
+        const uint64_t _gc_now      = common::timestamp_ns();
+        const uint64_t _unpublished = st.reader_copied_unpublished.load(std::memory_order_acquire);
+        const bool     _pipe_empty  = st.pipe.empty();
+        if(gc_gate_open(_unpublished, _pipe_empty) &&
            _gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
         {
             last_gc_ns = _gc_now;
