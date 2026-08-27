@@ -3200,8 +3200,8 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       errors.emplace_back("ConSan final validation could not resolve a dispatch-ID prologue owner");
       continue;
     }
-    const bool has_semantic_system_sgpr_restore = std::ranges::binary_search(
-        result.moi_full_workgroup_id_descriptor_offsets, owner->descriptor_file_offset);
+    const bool has_semantic_system_sgpr_restore =
+        consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch);
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
@@ -3891,6 +3891,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
     return errors;
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unordered_map<uint64_t, std::string> owner_names;
   for (const AmdGpuKernelInfo &kernel : original.kernels())
     owner_names.emplace(kernel.descriptor_file_offset, kernel.name);
@@ -3979,6 +3980,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
   }
   for (const ConSanPatchInfo &patch : result.patches) {
+    const bool requires_full_workgroup_id =
+        consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch);
     if (patch.persistent_dispatch_id_private_offset) {
       const uint32_t offset = *patch.persistent_dispatch_id_private_offset;
       if (!patch.persistent_epoch_private_offset || !patch.persistent_private_state_end ||
@@ -4055,9 +4058,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
       apply_to_owner(owner, [&](DescriptorRequirement &requirement) {
         requirement.allow_resource_delta = true;
-        requirement.require_full_workgroup_id |=
-            std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets, owner) ||
-            private_workgroup.complete();
+        requirement.require_full_workgroup_id |= requires_full_workgroup_id;
         requirement.required_private_bytes =
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
         requirement.required_group_bytes =
@@ -4085,7 +4086,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                 requirement.required_vgpr_count, static_cast<uint16_t>(*epoch_vgpr + 1u));
           }
           if (workgroup_key_vgpr) {
-            requirement.require_full_workgroup_id = true;
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
           }
@@ -4099,7 +4099,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                   ? patch.persistent_record_replay_workgroup_vgprs
                   : result.resolved_moi_record_replay_workgroup_vgprs;
           if (workgroup_vgprs.complete()) {
-            requirement.require_full_workgroup_id = true;
             for (const std::optional<uint16_t> reg :
                  {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z,
                   workgroup_vgprs.cluster_workgroup_id}) {
@@ -4109,8 +4108,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                   requirement.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
             }
           }
-          if (result.resolved_moi_persistent_workgroup_key_sgpr)
-            requirement.require_full_workgroup_id = true;
           if (result.resolved_moi_persistent_owner_sgpr) {
             requirement.required_sgpr_count = std::max<uint16_t>(
                 requirement.required_sgpr_count,
@@ -4127,7 +4124,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                 static_cast<uint16_t>(*result.resolved_moi_persistent_workgroup_key_sgpr + 1u));
           }
           if (result.resolved_moi_record_replay_workgroup_sgprs.complete()) {
-            requirement.require_full_workgroup_id = true;
             for (const std::optional<uint16_t> reg :
                  {result.resolved_moi_record_replay_workgroup_sgprs.x,
                   result.resolved_moi_record_replay_workgroup_sgprs.y,
@@ -4180,7 +4176,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 
   const bool text_relocated =
       original.text_sections().front()->size() != replacement.text_sections().front()->size();
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unordered_map<std::string_view, const AmdGpuKernelInfo *> replacement_kernels_by_name;
   replacement_kernels_by_name.reserve(replacement.kernels().size());
   for (const AmdGpuKernelInfo &kernel : replacement.kernels())
@@ -4230,8 +4225,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
     const bool requires_full_workgroup_id =
         requirement.require_full_workgroup_id &&
-        (!cdna || std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets,
-                                             original_kernel.descriptor_file_offset)) &&
         (cdna || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
          arch == ROCJITSU_CODE_ARCH_CDNA5);
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {

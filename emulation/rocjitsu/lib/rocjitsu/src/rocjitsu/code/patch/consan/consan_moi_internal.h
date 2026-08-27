@@ -76,6 +76,32 @@ struct ConSanMoiWorkgroupSource {
 
 namespace consan_detail {
 
+/// Return whether one emitted MOI patch makes its owning kernel consume all
+/// three launch workgroup coordinates. This shared descriptor-mutation and
+/// validation predicate distinguishes MOI patches from independently composed
+/// mutation and malformed-barrier patches. CDNA consumes the tuple only
+/// through an entry capture with complete persistent storage; RDNA and CDNA5
+/// observation bodies consume the firmware payload directly.
+[[nodiscard]] inline bool patch_requires_full_workgroup_id_payload(const ConSanResult &result,
+                                                                   rj_code_arch_t arch,
+                                                                   const ConSanPatchInfo &patch) {
+  if (!consan_is_capability_arch(arch) || patch.owner_descriptor_file_offsets.empty() ||
+      result.observation_plan.engine == ConSanCapabilityEngine::SuperCollider ||
+      result.observation_plan.engine == ConSanCapabilityEngine::Count) {
+    return false;
+  }
+  if (consan_uses_gfx9_cdna_encoding(arch)) {
+    const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
+                               patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+    return entry_capture && (result.resolved_moi_record_replay_workgroup_sgprs.complete() ||
+                             patch.persistent_record_replay_workgroup_vgprs.complete() ||
+                             patch.persistent_record_replay_workgroup_private_offsets.complete());
+  }
+  return (patch.kind >= ConSanPatchKind::InlineMoiAccessRecordStore &&
+          patch.kind <= ConSanPatchKind::TrampolineMoiFenceRecord) ||
+         patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+}
+
 /// Release-active outcome from recovering one guest VGPR out of an
 /// instrumentation spill window.
 enum class MoiSpilledVgprReloadResult : uint8_t {

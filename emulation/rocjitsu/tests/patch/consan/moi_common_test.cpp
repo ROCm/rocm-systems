@@ -91,6 +91,49 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   EXPECT_FALSE(ambiguous.operand());
 }
 
+TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
+  ConSanResult result;
+  result.observation_plan.engine = ConSanCapabilityEngine::RecordReplay;
+  ConSanPatchInfo patch;
+  patch.owner_descriptor_file_offsets.push_back(64u);
+  patch.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
+
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_RDNA4, patch));
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_CDNA5, patch));
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_CDNA4, patch));
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_INVALID, patch));
+
+  patch.kind = ConSanPatchKind::InlineMalformedBarrierAbort;
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_RDNA4, patch));
+  patch.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_RDNA4, patch));
+
+  patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_CDNA4, patch));
+  result.resolved_moi_record_replay_workgroup_sgprs = {.x = 20u, .y = 21u, .z = 22u};
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_CDNA4, patch));
+  result.resolved_moi_record_replay_workgroup_sgprs = {};
+  patch.persistent_record_replay_workgroup_private_offsets = {.x = 0u, .y = 4u, .z = 8u};
+  EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_CDNA3, patch));
+
+  result.observation_plan.engine = ConSanCapabilityEngine::SuperCollider;
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_RDNA4, patch));
+  result.observation_plan.engine = ConSanCapabilityEngine::RecordReplay;
+  patch.owner_descriptor_file_offsets.clear();
+  EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
+      result, ROCJITSU_CODE_ARCH_RDNA4, patch));
+}
+
 TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
   constexpr uint16_t kAddressVgpr = 40u;
   constexpr uint16_t kSlotVgpr = 42u;

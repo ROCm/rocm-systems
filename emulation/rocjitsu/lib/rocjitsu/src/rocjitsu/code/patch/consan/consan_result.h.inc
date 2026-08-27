@@ -222,10 +222,6 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_owner_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
-  /// Original owner-descriptor offsets whose active replacement descriptors
-  /// were explicitly expanded to carry the complete RDNA workgroup-ID launch
-  /// payload. Final validation resolves these identities after text growth.
-  std::vector<uint64_t> moi_full_workgroup_id_descriptor_offsets;
   uint64_t moi_report_dispatch_id = 0;
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;

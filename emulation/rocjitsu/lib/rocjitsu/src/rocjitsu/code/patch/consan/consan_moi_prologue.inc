@@ -1584,7 +1584,6 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
 }
 
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
-  result.moi_full_workgroup_id_descriptor_offsets.clear();
   if (result.elf_bytes.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
        arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
@@ -1592,21 +1591,11 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     return true;
   }
 
-  std::unordered_set<uint64_t> owner_descriptor_offsets;
   std::unordered_set<std::string_view> owner_names;
   for (const ConSanPatchInfo &patch : result.patches) {
-    const bool exact_cdna_workgroup_capture =
-        patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
-        patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-    if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-        (!exact_cdna_workgroup_capture ||
-         (!result.resolved_moi_record_replay_workgroup_sgprs.complete() &&
-          !patch.persistent_record_replay_workgroup_vgprs.complete() &&
-          !patch.persistent_record_replay_workgroup_private_offsets.complete()))) {
+    if (!consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch))
       continue;
-    }
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
-      owner_descriptor_offsets.insert(descriptor_offset);
       const auto owner = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
                                            &ConSanKernelInfo::descriptor_file_offset);
       if (owner == result.program_inventory.kernels().end()) {
@@ -1680,9 +1669,6 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     return false;
   }
   result.elf_bytes = std::move(patcher).emit();
-  result.moi_full_workgroup_id_descriptor_offsets.assign(owner_descriptor_offsets.begin(),
-                                                         owner_descriptor_offsets.end());
-  std::ranges::sort(result.moi_full_workgroup_id_descriptor_offsets);
   return true;
 }
 

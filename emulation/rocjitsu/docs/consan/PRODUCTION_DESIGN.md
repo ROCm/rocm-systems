@@ -3563,6 +3563,37 @@ analysis completed.
   simulator-device tests across the five supported targets pass in 68.32
   seconds. E2E validation remains outside this work.
 
+### Slice 5M: derive full workgroup-payload ownership
+
+- **Single semantic owner:** Descriptor mutation and final validation now call
+  one pure predicate that identifies when an emitted MOI patch makes its owner
+  consume all three launch workgroup coordinates. The predicate distinguishes
+  genuine MOI observation patches from independently composed mutation and
+  malformed-barrier patches. It also states the architecture distinction
+  directly: RDNA and CDNA5 observation bodies consume the firmware payload,
+  while CDNA3/CDNA4 require a real entry capture backed by complete persistent
+  state.
+- **Completed deletion:** `ConSanResult` no longer retains a sorted vector of
+  descriptor offsets that merely copied the writer's decision for a later
+  validator. The descriptor writer resolves owners from the semantic predicate
+  and the validator independently joins that same contract with each owning
+  kernel's resource requirement. Workgroup registers remain resource facts;
+  their mere presence no longer masquerades as proof that a descriptor payload
+  transaction occurred.
+- **Contract coverage:** A direct unit test covers owned and unowned patches,
+  invalid targets, RDNA4 and CDNA5 observation bodies, CDNA3/CDNA4 complete and
+  incomplete entry storage, MOI relay islands, SuperCollider exclusion, and a
+  composed malformed-barrier abort. Existing descriptor and device tests still
+  exercise the real writer/validator path, including full Record/Replay launch
+  coordinates and CDNA4 InlineShadow persistent state.
+- **Size result:** Production source grows by two formatted lines for the
+  documented shared predicate, but every transform result loses a vector and
+  its allocation. No replacement cache, flag, or telemetry field was added.
+- **Completed checked-in gate:** The complete host gate passes 1,509 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 72.28
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
