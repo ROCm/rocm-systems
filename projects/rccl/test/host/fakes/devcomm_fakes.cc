@@ -43,7 +43,7 @@ ncclTeam_t DefaultNcclTeamLsa(ncclComm_t comm) {
 }
 
 // MIRROR of src/dev_runtime.cc's ncclDevCommCopyLsaData body, not a call into it: dev_runtime.cc is
-// not in TEST_MICRO_SOURCE_FILES and cannot be host-compiled standalone, so the seam is the honest
+// not in RCCL_MICRO_TEST_SOURCES and cannot be host-compiled standalone, so the seam is the honest
 // microtest boundary. Keep this span expression in lockstep with the production one -- a hand-edit
 // there is invisible to every test whose name says "RealCopy" / "MovesLsaPrefix". What IS pinned
 // against the real struct is the 128-byte span itself, static_asserted in devcomm-test.cc.

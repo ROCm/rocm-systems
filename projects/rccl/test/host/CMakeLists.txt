@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(RCCL_MICRO_TEST_SOURCES
+  p2p-test.cc
+  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  devcomm-test.cc
+  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
+  fakes/devcomm_fakes.cc
+  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+  ../common/ProcessIsolatedTestRunner.cpp
+)
+
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -22,20 +35,7 @@ if(BUILD_TESTS)
   # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
-  set(TEST_MICRO_SOURCE_FILES
-    p2p-test.cc
-    rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
-    devcomm-test.cc                      # devcomm compat-shim microtests
-    fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-    fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
-    fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
-    fakes/devcomm_fakes.cc               # ncclTeamLsa / ncclDevCommCopyLsaData seams
-    fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
-    ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
-    ../common/ProcessIsolatedTestRunner.cpp
-  )
-
-  add_executable(rccl-UnitTestsMicro ${TEST_MICRO_SOURCE_FILES})
+  add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -100,7 +100,7 @@ if(BUILD_TESTS)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
-  # TEST_MICRO_SOURCE_FILES above as new units come under test.
+  # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
   # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
@@ -498,18 +498,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # RMA_PROXY_PROGRESS_CC_PATH, DEVCOMM_V22902_CC_PATH, DEVCOMM_V22907_CC_PATH) and
 # satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
 # HIP runtime.
-add_executable(rccl-UnitTestsMicro
-  p2p-test.cc
-  rma-proxy-progress-test.cc
-  devcomm-test.cc
-  fakes/nccl_fakes.cc
-  fakes/p2p_fakes.cc
-  fakes/rma_fakes.cc
-  fakes/devcomm_fakes.cc
-  fakes/hip_fakes.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
-)
+add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable)
