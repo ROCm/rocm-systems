@@ -1,15 +1,12 @@
 #!/bin/bash
 ###############################################################################
-# EXPLORATORY / first-cut tool -- not yet a validated pipeline like
-# resource_usage_compare.sh.
-#
 # Capture the whole-program AMDGPU LTO inliner's optimization-record remarks
 # (`-Xoffload-linker --plugin-opt=opt-remarks-filename=...`) for
-# rocshmem_functional_tests between two commits (or a single commit), so you
-# can look at real remark output -- e.g. direct evidence for the "last call to
-# a static function" cost bonus investigated in LTO_INLINE_CALLER_COUNT_ISSUE.md
-# -- before deciding whether this is worth a real diff/CSV/chart pipeline the
-# way resource_usage_diff.py is for kernel-resource-usage.
+# rocshmem_functional_tests, for a single commit or between two commits, and
+# turn them into a CSV (lto_inline_remarks_to_csv.py) plus a PNG dashboard:
+# a single-commit report (lto_inline_remarks_report.py) or a two-commit diff
+# (lto_inline_remarks_diff.py) -- e.g. direct evidence for the "last call to a
+# static function" cost bonus investigated in LTO_INLINE_CALLER_COUNT_ISSUE.md.
 #
 # Each commit is built in an isolated git worktree under /tmp, same as
 # resource_usage_compare.sh, so the main working tree is never touched.
@@ -109,18 +106,18 @@ _find_build_config() {
   echo "$result"
 }
 
-# measure_commit <commit> <sha> -> prints the path to that commit's flattened
-# remarks text file (raw .yaml lives alongside it in the same cache dir).
+# measure_commit <commit> <sha> -> prints the path to that commit's remarks
+# CSV (raw .yaml lives alongside it in the same cache dir).
 measure_commit() {
   local commit="$1" sha="$2"
   local build_dir="$PROJECTS_DIR/build-cache-lto-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
   local cache_dir="$PROJECTS_DIR/lto-inline-remarks/cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
   local yaml="$cache_dir/remarks-${sha}.yaml"
-  local txt="$cache_dir/remarks-${sha}.txt"
+  local csv="$cache_dir/remarks-${sha}.csv"
 
-  if [[ -f "$txt" && "$FORCE_REBUILD" == false ]]; then
-    echo "  [$sha] cached -> $txt" >&2
-    echo "$txt"
+  if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
+    echo "  [$sha] cached -> $csv" >&2
+    echo "$csv"
     return
   fi
 
@@ -139,7 +136,7 @@ measure_commit() {
 
   rm -rf "$build_dir"
   mkdir -p "$build_dir" "$cache_dir"
-  rm -f "$yaml" "$txt"
+  rm -f "$yaml" "$csv"
 
   (
     cd "$build_dir"
@@ -170,37 +167,48 @@ measure_commit() {
     exit 1
   fi
 
-  python3 "$TOOLS_DIR/lto_inline_remarks_to_txt.py" --yaml "$yaml" --out "$txt" >&2
+  python3 "$TOOLS_DIR/lto_inline_remarks_to_csv.py" --yaml "$yaml" --out "$csv" \
+    --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" >&2
 
-  echo "$txt"
+  echo "$csv"
 }
 
 COMMIT_1="${COMMIT_1:-HEAD}"
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 
 echo "=== LTO inline remarks: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $BUILD_CONFIG) ==="
-TXT_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
+CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
 
 if [[ -z "$COMMIT_2" ]]; then
+  OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/lto-inline-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}}"
+  mkdir -p "$OUTDIR"
+  cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
+  python3 "$TOOLS_DIR/lto_inline_remarks_report.py" \
+    --csv "$OUTDIR/remarks-${SHA_1}.csv" \
+    --out-chart "$OUTDIR/dashboard-${SHA_1}.png" \
+    --out-summary "$OUTDIR/summary-${SHA_1}.csv"
   echo ""
-  echo "Single-commit snapshot -> $TXT_1"
-  echo "  (raw YAML alongside it: ${TXT_1%.txt}.yaml)"
+  echo "Single-commit snapshot -> $OUTDIR/"
+  echo "  remarks-${SHA_1}.csv, summary-${SHA_1}.csv, dashboard-${SHA_1}.png"
+  echo "  (raw YAML in cache: ${CSV_1%.csv}.yaml)"
   exit 0
 fi
 
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
-TXT_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
+CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
 
 OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/lto-inline-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}}"
 mkdir -p "$OUTDIR"
-cp "$TXT_1" "$OUTDIR/remarks-${SHA_1}.txt"
-cp "$TXT_2" "$OUTDIR/remarks-${SHA_2}.txt"
+cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
+cp "$CSV_2" "$OUTDIR/remarks-${SHA_2}.csv"
 
-# Plain-text diff for now -- see header: this is deliberately not a keyed
-# CSV/chart diff yet, just enough to look at real content and decide if one
-# is worth building.
-diff -u "$TXT_1" "$TXT_2" > "$OUTDIR/remarks_diff.txt" || true
+python3 "$TOOLS_DIR/lto_inline_remarks_diff.py" \
+  --baseline "$OUTDIR/remarks-${SHA_1}.csv" --branch "$OUTDIR/remarks-${SHA_2}.csv" \
+  --out "$OUTDIR/remarks_diff_pairs.csv" \
+  --summary-out "$OUTDIR/remarks_diff_summary.csv" \
+  --chart "$OUTDIR/remarks_diff_dashboard.png"
 
 echo ""
 echo "Done. Report -> $OUTDIR/"
-echo "  remarks-${SHA_1}.txt, remarks-${SHA_2}.txt, remarks_diff.txt"
+echo "  remarks-${SHA_1}.csv, remarks-${SHA_2}.csv,"
+echo "  remarks_diff_pairs.csv, remarks_diff_summary.csv, remarks_diff_dashboard.png"
