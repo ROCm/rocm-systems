@@ -693,6 +693,27 @@ void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Inst
            (static_cast<uint64_t>(ref.cls) << 32);
   };
 
+  // Registers an instruction both names as a source and writes, as the
+  // preserved half of a d16 load does. Reading one of those is the instruction
+  // reaching its own result, not a dependency on an earlier one.
+  auto writes_register = [&inst](RegisterClass reg_class, const RegisterRef &ref) {
+    const uint32_t first = ref.index;
+    const uint32_t last = first + std::max<uint32_t>(1, ref.width);
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const auto *op = inst.dst_operand(i);
+      if (op == nullptr)
+        continue;
+      const auto dst = op->to_register_ref();
+      if (!dst || make_register_class(dst->cls) != reg_class)
+        continue;
+      const uint32_t dst_first = dst->index;
+      const uint32_t dst_last = dst_first + std::max<uint32_t>(1, dst->width);
+      if (first < dst_last && dst_first < last)
+        return true;
+    }
+    return false;
+  };
+
   std::unordered_set<uint64_t> seen;
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const auto *op = inst.src_operand(i);
@@ -708,9 +729,12 @@ void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Inst
     if (is_memory_op && inst.mnemonic() == "buffer_store_dword" &&
         reg_class == RegisterClass::Scalar && ref->width > 1)
       continue;
-    // Vector loads name their destination as a source operand; treating it as
-    // a read would manufacture a false WAR against the load itself.
-    if (is_vector_load_mnemonic(inst.mnemonic()) && is_vector_register_class(reg_class))
+    // Where a vector load names its own destination as a source, treating it as
+    // a read would manufacture a false WAR against the load itself. The address
+    // registers are ordinary reads and must stay: a load whose address is a
+    // result it never waited for is exactly the hazard being looked for.
+    if (is_vector_load_mnemonic(inst.mnemonic()) && is_vector_register_class(reg_class) &&
+        writes_register(reg_class, *ref))
       continue;
     if (!seen.insert(register_key(*ref)).second)
       continue;
