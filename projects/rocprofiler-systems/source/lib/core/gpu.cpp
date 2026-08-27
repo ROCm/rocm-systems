@@ -184,47 +184,76 @@ visibility_mask_is_ordered_subset(std::string_view value)
     return true;
 }
 
-// NOLINTBEGIN(readability-function-size)
-void
-warn_if_visibility_mask_permutes()
+struct visibility_env
 {
-    static std::once_flag once;
-    std::call_once(once, []() {
-        auto check = [](const char* name) {
-            const auto value = rocprofsys::get_env<std::string>(name, "");
-            if(value.empty() || visibility_mask_is_ordered_subset(value))
-            {
-                return;
-            }
-            LOG_WARNING(
-                "hipFile per-GPU stats are indexed by HIP device ordinal. {}={} "
-                "is a permutation (or UUID list), not an increasing subset, so "
-                "the mapping from hipFile slots to profiler GPU indices may be "
-                "wrong. Prefer an increasing mask such as HIP_VISIBLE_DEVICES=4,5",
-                name, value);
-        };
+    const char* name;
+    std::string value;
+};
 
-        check("ROCR_VISIBLE_DEVICES");
-
-        const auto hip  = rocprofsys::get_env<std::string>("HIP_VISIBLE_DEVICES", "");
-        const auto cuda = rocprofsys::get_env<std::string>("CUDA_VISIBLE_DEVICES", "");
-        const auto gpu_ordinal =
-            rocprofsys::get_env<std::string>("GPU_DEVICE_ORDINAL", "");
-        if(!hip.empty())
-        {
-            check("HIP_VISIBLE_DEVICES");
-        }
-        else if(!cuda.empty())
-        {
-            check("CUDA_VISIBLE_DEVICES");
-        }
-        else
-        {
-            check("GPU_DEVICE_ORDINAL");
-        }
-    });
+[[nodiscard]] std::optional<visibility_env>
+mask_if_unreliable(const char* name, std::string_view value)
+{
+    if(value.empty() || visibility_mask_is_ordered_subset(value))
+    {
+        return std::nullopt;
+    }
+    return visibility_env{ name, std::string{ value } };
 }
-// NOLINTEND(readability-function-size)
+
+/// @brief First visibility mask that would put HIP ordinals in a different order
+///        from agent-manager (physical) order. @c ROCR_VISIBLE_DEVICES is always
+///        considered; then @c HIP_VISIBLE_DEVICES, else CUDA / @c GPU_DEVICE_ORDINAL.
+[[nodiscard]] std::optional<visibility_env>
+unreliable_hip_ordinal_mask()
+{
+    if(auto rocr = mask_if_unreliable(
+           "ROCR_VISIBLE_DEVICES",
+           rocprofsys::get_env<std::string>("ROCR_VISIBLE_DEVICES", "")))
+    {
+        return rocr;
+    }
+
+    const auto hip = rocprofsys::get_env<std::string>("HIP_VISIBLE_DEVICES", "");
+    if(!hip.empty())
+    {
+        return mask_if_unreliable("HIP_VISIBLE_DEVICES", hip);
+    }
+
+    const auto cuda = rocprofsys::get_env<std::string>("CUDA_VISIBLE_DEVICES", "");
+    if(!cuda.empty())
+    {
+        return mask_if_unreliable("CUDA_VISIBLE_DEVICES", cuda);
+    }
+
+    return mask_if_unreliable("GPU_DEVICE_ORDINAL",
+                              rocprofsys::get_env<std::string>("GPU_DEVICE_ORDINAL", ""));
+}
+
+/// @brief Whether HIP ordinal k can be treated as the k-th hip-visible agent.
+///
+/// Logs once and returns false when a permutation or UUID list would mislabel
+/// hipFile slots. AMD SMI uses BDF membership and is not gated by this check.
+[[nodiscard]] bool
+hip_ordinal_mapping_is_reliable()
+{
+    static const bool reliable = [] {
+        const auto unreliable = unreliable_hip_ordinal_mask();
+        if(!unreliable)
+        {
+            return true;
+        }
+
+        LOG_WARNING("hipFile telemetry disabled: {}={} is a permutation or UUID "
+                    "list, not an increasing integer subset. hipFile per-GPU stats "
+                    "are indexed by HIP ordinal and would be recorded under the "
+                    "wrong profiler GPU. Use an increasing mask such as "
+                    "HIP_VISIBLE_DEVICES=4,5. AMD SMI and rocprofiler-sdk GPU "
+                    "metrics are unaffected.",
+                    unreliable->name, unreliable->value);
+        return false;
+    }();
+    return reliable;
+}
 }  // namespace
 
 int
@@ -272,7 +301,17 @@ get_visible_gpu_type_indices()
         return {};
     }
 
-    warn_if_visibility_mask_permutes();
+    // hipFile indexes per_gpu_stats by HIP ordinal (hipGetDevice()). rocprofiler-sdk
+    // agents only store a hip_visible bit, so HIP ordinal k is taken to be the k-th
+    // hip_visible agent in physical order. That is correct for an increasing integer
+    // mask (HIP_VISIBLE_DEVICES=4,5) and wrong for a permutation (5,4) or a UUID list.
+    // When the hipFile project fills each slot's UUID or PCI BDF, match that identity
+    // to the rocprofiler agent (the same join AMD SMI already does with BDF) and this
+    // fail-closed gate can be replaced with a real mapping for permutations.
+    if(!hip_ordinal_mapping_is_reliable())
+    {
+        return {};
+    }
 
     std::vector<std::size_t> indices;
     for(const auto& gpu_agent :

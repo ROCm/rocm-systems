@@ -177,13 +177,15 @@ TEST_F(HipFileTraitsTest, visible_gpus_clamped_to_snapshot_capacity)
 
 TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
 {
-    stub_settings::hipfile_metrics.value           = 0U;
-    stub_settings::hipfile_metrics.bits.read_bytes = 1;
+    constexpr auto read_bytes  = metric_bit_mask("Read Bytes");
+    constexpr auto write_bytes = metric_bit_mask("Write Bytes");
+
+    stub_settings::hipfile_metrics.value = read_bytes;
 
     const auto enabled = traits_t::get_enabled_metrics<stub_settings>();
 
-    EXPECT_EQ(enabled.bits.read_bytes, 1U);
-    EXPECT_EQ(enabled.bits.write_bytes, 0U);
+    EXPECT_EQ(enabled.value & read_bytes, read_bytes);
+    EXPECT_EQ(enabled.value & write_bytes, 0U);
 }
 
 TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)

@@ -81,6 +81,8 @@ struct cache_policy
      * @param timestamp Sample timestamp in nanoseconds.
      */
     // NOLINTNEXTLINE(readability-function-size)
+    // This clang-tidy rule for 4 arguments only is a cross-collector
+    // API change, not a hipFile cleanup:it should be its own PR.
     static void store_sample(std::size_t                         device_id,
                              [[maybe_unused]] const std::string& device_name,
                              const enabled_metrics&              enabled_metrics_cfg,
