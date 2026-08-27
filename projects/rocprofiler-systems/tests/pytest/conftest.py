@@ -252,6 +252,16 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
     )
+    config.addinivalue_line(
+        "markers",
+        "cap_perfmon: mark test as requiring CAP_PERFMON; skipped when the process "
+        "lacks this Linux capability (needed for GPU hardware performance counters)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "disable_archs(*archs): skip test when the detected GPU architecture is in "
+        "the provided set; each arg may be a str or an iterable of str",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
@@ -601,6 +611,32 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+        if "cap_perfmon" in item.keywords:
+            if not rocprof_config.capabilities.cap_perfmon:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason="GPU hardware performance counter access requires "
+                        "CAP_PERFMON (add runner to the render group or grant "
+                        "CAP_PERFMON / CAP_SYS_PERFMON to the process)"
+                    )
+                )
+        if "disable_archs" in item.keywords:
+            marker = item.get_closest_marker("disable_archs")
+            disabled: set = set()
+            for arg in marker.args:
+                if isinstance(arg, str):
+                    disabled.add(arg)
+                else:
+                    disabled.update(arg)
+            if disabled:
+                info = get_gpu_info()
+                overlap = disabled.intersection(info.architectures)
+                if overlap:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason="Test disabled on " + ", ".join(sorted(overlap))
+                        )
+                    )
         if "multi_gpu" in item.keywords:
             num_gpu = item.get_closest_marker("multi_gpu").args[0]
             info = get_gpu_info()
