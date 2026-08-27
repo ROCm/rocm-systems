@@ -4776,6 +4776,30 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 72.13 seconds. Slice 5AS remains the latest
   periodic physical-gfx950 gate; E2E validation remains outside this work.
 
+### Slice 5BC: share the typed transform policy with lowering
+
+- **One policy representation:** The temporary mutable `ConSanOptions` now
+  inherits the production `TransformPolicy` instead of redeclaring its image
+  growth, patch-count, and four planning-work limits. Existing lowerer code
+  therefore reads and mutates the actual typed policy subobject while the
+  remaining raw members are limited to other not-yet-migrated inputs and
+  lowering-selected state.
+- **One bounded adapter operation:** `LegacyOptionsAdapter` copies the complete
+  policy subobject in one value-semantic assignment. The removed seven-field
+  projection could drift whenever policy gained a field; the existing policy
+  and adapter tests prove defaults, both growth forms, every work limit, expert
+  patch limits, fresh outputs, and unchanged typed inputs.
+- **Deletion accounting:** Production adds 47 and deletes 65 physical lines, a
+  net deletion of eighteen. Most additions relocate the existing documented
+  `TransformPolicy` definition before its temporary derived lowerer state; no
+  second policy type, accessor layer, or fallback remains. Tests are unchanged.
+- **Checked-in gate:** All six focused policy and adapter tests pass. The host
+  gate passes all 1,508 runnable tests with the two expected benchmark-object
+  skips; all 172 HSA-hook and hook-lifecycle tests pass; and all 2,908
+  simulator-device tests across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and
+  `gfx1250` pass in 74.68 seconds. Slice 5AS remains the latest periodic
+  physical-gfx950 gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

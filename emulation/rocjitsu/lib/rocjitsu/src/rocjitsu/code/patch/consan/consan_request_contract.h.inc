@@ -64,46 +64,6 @@ struct ConSanRequest {
   bool operator==(const ConSanRequest &) const = default;
 };
 
-/// Limits on the amount of transformation and placement work one code object
-/// may consume.
-///
-/// These limits constrain implementation cost but do not alter which semantic
-/// sites are relevant. Resolved image sizes, selected caves, registers, and
-/// patch bytes are outputs and therefore cannot appear here.
-struct TransformPolicy {
-  /// Total growth permitted relative to the pristine input image.
-  ConSanPatchedImageGrowthLimit patched_image_growth_limit;
-  /// Maximum number of admitted legacy patches when an expert cap is active.
-  uint32_t max_patches = 1;
-  /// False means the legacy patch count is an implementation-sized all-sites
-  /// allowance rather than a user-requested semantic omission.
-  bool max_patches_is_expert_limit = true;
-  /// Work allowance for SOPP relay search.
-  PlanningWorkLimit sopp_relay_planning_work_limit = kDefaultSoppRelayPlanningWorkLimit;
-  /// Work allowance for direct reservoir search.
-  PlanningWorkLimit direct_reservoir_planning_work_limit = kDefaultDirectReservoirPlanningWorkLimit;
-  /// Work allowance for LDS relay layout refinement.
-  PlanningWorkLimit lds_relay_layout_planning_work_limit = kDefaultLdsRelayLayoutPlanningWorkLimit;
-  /// Work allowance for LDS convergence planning.
-  PlanningWorkLimit lds_convergence_planning_work_limit = kDefaultLdsConvergencePlanningWorkLimit;
-
-  [[nodiscard]] bool operator==(const TransformPolicy &other) const {
-    const auto same_limit = [](PlanningWorkLimit left, PlanningWorkLimit right) {
-      return left.base == right.base && left.per_input == right.per_input;
-    };
-    return patched_image_growth_limit == other.patched_image_growth_limit &&
-           max_patches == other.max_patches &&
-           max_patches_is_expert_limit == other.max_patches_is_expert_limit &&
-           same_limit(sopp_relay_planning_work_limit, other.sopp_relay_planning_work_limit) &&
-           same_limit(direct_reservoir_planning_work_limit,
-                      other.direct_reservoir_planning_work_limit) &&
-           same_limit(lds_relay_layout_planning_work_limit,
-                      other.lds_relay_layout_planning_work_limit) &&
-           same_limit(lds_convergence_planning_work_limit,
-                      other.lds_convergence_planning_work_limit);
-  }
-};
-
 /// Process and installation policy owned by the runtime hook rather than the
 /// code-object transformer.
 ///
@@ -838,16 +798,7 @@ public:
     options.delay_var_ssrc = request.delay_var_ssrc;
     options.report_marker = request.report_marker;
 
-    options.patched_image_growth_limit = transform_policy.patched_image_growth_limit;
-    options.max_patches = transform_policy.max_patches;
-    options.max_patches_is_expert_limit = transform_policy.max_patches_is_expert_limit;
-    options.sopp_relay_planning_work_limit = transform_policy.sopp_relay_planning_work_limit;
-    options.direct_reservoir_planning_work_limit =
-        transform_policy.direct_reservoir_planning_work_limit;
-    options.lds_relay_layout_planning_work_limit =
-        transform_policy.lds_relay_layout_planning_work_limit;
-    options.lds_convergence_planning_work_limit =
-        transform_policy.lds_convergence_planning_work_limit;
+    static_cast<TransformPolicy &>(options) = transform_policy;
 
     options.probe_nop = debug.probe_nop;
     options.probe_trampoline_nop = debug.probe_trampoline_nop;

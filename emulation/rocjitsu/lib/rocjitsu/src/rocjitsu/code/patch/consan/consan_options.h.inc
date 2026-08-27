@@ -327,7 +327,52 @@ struct ConSanMoiTransientSgprAssignment {
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
 
-struct ConSanOptions {
+/// Limits on the amount of transformation and placement work one code object
+/// may consume.
+///
+/// These limits constrain implementation cost but do not alter which semantic
+/// sites are relevant. Resolved image sizes, selected caves, registers, and
+/// patch bytes are outputs and therefore cannot appear here.
+struct TransformPolicy {
+  /// Total growth permitted relative to the pristine input image.
+  ConSanPatchedImageGrowthLimit patched_image_growth_limit;
+  /// Maximum number of admitted legacy patches when an expert cap is active.
+  uint32_t max_patches = 1;
+  /// False means the legacy patch count is an implementation-sized all-sites
+  /// allowance rather than a user-requested semantic omission.
+  bool max_patches_is_expert_limit = true;
+  /// Work allowance for SOPP relay search.
+  PlanningWorkLimit sopp_relay_planning_work_limit = kDefaultSoppRelayPlanningWorkLimit;
+  /// Work allowance for direct reservoir search.
+  PlanningWorkLimit direct_reservoir_planning_work_limit = kDefaultDirectReservoirPlanningWorkLimit;
+  /// Work allowance for LDS relay layout refinement.
+  PlanningWorkLimit lds_relay_layout_planning_work_limit = kDefaultLdsRelayLayoutPlanningWorkLimit;
+  /// Work allowance for LDS convergence planning.
+  PlanningWorkLimit lds_convergence_planning_work_limit = kDefaultLdsConvergencePlanningWorkLimit;
+
+  [[nodiscard]] bool operator==(const TransformPolicy &other) const {
+    const auto same_limit = [](PlanningWorkLimit left, PlanningWorkLimit right) {
+      return left.base == right.base && left.per_input == right.per_input;
+    };
+    return patched_image_growth_limit == other.patched_image_growth_limit &&
+           max_patches == other.max_patches &&
+           max_patches_is_expert_limit == other.max_patches_is_expert_limit &&
+           same_limit(sopp_relay_planning_work_limit, other.sopp_relay_planning_work_limit) &&
+           same_limit(direct_reservoir_planning_work_limit,
+                      other.direct_reservoir_planning_work_limit) &&
+           same_limit(lds_relay_layout_planning_work_limit,
+                      other.lds_relay_layout_planning_work_limit) &&
+           same_limit(lds_convergence_planning_work_limit,
+                      other.lds_convergence_planning_work_limit);
+  }
+};
+
+/// Mutable lowerer state retained while the prototype mechanism is migrated.
+///
+/// The inherited `TransformPolicy` is the sole representation of caller-owned
+/// growth, patch-count, and planning-work limits. Members declared here are
+/// sanitizer semantics or state selected and mutated during lowering.
+struct ConSanOptions : TransformPolicy {
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
   /// Automatic selects a normalized resident-wave identity for Inline Shadow
@@ -560,23 +605,9 @@ struct ConSanOptions {
   /// Auto report buffers use the stable code-object reader identity.
   uint64_t moi_report_dispatch_id = 0;
   uint32_t delay_nops = 0;
-  ConSanPatchedImageGrowthLimit patched_image_growth_limit;
-  /// Programmatic planning limits remain input-scaled and preserve the same
-  /// fail-closed semantics as their default production values. They are
-  /// exposed together so operators and qualification tests can reproduce an
-  /// observed exhaustion without a test-only path.
-  PlanningWorkLimit sopp_relay_planning_work_limit = kDefaultSoppRelayPlanningWorkLimit;
-  PlanningWorkLimit direct_reservoir_planning_work_limit = kDefaultDirectReservoirPlanningWorkLimit;
-  PlanningWorkLimit lds_relay_layout_planning_work_limit = kDefaultLdsRelayLayoutPlanningWorkLimit;
-  PlanningWorkLimit lds_convergence_planning_work_limit = kDefaultLdsConvergencePlanningWorkLimit;
   /// Internal immutable baseline set by the public transform entry point and
   /// retained by every staged composition pass.
   std::optional<size_t> patched_image_growth_input_bytes;
-  uint32_t max_patches = 1;
-  // Programmatic callers set max_patches as an explicit cap by default.  The
-  // runtime hook clears this for its all-supported policy so independent
-  // instrumentation phases do not consume one another's nominal budget.
-  bool max_patches_is_expert_limit = true;
   uint32_t moi_sample_stride = 1;
   uint32_t moi_sample_offset = 0;
   /// Runtime deterministic wave selector for direct sampled probes. The
