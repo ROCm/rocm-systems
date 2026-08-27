@@ -5,12 +5,11 @@
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
