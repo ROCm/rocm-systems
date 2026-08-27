@@ -47,6 +47,13 @@ testResult_t  ReduceScatterGetSymkInfo(ncclComm_t comm, size_t count, ncclDataTy
   return testSuccess;
 }
 
+testResult_t  ReduceScatterGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncReduceScatter, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void ReduceScatterGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
 
@@ -73,7 +80,8 @@ struct testColl reduceScatterTest = {
   ReduceScatterGetBw,
   ReduceScatterRunColl,
   ReduceScatterGetAlgoProtoChannels,
-  ReduceScatterGetSymkInfo
+  ReduceScatterGetSymkInfo,
+  ReduceScatterGetCollImplInfo
 };
 
 void ReduceScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

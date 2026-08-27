@@ -1034,8 +1034,11 @@ class StaticCommands:
 
                 # Get vram type string
                 vram_type_enum = vram_info["vram_type"]
+                # AMDSMI_VRAM_TYPE__MAX aliases the highest real type (LPDDR5);
+                # the auto-generated enum-value map resolves this shared value
+                # to the "__MAX" label, so translate it to the real type here.
                 if vram_type_enum == amdsmi_interface.amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX:
-                    vram_type = "GDDR7"
+                    vram_type = "LPDDR5"
                 else:
                     vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
                         vram_type_enum
@@ -1090,8 +1093,23 @@ class StaticCommands:
                 logging.debug(f"cache_info dictionary = {cache_info_list}")
 
                 for index, cache_info in enumerate(cache_info_list):
-                    new_cache_info = {"cache": index}
+                    # Label each entry with a cache-type acronym from level +
+                    # DATA/INST flags (L1D/L1I/L2/L3, else L<level>).
+                    cache_level = cache_info.get("cache_level")
+                    cache_properties = cache_info.get("cache_properties", [])
+                    if cache_level == 1 and "INST_CACHE" in cache_properties:
+                        cache_acronym = "L1I"
+                    elif cache_level == 1 and "DATA_CACHE" in cache_properties:
+                        cache_acronym = "L1D"
+                    else:
+                        cache_acronym = f"L{cache_level}"
+
+                    new_cache_info = {"cache": index, "cache_acronym": cache_acronym}
                     new_cache_info.update(cache_info)
+                    # Aggregate size across all instances (per-instance size x count).
+                    new_cache_info["total_cache_size"] = (
+                        cache_info["cache_size"] * cache_info["num_cache_instance"]
+                    )
                     cache_info_list[index] = new_cache_info
 
                 logging.debug(f"[after update] cache_info_list = {cache_info_list}")
@@ -1112,6 +1130,10 @@ class StaticCommands:
                         )
                         cache_info_dict_format[cache_index]["cache_size"] = cache_size
 
+                        # Add total_cache_size unit
+                        total_size = cache_dict["total_cache_size"]
+                        cache_dict["total_cache_size"] = f"{total_size} {cache_size_unit}"
+
                         # take cache_properties out of list -> display as string, removing brackets
                         cache_info_dict_format[cache_index]["cache_properties"] = ", ".join(
                             cache_info_dict_format[cache_index]["cache_properties"]
@@ -1125,6 +1147,10 @@ class StaticCommands:
                     for cache_dict in cache_info_list:
                         cache_dict["cache_size"] = {
                             "value": cache_dict["cache_size"],
+                            "unit": cache_size_unit,
+                        }
+                        cache_dict["total_cache_size"] = {
+                            "value": cache_dict["total_cache_size"],
                             "unit": cache_size_unit,
                         }
             except amdsmi_exception.AmdSmiLibraryException as e:

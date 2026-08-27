@@ -70,9 +70,10 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
     rj_code_binary_inst_t word_buf[2] = {0, 0};
     const size_t avail = std::min<size_t>(sizeof(word_buf), text.size() - cur);
     std::memcpy(word_buf, text.data() + cur, avail);
-    std::unique_ptr<Instruction> inst(decoder.decode(word_buf));
-    if (!inst)
+    auto decoded = decoder.decode(word_buf);
+    if (decoded.failed())
       return false;
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
     if (inst->mnemonic() == mnemonic)
       return true;
     cur += static_cast<uint64_t>(inst->size());
@@ -127,7 +128,9 @@ protected:
     // test stays stable across compiler revisions.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
     ASSERT_NE(decoder, nullptr);
-    auto blocks = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
+    auto block_result = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
+    ASSERT_TRUE(block_result.succeeded());
+    auto blocks = std::move(block_result).value();
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
@@ -236,7 +239,9 @@ TEST_F(HsaDbiNopProbeStatic, PatchedElfContainsProbeCallInstrumentation) {
   ASSERT_GT(text->size(), anchor_offset_ + sizeof(uint32_t));
   rj_code_binary_inst_t anchor_word = 0;
   std::memcpy(&anchor_word, text->data() + anchor_offset_, sizeof(anchor_word));
-  std::unique_ptr<Instruction> anchor_inst(decoder->decode(&anchor_word));
+  auto decoded = decoder->decode(&anchor_word);
+  ASSERT_TRUE(decoded.succeeded());
+  std::unique_ptr<Instruction> anchor_inst = std::move(decoded).value();
   ASSERT_NE(anchor_inst, nullptr);
   EXPECT_NE(anchor_inst->mnemonic().find("s_branch"), std::string_view::npos)
       << "Anchor at offset " << anchor_offset_ << " should decode as s_branch; got "
