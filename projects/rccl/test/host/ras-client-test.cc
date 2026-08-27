@@ -1275,3 +1275,246 @@ TEST_F(RasClientMicrotest, ParseArgsDefault_RealExit_TerminatesProcessWithStatus
   EXPECT_EXIT(parseArgs(args.argc(), args.argv()), ::testing::ExitedWithCode(1),
               "unrecognized option '--bogus'");
 }
+
+
+// ===========================================================================
+// setOutputFormat: the format guard, the write arm, the read arm, and the
+// "OK\n" response check. Driven directly on the file-scope statics `format`
+// and `sock` so these tests stay independent of the parseArgs tests above.
+// ===========================================================================
+
+namespace {
+
+// Not one of the two values parseArgs accepts: setOutputFormat itself does no
+// validation, so a distinctive value proves the bytes came from `format`.
+constexpr const char kOddFormat[] = "quokka";
+
+}  // namespace
+
+// Guard arm, false side: `format` still NULL, so nothing is sent or read.
+TEST_F(RasClientMicrotest, SetOutputFormat_FormatNeverSpecified_WritesNothingReadsNothingAndReturnsZero) {
+  sock = 77;
+  ASSERT_EQ(nullptr, format);
+
+  int rc = -1;
+  {
+    ScopedHook writeHook(g_write, [](int, const void*, size_t count) { return static_cast<ssize_t>(count); });
+    ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
+
+    const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+    EXPECT_EQ(0, rc);
+    EXPECT_EQ(0, writeHook.calls);
+    EXPECT_EQ(0, readHook.calls);
+    EXPECT_EQ("", log);
+    EXPECT_TRUE(g_writtenData.empty()) << g_writtenData;
+  }
+
+  // Positive anchor: the same fixture state does write once `format` is set, so
+  // the assertions above are not passing because the seams are inert.
+  format = kOddFormat;
+  ScriptReadData("OK\n");
+  EXPECT_EQ(0, setOutputFormat());
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+}
+
+// Guard arm, true side + the success return: exact bytes on the wire, on `sock`.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOk_SendsExactCommandOnSockAndReturnsZero) {
+  sock = 77;
+  format = kOddFormat;
+
+  int writeFd = -1;
+  int readFd = -1;
+  bool served = false;
+  int rc = -1;
+  ScopedHook writeHook(g_write, [&](int fd, const void* buf, size_t count) {
+    writeFd = fd;
+    g_writtenData.append(static_cast<const char*>(buf), count);
+    return static_cast<ssize_t>(count);
+  });
+  // Serves the reply exactly once; a hook that kept returning 0 would spin
+  // rasRead's until-newline loop forever.
+  ScopedHook readHook(g_read, [&](int fd, void* buf, size_t count) -> ssize_t {
+    readFd = fd;
+    if (served || count < 3) return 0;
+    served = true;
+    std::memcpy(buf, "OK\n", 3);
+    return 3;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_EQ(77, writeFd);
+  EXPECT_EQ(77, readFd);
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(1, readHook.calls);
+  EXPECT_EQ("", log);
+}
+
+// strcasecmp folds case, so a lowercase acknowledgement is still success.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersLowercaseOk_IsAcceptedCaseInsensitively) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptReadData("ok\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_EQ("", log);
+}
+
+// strcasecmp compares whole strings: "OK" without the newline is a mismatch.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithoutNewline_ReportsUnexpectedResponseAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptReadData("OK");  // rasRead then hits EOF and returns the 2 bytes
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: OK\n")) << log;
+  EXPECT_FALSE(LogHas(log, "NCCL unexpectedly closed the connection"));
+}
+
+// A correct prefix plus trailing bytes is also a mismatch.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkWithTrailingText_ReportsUnexpectedResponseAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptReadData("OK\nextra");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: OK\nextra\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+}
+
+// "OKAY\n" shares the first two characters with "OK\n" and must still be rejected.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOkay_ReportsUnexpectedResponseAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptReadData("OKAY\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: OKAY\n\n")) << log;
+  EXPECT_FALSE(LogHas(log, "read socket"));
+}
+
+// Write arm, EAGAIN side. socketWrite surfaces a failed write as -1, never as a
+// short count, so the hook must return -1 rather than a partial byte count.
+TEST_F(RasClientMicrotest, SetOutputFormat_WriteFailsWithEagain_ReportsConnectionTimedOutAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+
+  int rc = -1;
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EAGAIN;
+    return -1;
+  });
+  ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
+
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "write to socket"));
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(0, readHook.calls);
+}
+
+// Write arm, non-EAGAIN side: perror, and the response read must not happen.
+TEST_F(RasClientMicrotest, SetOutputFormat_WriteFailsWithBrokenPipe_ReportsPerrorAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+
+  int rc = -1;
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EPIPE;
+    return -1;
+  });
+  ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
+
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  const std::string expected = std::string("write to socket: ") + std::strerror(EPIPE) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  EXPECT_EQ(0, readHook.calls);
+}
+
+// Read arm, EAGAIN side: the command still went out before the read failed.
+TEST_F(RasClientMicrotest, SetOutputFormat_ReadFailsWithEagain_ReportsConnectionTimedOutAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptRead(-1, EAGAIN, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "read socket"));
+}
+
+// Read arm, non-EAGAIN side.
+TEST_F(RasClientMicrotest, SetOutputFormat_ReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptRead(-1, ECONNRESET, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  const std::string expected = std::string("read socket: ") + std::strerror(ECONNRESET) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+}
+
+// bytes == 0 arm: the empty read script makes the default read report EOF.
+TEST_F(RasClientMicrotest, SetOutputFormat_ServerClosesConnection_ReportsUnexpectedCloseAndReturnsOne) {
+  sock = 77;
+  format = kOddFormat;
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "NCCL unexpectedly closed the connection\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Unexpected response from NCCL"));
+  EXPECT_FALSE(LogHas(log, "read socket"));
+}
+
+// snprintf truncates silently and its return value is discarded, so an
+// over-long format ships a 4095-byte command whose terminating '\n' is gone.
+TEST_F(RasClientMicrotest, SetOutputFormat_FormatOverflowsMsgBuf_TruncatesCommandAndDropsTheNewline) {
+  const std::string longFormat(4200, 'z');
+  sock = 77;
+  format = longFormat.c_str();
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(0, rc);  // truncation is not detected or reported
+  EXPECT_EQ("", log);
+  ASSERT_EQ(4095u, g_writtenData.size());
+  EXPECT_EQ("SET FORMAT zzzz", g_writtenData.substr(0, 15));
+  EXPECT_EQ('z', g_writtenData.back());
+  EXPECT_EQ(std::string::npos, g_writtenData.find('\n'));
+}
