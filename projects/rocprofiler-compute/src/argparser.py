@@ -579,7 +579,7 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help="\t\t\tEnable memory bandwidth counters (block 30) for guided analysis.",
+        help="\t\t\tEnable Memory Bandwidth Analysis counters (block 30).",
     )
 
     profile_group.add_argument(
@@ -1040,10 +1040,7 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help=(
-            "\t\tEnable memory bandwidth guided analysis"
-            " with bottleneck detection and guidance panel."
-        ),
+        help="\t\tEnable Memory Bandwidth Analysis with bottleneck detection.",
     )
 
     analyze_group.add_argument(
