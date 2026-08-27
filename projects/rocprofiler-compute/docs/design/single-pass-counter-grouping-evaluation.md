@@ -52,50 +52,86 @@ Each pass re-runs the workload kernel(s). Total profile time scales roughly line
 
 ## 4. Allocator simulation (gfx942, MI300)
 
-Simulated with `OmniSoC_Base.detect_counters()` + `_allocate_perfmon_counter_files()` against shipped gfx942 YAML (Aug 2026). Pass counts are **allocator estimates**; measured CPX runs may differ by +1 when level accumulators split (13 measured vs 12 simulated baseline).
+Simulated with `tools/counter_grouping_inspector.py` (§7) against shipped gfx942 YAML. All pass counts below were **run through the inspector** (Aug 2026); measured CPX hardware profiles match the full-panel bucket count (**13**).
 
 ### 4.1 Pass count by profile scope
 
-| Scenario | PMC passes | Accumulator files | Counter count |
-|----------|------------|-------------------|---------------|
-| Full panel (typical blocks) | **12** | 5 | 439 |
+| Scenario | PMC passes | Accumulator YAMLs | Counter assignments |
+|----------|------------|-------------------|---------------------|
+| Full panel (typical blocks) | **13** | **7** | 274 |
 | Block 17 (L2 only) | **8** | 0 | 34 |
 | Blocks 5+6 (CPC/SPI) | **5** | 0 | 39 |
 | Block 15 (TA/TD data-return) | **8** | 0 | 28 |
 | Blocks 5+6+15+17 (all cap-affected panels) | **8** | 0 | 97 |
 
-**Validation recipe cost:** `--block 17` reduces passes from ~12–13 to **8** (~35–40% fewer re-runs vs full panel) while keeping L2/HBM counters.
+**Validation recipe cost:** `--block 17` reduces passes from **13** to **8** (~38% fewer re-runs vs full panel) while keeping L2/HBM counters.
 
 ### 4.2 Grouping policy typically increases passes
 
-On gfx942 full panel, adding `same_bucket_priority_metric_ids` **typically increases** pass count. Metric-aware coalesce may open **new buckets** when priority metric groups cannot fit existing ones — co-locating ratio partners trades off against **more kernel re-runs**.
+On gfx942 full panel, adding `same_bucket_priority_metric_ids` **increases** pass count in inspector runs. Metric-aware coalesce opens **new buckets** when priority metric groups cannot fit existing ones — co-locating ratio partners trades off against **more kernel re-runs**.
 
-| Policy | Full-panel passes | Δ vs empty policy |
-|--------|-------------------|---------------------|
-| `{}` (today) | 12 | — |
-| `17.2.1` (HBM Read Traffic) | **17** | **+5 (+42%)** |
-| `6.1.2` (Workgroup Manager Utilization) | 17 | +5 |
-| All cap metrics (`17.2.1`, `6.1.2`, `5.1.0`, `15.4.0`) | 17 | +5 |
+| Policy (`same_bucket_priority_metric_ids`) | Full-panel passes | Δ vs `{}` | Workgroup Manager Utilization | HBM Read Traffic |
+|--------------------------------------------|-------------------|-----------|------------------------------|------------------|
+| `{}` (shipped) | **13** | — | 2 buckets (split) | 2 buckets (split) |
+| `6.1.2` | **19** | **+6 (+46%)** | **1 bucket** (`0`) | still 2 buckets |
+| `17.2.1` | **19** | **+6** | 1 bucket (`0`) | **1 bucket** (`0`) |
+| All cap metrics (`17.2.1`, `6.1.2`, `5.1.0`, `15.4.0`) | **19** | **+6** | 1 bucket (`0`) | **1 bucket** (`0`) |
+
+Reproduce: temporarily edit `profiling_counter_grouping_policy.yaml` (gfx942 section), run `python3 tools/counter_grouping_inspector.py --arch gfx942`, restore file. **Hardware confirmation pending** — see [hardware runbook](../reports/aiprofcomp78-hardware-validation-runbook.md).
 
 Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. gfx1250 is a documented exception where priority metrics can steer packing **without** increasing pass count — behavior is **arch- and counter-set-specific**.
 
 ### 4.3 Does grouping policy co-locate ratio partners?
 
-Simulated counter → pass bucket (full panel):
+Counter → bucket layout from `tools/counter_grouping_inspector.py` (full panel — §7):
 
-| Counter | No policy | With `17.2.1` priority | With `6.1.2` priority |
-|---------|-----------|------------------------|------------------------|
-| `TCC_EA0_RDREQ_DRAM_sum` | `SQ_INST_LEVEL_VMEM_ACCUM` | **`0` (same as partner)** | `5` |
-| `TCC_EA0_RDREQ_sum` | `SQ_LEVEL_WAVES_ACCUM` | **`0`** | `4` |
-| `GRBM_SPI_BUSY` | `SQ_INST_LEVEL_LDS_ACCUM` | `0` | **`0` (with partner)** |
-| `GRBM_GUI_ACTIVE` | `SQ_IFETCH_LEVEL_ACCUM` | `0` | **`0`** |
-| `CPF_CPF_STAT_BUSY` | `SQ_IFETCH_LEVEL_ACCUM` | `0` | `0` |
-| `CPF_CPF_STAT_IDLE` | `SQ_INST_LEVEL_LDS_ACCUM` | `0` | `0` |
+| Counter | Bucket (`{}`) | With `17.2.1` | With `6.1.2` |
+|---------|---------------|---------------|--------------|
+| `TCC_EA0_RDREQ_DRAM_sum` | `SQ_INST_LEVEL_LDS_ACCUM`* | **`0`** | `4` |
+| `TCC_EA0_RDREQ_sum` | `SQ_INST_LEVEL_SMEM_ACCUM`* | **`0`** | `5` |
+| `GRBM_SPI_BUSY` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` | `0` | **`0`** |
+| `GRBM_GUI_ACTIVE` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` | `0` | **`0`** |
+| `CPF_CPF_STAT_BUSY` | (multi-bucket metric) | `0` | `0` |
+| `CPF_CPF_STAT_IDLE` | (multi-bucket metric) | `0` | `0` |
 
-**Without policy:** every affected pair is split across passes (matches mat_exp CPX perfmon files).  
-**With targeted priority:** partners can co-locate (e.g. HBM both in bucket `0`), at the cost of **more total passes**.
+\*HBM Read Traffic multi-bucket row under `{}`: `SQ_INST_LEVEL_LDS_ACCUM`, `SQ_INST_LEVEL_SMEM_ACCUM`.
+
+**Without policy:** every affected pair is split across passes (matches mat_exp CPX perfmon files and the inspector multi-bucket metrics table).  
+**With targeted priority:** partners co-locate (e.g. HBM in bucket `0` with `17.2.1`), at **+6 passes** on full panel.
 
 **Block 17 only:** `TCC_EA0_RDREQ_DRAM_sum` and `TCC_EA0_RDREQ_sum` already share a pass **with or without** policy (8 passes). Block-only validation does not need policy entries for HBM co-location.
+
+#### WGM example (Workgroup Manager Utilization)
+
+Metric **`6.1.2`** — `100 × GRBM_SPI_BUSY / GRBM_GUI_ACTIVE` (non-partition; min/max caps only). On **mat_exp CPX** (gfx942, 13 perfmon passes, full panel):
+
+**Measured pass split** (from shipped perfmon YAML on disk — no counter appears in both passes):
+
+| Role | Counter | Perfmon pass file |
+|------|---------|-------------------|
+| Numerator | `GRBM_SPI_BUSY` | `pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL_ACCUM.yaml` |
+| Denominator | `GRBM_GUI_ACTIVE` | `pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL_ACCUM.yaml` |
+
+**Merged analyze output** (`pmc_perf.csv` stitched across passes):
+
+| Dispatches | Rows with `a > b` | % bad | Max `100×a/b` | `100×SUM(a)/SUM(b)` |
+|------------|-------------------|-------|---------------|---------------------|
+| 206 | 2 | 1.0% | **739.6%** | 40.06% |
+
+Analyze joins numerator and denominator by `Dispatch_ID`, so two mismatched passes can produce extreme per-dispatch ratios even though each counter is valid in its own pass.
+
+**Inspector output** (full panel, gfx942, empty policy — `python3 tools/counter_grouping_inspector.py --arch gfx942`):
+
+| Counter | Bucket |
+|---------|--------|
+| `GRBM_SPI_BUSY` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` |
+| `GRBM_GUI_ACTIVE` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` |
+
+Multi-bucket metrics row: `Workgroup Manager Utilization` → **2 buckets** (`SQC_DCACHE_INFLIGHT_LEVEL_ACCUM`, `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM`). `Summary: 13 bucket(s)`.
+
+**With `6.1.2` priority** (inspector with edited policy YAML): partners co-locate in bucket `0`; full panel **13 → 19 passes** (+6).
+
+**Takeaway:** Empty gfx942 policy leaves Workgroup Manager Utilization partners in different passes → merged max **739.6%** on mat_exp. Priority metric `6.1.2` co-locates partners in the inspector at **+6 passes**. **`--block 5,6`** lowers pass count to **5** but **does not** co-locate `GRBM_SPI_BUSY` / `GRBM_GUI_ACTIVE` without policy — use `6.1.2` priority or a single-pass re-profile to confirm.
 
 ---
 
@@ -105,8 +141,8 @@ Simulated counter → pass bucket (full panel):
 |----------|--------|
 | Is grouping the most accurate fix? | **Yes**, when counters truly share a pass on the same dispatch |
 | Does empty gfx942 policy cause splitting? | **Yes** — partners land in different accum passes under default packing |
-| Does adding policy increase passes? | **Typically yes** on gfx942 full panel — simulated **+42%** for priority metrics |
-| Does `--block 17` help HBM validation? | **Yes** — partners already co-locate; **8 passes** vs ~12–13 |
+| Does adding policy increase passes? | **Yes** on gfx942 full panel — inspector **+6 passes** (13 → 19) for any tested priority entry |
+| Does `--block 17` help HBM validation? | **Yes** — partners already co-locate; **8 passes** vs **13** full panel |
 | Does policy help block-only HBM? | **No extra benefit** in simulation (already co-located) |
 | Can policy fix Workgroup Manager Utilization on full panel? | **Simulated co-location** with `6.1.2`, same pass-count penalty |
 
@@ -115,7 +151,7 @@ Simulated counter → pass bucket (full panel):
 ## 6. Recommendations
 
 1. **Validation (Rule 3):** Use `--block` subsets (e.g. 17, 5+6, 15) before full-panel caps — lower pass count than full panel, partners often co-locate without policy changes.
-2. **Grouping policy for gfx942:** Do **not** assume zero cost. Any PR adding `same_bucket_priority_metric_ids` must report **simulated and measured pass count** before/after (use allocator simulation + one profile run).
+2. **Grouping policy for gfx942:** Do **not** assume zero cost. Any PR adding `same_bucket_priority_metric_ids` must report **inspector pass count** before/after (§7) plus one hardware profile run.
 3. **Full-panel production:** Grouping policy is a **trade-off** — better ratio accuracy vs longer profile time. Consider user `--set` presets instead of default full-panel policy for all users.
 4. **Analyze-time caps:** Remain appropriate when users run default multi-pass full panel and pass-count increase is unacceptable.
 
@@ -123,21 +159,80 @@ Simulated counter → pass bucket (full panel):
 
 ## 7. How to reproduce pass-count simulation
 
+Use **`tools/counter_grouping_inspector.py`** — offline developer tool that runs the same SoC path as profiling (`detect_counters` → `perfmon_coalesce` → bucket allocation) without a GPU or rocprofiler.
+
 From `projects/rocprofiler-compute/`:
 
 ```bash
-PYTHONPATH=src python3 - <<'PY'
-# See commit aiprofcomp78 docs or soc_base unit tests for full script.
-# Uses OmniSoC_Base.detect_counters + _allocate_perfmon_counter_files.
-PY
+# Full panel — pass count in Summary; split metrics listed at end
+python3 tools/counter_grouping_inspector.py --arch gfx942
+
+# Scoped profiles (--block accepts panel/metric IDs from analyze)
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 17
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 5 6
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 5 6 15 17
+
+# Emit perfmon YAML names (compare to measured profile perfmon/ directory)
+python3 tools/counter_grouping_inspector.py --arch gfx942 -v
+
+# Save plan + metric/bucket report for diffing
+python3 tools/counter_grouping_inspector.py --arch gfx942 --output /tmp/plan.txt
+grep -E 'Summary:|Workgroup Manager Utilization|HBM Read Traffic' /tmp/plan.txt
 ```
 
-Reference implementation: `tests/unit/rocprof_compute_soc/test_soc_base.py` (allocator tests).
+**How to read output**
+
+| Output | Meaning |
+|--------|---------|
+| `Summary: N bucket(s), …` | Simulated perfmon pass count |
+| Multi-bucket metrics table | Metrics whose formula counters land in **2+ buckets** — split ratio partners |
+| `-v` perfmon file list | Names like `pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL_ACCUM.yaml` (matches on-disk profile layout) |
+
+Example rows on full-panel gfx942 today (empty grouping policy):
+
+```
+Summary: 13 bucket(s), 274 counter assignment(s).
+
+| 0600 | 601   | 2   | Workgroup Manager Utilization | 2 | SQC_DCACHE_INFLIGHT_LEVEL_ACCUM, SQC_ICACHE_INFLIGHT_LEVEL_ACCUM |
+| 1700 | 1702  | 1   | HBM Read Traffic              | 2 | … |
+```
+
+**Grouping policy what-if:** gfx942 policy is `{}` in `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`. Add `same_bucket_priority_metric_ids` entries (e.g. `6.1.2`), re-run the inspector, and compare `Summary` plus whether Workgroup Manager Utilization / HBM Read Traffic move to single-bucket rows.
+
+Example (temporary edit — restore after):
+
+```yaml
+gfx942:
+  same_bucket_priority_metric_ids:
+    "6.1.2":
+      name: "Workgroup Manager Utilization"
+```
+
+```bash
+python3 tools/counter_grouping_inspector.py --arch gfx942 | rg '^Summary:|Workgroup Manager Utilization|HBM Read Traffic'
+# Expect: 19 bucket(s); Workgroup Manager Utilization | 0 |
+```
+
+Smoke test: `python3 tools/test_counter_grouping_inspector_manual.py`
 
 ---
 
-## 8. Open follow-ups
+## 8. Hardware validation (Conductor + CPX)
 
-1. **Measure** pass count and profile wall time on hardware after adding gfx942 policy entries (confirm simulation).
-2. **Single-pass re-profile** mat_exp / occupancy with `--block 17` and compare raw `a/b` distributions to merged full-panel data.
-3. **Investigate** whether pass count increase can be mitigated (allocator tuning vs selective priority metrics only).
+| Follow-up | Inspector (offline) | Hardware (pending) |
+|-----------|--------------------|--------------------|
+| **1. Policy pass count + wall time** | **Done** — `{}` → 13 passes; priority entries → **19** (+6) | Profile full panel on MI300X CPX with/without policy YAML; compare `perfmon/` file count + wall time |
+| **2. Block 17 single-pass HBM** | **Done** — `--block 17` → **8 passes**, HBM partners co-located | Re-profile mat_exp + occupancy with `--block 17` in CPX; compare raw `a/b` to merged full-panel data |
+
+**Recommended Conductor target:** `ctr-cx71-mi300x-01` (MI300X gfx942, pool `AIG-SW-Alola`, deployable). Book **4 h**, set **CPX** (`amd-smi set --compute-partition CPX` — needs reservation/sudo on Alola).
+
+**Access note:** Creating new Conductor reservations on `AIG-SW-Alola` MI300X nodes returned 422 (no create permission). Active team reservation **`rocprof-compute`** includes `fei.zheng@amd.com` but targets **`asrock-1w300-f2-1`** (MI350X). Request Alola pool access or an admin booking for `ctr-cx71-mi300x-01`.
+
+Step-by-step commands: [aiprofcomp78-hardware-validation-runbook.md](../reports/aiprofcomp78-hardware-validation-runbook.md).
+
+---
+
+## 9. Open follow-ups
+
+1. **Execute** hardware validation runbook on `ctr-cx71-mi300x-01` (4 h CPX reservation).
+2. **Investigate** whether pass count increase can be mitigated (allocator tuning vs selective priority metrics only).

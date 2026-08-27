@@ -138,36 +138,12 @@ gfx942:
 
 ## 8. Reproduce simulation
 
-From `projects/rocprofiler-compute/` with `PYTHONPATH=src`:
+From `projects/rocprofiler-compute/`:
 
-```python
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
-from rocprof_compute_soc.soc_base import OmniSoC_Base, flat_counters_in_perfmon_file
-
-config_dir = Path("src/rocprof_compute_soc/analysis_configs")
-mspec = SimpleNamespace(
-    gpu_arch="gfx942", gpu_series="MI300",
-    l2_banks=16, num_xcd=1, rocminfo_lines=None,
-)
-blocks = ["0","1","2","4","5","6","7","10","11","12","13","14","15","16","17","18","21"]
-args = SimpleNamespace(
-    config_dir=str(config_dir), filter_blocks=blocks,
-    set_selected=None, roof_only=False, membw_analysis=False,
-)
-with patch("rocprof_compute_soc.soc_base.console_debug"), patch(
-    "rocprof_compute_soc.soc_base.console_log"
-):
-    soc = OmniSoC_Base(args, mspec)
-soc.set_arch("gfx942")
-soc._OmniSoC_Base__perfmon_config = {
-    "SQ": 8, "SQC": 8, "SPI": 6, "TA": 2, "TD": 2,
-    "TCP": 4, "TCC": 4, "CPC": 2, "CPF": 2, "GRBM": 2, "GDS": 4,
-}
-counters, _ = soc.detect_counters()
-for pri in [(), ("17.2.1",)]:
-    with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=pri):
-        files, _, accu = soc._allocate_perfmon_counter_files(set(counters))
-    print(len(pri), "->", len(files), "passes, accu", accu)
+```bash
+python3 tools/counter_grouping_inspector.py --arch gfx942
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 17
+grep -E 'Summary:|Workgroup Manager Utilization|HBM Read Traffic' /tmp/plan.txt  # after --output /tmp/plan.txt
 ```
+
+See [single-pass-counter-grouping-evaluation.md §7](../design/single-pass-counter-grouping-evaluation.md#7-how-to-reproduce-pass-count-simulation) for full usage.
