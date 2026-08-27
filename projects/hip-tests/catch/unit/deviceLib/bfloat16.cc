@@ -197,6 +197,27 @@ __global__ void bf16_compare_nan(const float* a, const float* b, unsigned* res, 
   }
 }
 
+// Order of scalar operator results written by bf16_nan_operators().
+enum Bf16NanOp {
+  kOpNeQnan, kOpNeSnan,  // operator!= : unordered -> true for NaN
+  kOpEqQnan, kOpEqSnan,  // operator== : ordered   -> false for NaN
+  kOpNeOne, kOpEqOne,    // sanity: normal value
+  kBf16NanOpCount
+};
+
+__global__ void bf16_nan_operators(unsigned* out) {
+  const __hip_bfloat16 qnan = __ushort_as_bfloat16((unsigned short)0x7FC0U);  // quiet NaN
+  const __hip_bfloat16 snan = __ushort_as_bfloat16((unsigned short)0x7FA0U);  // signaling NaN
+  const __hip_bfloat16 one = __ushort_as_bfloat16((unsigned short)0x3F80U);   // 1.0
+
+  out[kOpNeQnan] = bool_to_unsigned(qnan != qnan);
+  out[kOpNeSnan] = bool_to_unsigned(snan != snan);
+  out[kOpEqQnan] = bool_to_unsigned(qnan == qnan);
+  out[kOpEqSnan] = bool_to_unsigned(snan == snan);
+  out[kOpNeOne] = bool_to_unsigned(one != one);
+  out[kOpEqOne] = bool_to_unsigned(one == one);
+}
+
 // Convert to bits
 __global__ void bf16_conv_bits(float* val, unsigned short* res, size_t size) {
   auto i = threadIdx.x;
@@ -404,6 +425,33 @@ HIP_TEST_CASE(Unit_bf16_basic) {
 
     HIP_CHECK(hipFree(d_a));
     HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipFree(d_res));
+  }
+
+  SECTION("NaN operator semantics") {
+    struct OpCase {
+      const char* name;
+      unsigned expected;
+    };
+    static const OpCase kOps[kBf16NanOpCount] = {
+        {"qnan != qnan", 1}, {"snan != snan", 1},
+        {"qnan == qnan", 0}, {"snan == snan", 0},
+        {"one != one", 0},   {"one == one", 1}};
+
+    unsigned* d_res;
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * kBf16NanOpCount));
+
+    bf16_nan_operators<<<1, 1>>>(d_res);
+
+    std::vector<unsigned> res(kBf16NanOpCount, 0);
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * res.size(),
+                        hipMemcpyDeviceToHost));
+
+    for (int p = 0; p < kBf16NanOpCount; p++) {
+      CAPTURE(kOps[p].name);
+      CHECK(res[p] == kOps[p].expected);
+    }
+
     HIP_CHECK(hipFree(d_res));
   }
 

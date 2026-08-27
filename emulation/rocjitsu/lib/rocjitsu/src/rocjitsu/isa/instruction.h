@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
 
 #include <array>
@@ -17,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,7 +49,19 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Executes regardless of the EXEC mask (e.g. branches).
+  IGNORES_EXEC = (1ULL << 12),
+  /// @brief Writes the EXEC mask regardless of DST operands.
+  WRITES_EXEC = (1ULL << 13),
+  /// @brief The destination value is a scalar plain copy of a single source operand
+  /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
+  /// all-ones source.
+  RESULT_COPY = (1ULL << 14),
+  /// @brief The destination value is the scalar bitwise pure OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
+  /// regardless of the others.
+  RESULT_OR = (1ULL << 15)
 };
 
 class BasicBlock;
@@ -95,6 +109,63 @@ public:
   static thread_local inline AllocFn alloc_fn_;
   static thread_local inline DeallocFn dealloc_fn_;
   static thread_local inline void *alloc_pool_;
+
+  /// @brief Temporarily force instruction allocations onto the heap.
+  ///
+  /// @details C ABI entry points use this guard when instructions can outlive
+  /// the decoder that produced them. It preserves the ambient allocator hooks
+  /// and restores them on scope exit. Decoder destruction invalidates matching
+  /// saved hooks so a scope never restores a pointer to a dead pool.
+  class ScopedHeapAllocation {
+  public:
+    ScopedHeapAllocation()
+        : saved_alloc_fn_(alloc_fn_), saved_dealloc_fn_(dealloc_fn_),
+          saved_alloc_pool_(alloc_pool_), previous_scope_(active_scope_) {
+      active_scope_ = this;
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+
+    ~ScopedHeapAllocation() {
+      assert(active_scope_ == this && "allocation guards must be destroyed in stack order");
+      alloc_fn_ = saved_alloc_fn_;
+      dealloc_fn_ = saved_dealloc_fn_;
+      alloc_pool_ = saved_alloc_pool_;
+      active_scope_ = previous_scope_;
+    }
+
+    ScopedHeapAllocation(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation &operator=(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation(ScopedHeapAllocation &&) = delete;
+    ScopedHeapAllocation &operator=(ScopedHeapAllocation &&) = delete;
+
+  private:
+    friend class Instruction;
+
+    static thread_local inline ScopedHeapAllocation *active_scope_;
+    AllocFn saved_alloc_fn_;
+    DeallocFn saved_dealloc_fn_;
+    void *saved_alloc_pool_;
+    ScopedHeapAllocation *previous_scope_;
+  };
+
+  /// @brief Remove every active or saved reference to an allocator pool.
+  /// @param[in] pool Pool that is being disabled or destroyed.
+  static void invalidate_allocator_pool(void *pool) {
+    if (alloc_pool_ == pool) {
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+    for (auto *scope = ScopedHeapAllocation::active_scope_; scope; scope = scope->previous_scope_) {
+      if (scope->saved_alloc_pool_ != pool)
+        continue;
+      scope->saved_alloc_fn_ = nullptr;
+      scope->saved_dealloc_fn_ = nullptr;
+      scope->saved_alloc_pool_ = nullptr;
+    }
+  }
 
   static void *operator new(size_t size) {
     if (alloc_fn_)
@@ -269,21 +340,22 @@ public:
   /// @returns Reference to the disassembly string.
   const std::string &disassemble() const {
     if (disassembly_.empty()) {
-      disassembly_ = mnemonic_;
+      disassembly_ += mnemonic_;
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
-      for (uint8_t i = 0; i < num_dst_; ++i) {
-        if (dst_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
+        if (dst_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[i]->name();
+        disassembly_ += dst_operands_[operand_index]->name();
         first = false;
       }
-      for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
+        if (src_operands_[operand_index]->size_bits() == 0 ||
+            src_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += src_operands_[i]->name();
+        append_src_operand(disassembly_, operand_index);
         first = false;
       }
       build_modifiers(disassembly_);
@@ -309,6 +381,10 @@ protected:
   /// Overridden by memory encoding bases that have flag bits to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Append one source operand to textual disassembly.
+  virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
+    out += src_operands_[operand_index]->name();
+  }
   /// @brief Cached disassembly string.
   mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.
@@ -344,6 +420,12 @@ public:
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
       : Instruction(mnemonic, exec_fn, src_loc) {}
 
+  /// @brief Accept encodings for formats without additional validation.
+  template <typename... Args>
+  static constexpr Result validate_encoding([[maybe_unused]] Args &&...args) noexcept {
+    return Result::success();
+  }
+
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///
   /// The returned function pointer casts the base ``Instruction&`` to the
@@ -362,6 +444,13 @@ public:
   /// @brief Select a callback from the active immutable per-ISA table.
   static ExecuteFn selected_exec_fn(size_t instruction_id) {
     return current_instruction_execute(instruction_id);
+  }
+
+  /// @brief Select a callback using a generated, named execution ID.
+  template <typename ExecutionId>
+    requires std::is_enum_v<ExecutionId>
+  static ExecuteFn selected_exec_fn(ExecutionId instruction_id) {
+    return current_instruction_execute(static_cast<size_t>(instruction_id));
   }
 };
 

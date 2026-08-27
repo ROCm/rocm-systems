@@ -4,6 +4,48 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
+### Changed
+
+- `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
+  via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
+- The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
+  default. Pass `--profile` to get a call-stack-based profile instead.
+- `rocprof-sys-python` no longer accepts abbreviated long options (for example,
+  `--conf` for `--config`). Spell out the full option name.
+
+### Resolved issues
+
+- Fixed `rocprof-sys-python` ignoring the `-c`/`--config` flag. The configuration
+  file is now applied to `ROCPROFSYS_CONFIG_FILE` before the profiler bindings are
+  loaded, so its settings take effect. A configuration file already named by
+  `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
+  appended to it.
+
+### Removed
+
+- Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
+  storage backend. This is now handled by profiler-hub.
+
+- Removed the deprecated `rocprof-sys-user` library and its C API
+  (`rocprofsys_user_*`, `<rocprofiler-systems/user.h>`), including the `user`
+  find_package component, the `examples/user-api` example, the Python
+  `rocprofsys.user` submodule, and the associated pytest coverage. Use
+  ROCTx (`rocprofiler-sdk-roctx`) for general-purpose manual instrumentation
+  (starting/stopping tracing, named regions) instead; see `examples/roctx`
+  for usage.
+
+  - Causal profiling's `ROCPROFSYS_CAUSAL_PROGRESS`/`ROCPROFSYS_CAUSAL_BEGIN`/
+    `ROCPROFSYS_CAUSAL_END` macros are unaffected at the source level: they now
+    run on a new, minimal `rocprof-sys-causal-api` library instead of the removed
+    general-purpose user API. Existing causal profiling code does not need to be
+    edited, but it must be rebuilt against the new headers and library, and
+    projects that requested the old component via
+    `find_package(rocprofiler-systems COMPONENTS user)` must change that to
+    `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
+    it now fails at configure time.
+
 ## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
 
 ### Added

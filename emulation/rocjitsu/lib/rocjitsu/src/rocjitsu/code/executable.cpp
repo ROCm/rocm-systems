@@ -36,16 +36,19 @@ private:
 
 class HsaSection : public Section {
 public:
-  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr)
-      : Section(std::move(name), std::move(data)), shdr_(shdr) {}
+  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr,
+             size_t section_index)
+      : Section(std::move(name), std::move(data)), shdr_(shdr), section_index_(section_index) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
+  std::optional<size_t> sectionHeaderIndex() const override { return section_index_; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
   Elf64_Shdr shdr_;
+  size_t section_index_;
 };
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
@@ -156,7 +159,8 @@ void Executable::load_fat_binary() {
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (const auto &shdr : section_hdrs) {
+  for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
+    const Elf64_Shdr &shdr = section_hdrs[section_index];
     if (shdr.sh_type == SHT_NULL)
       continue;
     if (shdr.sh_name >= shstrtab.sh_size)
@@ -173,7 +177,8 @@ void Executable::load_fat_binary() {
     if (sec_name == ".hip_fatbin") {
       std::unique_ptr<char[]> sec_data(std::make_unique<char[]>(shdr.sh_size));
       std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
-      auto section = std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr);
+      auto section =
+          std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index);
       load_hip_fatbin(*section);
       sections_.emplace_back(std::move(section));
       if (!is_valid_)

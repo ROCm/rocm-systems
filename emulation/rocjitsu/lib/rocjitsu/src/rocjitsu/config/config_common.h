@@ -97,6 +97,7 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.l2_assoc = device->l2_assoc();
   config.num_sdma_engines = device->num_sdma_engines();
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
+  config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -209,6 +209,7 @@ using host_functions_map_t = std::unordered_map<uint64_t, host_function_data_t>;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
+std::string                   output_filename  = {};
 
 using callback_payload_t =
     std::variant<rocprofiler_callback_tracing_code_object_load_data_t,
@@ -679,27 +680,28 @@ struct spm_counting_record_t
     }
 };
 
-auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{};
-auto runtime_init_cb_records       = std::deque<runtime_init_callback_record_t>{};
-auto code_object_records           = std::deque<code_object_callback_record_t>{};
-auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
-auto host_function_records         = std::deque<host_function_callback_record_t>{};
-auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
-auto marker_api_cb_records         = std::deque<marker_api_callback_record_t>{};
-auto counter_collection_bf_records = std::deque<profile_counting_record>{};
-auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
-auto scratch_memory_cb_records     = std::deque<scratch_memory_callback_record_t>{};
-auto kernel_dispatch_cb_records    = std::deque<kernel_dispatch_callback_record_t>{};
-auto memory_copy_cb_records        = std::deque<memory_copy_callback_record_t>{};
-auto memory_allocation_cb_records  = std::deque<memory_allocation_callback_record_t>{};
-auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
-auto rocdecode_api_cb_records      = std::deque<rocdecode_api_callback_record_t>{};
-auto rocjpeg_api_cb_records        = std::deque<rocjpeg_api_callback_record_t>{};
-auto rocshmem_api_cb_records       = std::deque<rocshmem_api_callback_record_t>{};
-auto hipfile_api_cb_records        = std::deque<hipfile_api_callback_record_t>{};
-auto ompt_cb_records               = std::deque<ompt_callback_record_t>{};
-auto spm_cb_records                = std::deque<spm_counting_record_t>{};
-auto spm_bf_records                = std::deque<spm_profile_counting_record>{};
+auto counter_info                      = std::deque<rocprofiler_counter_info_v0_t>{};
+auto runtime_init_cb_records           = std::deque<runtime_init_callback_record_t>{};
+auto code_object_records               = std::deque<code_object_callback_record_t>{};
+auto kernel_symbol_records             = std::deque<kernel_symbol_callback_record_t>{};
+auto host_function_records             = std::deque<host_function_callback_record_t>{};
+auto hsa_api_cb_records                = std::deque<hsa_api_callback_record_t>{};
+auto marker_api_cb_records             = std::deque<marker_api_callback_record_t>{};
+auto counter_collection_bf_records     = std::deque<profile_counting_record>{};
+auto counter_collection_pending_values = std::deque<rocprofiler_record_counter_t>{};
+auto hip_api_cb_records                = std::deque<hip_api_callback_record_t>{};
+auto scratch_memory_cb_records         = std::deque<scratch_memory_callback_record_t>{};
+auto kernel_dispatch_cb_records        = std::deque<kernel_dispatch_callback_record_t>{};
+auto memory_copy_cb_records            = std::deque<memory_copy_callback_record_t>{};
+auto memory_allocation_cb_records      = std::deque<memory_allocation_callback_record_t>{};
+auto rccl_api_cb_records               = std::deque<rccl_api_callback_record_t>{};
+auto rocdecode_api_cb_records          = std::deque<rocdecode_api_callback_record_t>{};
+auto rocjpeg_api_cb_records            = std::deque<rocjpeg_api_callback_record_t>{};
+auto rocshmem_api_cb_records           = std::deque<rocshmem_api_callback_record_t>{};
+auto hipfile_api_cb_records            = std::deque<hipfile_api_callback_record_t>{};
+auto ompt_cb_records                   = std::deque<ompt_callback_record_t>{};
+auto spm_cb_records                    = std::deque<spm_counting_record_t>{};
+auto spm_bf_records                    = std::deque<spm_profile_counting_record>{};
 
 int
 set_external_correlation_id(rocprofiler_thread_id_t                            thr_id,
@@ -1437,16 +1439,41 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         {
             auto* profiler_record =
                 static_cast<rocprofiler_dispatch_counting_service_record_t*>(header->payload);
-            counter_collection_bf_records.emplace_back(*profiler_record);
+            auto& new_record = counter_collection_bf_records.emplace_back(*profiler_record);
+
+            // Attach any values that were delivered before this header (see
+            // counter_collection_pending_values).
+            for(auto pitr = counter_collection_pending_values.begin();
+                pitr != counter_collection_pending_values.end();)
+            {
+                if(new_record == *pitr)
+                {
+                    new_record.emplace_back(*pitr);
+                    pitr = counter_collection_pending_values.erase(pitr);
+                }
+                else
+                {
+                    ++pitr;
+                }
+            }
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            if(counter_collection_bf_records.empty())
-                throw std::runtime_error{
-                    "missing rocprofiler_dispatch_counting_service_record_t (header)"};
-            counter_collection_bf_records.back().emplace_back(*profiler_record);
+            auto  ritr            = std::find_if(counter_collection_bf_records.rbegin(),
+                                     counter_collection_bf_records.rend(),
+                                     [profiler_record](const profile_counting_record& itr) {
+                                         return itr == *profiler_record;
+                                     });
+            // The dispatch header for this value may not have been delivered yet: the SDK
+            // double-buffers and can flush mid-dispatch, so a dispatch's records can be split
+            // across flush batches. Park the value and attach it when its header arrives rather
+            // than aborting.
+            if(ritr == counter_collection_bf_records.rend())
+                counter_collection_pending_values.emplace_back(*profiler_record);
+            else
+                ritr->emplace_back(*profiler_record);
         }
         else
         {
@@ -1717,6 +1744,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     rocprofiler_get_timestamp(&init_time);
     rocprofiler_get_thread_id(&main_tid);
+
+    // snapshot the output filename at configure time so that multiple tool
+    // instances registered with different ROCPROFILER_TOOL_OUTPUT_FILE values
+    // each write to their own file rather than reading a single shared value
+    // at teardown
+    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) output_filename = eofname;
 
     assert(tool_data != nullptr);
 
@@ -2658,6 +2691,19 @@ tool_fini(void* tool_data)
 
     rocprofiler_get_timestamp(&fini_time);
 
+    if(!counter_collection_pending_values.empty())
+    {
+        auto msg = std::stringstream{};
+        msg << "missing rocprofiler_dispatch_counting_service_record_t (header) for "
+            << counter_collection_pending_values.size()
+            << " buffered counter value record(s); unmatched records:";
+        for(const auto& itr : counter_collection_pending_values)
+        {
+            msg << " {dispatch_id=" << itr.dispatch_id << ", counter_instance_id=" << itr.id << "}";
+        }
+        throw std::runtime_error{msg.str()};
+    }
+
     std::cerr << "[" << getpid() << "][" << __FUNCTION__
               << "] Finalizing... agents=" << agents.size()
               << ", runtime_init_callback_records=" << runtime_init_cb_records.size()
@@ -2727,7 +2773,7 @@ void
 write_json(call_stack_t* _call_stack)
 {
     auto ofname = std::string{"rocprofiler-tool-results.json"};
-    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+    if(!output_filename.empty()) ofname = output_filename;
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};
@@ -3644,6 +3690,30 @@ rocprofiler_configure(uint32_t                 version,
 
     // return pointer to configure data
     return &cfg;
+}
+
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_force_configure()
+{
+    return rocprofiler_force_configure(rocprofiler_configure);
+}
+
+// Mid-run context control hooks for the anytime stop/start test. json-tool normally starts
+// its contexts at tool_init and stops them at tool_fini; these let a driver stop and
+// restart the contexts at controlled points so a test can verify that work performed while
+// the contexts are stopped is not captured.
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_stop()
+{
+    client::stop();
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_start()
+{
+    client::start();
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();

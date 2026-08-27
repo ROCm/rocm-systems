@@ -1,0 +1,477 @@
+# rocshmem4py: Python Bindings for rocSHMEM
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
+`rocshmem4py` provides Python bindings for the ROCm OpenSHMEM (rocSHMEM) runtime library, enabling GPU-centric networking through an OpenSHMEM-like interface on AMD ROCm platforms.
+
+## Features
+
+- **Core rocSHMEM API**: Memory management, data transfer, atomics, synchronization
+- **Teams**: Team split/destroy/translate with tracked lifecycle and WORLD/INVALID sentinels
+- **Team-scoped collectives**: Stream-ordered all-to-all and broadcast
+- **Framework-agnostic allocation**: `rocshmem_create_buffer` / `rocshmem_get_peer_buffer` work without any ML framework
+- **Heap-base introspection**: `rocshmem_get_heap_bases` for device-side pointer translation
+- **`__cuda_array_interface__`**: Zero-copy interop between `SymmetricBuffer` and PyTorch tensors
+- **PyTorch interop submodule**: `rocshmem4py.interop.torch` for tensor allocation, RMA, and collectives
+- **PyTorch coordination**: `init_with_torch()` / `finalize_with_torch()` for torch.distributed-based init
+- **MPI Integration**: `init_with_mpi()` / `finalize_with_mpi()` for existing MPI applications
+
+## API Coverage
+
+`rocshmem4py` currently exposes a focused host-side subset of rocSHMEM APIs:
+initialization/finalization, PE/team queries, team management, memory
+allocation, put/get (blocking/non-blocking/stream variants), team-scoped
+collectives, the full host atomic-operation matrix, and key constants.
+Context APIs (`rocshmem_ctx_*`) are not yet exposed. It does not yet expose
+every rocSHMEM host API.
+
+Host-facing symbols are exported directly from the compiled extension module
+(`_rocshmem4py`) to avoid drift between Python imports and C++ bindings.
+
+## Prerequisites
+
+- AMD ROCm 6.0+ with HIP
+- An **installed** rocSHMEM, **version 3.5.0 or newer** (built with RO, IPC, or
+  GDA backend, with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`) exposing its CMake
+  package at `<prefix>/lib/cmake/rocshmem/`, discoverable via `CMAKE_PREFIX_PATH`.
+  The build enforces this floor via `find_package(rocshmem 3.5 ...)`; an older
+  install is rejected at configure time (the binding wraps APIs added in 3.5.0).
+  The linked version is recorded in the wheel version as a local segment
+  (`rocshmem4py-0.1.0+rocshmem<ver>`) and exposed at runtime as
+  `rocshmem4py.__rocshmem_version__`.
+- Python 3.8+
+- CMake 3.20+
+- nanobind 2.12.0+ (binding backend)
+- Distributed launcher: `torchrun` (for `init_with_torch()`, IPC/GDA
+  backends) **or** `mpirun` (for `init_with_mpi()`, and required by the RO
+  backend regardless of init path &mdash; see [*RO backend requires `mpirun`*](#ro-backend-requires-mpirun) below).
+- ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; **RO backend only**; any
+  distro Open MPI works for IPC/GDA bootstrap. See [*ROCm-aware Open MPI required for RO*](#rocm-aware-open-mpi-required-for-ro) below.
+- `mpi4py` (only when using `init_with_mpi()`).
+
+## Installation
+
+`rocshmem4py` builds as a standalone Python project **on top of an installed
+rocSHMEM** — it does not build the C++ library itself. Build and install
+rocSHMEM first, then point the binding build at that install with
+`CMAKE_PREFIX_PATH`; rocSHMEM is located through its exported CMake package
+(`find_package(rocshmem CONFIG)`).
+
+### 1. Build and install rocSHMEM (the C++ library)
+
+```bash
+cmake -S /path/to/rocm-systems/projects/rocshmem -B /tmp/rocshmem-build \
+      -DCMAKE_INSTALL_PREFIX=/opt/rocshmem \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON      # required: the wheel links librocshmem.a
+cmake --build /tmp/rocshmem-build -j && cmake --install /tmp/rocshmem-build
+```
+
+### 2. Build the binding against that install
+
+```bash
+export CMAKE_PREFIX_PATH=/opt/rocshmem          # the rocSHMEM install prefix
+export ROCM_PATH=/opt/rocm                      # only if ROCm isn't at /opt/rocm
+
+pip install -e .                                # or: python -m build --wheel
+```
+
+`CMAKE_PREFIX_PATH` is the standard discovery interface and is all that is
+needed to point at a rocSHMEM install; `ROCSHMEM_HOME` is still accepted as a
+convenience alias. The build requirements (`nanobind`, `cmake`) are declared in
+`pyproject.toml`, so a plain `pip install -e .` pulls them into the build
+isolation environment automatically. With `--no-build-isolation`, install them
+first: `pip install nanobind cmake`.
+
+At runtime the extension needs the ROCm libraries on the loader path:
+
+```bash
+export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+```
+
+> Note: this package is not published to PyPI yet; install from source only.
+
+### Building against different rocSHMEM backend configurations
+
+The binding statically links `librocshmem.a`, so its build and runtime
+requirements follow whatever backends/allocators the rocSHMEM install was
+configured with:
+
+- **MPI (every config, not just RO)** — rocSHMEM defaults `USE_EXTERNAL_MPI=AUTO`,
+  so if MPI was present when the library was built it is linked into *every*
+  configuration, IPC-only included, and the extension records `libmpi` as
+  `NEEDED`. The binding locates MPI itself (`find_package(MPI)`), so an MPI
+  development install must be present at build time and `libmpi` loadable at
+  runtime. This base-MPI link/bootstrap dependency is separate from the
+  ROCm-aware Open MPI + UCX that the **RO backend** needs at runtime for
+  transport / `init_with_mpi()` (see the RO sections below).
+- **`USE_GDA=ON` / `USE_SDMA=ON`** — the install exports `find_dependency(NUMA)`.
+  rocSHMEM's exported config resolves this itself: on ROCm ≥ 7.13 it adds its
+  `rocm_sysdeps` prefix around the `find_dependency(NUMA)` call, and on older
+  ROCm it bakes a resolved `numa::numa` target into the package. The binding
+  needs no `rocm_sysdeps` / NUMA handling of its own. (Requires a rocSHMEM that
+  includes the exported-dependency fix, ROCm-systems PR #9583.)
+- **`USE_SDMA=ON`** / **`rocprofiler-register`** — also exported by rocSHMEM's
+  config (`find_dependency(hsakmt)` / `find_dependency(rocprofiler-register)`),
+  so both resolve automatically during `find_package(rocshmem)`.
+- **`hip`, `hsa-runtime64`, `Threads`** — resolved via the binding's own
+  `find_package(hip)`, which runs before `find_package(rocshmem)`.
+- **Heap allocator (runtime, not a build flag)** — as of ROCm-systems PR #9432
+  the allocator is selected at runtime via `ROCSHMEM_HEAP_ALLOCATOR_TYPE`; the
+  old `USE_HEAP_DEVICE_*` CMake options are gone. It does not affect the binding
+  build (same wheel, chosen per run):
+
+  | `ROCSHMEM_HEAP_ALLOCATOR_TYPE` | Use case | Requirements |
+  |---|---|---|
+  | `finegrained` *(default)* | General use | — |
+  | `coarsegrained` | Coarse-grained device memory | — |
+  | `uncached` | Uncached fine-grained; falls back to `finegrained` if unavailable in the build | — |
+  | `vmm_posix` | Single-node VMM over POSIX IPC | ROCm ≥ 7.2; **not** compatible with MPI-based init (`init_with_mpi()`) |
+  | `vmm_fabric` | Multi-node / multi-pod over fabric | fabric-capable interconnect; `libamd_smi` reachable at runtime (it is `dlopen`ed for pod detection, not linked) |
+
+  Unset defaults to `finegrained`. See rocSHMEM's `rocshmem_info` output and its
+  docs for the authoritative list and performance guidance.
+
+Device code objects are embedded in the extension's `.hip_fatbin`; there are no
+separate `_rocshmem4py*.so.0.*` offload files to install or clean up.
+
+### Running the tests
+
+The tests are plain `pytest` — `tests/conftest.py` handles rocSHMEM
+init/finalize and PE detection, so all that's needed is to launch `pytest`
+across the desired number of PEs with the ROCm runtime on the loader path (the
+`LD_LIBRARY_PATH` export above):
+
+```bash
+# IPC / GDA backends (torch present): torchrun spawns the PEs
+torchrun --standalone --nnodes=1 --nproc_per_node=2 -m pytest tests/ -v
+
+# RO backend: a ROCm-aware, UCX-enabled Open MPI (see the RO section below)
+mpirun -n 2 -mca pml ucx -mca osc ucx \
+    -x LD_LIBRARY_PATH -x WORLD_SIZE=2 \
+    python -m pytest tests/ -v
+```
+
+To validate the binding across *every* rocSHMEM backend configuration in one
+shot — rebuilding the C++ library per config in isolated venvs and asserting the
+wheel imports, records the linked library version, embeds all GPU arches, and
+resolves its transitive deps — use `validate_configs.py` (see `tests/README.md`).
+
+### Binding backend
+
+`rocshmem4py` uses **nanobind** to build the compiled extension module
+(`_rocshmem4py`). The public Python contract &mdash; module name, function
+names, argument behavior, and return types &mdash; is stable and independent
+of the binding framework. Framework-independent rocSHMEM glue lives in
+`src/rocshmem4py_common.hpp`; the thin `m.def(...)` registration layer lives in
+`src/rocshmem4py.cc`.
+
+## Quick Start
+
+### Backend launch matrix
+
+| Backend | Requires MPI runtime | Recommended launcher | Example |
+|---|---|---|---|
+| RO      | Yes | `mpirun`   | `mpirun -n 2 python my_script.py` |
+| IPC/GDA | No  | `torchrun` | `torchrun --standalone --nproc_per_node=2 my_script.py` |
+
+`init_with_torch()` works under both launchers. `init_with_mpi()` requires an
+`mpirun`-launched process environment.
+
+### With PyTorch coordination (recommended)
+
+```python
+import torch
+import rocshmem4py
+from rocshmem4py.interop import torch as rshmem_torch
+
+# RO backend:   mpirun -n 2 python my_script.py
+# IPC/GDA:      torchrun --standalone --nproc_per_node=2 my_script.py
+rocshmem4py.init_with_torch()
+
+my_pe = rocshmem4py.rocshmem_my_pe()
+n_pes = rocshmem4py.rocshmem_n_pes()
+
+# Allocate a symmetric tensor (backed by rocshmem_malloc)
+src = rshmem_torch.create_tensor((64,), torch.float32)
+dst = rshmem_torch.create_tensor((64,), torch.float32)
+src.fill_(float(my_pe))
+dst.fill_(-1.0)
+torch.cuda.synchronize()
+
+# Stream-ordered transfer to the next PE (portable across all backends)
+peer = (my_pe + 1) % n_pes
+rshmem_torch.barrier_all()
+rshmem_torch.put(dst, src, peer)
+rshmem_torch.barrier_all()
+torch.cuda.synchronize()
+
+rocshmem4py.finalize_with_torch()
+```
+
+### With MPI coordination
+
+```python
+from mpi4py import MPI
+import rocshmem4py
+
+rocshmem4py.init_with_mpi(MPI.COMM_WORLD)
+
+my_pe = rocshmem4py.rocshmem_my_pe()
+buf = rocshmem4py.SymmetricBuffer(1024)
+rocshmem4py.rocshmem_barrier_all()
+
+buf.free()
+rocshmem4py.finalize_with_mpi()
+```
+
+## API Reference
+
+### Initialization / Finalization
+
+| Function | Description |
+|---|---|
+| `init_with_torch(group=None)` | Init rocSHMEM via torch.distributed (recommended) |
+| `finalize_with_torch()` | Synchronized teardown of rocSHMEM + torch.distributed |
+| `init_with_mpi(comm)` | Init rocSHMEM via mpi4py |
+| `finalize_with_mpi()` | Synchronized teardown for `init_with_mpi()` sessions |
+| `init_rocshmem_by_uniqueid(group)` | Low-level init with a torch process group |
+| `set_hip_device_from_env()` | Pin HIP device from `LOCAL_RANK` before raw init |
+| `rocshmem_init()` | Raw rocSHMEM init (rarely needed directly) |
+| `rocshmem_finalize()` | Raw rocSHMEM finalize |
+| `rocshmem_init_attr(rank, nranks, uid)` | Init with unique ID |
+| `rocshmem_get_uniqueid()` | Get a unique ID for init_attr |
+
+### PE Queries
+
+| Function | Description |
+|---|---|
+| `rocshmem_my_pe()` | PE number of the calling process |
+| `rocshmem_n_pes()` | Total number of PEs |
+| `rocshmem_team_my_pe(team)` | PE number within a team |
+| `rocshmem_team_n_pes(team)` | Number of PEs in a team |
+
+### Teams
+
+Team handles are passed as Python `int` values (raw `intptr_t` from the C
+library). Use the sentinel constants below for the special teams; all other
+handles come from `rocshmem_team_split_strided`.
+
+| Function / type | Description |
+|---|---|
+| `TeamConfig()` | Configuration record for `rocshmem_team_split_strided` (`num_contexts`) |
+| `rocshmem_team_split_strided(parent, start, stride, size, config=None, mask=0)` | Split a parent team into a strided sub-team; returns `(status, team_handle)`. Non-members receive `ROCSHMEM_TEAM_INVALID` (`-1`), not `0` |
+| `rocshmem_team_destroy(team)` | Destroy a team (no-op for `ROCSHMEM_TEAM_WORLD` / `ROCSHMEM_TEAM_INVALID`) |
+| `rocshmem_team_translate_pe(src_team, src_pe, dest_team)` | Map a PE index between teams; returns `-1` if unmappable |
+
+Pass `ROCSHMEM_TEAM_WORLD` (`0`) for world-scope team operations. The C
+binding's `resolve_team_handle()` translates this sentinel to the runtime
+handle; use the constant rather than a raw runtime pointer so
+`rocshmem_team_destroy` and the tracked split/destroy wrappers stay safe.
+
+`finalize_with_torch()` and `finalize_with_mpi()` automatically destroy any
+teams created via the tracked `rocshmem_team_split_strided` wrapper before
+calling `rocshmem_finalize()`.
+
+### Memory Management
+
+#### Framework-agnostic (`rocshmem4py`)
+
+| Function | Description |
+|---|---|
+| `rocshmem_malloc(size)` | Allocate symmetric memory (returns raw pointer) |
+| `rocshmem_free(ptr)` | Free symmetric memory |
+| `rocshmem_ptr(dest, pe)` | Get remote symmetric pointer (IPC backends only) |
+| `SymmetricBuffer(size)` | RAII wrapper; exposes `__cuda_array_interface__` for zero-copy torch interop |
+| `rocshmem_create_buffer(nbytes)` | Collective allocation returning a `SymmetricBuffer` |
+| `rocshmem_get_peer_buffer(buf, peer)` | Non-owning `SymmetricBuffer` view of a peer's buffer (IPC only) |
+| `rocshmem_get_heap_bases(ptr)` | Per-PE base addresses for a symmetric allocation (for device-side pointer translation) |
+
+#### PyTorch interop (`rocshmem4py.interop.torch`)
+
+| Function | Description |
+|---|---|
+| `create_tensor(shape, dtype)` | Collective allocation returning a symmetric `torch.Tensor` |
+| `get_peer_tensor(tensor, peer)` | Zero-copy tensor view of a peer's symmetric tensor (IPC only) |
+| `free_tensor(tensor)` | Explicit collective-safe deallocation |
+| `put(dst, src, peer, stream=None)` | Stream-ordered put (all backends) |
+| `get(dst, src, peer, stream=None)` | Stream-ordered get (all backends) |
+| `barrier_all(stream=None)` | Stream-ordered collective barrier |
+| `get_heap_bases(tensor)` | `(n_pes,)` int64 GPU tensor of per-PE heap bases for a symmetric tensor |
+| `alltoall(team, dst, src, stream=None)` | Stream-ordered all-to-all over a team |
+| `broadcast(team, dst, src, pe_root, stream=None)` | Stream-ordered broadcast over a team |
+
+### Collectives
+
+#### Host (`rocshmem4py`)
+
+| Function | Description |
+|---|---|
+| `rocshmem_alltoallmem_on_stream(team, dest, source, bytes_per_pe, stream)` | Stream-ordered all-to-all; `bytes_per_pe` is bytes sent to each PE in the team |
+| `rocshmem_broadcastmem_on_stream(team, dest, source, nbytes, pe_root, stream)` | Stream-ordered broadcast; `nbytes` is total bytes; `pe_root` is in the team's PE space |
+| `rocshmem_sync_all()` | Lighter-weight sync (local-store visibility) |
+| `rocshmem_sync_all_on_stream(stream)` | Stream-ordered `sync_all` |
+
+Pass `ROCSHMEM_TEAM_WORLD` (`0`) as the team handle for world-scope collectives.
+
+### Data Transfer
+
+| Function | Description |
+|---|---|
+| `rocshmem_putmem(dest, src, nbytes, pe)` | Blocking put |
+| `rocshmem_getmem(dest, src, nbytes, pe)` | Blocking get |
+| `rocshmem_putmem_nbi(dest, src, nbytes, pe)` | Non-blocking put |
+| `rocshmem_getmem_nbi(dest, src, nbytes, pe)` | Non-blocking get |
+| `rocshmem_putmem_on_stream(dest, src, nbytes, pe, stream)` | Stream-ordered put |
+| `rocshmem_getmem_on_stream(dest, src, nbytes, pe, stream)` | Stream-ordered get |
+| `rocshmem_putmem_signal_on_stream(...)` | Stream-ordered put with signal |
+| `rocshmem_signal_wait_until_on_stream(...)` | Stream-ordered signal wait |
+
+### Synchronization
+
+| Function | Description |
+|---|---|
+| `rocshmem_barrier_all()` | Barrier across all PEs |
+| `rocshmem_barrier_all_on_stream(stream)` | Stream-ordered barrier across all PEs |
+| `rocshmem_barrier(team)` | Blocking barrier across all PEs in `team` |
+| `rocshmem_barrier_on_stream(team, stream)` | Stream-ordered team barrier; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_team_sync(team)` | Team member rendezvous plus local-store visibility (lighter than barrier) |
+| `rocshmem_team_sync_on_stream(team, stream)` | Stream-ordered team sync; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_sync_all()` | World-scope sync (local-store visibility) |
+| `rocshmem_sync_all_on_stream(stream)` | Stream-ordered world sync |
+| `rocshmem_fence()` | Ordering fence |
+| `rocshmem_quiet()` | Wait for all outstanding operations |
+| `hip_device_synchronize()` | Synchronize the current HIP device |
+
+Team-scoped calls use the same `team` handle conventions as collectives
+(`ROCSHMEM_TEAM_WORLD` or a handle from `rocshmem_team_split_strided`).
+Non-members of a child team should pass `ROCSHMEM_TEAM_INVALID` (`-1`); the
+runtime returns without enqueueing work. If RMA was issued on a HIP stream,
+synchronize that stream before a *blocking* `rocshmem_barrier(team)`; use
+`rocshmem_barrier_on_stream` on the same stream as the RMA for overlap.
+
+### Atomic Operations
+
+Host atomic operations are auto-exported from the compiled extension by naming
+convention (`rocshmem_{type}_atomic_{op}`). The matrix covers integer, unsigned,
+and floating types with fetch/set/swap/CAS, fetch-add/add, fetch-inc/inc, and
+bitwise ops where the rocSHMEM header provides them.
+
+Examples:
+
+| Function | Description |
+|---|---|
+| `rocshmem_int_atomic_fetch_add(dest, value, pe)` | Atomic int fetch-and-add |
+| `rocshmem_long_atomic_fetch_add(dest, value, pe)` | Atomic long fetch-and-add |
+| `rocshmem_int_atomic_compare_swap(dest, cond, value, pe)` | Atomic int CAS |
+| `rocshmem_uint64_atomic_or(dest, value, pe)` | Atomic uint64 OR |
+
+> **Note:** Host AMO bindings are present in all builds, but behavioral
+> correctness on the IPC no-MPI backend depends on runtime support that is
+> still being extended.
+
+### Constants
+
+| Constant | Value | Description |
+|---|---|---|
+| `ROCSHMEM_TEAM_WORLD` | `0` | Team containing all PEs |
+| `ROCSHMEM_TEAM_INVALID` | `-1` | Invalid team identifier |
+| `ROCSHMEM_SUCCESS` | `0` | Success status code |
+| `ROCSHMEM_SIGNAL_SET` | impl-defined | Signal set op enum |
+| `ROCSHMEM_SIGNAL_ADD` | impl-defined | Signal add op enum |
+| `ROCSHMEM_CMP_EQ/NE/GT/GE/LT/LE` | impl-defined | Signal wait compare enums |
+
+## Test suite layout
+
+For how to launch the tests see [*Running the tests*](#running-the-tests) above.
+Test source layout, the full launcher &times; backend &times; init-tier
+matrix used by `conftest.py`, and CI-author guidance live in the test
+suite's own README:
+<https://github.com/ROCm/rocm-systems/blob/develop/python/rocshmem/tests/README.md>.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ImportError: _rocshmem4py` | ROCm runtime not on the loader path | `export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH` |
+| CMake cannot find rocSHMEM at build time | rocSHMEM install prefix not on the search path | `export CMAKE_PREFIX_PATH=/path/to/rocshmem-install` (has `lib/cmake/rocshmem/`) before `pip install -e .` |
+| Build picks up a stale rocSHMEM (e.g. `/opt/rocm`), new APIs undeclared | another rocSHMEM shadows your prefix | ensure `CMAKE_PREFIX_PATH` points at the intended install; `setup.py` forwards it as a `-D` cache var so it takes precedence |
+| Link error: `recompile with -fPIC` | `librocshmem.a` built without PIC | Rebuild rocSHMEM with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` |
+| RO backend hangs in `mca_btl_vader.so` (`Wrote -1, errno = 14`), aborts with `MPI_ERR_WIN: invalid window`, or hangs at exit in `__run_exit_handlers` &rarr; `libamdhip64` | Non-ROCm-aware Open MPI / UCX cannot handle GPU buffers in the data plane | Use ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; see [below](#rocm-aware-open-mpi-required-for-ro) |
+| `Unsupported configuration to initialize rocSHMEM. Please initialize the MPI library using MPI_Init first` | RO backend launched under `torchrun` &mdash; see *"RO backend requires `mpirun`"* below | Launch with `mpirun` (you can keep `init_with_torch()`), or build an IPC/GDA-only rocSHMEM if you don't need inter-node RDMA |
+| Rendezvous / port conflict under `torchrun` | Default `MASTER_PORT=29500` already taken | Set `MASTER_PORT` (or `ROCSHMEM_MASTER_PORT`) to a free port |
+
+### Why `LD_LIBRARY_PATH` is needed
+
+The wheel *statically* links `librocshmem.a`, but still *dynamically* links the
+ROCm runtime (`libamdhip64`, `libhsa-runtime64`) and whatever shared libraries
+rocSHMEM itself pulls in (e.g. `libmpi`, `libnuma`). Those are not bundled into
+the wheel, so at import time the dynamic loader has to be able to find them:
+
+```bash
+export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+```
+
+On HPC systems ROCm is usually provided by a module (`module load rocm`), which
+sets this for you; on a workstation, point it at your ROCm `lib` (or add that
+directory under `/etc/ld.so.conf.d/`). The tell-tale symptom when it is missing
+is an `ImportError` naming `libamdhip64.so` (or another ROCm lib) as unfindable.
+
+### RO backend requires `mpirun`
+
+This is a structural property of rocSHMEM's C library, not a packaging
+gap in `rocshmem4py`: `library_init_subcomm` (in `src/rocshmem.cpp`)
+requires either `MPI_Initialized()` to be true or the OpenMPI launcher
+env var `OMPI_COMM_WORLD_SIZE` to be set. `mpirun`/`prterun` exports
+those env vars; `torchrun` does not. Pre-importing `mpi4py` is **not** a
+workaround &mdash; it makes `MPI_Initialized()` return true, which then
+routes the C library through a subgroup-creation path
+(`MPI_Group_incl` + `MPI_Comm_create_group`) across processes that live
+in disjoint singleton MPI universes, and that crashes inside OMPI's PMIx
+wireup. Use `mpirun` for RO; `init_with_torch()` itself still works
+under `mpirun`, so you keep the `torch.distributed` unique-id exchange
+and only the launcher changes.
+
+### ROCm-aware Open MPI required for RO
+
+Only RO backend builds need ROCm-aware **Open MPI 5.0.x + UCX 1.17+ built
+with `--with-rocm`** for data-plane RMA. IPC and GDA backends use MPI
+only for bootstrap and work with any distro Open MPI (see prereqs and
+troubleshooting above).
+
+Verify on the launch host:
+
+```bash
+mpirun --version           # must say "Open MPI v5.0.x"
+ucx_info -d | grep rocm    # must list rocm_copy and rocm_ipc transports
+```
+
+See the rocSHMEM
+[install docs](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/docs/install.rst#install-dependencies)
+for build instructions.
+
+### Diagnosing which rocSHMEM backend you actually linked
+
+A pre-built `_rocshmem4py.so` (or any wheel you might pick up later)
+statically links *one* rocSHMEM backend. When initialization fails in
+ways that look backend-specific, two checks pin down which one:
+
+```bash
+# What backend does the rocSHMEM install at $ROCSHMEM_HOME advertise?
+"${ROCSHMEM_HOME}/bin/rocshmem_info" | grep "Vendor String"
+
+# Which backend's code is actually linked into the loaded extension?
+nm -D --defined-only "$(python -c 'import _rocshmem4py; print(_rocshmem4py.__file__)')" \
+  | grep -E " T _ZN8rocshmem(9RO|10IPC|10GDA)Backend" | head
+```
+
+The auto-detect order is IPC &rarr; GDA &rarr; RO; force a specific one
+with `ROCSHMEM_BACKEND=ipc` if the build supports it. The same
+`_rocshmem4py` source builds against any backend &mdash; there are no
+backend `#ifdef`s in the binding layer &mdash; so two wheels with
+identical Python APIs can behave differently at runtime depending on
+how the C library was configured.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.

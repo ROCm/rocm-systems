@@ -570,4 +570,16 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
     }
 }
 
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_get_version(rocprof_trace_decoder_version_t* version)
+{
+    if (version == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    version->size = sizeof(rocprof_trace_decoder_version_t);
+    version->major = ROCPROF_TRACE_DECODER_VERSION_MAJOR;
+    version->minor = ROCPROF_TRACE_DECODER_VERSION_MINOR;
+    version->patch = ROCPROF_TRACE_DECODER_VERSION_PATCH;
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
 } // extern "C"

@@ -1077,9 +1077,8 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
     return hipSuccess;
   }
 
-  // num_streams is already capped by Init() but guard here defensively.
-  // For the instantiation device one slot is occupied by the launch stream,
-  // so create one fewer extra stream. Other devices use all slots as parallel streams.
+  // num_streams is already capped by Init() but guard here defensively. On the
+  // capture device the launch stream fills one slot, so create one fewer there.
   uint32_t capped = std::min(num_streams, DEBUG_HIP_FORCE_GRAPH_QUEUES);
   uint32_t max_streams = (devId == captureDeviceId_ && capped > 0) ? capped - 1 : capped;
   if (max_streams == 0) {
@@ -1118,6 +1117,53 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
 
     parallel_streams_[devId].push_back(stream);
   }
+  return hipSuccess;
+}
+
+// ================================================================================================
+// Creates the capture-device stream needed for cross-device launches (restores
+// the full internal pool; CreateStreams() holds one slot back for same-device
+// launches where the user stream fills it). Deferred to first cross-device use.
+hipError_t GraphExecBase::EnsureCrossDeviceStream() {
+  std::scoped_lock lock(graphExecStreamCreateLock_);
+
+  // Callers pre-test the pointer, so a steady-state launch never takes this lock.
+  if (cross_device_stream_ != nullptr) {
+    return hipSuccess;
+  }
+  if (captureDeviceId_ < 0 || captureDeviceId_ >= g_devices.size() ||
+      g_devices[captureDeviceId_] == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "[hipGraph] Invalid capture device ID %d for cross-device stream creation",
+            captureDeviceId_);
+    return hipErrorInvalidDevice;
+  }
+
+  auto stream = new hip::Stream(g_devices[captureDeviceId_], hip::Stream::Priority::Normal,
+                                hipStreamNonBlocking);
+  if (!stream->Create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "[hipGraph] Failed to create cross-device stream for device %d", captureDeviceId_);
+    hip::Stream::Destroy(stream);
+    return hipErrorOutOfMemory;
+  }
+
+  auto& parallel_streams = parallel_streams_[captureDeviceId_];
+  stream->vdev()->PinQueue();
+  // Avoid colliding with the queues already held by the capture-device pool.
+  std::unordered_set<uint64_t> used_qids;
+  for (auto* existing : parallel_streams) {
+    if (existing != nullptr) {
+      used_qids.insert(existing->getQueueID());
+    }
+  }
+  if (!used_qids.empty()) {
+    stream->vdev()->ReacquireQueueExcluding(used_qids);
+  }
+
+  // Owned by parallel_streams_, so ~GraphExecBase() tears it down with the rest.
+  parallel_streams.push_back(stream);
+  cross_device_stream_ = stream;
   return hipSuccess;
 }
 
@@ -1220,10 +1266,9 @@ hipError_t GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
-  // max_streams_dev_ holds the raw parallelism count per device as computed by
-  // FindStreamsReqPerDevForSegments() and capped in Init(). CreateStreams() handles
-  // the -1 adjustment for the instantiation device internally, so the value here
-  // represents the total stream pool size for every device uniformly.
+  // max_streams_dev_ represents the total stream-slot count uniformly per device;
+  // CreateStreams() does not adjust it. The capture device's slot 0 instead comes
+  // from the launch stream (same-device) or EnsureCrossDeviceStream() (cross-device).
   auto getPoolSize = [&](int dev_id) -> size_t {
     auto it = max_streams_dev_.find(dev_id);
     return (it != max_streams_dev_.end() && it->second > 0)
@@ -1611,13 +1656,23 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
       status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
-      topoOrder_[i]->EnqueueCommands(launch_stream);
+      if (status != hipSuccess) {
+        this->release();
+        return status;
+      }
+      status = topoOrder_[i]->EnqueueCommands(launch_stream);
+      if (status != hipSuccess) {
+        this->release();
+        return status;
+      }
     }
   } else {
-    if (!RunNodes()) {
+    // Execute all nodes in the graph
+    status = RunNodes();
+    if (status != hipSuccess) {
       LogError("Failed to launch nodes!");
       this->release();
-      return hipErrorOutOfMemory;
+      return status;
     }
   }
 
@@ -2763,7 +2818,8 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
-      node->EnqueueCommands(stream);
+      status = node->EnqueueCommands(stream);
+      if (status != hipSuccess) return status;
     }
   }
 
@@ -2781,20 +2837,34 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
 
 // ================================================================================================
 void GraphExecBase::UpdateStreams(hip::Stream* launch_stream) {
-  int devId = launch_stream->vdev()->device().index();
+  int devId = (launch_stream != nullptr) ? launch_stream->vdev()->device().index()
+                                         : captureDeviceId_;
   streams_.clear();
-  streams_.push_back(launch_stream);
+  if (launch_stream != nullptr) {
+    streams_.push_back(launch_stream);
+  }
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
-    // No parallel streams were created for this device
+    if (launch_stream == nullptr) {
+      LogPrintfError("UpdateStreams failed for capture device id:%d", devId);
+    }
     return;
   }
   auto& parallel_streams = parallel_streams_[devId];
 
-  // Collect queue IDs already in use, starting with the launch stream
+  // Collect queue IDs already in use, starting with the launch stream if present.
   std::unordered_set<uint64_t> used_qids;
-  used_qids.insert(launch_stream->getQueueID());
+  hip::Stream* skipped_stream = nullptr;
+  if (launch_stream != nullptr) {
+    used_qids.insert(launch_stream->getQueueID());
+    // The launch stream fills slot 0 here, so a stream added for cross-device use
+    // stays idle.
+    skipped_stream = (devId == captureDeviceId_) ? cross_device_stream_ : nullptr;
+  }
 
-  for (auto stream : parallel_streams) {
+  for (auto* stream : parallel_streams) {
+    if (stream == skipped_stream) {
+      continue;
+    }
     uint64_t qid = stream->getQueueID();
     if (used_qids.count(qid) > 0) {
       // Collision: this stream shares a HW queue with the launch stream or another
@@ -2814,10 +2884,19 @@ void GraphExecBase::UpdateStreams(hip::Stream* launch_stream) {
 }
 
 // ================================================================================================
-bool Graph::RunOneNode(Node node) {
+hipError_t Graph::RunOneNode(Node node) {
   // Clear the storage of the wait nodes
   memset(&wait_order_[0], 0, sizeof(Node) * wait_order_.size());
   amd::Command::EventWaitList waitList;
+  auto releaseWaitOrderCommands = [&]() {
+    for (auto dep : wait_order_) {
+      if (dep != nullptr) {
+        for (auto command : dep->GetCommands()) {
+          command->release();
+        }
+      }
+    }
+  };
   // Walk through dependencies and find the last launches on each parallel stream
   for (auto depNode : node->GetDependencies()) {
     // Process only the nodes that have been submitted
@@ -2845,7 +2924,7 @@ bool Graph::RunOneNode(Node node) {
       node->SetWait(false);
       // It should be a safe return,
       // since the last edge to this dependency has to submit the command
-      return true;
+      return hipSuccess;
     }
   }
 
@@ -2861,7 +2940,11 @@ bool Graph::RunOneNode(Node node) {
     // Process child graph separately, since there is no connection
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-      child->RunNodes(node->stream_id_, &streams_, &waitList);
+      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList);
+      if (status != hipSuccess) {
+        releaseWaitOrderCommands();
+        return status;
+      }
       // Store the child graph's completion command so that downstream
       // dependency handling can use node->GetCommands() directly,
       // instead of querying getLastQueuedCommand at dependency time
@@ -2886,23 +2969,22 @@ bool Graph::RunOneNode(Node node) {
     auto status = node->CreateCommand(node->GetQueue());
     if (status != hipSuccess) {
       LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
-      return false;
+      releaseWaitOrderCommands();
+      return status;
     }
     // If a wait was requested, then process the list
     if (node->GetWait() && !waitList.empty()) {
       node->UpdateEventWaitLists(waitList);
     }
     // Start the execution
-    node->EnqueueCommands(node->GetQueue());
-  }
-  // Release commands of dependency nodes that were included in the wait list after enqueue
-  for (auto dep : wait_order_) {
-    if (dep != nullptr) {
-      for (auto command : dep->GetCommands()) {
-        command->release();
-      }
+    status = node->EnqueueCommands(node->GetQueue());
+    if (status != hipSuccess) {
+      releaseWaitOrderCommands();
+      return status;
     }
   }
+  // Release commands of dependency nodes that were included in the wait list after enqueue
+  releaseWaitOrderCommands();
   // Assign the launch ID of the submitted node
   // This is also applied to childGraphs to prevent them from being reprocessed
   node->launch_id_ = current_id_++;
@@ -2935,12 +3017,12 @@ bool Graph::RunOneNode(Node node) {
   }
 
   node->SetWait(false);
-  return true;
+  return hipSuccess;
 }
 
 // ================================================================================================
-bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
-                     const amd::Command::EventWaitList* parent_waitlist) {
+hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
+                           const amd::Command::EventWaitList* parent_waitlist) {
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
   }
@@ -2986,8 +3068,9 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   // Run all commands in the graph
   for (auto node : GetTopoOrder()) {
     node->launch_id_ = -1;
-    if (!RunOneNode(node)) {
-      return false;
+    auto status = RunOneNode(node);
+    if (status != hipSuccess) {
+      return status;
     }
   }
   wait_list.clear();
@@ -3013,7 +3096,7 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
     }
   }
 
-  return true;
+  return hipSuccess;
 }
 
 // ================================================================================================
@@ -3072,9 +3155,19 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   // try to re-acquire the same one it used last time.
   // Then run collision detection to ensure graph-internal streams don't share
   // a HW queue with the launch stream.
+  const bool cross_device_launch = (captureDeviceId_ != launch_stream->DeviceId());
   launch_stream->vdev()->SetPreferredQueue();
   launch_stream->vdev()->AcquireQueueWithPreference();
-  UpdateStreams(launch_stream);
+  // Slot 0 must be an internal capture-device stream when the launch stream lives on
+  // another device. Built on first use; later launches only test the pointer.
+  if (cross_device_launch && cross_device_stream_ == nullptr) {
+    status = EnsureCrossDeviceStream();
+    if (status != hipSuccess) {
+      this->release();
+      return status;
+    }
+  }
+  UpdateStreams(cross_device_launch ? nullptr : launch_stream);
 
   // Signals borrowed from the per-graph pool for this launch (segmented path
   // only); handed to the completion callback to re-arm and return to the pool.
@@ -3084,15 +3177,17 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   // reuse the graph's own accumulate command instead of enqueuing a dedicated marker
   amd::Command* completion_cmd = nullptr;
 
-  if (captureDeviceId_ == launch_stream->DeviceId()) {
-    // If the graph has kernels that does device side allocation,  during packet capture, heap is
-    // allocated because heap pointer has to be added to the AQL packet, and initialized during
-    // graph launch.
-    // Todo: Hidden heap initialization is done only for single device graph
-    if (HasHiddenHeap() && hiddenHeapInitializedDevices_.insert(launch_stream->DeviceId()).second) {
-      launch_stream->vdev()->HiddenHeapInit();
-    }
-    amd::Command* last_cmd = nullptr;
+  // If the graph has kernels that do device-side allocation, packet capture
+  // needs the hidden heap on the graph/capture device, not necessarily the
+  // user-visible launch stream device.
+  hip::Stream* graph_launch_stream = cross_device_launch ? streams_[0] : launch_stream;
+  if (HasHiddenHeap() &&
+      hiddenHeapInitializedDevices_.insert(captureDeviceId_).second) {
+    graph_launch_stream->vdev()->HiddenHeapInit();
+  }
+
+  amd::Command* last_cmd = nullptr;
+  if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
       last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_set);
@@ -3100,23 +3195,49 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       // Multi-device: pass empty vector, will use parallel_streams_ internally
       last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_set);
     }
-
-    // Drive OnLaunchComplete off this command's completion (its leaf-sync deps
-    // already imply all parallel work is done). Our reference is released after
-    // the callback is registered below; the queue keeps it alive until done.
-    completion_cmd = last_cmd;
-  } else if (max_streams_ == 1 && captureDeviceId_ != launch_stream->DeviceId()) {
-    for (int i = 0; i < topoOrder_.size(); i++) {
-      topoOrder_[i]->SetStream(launch_stream);
-      status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
-      topoOrder_[i]->EnqueueCommands(launch_stream);
+  } else {
+    // Cross-device launch: replay segmented AQL on a capture-device stream.
+    // A marker on the graph stream preserves prior foreign launch-stream
+    // ordering when such work exists. The completion marker below makes graph
+    // completion visible on the foreign launch stream.
+    hip::Stream* graph_stream = streams_[0];
+    constexpr bool kRetainCommand = true;
+    amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(kRetainCommand);
+    if (launch_last_cmd != nullptr) {
+      amd::Command::EventWaitList launch_wait_list;
+      launch_wait_list.push_back(launch_last_cmd);
+      auto* graph_start = new amd::Marker(*graph_stream, true, launch_wait_list);
+      graph_start->enqueue();
+      graph_start->release();
+      launch_last_cmd->release();
     }
-  } else if (captureDeviceId_ != launch_stream->DeviceId()) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-      "[hipGraph] GraphExecSegmented::Run: launch stream device %d does not match capture device %d",
-      launch_stream->DeviceId(), captureDeviceId_);
-    status = hipErrorInvalidValue;
+
+    last_cmd = EnqueueSegmentedGraph(graph_stream, streams_, &status, &launch_signal_set);
+    if (status == hipSuccess && last_cmd != nullptr) {
+      amd::Command::EventWaitList completion_wait_list;
+      completion_wait_list.push_back(last_cmd);
+
+      auto* launch_done = new amd::Marker(*launch_stream, kMarkerDisableFlush, completion_wait_list);
+      launch_done->enqueue();
+      // The launch stream queue owns this marker now. Keep last_cmd as the
+      // capture-device completion command that drives graph resource cleanup.
+      launch_done->release();
+    } else if (status != hipSuccess) {
+      // Error path only: EnqueueSegmentedGraph may have queued partial work
+      // before failing. Drain the capture-device streams before the common
+      // cleanup path can recycle launch signals or drop this exec reference.
+      for (auto* stream : streams_) {
+        if (stream != nullptr) {
+          stream->finish();
+        }
+      }
+    }
   }
+
+  // Drive OnLaunchComplete off this command's completion (its leaf-sync deps
+  // already imply all parallel work is done). Our reference is released after
+  // the callback is registered below; the queue keeps it alive until done.
+  completion_cmd = last_cmd;
   if (DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_) {
     graph_dumped_ = true;
     std::string filename =
@@ -3132,7 +3253,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   amd::Command* CallbackCommand = completion_cmd;
   const bool own_callback_cmd = (CallbackCommand == nullptr);
   if (own_callback_cmd) {
-    CallbackCommand = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});
+    CallbackCommand = new amd::Marker(*graph_launch_stream, kMarkerDisableFlush, {});
     // we may not need to flush any caches.
     CallbackCommand->setCommandEntryScope(amd::Device::kCacheStateIgnore);
   }
@@ -3140,7 +3261,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   constexpr bool kBlocking = false;
   auto* cleanup = new GraphLaunchCleanup();
   cleanup->exec = this;
-  cleanup->device = g_devices[launch_stream->DeviceId()]->devices()[0];
+  cleanup->device = g_devices[captureDeviceId_]->devices()[0];
   cleanup->signal_set = std::move(launch_signal_set);
   if (!event.setCallback(CL_COMPLETE, GraphExecBase::OnLaunchComplete, cleanup, kBlocking)) {
     // setCallback essentially never fails, but if it does the launch's GPU work
@@ -3148,7 +3269,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     // its signals). Drain that work, then run the same completion handling the
     // callback would have (recycle the borrowed pooled signals + drop our
     // reference) so they are not leaked and the pool does not shrink.
-    launch_stream->finish();
+    graph_launch_stream->finish();
     OnLaunchComplete(nullptr, CL_COMPLETE, cleanup);
     CallbackCommand->release();
     return hipErrorInvalidHandle;

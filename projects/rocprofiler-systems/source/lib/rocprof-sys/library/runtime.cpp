@@ -65,7 +65,8 @@ sampling_on_child_threads()
     // inherit the last state
     static thread_local bool _v =
         (_thr_info) ? !_thr_info->is_offset
-        : (get_state() != State::Active || get_thread_state() != ThreadState::Enabled)
+        : (state::process::get() != state::process::Active ||
+           state::thread::get() != state::thread::Enabled)
             ? false
             : (get_sampling_on_child_threads_history().empty()
                    ? false
@@ -121,14 +122,14 @@ create_cpu_cid_entry(std::int64_t _tid)
 {
     using tim::auto_lock_t;
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // unique lock for _tid
     auto&       _mtx = get_cpu_cid_stack_lock(_tid);
     auto_lock_t _lk{ _mtx, std::defer_lock };
     if(!_lk.owns_lock()) _lk.lock();
 
-    std::int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
+    const std::int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
 
     auto&       _p_mtx = get_cpu_cid_stack_lock(_p_idx);
     auto_lock_t _p_lk{ _p_mtx, std::defer_lock };
@@ -226,7 +227,7 @@ sampling_enabled_on_child_threads()
 bool
 push_enable_sampling_on_child_threads(bool _v)
 {
-    bool _last                  = sampling_on_child_threads();
+    const bool _last            = sampling_on_child_threads();
     sampling_on_child_threads() = _v;
     auto& _hist                 = get_sampling_on_child_threads_history();
     _hist.emplace_back(_last);
@@ -239,7 +240,7 @@ pop_enable_sampling_on_child_threads()
     auto& _hist = get_sampling_on_child_threads_history();
     if(!_hist.empty())
     {
-        bool _restored = _hist.back();
+        const bool _restored = _hist.back();
         _hist.pop_back();
         sampling_on_child_threads() = _restored;
     }
