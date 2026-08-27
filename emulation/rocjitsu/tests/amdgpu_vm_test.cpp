@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
@@ -1114,6 +1115,75 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
 }
 
+TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  allocation[0] = 0x5a;
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  {
+    amdgpu::RequestMtypeResolver request(&memory, kPid);
+    EXPECT_EQ(request.at(kBaseVa), amdgpu::Mtype::UC);
+    EXPECT_EQ(hook_calls, 0u);
+  }
+
+  EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x5a);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, SanitizedL1BackingLookupAllowsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint32_t kInitial = 0x11112222;
+  constexpr uint32_t kReplacement = 0x33334444;
+  constexpr uint32_t kLatest = 0x55556666;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::memcpy(allocation.get(), &kInitial, sizeof(kInitial));
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+  l2.set_backing_memory(&memory);
+  l1.set_memory(&memory);
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::UC);
+    std::memcpy(allocation.get(), &kReplacement, sizeof(kReplacement));
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+
+  uint32_t result = 0;
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kReplacement);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::UC);
+
+  std::memcpy(allocation.get(), &kLatest, sizeof(kLatest));
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kLatest);
+}
+
 TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
@@ -1128,13 +1198,13 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
   process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
+                          process.page_table_generation(), process.page_table_request_mutex());
 
   std::function<void()> query_hook = [&] {
     amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
     memory.unregister_process(kPid);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            process.page_table_generation());
+                            process.page_table_generation(), process.page_table_request_mutex());
     EXPECT_EQ(memory.read8(kNestedVa, kPid), 0x22);
   };
   amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
@@ -1155,7 +1225,8 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
     new_page[0] = 0x22;
     process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            use_generation ? process.page_table_generation() : nullptr);
+                            use_generation ? process.page_table_generation() : nullptr,
+                            process.page_table_request_mutex());
 
     uint8_t *current_page = old_page.get();
     size_t hook_calls = 0;
@@ -2735,6 +2806,7 @@ constexpr uint32_t sop1(uint32_t op, uint32_t sdst, uint32_t ssrc0) {
   return (0x17Du << 23) | (sdst << 16) | (op << 8) | ssrc0;
 }
 constexpr uint32_t s_mov_b32(uint32_t sdst, uint32_t ssrc0) { return sop1(0, sdst, ssrc0); }
+constexpr uint32_t s_mov_b64(uint32_t sdst, uint32_t ssrc0) { return sop1(1, sdst, ssrc0); }
 
 // SOP2: encoding[31:30]=0x2, op[29:23], sdst[22:16], ssrc1[15:8], ssrc0[7:0]
 constexpr uint32_t sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0, uint32_t ssrc1) {
@@ -2824,6 +2896,18 @@ constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0
 constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
                             uint32_t soffset = INLINE_CONST(0)) {
   return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
+}
+
+// SMEM (64-bit): CDNA layout.
+// dword0: sbase[5:0], sdata[12:6], soffset_en[14], nv[15], glc[16], imm[17],
+//         op[25:18], encoding[31:26]=0x30
+// dword1: offset[20:0], soffset[31:25]
+constexpr uint32_t smem_lo(uint32_t op, uint32_t sdata, uint32_t sbase, uint32_t imm = 0,
+                           uint32_t soffset_en = 0) {
+  return (0x30u << 26) | (op << 18) | (imm << 17) | (soffset_en << 14) | (sdata << 6) | sbase;
+}
+constexpr uint32_t smem_hi(uint32_t offset, uint32_t soffset = 0) {
+  return (soffset << 25) | (offset & 0x1FFFFFu);
 }
 
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
@@ -3280,6 +3364,82 @@ TEST_P(IsaTest, BranchLoop) {
   step_until_halted(*fx.f.engine, {fx.cu()});
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
+  EXPECT_TRUE(fx.halted());
+}
+
+// SMEM offset forms: IMM=0 (SGPR, M0, unaligned SGPR, s_scratch x64), IMM=1 (aligned,
+// unaligned), IMM=1+SOE, SOE=1 (SGPR, M0, VCC_LO, unaligned SGPR), SBASE = VCC.
+TEST_P(IsaTest, SLoad_OffsetForms) {
+  ExecFixture fx(arch());
+  constexpr uint64_t kBufferAddr = 0x2000;
+  for (uint32_t i = 0; i < 64; ++i)
+    fx.f.mem()->write32(kBufferAddr + i * 4, 0x1000 + i);
+
+  using namespace enc;
+  constexpr uint32_t kM0 = 124, kVccLo = 106;
+  const std::vector<uint32_t> code = {
+      s_mov_b32(SGPR(4), 255), // s[4:5] = kBufferAddr
+      static_cast<uint32_t>(kBufferAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(64)),
+      s_mov_b32(kM0, INLINE_CONST(32)),
+      s_mov_b32(kVccLo, INLINE_CONST(48)),
+      s_mov_b32(SGPR(2), INLINE_CONST(2)),
+      s_mov_b32(SGPR(11), INLINE_CONST(63)),
+      s_mov_b32(SGPR(12), SGPR(4)), // V# s[12:15]: base, stride 0, 256 records
+      s_mov_b32(SGPR(13), INLINE_CONST(0)),
+      s_mov_b32(SGPR(14), 255),
+      256u,
+      s_mov_b32(SGPR(15), INLINE_CONST(0)),
+      smem_lo(cdna4::kSLoadDwordSmem, 7, SGPR(4) / 2),
+      smem_hi(6), // s7 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordx2Smem, 8, SGPR(4) / 2),
+      smem_hi(6), // s[8:9] = [s[4:5] + s6]
+      smem_lo(cdna4::kSBufferLoadDwordSmem, 10, SGPR(12) / 2),
+      smem_hi(6), // s10 = [V# + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 16, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x8), // s16 = [s[4:5] + 8]
+      smem_lo(cdna4::kSLoadDwordSmem, 17, SGPR(4) / 2, /*imm=*/1, /*soffset_en=*/1),
+      smem_hi(0x8, 6), // s17 = [s[4:5] + 8 + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 18, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 6), // s18 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 19, SGPR(4) / 2),
+      smem_hi(kM0), // s19 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 20, SGPR(4) / 2),
+      smem_hi(11), // s20 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 21, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kM0), // s21 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 22, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kVccLo), // s22 = [s[4:5] + vcc_lo]
+      smem_lo(cdna4::kSLoadDwordSmem, 23, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 11), // s23 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 24, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x9), // s24 = [s[4:5] + (9 & ~3)]
+      smem_lo(cdna4::kSScratchLoadDwordSmem, 25, SGPR(4) / 2),
+      smem_hi(2),                 // s25 = [s[4:5] + s2 * 64]
+      s_mov_b64(kVccLo, SGPR(4)), // vcc = s[4:5]
+      smem_lo(cdna4::kSLoadDwordSmem, 26, kVccLo / 2),
+      smem_hi(6), // s26 = [vcc + s6]
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  fx.load_program(code);
+
+  EXPECT_EQ(fx.read_sgpr(7), 0x1010u) << "IMM=0 s_load_dword";
+  EXPECT_EQ(fx.read_sgpr(8), 0x1010u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(9), 0x1011u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(10), 0x1010u) << "IMM=0 s_buffer_load_dword";
+  EXPECT_EQ(fx.read_sgpr(16), 0x1002u) << "IMM=1";
+  EXPECT_EQ(fx.read_sgpr(17), 0x1012u) << "IMM=1 SOE=1";
+  EXPECT_EQ(fx.read_sgpr(18), 0x1010u) << "SOE=1";
+  EXPECT_EQ(fx.read_sgpr(19), 0x1008u) << "IMM=0 M0";
+  EXPECT_EQ(fx.read_sgpr(20), 0x100fu) << "IMM=0 unaligned";
+  EXPECT_EQ(fx.read_sgpr(21), 0x1008u) << "SOE=1 M0";
+  EXPECT_EQ(fx.read_sgpr(22), 0x100cu) << "SOE=1 VCC_LO";
+  EXPECT_EQ(fx.read_sgpr(23), 0x100fu) << "SOE=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(24), 0x1002u) << "IMM=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(25), 0x1020u) << "IMM=0 s_scratch_load_dword";
+  EXPECT_EQ(fx.read_sgpr(26), 0x1010u) << "SBASE=VCC";
   EXPECT_TRUE(fx.halted());
 }
 
