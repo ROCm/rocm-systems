@@ -4,7 +4,7 @@
 **Date:** 2026-08-27  
 **Arch:** gfx942 (MI300X)
 
-**Related:** Design docs on branch `users/feizheng10/metric-correction-design` (PR #10655) — `single-pass-counter-grouping-evaluation.md`
+**Related:** [Single-pass grouping evaluation (design)](../design/single-pass-counter-grouping-evaluation.md) · [Root cause report](aiprofcomp78-multipass-root-cause-report.md)
 
 ---
 
@@ -53,16 +53,18 @@ Tool: `OmniSoC_Base.detect_counters()` + `_allocate_perfmon_counter_files()` on 
 
 Block-only profiling is the **cheapest** way to get co-temporal counters for validation without policy edits.
 
-### 4.2 Adding grouping policy (full panel)
+### 4.2 Adding grouping policy (full panel) — typically increases passes
+
+Adding `same_bucket_priority_metric_ids` on gfx942 full panel **typically increases** pass count in simulation. Metric-aware coalesce opens new buckets when priority groups cannot fit existing ones.
 
 | `same_bucket_priority_metric_ids` | Simulated passes | Δ |
 |-----------------------------------|------------------|---|
 | `{}` (current) | 12 | — |
 | `17.2.1` (HBM Read Traffic) | **17** | **+42%** |
-| `6.1.2` (WGM Utilization) | 17 | +42% |
+| `6.1.2` (Workgroup Manager Utilization) | 17 | +42% |
 | `17.2.1`, `6.1.2`, `5.1.0`, `15.4.0` | 17 | +42% |
 
-**Policy does not reduce pass count on gfx942 full panel** in simulation — it **increases** it when metric-aware coalesce opens new buckets.
+Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. The trade-off is co-location accuracy vs longer profile time.
 
 ### 4.3 Co-location effect (full panel)
 
