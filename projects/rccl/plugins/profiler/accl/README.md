@@ -1,7 +1,7 @@
 # ACCL Profiler — RCCL Timing Decomposition Plugin
 
 A profiler plugin that decomposes collective execution time into GPU kernel,
-network, proxy, and launch overhead components. Unlike the inspector plugin
+network, proxy, and enqueue delay components. Unlike the inspector plugin
 (which only captures Coll + KernelCh events), the accl-profiler subscribes
 to all four key event types for full root-cause triage.
 
@@ -32,7 +32,7 @@ Per-collective JSONL records with timing decomposition:
     "coll_algobw_gbs": 0.027907, "coll_busbw_gbs": 0.048836,
     "coll_timing_source": "gpu_globaltimer",
     "decomposition": {
-      "launch_overhead_us": 5.20,
+      "enqueue_to_kernel_us": 5.20,
       "gpu_kernel_avg_us": 45.10, "gpu_kernel_min_us": 44.80, "gpu_kernel_max_us": 45.40,
       "proxy_gpu_wait_us": 12.80, "proxy_network_us": 1.20,
       "proxy_peer_wait_us": 38.70, "proxy_flush_us": 42.30,
@@ -81,13 +81,14 @@ python3 accl_report.py single --input /path/to/output/
 python3 accl_report.py compare --baseline /path/to/baseline/ --candidate /path/to/candidate/
 ```
 
-The report classifies bottlenecks per message size:
-- **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
+The report classifies bottlenecks per message size (evaluated in this order):
+- **unknown** — zero wall time (degenerate record)
 - **gpu-compute (no proxy)** — kernel-only collective with no proxy ops
-- **NETWORK** — network send/recv + peer wait dominates
-- **PROXY-FLUSH/GDR** — GDR flush + GPU recv wait dominates
+- **NETWORK** — network send/recv + peer wait dominates (>40% of wall time)
+- **PROXY-FLUSH/GDR** — GDR flush + GPU recv wait dominates (>40%)
 - **GPU-SCHEDULING** — proxy GPU wait dominates (>20% of wall time)
-- **LAUNCH-OVERHEAD** — host-side launch latency dominates (>40%)
+- **ENQUEUE-DELAY** — enqueue-to-first-kernel delay dominates (>40%)
+- **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
 - **mixed** — no single component dominates
 
 ## Requirements

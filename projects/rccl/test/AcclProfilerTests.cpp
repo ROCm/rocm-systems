@@ -10,11 +10,15 @@
 // and exercises the plugin lifecycle (init → startEvent → stopEvent → finalize)
 // through process-isolated tests to keep global pool state clean.
 
-#include <gtest/gtest.h>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <unistd.h>
+
+#include <gtest/gtest.h>
+
+#include "accl_shim.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 // Forward declarations — thin wrappers defined in accl_profiler_wrapper.cc
@@ -22,9 +26,6 @@ extern "C" {
   int test_acclDatatypeSize(const char* dt);
   double test_acclBusBwFactor(const char* func, int nRanks);
 }
-
-// Plugin API (symbol visibility is __hidden but linked within the same binary)
-#include "accl_shim.h"
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
                                    int, int, int, ncclDebugLogger_t);
 extern ncclResult_t acclPluginStartEvent(void*, void**,
@@ -96,11 +97,14 @@ TEST(AcclBusBwFactor, AllGather) {
 
 TEST(AcclBusBwFactor, AlltoAll) {
     EXPECT_DOUBLE_EQ(test_acclBusBwFactor("AlltoAll", 8), 7.0 / 8.0);
+    EXPECT_DOUBLE_EQ(test_acclBusBwFactor("AlltoAllv", 8), 7.0 / 8.0);
 }
 
 TEST(AcclBusBwFactor, BroadcastAndReduce) {
     EXPECT_DOUBLE_EQ(test_acclBusBwFactor("Broadcast", 8), 1.0);
     EXPECT_DOUBLE_EQ(test_acclBusBwFactor("Reduce", 8), 1.0);
+    EXPECT_DOUBLE_EQ(test_acclBusBwFactor("Gather", 8), 1.0);
+    EXPECT_DOUBLE_EQ(test_acclBusBwFactor("Scatter", 8), 1.0);
 }
 
 TEST(AcclBusBwFactor, EdgeCases) {
@@ -123,10 +127,10 @@ TEST(AcclProfilerInit, InitAndFinalize) {
                 &ctx, 0x1234, &mask, "test_comm", 1, 8, 0, nullptr);
             ASSERT_EQ(rc, 0);
             ASSERT_NE(ctx, nullptr);
-            EXPECT_TRUE(mask & (1 << 1));  // ncclProfileColl
-            EXPECT_TRUE(mask & (1 << 6));  // ncclProfileKernelCh
-            EXPECT_TRUE(mask & (1 << 3));  // ncclProfileProxyOp
-            EXPECT_TRUE(mask & (1 << 4));  // ncclProfileProxyStep
+            EXPECT_TRUE(mask & ncclProfileColl);
+            EXPECT_TRUE(mask & ncclProfileKernelCh);
+            EXPECT_TRUE(mask & ncclProfileProxyOp);
+            EXPECT_TRUE(mask & ncclProfileProxyStep);
             EXPECT_EQ(acclPluginFinalize(ctx), 0);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp"}}
@@ -149,7 +153,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             // Start a Coll event
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);  // ncclProfileColl
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -165,7 +169,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             // Start a KernelCh event
             ncclProfilerEventDescr_v5_t kchDescr;
             memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = (1 << 6);  // ncclProfileKernelCh
+            kchDescr.type = ncclProfileKernelCh;
             kchDescr.parentObj = collHandle;
             kchDescr.kernelCh.channelId = 0;
             kchDescr.kernelCh.pTimer = 1000000;
@@ -180,7 +184,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             stateArgs.kernelCh.pTimer = 1005000;  // 50 us at 100 MHz
             ASSERT_EQ(acclPluginRecordEventState(
                 kchHandle,
-                static_cast<ncclProfilerEventState_v5_t>(22),  // kernelChStop
+                ncclProfilerKernelChStop,  // kernelChStop
                 &stateArgs), 0);
 
             // Stop Coll first, then KernelCh — matches RCCL teardown ordering
@@ -234,7 +238,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             // Start Coll
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -249,7 +253,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             // Start KernelCh
             ncclProfilerEventDescr_v5_t kchDescr;
             memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = (1 << 6);
+            kchDescr.type = ncclProfileKernelCh;
             kchDescr.parentObj = collHandle;
             kchDescr.kernelCh.channelId = 0;
             kchDescr.kernelCh.pTimer = 0;
@@ -260,7 +264,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             // Start ProxyOp (referencing the same coll)
             ncclProfilerEventDescr_v5_t proxyDescr;
             memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = (1 << 3);
+            proxyDescr.type = ncclProfileProxyOp;
             proxyDescr.parentObj = collHandle;
             proxyDescr.proxyOp.channelId = 0;
             proxyDescr.proxyOp.peer = 1;
@@ -301,26 +305,25 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 }
 
 // =========================================================================
-// Pool reclaim: teardown-orphaned slots must be reclaimable
+// Pool exhaustion: full pool returns NULL and drops the collective
 // =========================================================================
-TEST(AcclProfilerLifecycle, PoolReclaimsOrphanedSlots) {
+TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
     RUN_ISOLATED_TEST_WITH_ENV(
-        "AcclProfilerLifecycle.PoolReclaimsOrphanedSlots",
+        "AcclProfilerLifecycle.PoolFullReturnsNull",
         []() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xD00D, &mask, "pool_test",
                                      1, 1, 0, nullptr), 0);
 
-            // Fill the pool (256 slots) with collectives that have
-            // nChannels=1 but no KernelCh events. Stop each coll
-            // immediately — collStopped=1, nKernelChCompleted(0) != nChannels(1),
-            // so acclShouldFinalize never fires and the slot stays pinned.
+            // Fill the pool (256 slots) with collectives that stay pinned:
+            // nChannels=1 but no KernelCh events, so acclShouldFinalize
+            // never fires even after coll stop.
             void* handles[256];
             for (int i = 0; i < 256; i++) {
                 ncclProfilerEventDescr_v5_t d;
                 memset(&d, 0, sizeof(d));
-                d.type = (1 << 1);
+                d.type = ncclProfileColl;
                 d.coll.func = "AllReduce";
                 d.coll.algo = "Ring";
                 d.coll.proto = "Simple";
@@ -333,22 +336,21 @@ TEST(AcclProfilerLifecycle, PoolReclaimsOrphanedSlots) {
                 ASSERT_EQ(acclPluginStopEvent(handles[i]), 0);
             }
 
-            // Pool is now full. The next alloc should trigger reclaim
-            // of the collStopped slots and succeed.
+            // Pool is full. The 257th allocation must return NULL (dropped).
             ncclProfilerEventDescr_v5_t d;
             memset(&d, 0, sizeof(d));
-            d.type = (1 << 1);
+            d.type = ncclProfileColl;
             d.coll.func = "AllReduce";
             d.coll.algo = "Ring";
             d.coll.proto = "Simple";
             d.coll.datatype = "ncclFloat32";
             d.coll.count = 1;
             d.coll.seqNumber = 999;
-            d.coll.nChannels = 0;
+            d.coll.nChannels = 1;
             void* h = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &h, &d), 0);
-            EXPECT_NE(h, nullptr) << "Pool reclaim failed — slot 257 should succeed";
-            if (h) ASSERT_EQ(acclPluginStopEvent(h), 0);
+            EXPECT_EQ(h, nullptr)
+                << "Full pool must return NULL, not evict live collectives";
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
@@ -371,7 +373,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             // Start coll with 2 channels
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -388,7 +390,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             void* kch1 = nullptr;
             ncclProfilerEventDescr_v5_t kd;
             memset(&kd, 0, sizeof(kd));
-            kd.type = (1 << 6);
+            kd.type = ncclProfileKernelCh;
             kd.parentObj = collHandle;
 
             kd.kernelCh.channelId = 0;
@@ -404,10 +406,10 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             memset(&sa, 0, sizeof(sa));
             sa.kernelCh.pTimer = 2010000;
             ASSERT_EQ(acclPluginRecordEventState(
-                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kch0, ncclProfilerKernelChStop, &sa), 0);
             sa.kernelCh.pTimer = 2010200;
             ASSERT_EQ(acclPluginRecordEventState(
-                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kch1, ncclProfilerKernelChStop, &sa), 0);
 
             // Stop Coll FIRST (before any KernelCh stop)
             ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
@@ -464,7 +466,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             // Start Coll
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -479,7 +481,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             // Start KernelCh
             ncclProfilerEventDescr_v5_t kchDescr;
             memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = (1 << 6);
+            kchDescr.type = ncclProfileKernelCh;
             kchDescr.parentObj = collHandle;
             kchDescr.kernelCh.channelId = 0;
             kchDescr.kernelCh.pTimer = 5000000;
@@ -489,7 +491,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             // Start ProxyOp
             ncclProfilerEventDescr_v5_t proxyDescr;
             memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = (1 << 3);
+            proxyDescr.type = ncclProfileProxyOp;
             proxyDescr.parentObj = collHandle;
             proxyDescr.proxyOp.channelId = 0;
             proxyDescr.proxyOp.peer = 1;
@@ -501,7 +503,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             // Start ProxyStep
             ncclProfilerEventDescr_v5_t stepDescr;
             memset(&stepDescr, 0, sizeof(stepDescr));
-            stepDescr.type = (1 << 4);
+            stepDescr.type = ncclProfileProxyStep;
             stepDescr.parentObj = proxyHandle;
             stepDescr.proxyStep.step = 0;
             void* stepHandle = nullptr;
@@ -510,14 +512,15 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             // Simulate proxy step state transitions
             ASSERT_EQ(acclPluginRecordEventState(
                 stepHandle,
-                static_cast<ncclProfilerEventState_v5_t>(8),   // SendGPUWait
+                ncclProfilerProxyStepSendGPUWait,
                 nullptr), 0);
             ASSERT_EQ(acclPluginRecordEventState(
                 stepHandle,
-                static_cast<ncclProfilerEventState_v5_t>(9),   // SendWait
+                ncclProfilerProxyStepSendWait,
                 nullptr), 0);
 
-            // Stop everything in order: step → op → kernel → coll
+            // Stop in order: step -> coll -> kernel -> op (op last, so the
+            // ProxyOp-stop path is what triggers finalization)
             ASSERT_EQ(acclPluginStopEvent(stepHandle), 0);
             ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
 
@@ -526,7 +529,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             memset(&sa, 0, sizeof(sa));
             sa.kernelCh.pTimer = 5010000;
             ASSERT_EQ(acclPluginRecordEventState(
-                kchHandle, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kchHandle, ncclProfilerKernelChStop, &sa), 0);
 
             ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
             ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
@@ -551,11 +554,13 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 }
 
 // =========================================================================
-// Channel bounds: channelId >= nChannels should be silently dropped
+// Channel bounds: absolute channelId above nChannels must be accepted
+// (RCCL uses a plan-wide cursor, so the second collective in a grouped
+// launch gets channelIds starting where the first left off)
 // =========================================================================
-TEST(AcclProfilerLifecycle, OutOfRangeChannelIdDropped) {
+TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
     RUN_ISOLATED_TEST_WITH_ENV(
-        "AcclProfilerLifecycle.OutOfRangeChannelIdDropped",
+        "AcclProfilerLifecycle.AbsoluteChannelIdAboveNChannelsAccepted",
         []() {
             void* ctx = nullptr;
             int mask = 0;
@@ -564,7 +569,7 @@ TEST(AcclProfilerLifecycle, OutOfRangeChannelIdDropped) {
 
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -575,43 +580,41 @@ TEST(AcclProfilerLifecycle, OutOfRangeChannelIdDropped) {
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+            ASSERT_NE(collHandle, nullptr);
 
-            // channelId=5 with nChannels=2 should be dropped
             ncclProfilerEventDescr_v5_t kchDescr;
             memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = (1 << 6);
+            kchDescr.type = ncclProfileKernelCh;
             kchDescr.parentObj = collHandle;
+
+            // channelId=4 and 5 with nChannels=2: simulates the second
+            // collective in a grouped launch where the first used channels 0-3.
+            // These MUST be accepted — the guard is ACCL_MAX_CHANNELS, not nChannels.
+            kchDescr.kernelCh.channelId = 4;
+            kchDescr.kernelCh.pTimer = 1000000;
+            void* kch4 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch4, &kchDescr), 0);
+            ASSERT_NE(kch4, nullptr)
+                << "channelId=4 with nChannels=2 must be accepted (absolute id)";
+
             kchDescr.kernelCh.channelId = 5;
-            kchDescr.kernelCh.pTimer = 0;
-            void* kchHandle = nullptr;
-            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
-            EXPECT_EQ(kchHandle, nullptr)
-                << "channelId=5 with nChannels=2 should return NULL handle";
-
-            // Valid channels should still work
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 1000;
-            void* kch0 = nullptr;
-            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kchDescr), 0);
-            ASSERT_NE(kch0, nullptr);
-
-            kchDescr.kernelCh.channelId = 1;
-            kchDescr.kernelCh.pTimer = 1000;
-            void* kch1 = nullptr;
-            ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kchDescr), 0);
-            ASSERT_NE(kch1, nullptr);
+            kchDescr.kernelCh.pTimer = 1000000;
+            void* kch5 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch5, &kchDescr), 0);
+            ASSERT_NE(kch5, nullptr)
+                << "channelId=5 with nChannels=2 must be accepted (absolute id)";
 
             ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
 
             ncclProfilerEventStateArgs_v5_t sa;
             memset(&sa, 0, sizeof(sa));
-            sa.kernelCh.pTimer = 2000;
+            sa.kernelCh.pTimer = 1010000;
             ASSERT_EQ(acclPluginRecordEventState(
-                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kch4, ncclProfilerKernelChStop, &sa), 0);
             ASSERT_EQ(acclPluginRecordEventState(
-                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
-            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
-            ASSERT_EQ(acclPluginStopEvent(kch1), 0);
+                kch5, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch4), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch5), 0);
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
@@ -633,7 +636,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 
             ncclProfilerEventDescr_v5_t collDescr;
             memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = (1 << 1);
+            collDescr.type = ncclProfileColl;
             collDescr.coll.func = "AllReduce";
             collDescr.coll.algo = "Ring";
             collDescr.coll.proto = "Simple";
@@ -648,7 +651,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
             // Channel 0: 100 us (10000 ticks at 100 MHz)
             ncclProfilerEventDescr_v5_t kd;
             memset(&kd, 0, sizeof(kd));
-            kd.type = (1 << 6);
+            kd.type = ncclProfileKernelCh;
             kd.parentObj = collHandle;
             kd.kernelCh.channelId = 0;
             kd.kernelCh.pTimer = 1000000;
@@ -665,10 +668,10 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
             memset(&sa, 0, sizeof(sa));
             sa.kernelCh.pTimer = 1010000;  // +10000 = 100 us
             ASSERT_EQ(acclPluginRecordEventState(
-                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kch0, ncclProfilerKernelChStop, &sa), 0);
             sa.kernelCh.pTimer = 1020000;  // +20000 = 200 us
             ASSERT_EQ(acclPluginRecordEventState(
-                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+                kch1, ncclProfilerKernelChStop, &sa), 0);
 
             ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
             ASSERT_EQ(acclPluginStopEvent(kch0), 0);

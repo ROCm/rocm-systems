@@ -12,6 +12,7 @@ Usage:
     python3 accl_report.py compare --baseline dir/baseline/ --candidate dir/candidate/
 """
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -35,7 +36,7 @@ class Record:
     busbw_gbs: float
     timing_source: str
     # Decomposition
-    launch_overhead_us: float = 0
+    enqueue_to_kernel_us: float = 0
     gpu_kernel_avg_us: float = 0
     gpu_kernel_min_us: float = 0
     gpu_kernel_max_us: float = 0
@@ -85,7 +86,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 algobw_gbs=cp.get('coll_algobw_gbs', 0),
                 busbw_gbs=cp.get('coll_busbw_gbs', 0),
                 timing_source=cp.get('coll_timing_source', ''),
-                launch_overhead_us=decomp.get('launch_overhead_us', 0),
+                enqueue_to_kernel_us=decomp.get('enqueue_to_kernel_us', 0),
                 gpu_kernel_avg_us=decomp.get('gpu_kernel_avg_us', 0),
                 gpu_kernel_min_us=decomp.get('gpu_kernel_min_us', 0),
                 gpu_kernel_max_us=decomp.get('gpu_kernel_max_us', 0),
@@ -103,6 +104,40 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
               f"File may have fewer than {warmup} iterations.",
               file=sys.stderr)
     return records
+
+
+def parse_summaries(filepath: str) -> List[dict]:
+    summaries = []
+    with open(filepath, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or not line.startswith('{'):
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if 'summary' in obj:
+                summaries.append(obj['summary'])
+    return summaries
+
+
+def load_summaries(path: str) -> List[dict]:
+    if os.path.isdir(path):
+        summaries = []
+        for fn in sorted(os.listdir(path)):
+            if fn.endswith('.jsonl'):
+                summaries.extend(parse_summaries(os.path.join(path, fn)))
+        return summaries
+    return parse_summaries(path)
+
+
+def print_drop_warnings(summaries: List[dict]):
+    total_dropped = sum(s.get('dropped_collectives', 0) for s in summaries)
+    if total_dropped > 0:
+        print(f"\n*** WARNING: {total_dropped} collectives dropped due to pool "
+              f"exhaustion (pool_size={summaries[0].get('pool_size', '?')}). "
+              f"Profiling data is incomplete. ***\n", file=sys.stderr)
 
 
 def load_dir_or_file(path: str, warmup: int) -> List[Record]:
@@ -158,7 +193,7 @@ def aggregate(records: List[Record]) -> Dict[Tuple[str, int], SizeAgg]:
             mean_exec_us=sum(r.exec_time_us for r in recs) / n,
             mean_busbw=sum(r.busbw_gbs for r in recs) / n,
             mean_algobw=sum(r.algobw_gbs for r in recs) / n,
-            mean_launch_us=sum(r.launch_overhead_us for r in recs) / n,
+            mean_launch_us=sum(r.enqueue_to_kernel_us for r in recs) / n,
             mean_kernel_us=sum(r.gpu_kernel_avg_us for r in recs) / n,
             mean_proxy_gpu_wait_us=sum(r.proxy_gpu_wait_us for r in recs) / n,
             mean_proxy_network_us=sum(r.proxy_network_us for r in recs) / n,
@@ -200,7 +235,7 @@ def classify_bottleneck(agg: SizeAgg) -> str:
     if agg.mean_proxy_gpu_wait_us / wall * 100 > 20:
         return "GPU-SCHEDULING"
     if launch_pct > 40:
-        return "LAUNCH-OVERHEAD"
+        return "ENQUEUE-DELAY"
     if kernel_pct > 50:
         return "GPU-COMPUTE"
     return "mixed"
@@ -215,7 +250,7 @@ def print_single_report(records: List[Record]):
         print(f"  {coll}")
         print(f"{'='*140}")
         print(f"{'Size':>8s} │ {'ExecUs':>10s} {'BusBW':>8s} │ "
-              f"{'Kernel':>8s} {'PeerWait':>8s} {'Flush':>8s} {'GPUWait':>8s} {'Launch':>8s} │ "
+              f"{'Kernel':>8s} {'PeerWait':>8s} {'Flush':>8s} {'GPUWait':>8s} {'EnqDly':>8s} │ "
               f"{'Algo':>8s} {'Proto':>8s} {'nCh':>4s} {'nProxy':>6s} │ Bottleneck")
         print(f"{'─'*8}─┼─{'─'*10}─{'─'*8}─┼─"
               f"{'─'*8}─{'─'*8}─{'─'*8}─{'─'*8}─{'─'*8}─┼─"
@@ -347,7 +382,7 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
                 if not b or not c:
                     continue
                 components = [
-                    ("Launch",   b.mean_launch_us, c.mean_launch_us),
+                    ("EnqDelay", b.mean_launch_us, c.mean_launch_us),
                     ("GPU Kernel", b.mean_kernel_us, c.mean_kernel_us),
                     ("Network",  b.mean_proxy_network_us, c.mean_proxy_network_us),
                     ("GPU Wait", b.mean_proxy_gpu_wait_us, c.mean_proxy_gpu_wait_us),
@@ -425,25 +460,25 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    out_file = None
-    if args.output:
-        out_file = open(args.output, 'w', encoding="utf-8")
-        sys.stdout = out_file
+    out_ctx = contextlib.redirect_stdout(
+        open(args.output, 'w', encoding="utf-8")
+    ) if args.output else contextlib.nullcontext()
 
-    try:
+    with out_ctx:
         if args.cmd == 'single':
             records = load_dir_or_file(args.input, args.warmup)
+            summaries = load_summaries(args.input)
             print(f"Loaded {len(records)} records")
+            print_drop_warnings(summaries)
             print_single_report(records)
         elif args.cmd == 'compare':
             base = load_dir_or_file(args.baseline, args.warmup)
             cand = load_dir_or_file(args.candidate, args.warmup)
+            base_summaries = load_summaries(args.baseline)
+            cand_summaries = load_summaries(args.candidate)
             print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
+            print_drop_warnings(base_summaries + cand_summaries)
             print_compare_report(base, cand, args.threshold)
-    finally:
-        if out_file:
-            sys.stdout = sys.__stdout__
-            out_file.close()
 
 
 if __name__ == '__main__':

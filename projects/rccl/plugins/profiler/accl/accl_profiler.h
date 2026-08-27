@@ -10,8 +10,8 @@
 #include <time.h>
 
 // Limits
-#define ACCL_MAX_CHANNELS      256
-#define ACCL_MAX_PROXY_OPS     256
+#define ACCL_MAX_CHANNELS 256
+#define ACCL_MAX_PROXY_OPS 256
 
 static inline uint64_t acclGetTimeUs() {
   struct timespec ts;
@@ -23,7 +23,6 @@ static inline uint64_t acclGetTimeUs() {
 struct acclKernelChInfo {
   uint64_t type;
   void*    parentObj;
-  uint64_t parentType;
   uint8_t  channelId;
   uint64_t startGpuClk;
   uint64_t stopGpuClk;
@@ -54,7 +53,6 @@ struct acclProxyOpInfo {
   uint64_t type;
   void*    parentObj;    // points to acclCollInfo (the coll event handle)
   void*    commCtx;      // owning acclCommContext (for pool free)
-  uint64_t parentGeneration; // captured generation of parent coll at start
   uint8_t  channelId;
   int      peer;
   int      nSteps;
@@ -69,14 +67,12 @@ struct acclProxyOpInfo {
   uint64_t totalNetworkUs;   // sendWait + recvWait
   uint64_t totalFlushUs;
   uint64_t totalGpuRecvWaitUs;
-  int      stepCount;
   int      stepsCompleted;
 };
 
 // Per collective record
 struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
-  uint64_t    generation;   // monotonic generation for stale-callback detection
   int         collStopped;
   int         finalized;
   pthread_mutex_t mutex;
@@ -122,7 +118,7 @@ struct acclCompletedRecord {
 
   // Timing decomposition (microseconds)
   double      totalExecUs;
-  double      launchOverheadUs;
+  double      enqueueToKernelUs;
   double      gpuKernelUs;        // avg kernel duration across channels
   double      gpuKernelMinUs;
   double      gpuKernelMaxUs;
@@ -151,13 +147,14 @@ struct acclCompletedRecord {
 };
 
 // Pool sizes (per communicator)
-#define ACCL_COLL_POOL_SIZE      256
-#define ACCL_PROXY_OP_POOL_SIZE  1024
+#define ACCL_COLL_POOL_SIZE 256
+#define ACCL_PROXY_OP_POOL_SIZE 1024
 #define ACCL_PROXY_STEP_POOL_SIZE 4096
 
 // Per-communicator context (owns all pools)
 struct acclCommContext {
-  volatile int refCount;    // ref-count: 1 (init) + 1 per live coll slot
+  int         refCount;
+  uint64_t    droppedCollectives;
   uint64_t    commHash;
   int         rank;
   int         nRanks;
@@ -168,9 +165,6 @@ struct acclCommContext {
   FILE*       outputFile;
   char        outputPath[1024];
   pthread_mutex_t outputMutex;
-
-  // Per-slot generation counters (bumped on each alloc to detect stale callbacks)
-  uint64_t    collGeneration[ACCL_COLL_POOL_SIZE];
 
   // Per-comm pools
   struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
@@ -186,4 +180,4 @@ struct acclCommContext {
   pthread_mutex_t          proxyStepPoolMutex;
 };
 
-#endif // ACCL_PROFILER_H_
+#endif

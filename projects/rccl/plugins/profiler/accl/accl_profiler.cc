@@ -4,12 +4,11 @@
  * Subscribes to: Coll, KernelCh, ProxyOp, ProxyStep
  * Output: JSONL with per-collective timing decomposition.
  *
- * Build: see build.sh
+ * Build: see README.md or CMakeLists.txt
  */
 
 #include "accl_profiler.h"
 
-#include <dlfcn.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -31,49 +30,36 @@ static inline const char* safeStr(const char* s) { return s ? s : ""; }
 // Forward declarations for cross-referenced pool functions
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
 
+static void acclFreeCollProxyOps(struct acclCommContext* ctx,
+                                 struct acclCollInfo* coll) {
+  for (int i = 0; i < coll->nProxyOps; i++) {
+    int idx = coll->proxyOpIndices[i];
+    if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
+      acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+    }
+  }
+}
+
 // ============================================================================
 // Per-communicator pool allocators
 // ============================================================================
 
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int pass = 0; pass < 2; pass++) {
-    for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-      if (!ctx->collPoolUsed[i]) {
-        ctx->collPoolUsed[i] = 1;
-        uint64_t gen = ++ctx->collGeneration[i];
-        memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
-        pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
-        ctx->collPool[i].generation = gen;
-        __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-        pthread_mutex_unlock(&ctx->collPoolMutex);
-        return &ctx->collPool[i];
-      }
-    }
-    if (pass == 0) {
-      int reclaimed = 0;
-      for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-        struct acclCollInfo* c = &ctx->collPool[i];
-        if (ctx->collPoolUsed[i] && c->collStopped && !c->finalized
-            && c->nKernelChStarted == c->nKernelChCompleted
-            && c->nProxyOpsStarted == c->nProxyOpsCompleted) {
-          for (int j = 0; j < c->nProxyOps; j++) {
-            int idx = c->proxyOpIndices[j];
-            if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
-              acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
-          }
-          c->finalized = 1;
-          pthread_mutex_destroy(&c->mutex);
-          ctx->collPoolUsed[i] = 0;
-          __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-          reclaimed++;
-        }
-      }
-      if (reclaimed == 0) break;
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    if (!ctx->collPoolUsed[i]) {
+      ctx->collPoolUsed[i] = 1;
+      memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
+      pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+      pthread_mutex_unlock(&ctx->collPoolMutex);
+      return &ctx->collPool[i];
     }
   }
+  ctx->droppedCollectives++;
   pthread_mutex_unlock(&ctx->collPoolMutex);
-  ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots), dropping collective", ACCL_COLL_POOL_SIZE);
+  ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots), dropping collective (total dropped: %lu)",
+            ACCL_COLL_POOL_SIZE, (unsigned long)ctx->droppedCollectives);
   return NULL;
 }
 
@@ -176,6 +162,9 @@ static double acclBusBwFactor(const char* func, int nRanks) {
   if (strcmp(func, "Broadcast") == 0)       return 1.0;
   if (strcmp(func, "Reduce") == 0)          return 1.0;
   if (strcmp(func, "AlltoAll") == 0)        return (n - 1.0) / n;
+  if (strcmp(func, "AlltoAllv") == 0)       return (n - 1.0) / n;
+  if (strcmp(func, "Gather") == 0)          return 1.0;
+  if (strcmp(func, "Scatter") == 0)         return 1.0;
   return 1.0;
 }
 
@@ -204,7 +193,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     "\"coll_algobw_gbs\":%.6f,\"coll_busbw_gbs\":%.6f,"
     "\"coll_timing_source\":\"%s\","
     "\"decomposition\":{"
-      "\"launch_overhead_us\":%.2f,"
+      "\"enqueue_to_kernel_us\":%.2f,"
       "\"gpu_kernel_avg_us\":%.2f,"
       "\"gpu_kernel_min_us\":%.2f,"
       "\"gpu_kernel_max_us\":%.2f,"
@@ -224,7 +213,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     rec->totalExecUs,
     algoBw, busBw,
     rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock",
-    rec->launchOverheadUs,
+    rec->enqueueToKernelUs,
     rec->gpuKernelUs,
     rec->gpuKernelMinUs,
     rec->gpuKernelMaxUs,
@@ -328,7 +317,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
     } else {
       rec.totalExecUs = (double)(lastCpuStop - firstKernelCpuStartUs);
     }
-    rec.launchOverheadUs = (firstKernelCpuStartUs > coll->tsCollStartUs)
+    rec.enqueueToKernelUs = (firstKernelCpuStartUs > coll->tsCollStartUs)
       ? (double)(firstKernelCpuStartUs - coll->tsCollStartUs) : 0;
   } else {
     rec.totalExecUs = (coll->tsCollStopUs > coll->tsCollStartUs)
@@ -370,12 +359,8 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (coll->finalized) return 0;
   if (!coll->collStopped) return 0;
-  if (coll->nChannels == 0) {
-    coll->finalized = 1;
-    return 1;
-  }
-  if (coll->nKernelChCompleted != coll->nChannels) return 0;
-  if (coll->nProxyOpsCompleted != coll->nProxyOpsStarted) return 0;
+  if (coll->nKernelChCompleted < coll->nChannels) return 0;
+  if (coll->nProxyOpsCompleted < coll->nProxyOpsStarted) return 0;
   coll->finalized = 1;
   return 1;
 }
@@ -383,11 +368,7 @@ static inline int acclShouldFinalize(struct acclCollInfo* coll) {
 static void acclFinalizeAndFree(struct acclCommContext* ctx,
                                 struct acclCollInfo* coll) {
   acclFinalizeCollective(coll);
-  for (int i = 0; i < coll->nProxyOps; i++) {
-    int idx = coll->proxyOpIndices[i];
-    if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
-      acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
-  }
+  acclFreeCollProxyOps(ctx, coll);
   acclFreeColl(ctx, coll);
 }
 
@@ -402,8 +383,9 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   gLogFn = logfn;
 
   const char* env;
-  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL)
+  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL) {
     gMinMsgSize = (size_t)atol(env);
+  }
 
   struct acclCommContext* ctx = (struct acclCommContext*)calloc(1, sizeof(*ctx));
   if (!ctx) return ncclSuccess;
@@ -454,31 +436,43 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   ACCL_INFO("ACCL Profiler: finalize rank=%d output=%s", ctx->rank, ctx->outputPath);
 
   // Drain any coll slots still in use (orphaned by teardown).
-  // Don't emit records — they have incomplete data.
+  pthread_mutex_lock(&ctx->collPoolMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
-      for (int j = 0; j < coll->nProxyOps; j++) {
-        int idx = coll->proxyOpIndices[j];
-        if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
-          acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+      if (!coll->finalized) {
+        acclFreeCollProxyOps(ctx, coll);
       }
       coll->finalized = 1;
       pthread_mutex_destroy(&coll->mutex);
       ctx->collPoolUsed[i] = 0;
+      __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
   }
+  pthread_mutex_unlock(&ctx->collPoolMutex);
 
+  // Write drop summary and close output before tearing down mutexes.
   if (ctx->outputFile) {
+    if (ctx->droppedCollectives > 0) {
+      fprintf(ctx->outputFile,
+        "{\"summary\":{\"dropped_collectives\":%lu,\"pool_size\":%d}}\n",
+        (unsigned long)ctx->droppedCollectives, ACCL_COLL_POOL_SIZE);
+      fflush(ctx->outputFile);
+      ACCL_WARN("ACCL Profiler: rank=%d dropped %lu collectives due to pool exhaustion",
+                ctx->rank, (unsigned long)ctx->droppedCollectives);
+    }
     fclose(ctx->outputFile);
     ctx->outputFile = NULL;
   }
-  pthread_mutex_destroy(&ctx->outputMutex);
-  pthread_mutex_destroy(&ctx->collPoolMutex);
-  pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
-  pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
-  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) == 0)
+
+  // Tear down context only after refcount reaches zero.
+  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) == 0) {
+    pthread_mutex_destroy(&ctx->outputMutex);
+    pthread_mutex_destroy(&ctx->collPoolMutex);
+    pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
+    pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
     free(ctx);
+  }
   return ncclSuccess;
 }
 
@@ -495,6 +489,11 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     // Check message size filter
     size_t msgSize = (size_t)acclDatatypeSize(eDescr->coll.datatype) * eDescr->coll.count;
     if (msgSize < gMinMsgSize) {
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
+
+    if (eDescr->coll.nChannels == 0) {
       *eHandle = NULL;
       return ncclSuccess;
     }
@@ -531,7 +530,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclCollInfo* coll = (struct acclCollInfo*)eDescr->parentObj;
     uint8_t chId = eDescr->kernelCh.channelId;
-    if (chId >= coll->nChannels) {
+    if (chId >= ACCL_MAX_CHANNELS) {
       *eHandle = NULL;
       return ncclSuccess;
     }
@@ -540,7 +539,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     struct acclKernelChInfo* kch = &coll->kernelCh[chId];
     kch->type = ncclProfileKernelCh;
     kch->parentObj = coll;
-    kch->parentType = coll->generation;
     kch->channelId = chId;
     kch->startGpuClk = eDescr->kernelCh.pTimer;
     kch->tsStartUs = acclGetTimeUs();
@@ -569,7 +567,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
     op->commCtx = ctx;
-    op->parentGeneration = parentColl ? parentColl->generation : 0;
     if (parentColl) {
       pthread_mutex_lock(&parentColl->mutex);
       parentColl->nProxyOpsStarted++;
@@ -619,6 +616,10 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     coll->tsCollStopUs = acclGetTimeUs();
 
     pthread_mutex_lock(&coll->mutex);
+    if (coll->finalized) {
+      pthread_mutex_unlock(&coll->mutex);
+      return ncclSuccess;
+    }
     coll->collStopped = 1;
     int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);
@@ -637,10 +638,6 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     if (!coll) return ncclSuccess;
 
     pthread_mutex_lock(&coll->mutex);
-    if (coll->generation != kch->parentType) {
-      pthread_mutex_unlock(&coll->mutex);
-      return ncclSuccess;
-    }
     coll->nKernelChCompleted++;
     int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);
@@ -661,11 +658,6 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     if (coll) {
       pthread_mutex_lock(&coll->mutex);
-      if (coll->generation != op->parentGeneration) {
-        pthread_mutex_unlock(&coll->mutex);
-        acclFreeProxyOp(ctx, op);
-        return ncclSuccess;
-      }
       int opIdx = (int)(op - ctx->proxyOpPool);
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
         coll->proxyOpIndices[coll->nProxyOps] = opIdx;
@@ -698,7 +690,6 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
       op->totalNetworkUs += step->sendWaitUs + step->recvWaitUs;
       op->totalFlushUs += step->flushWaitUs;
       op->totalGpuRecvWaitUs += step->gpuRecvWaitUs;
-      op->stepCount++;
       op->stepsCompleted++;
       pthread_mutex_unlock(&op->mutex);
     }
@@ -718,14 +709,11 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
 
   uint64_t type = *(uint64_t*)eHandle;
 
-  // KernelCh stop record — capture GPU stop timestamp
   if (type == ncclProfileKernelCh && (int)eState == (int)ncclProfilerKernelChStop) {
     struct acclKernelChInfo* kch = (struct acclKernelChInfo*)eHandle;
     if (eStateArgs) {
       kch->stopGpuClk = eStateArgs->kernelCh.pTimer;
     }
-    // Deref the GPU-timestamp ref (paired with startGpuClk != 0 check)
-    // We handle this simply: the stop event will handle the main deref
     return ncclSuccess;
   }
 
