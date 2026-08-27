@@ -47,6 +47,15 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
+/// Compile-time switch for the 64-bit-lane SIMD paths specifically. The
+/// `ROCJITSU_TRY_SIMD_*_F64` probes in simd_glue.h expand to nothing when
+/// `UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS` is set, so execution falls through to
+/// the scalar implementation even though `has_stdx_simd` is true. A test that
+/// gates only on `has_stdx_simd` would then run the scalar path twice and
+/// report the second run as SIMD coverage; gate on this instead.
+inline constexpr bool has_stdx_simd_64bit_lanes =
+    has_stdx_simd && UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS == 0;
+
 namespace detail {
 
 inline bool init_force_scalar() {

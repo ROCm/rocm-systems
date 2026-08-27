@@ -229,9 +229,14 @@ TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExact
 ///      keep 1.0.
 ///   b) 1.125 * 2^-53 + 1.25 lands 0.5625 ulp above 1.25. Nearest is past the
 ///      halfway point and steps up, as does +inf; -inf and zero truncate.
+///
+/// Because the reference is the ISA and not the other path, the scalar half
+/// stands on its own and runs everywhere -- it is the half that caught this bug.
+/// The SIMD half is gated on `has_stdx_simd_64bit_lanes`, not `has_stdx_simd`:
+/// where the 64-bit-lane probes are compiled out, `run_fmac(false, ...)` falls
+/// through to the scalar implementation, and asserting on it would report the
+/// scalar path a second time as SIMD coverage.
 TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarGuard guard;
 
   constexpr uint64_t kOne = 0x3FF0000000000000ULL;
@@ -267,12 +272,15 @@ TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
       const uint32_t mode = (round << 2) | (3u << 6);
       const uint64_t want = test_case.expected[round];
       const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode, false, &inputs);
-      const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
-      for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+      for (uint32_t lane = 0; lane < kWaveSize; ++lane)
         EXPECT_EQ(scalar.output[lane], want)
             << "scalar, " << test_case.what << ", round=" << round << ", lane=" << lane;
-        EXPECT_EQ(simd.output[lane], want)
-            << "simd, " << test_case.what << ", round=" << round << ", lane=" << lane;
+
+      if constexpr (util::has_stdx_simd_64bit_lanes) {
+        const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
+        for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+          EXPECT_EQ(simd.output[lane], want)
+              << "simd, " << test_case.what << ", round=" << round << ", lane=" << lane;
       }
     }
   }
