@@ -12,8 +12,8 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 find_package(Threads REQUIRED)
-if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
-    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-causal-api-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 endif()
 
 add_library(causal-interface-library INTERFACE)
