@@ -3054,6 +3054,9 @@ RMA_GEN(unsigned long long)
 RMA_GEN(__half)
 RMA_GEN(__hip_bfloat16)
 
+RMA_GEN(__half)
+RMA_GEN(__hip_bfloat16)
+
 AMO_STANDARD_GEN(int)
 AMO_STANDARD_GEN(long)
 AMO_STANDARD_GEN(long long)
@@ -3146,6 +3149,9 @@ RMA_DEF_GEN(uint32_t, uint32)
 RMA_DEF_GEN(uint64_t, uint64)
 RMA_DEF_GEN(size_t, size)
 RMA_DEF_GEN(ptrdiff_t, ptrdiff)
+RMA_DEF_GEN(__half, half)
+RMA_DEF_GEN(__hip_bfloat16, bfloat16)
+
 RMA_DEF_GEN(__half, half)
 RMA_DEF_GEN(__hip_bfloat16, bfloat16)
 
