@@ -14,28 +14,13 @@
 #include <utility>
 #include <vector>
 
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-#    include <rocprofiler-sdk-rocpd/sql.h>
-#    include <rocprofiler-sdk-rocpd/types.h>
-#    include <rocprofiler-sdk-rocpd/version.h>
-// rocpd_sql_load_schema() and its callback gained a schema_version parameter in
-// rocprofiler-sdk-rocpd 1.3.2 (upstream PR #5267). Older installs (e.g. ROCm <= 7.2,
-// version 1.3.1) still use the 8-argument signature without it.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION (ROCPD_VERSION >= 10302)
-// ROCPD_SQL_SCHEMA_ROCPD_METADATA was added to rocpd_sql_schema_kind_t in the same
-// upstream PR (#5267 / rocpd 1.3.2) that added schema_version, so gate on the same
-// version check -- older installs don't have this enumerator at all.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND                                     \
-        PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-#else
-#    include <regex>
+#include <regex>
 
-#    include "schema/data_views.hpp"
-#    include "schema/rocpd_metadata.hpp"
-#    include "schema/rocpd_tables.hpp"
-#    include "schema/rocpd_views.hpp"
-#    include "schema/summary_views.hpp"
+#include "schema/data_views.hpp"
+#include "schema/rocpd_metadata.hpp"
+#include "schema/rocpd_tables.hpp"
+#include "schema/rocpd_views.hpp"
+#include "schema/summary_views.hpp"
 
 namespace
 {
@@ -52,12 +37,6 @@ enum rocpd_sql_schema_kind_t
 };
 }  // namespace
 
-// This local schema is always sourced fresh (bundled or cloned) so the METADATA kind
-// is always present, unlike the installed rocprofiler-sdk-rocpd library above.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND 1
-
-#endif
-
 namespace
 {
 [[maybe_unused]] void
@@ -70,66 +49,9 @@ create_directory_for_database_file(const std::string& db_file)
     }
 }
 
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-void
-load_schema_cb(rocpd_sql_engine_t /*unused*/,
-               rocpd_sql_schema_kind_t /*unused*/,
-               rocpd_sql_options_t /*unused*/,
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-               rocpd_version_triplet_t /*unused*/,
-#    endif
-               const rocpd_sql_schema_jinja_variables_t* /*unused*/,
-               const char* /*unused*/,
-               const char* schema_content,
-               void*       user_data)
-{
-    if(user_data == nullptr || schema_content == nullptr)
-    {
-        LOG_ERROR("Invalid user data or schema content pointer");
-        return;
-    }
-    auto* query = static_cast<std::string*>(user_data);
-    if(query == nullptr)
-    {
-        LOG_ERROR("Invalid query pointer");
-        return;
-    }
-    *query = std::string(schema_content);
-}
-#endif
-
 [[maybe_unused]] std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 {
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-    rocpd_sql_schema_jinja_variables_t const info{
-        sizeof(rocpd_sql_schema_jinja_variables_t), uuid.c_str(), uuid.c_str()
-    };
-
-    std::string query;
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-    rocpd_version_triplet_t schema_version{ 0, 0, 0 };  // 0,0,0 = latest available schema
-#    endif
-    auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
-                                        schema_kind,
-                                        ROCPD_SQL_OPTIONS_NONE,
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-                                        schema_version,
-#    endif
-                                        &info,
-                                        load_schema_cb,
-                                        nullptr,
-                                        0,
-                                        &query);
-    if(status != ROCPD_STATUS_SUCCESS)
-    {
-        LOG_ERROR("Unable to load rocpd schema (error code: {})",
-                  static_cast<int>(status));
-    }
-    return query;
-#else
     std::string_view schema_content;
 
     switch(schema_kind)
@@ -171,13 +93,12 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
     query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
     query_str = std::regex_replace(query_str, guid_pattern, uuid);
     query_str = std::regex_replace(query_str, view_upid_pattern, "");
-    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.0");
+    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.1");
     query_str = std::regex_replace(query_str, schema_version_major_pattern, "3");
     query_str = std::regex_replace(query_str, schema_version_minor_pattern, "0");
-    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "0");
+    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "1");
 
     return query_str;
-#endif
 }
 
 }  // namespace

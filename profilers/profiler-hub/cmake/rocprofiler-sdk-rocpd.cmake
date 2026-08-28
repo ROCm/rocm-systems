@@ -94,7 +94,7 @@ function(ROCPD_CLONE_ROCPD_SCHEMA_FILES OUTPUT_SCHEMA_DIR)
         if(NOT RESULT EQUAL 0)
             message(
                 FATAL_ERROR
-                "[profiler-hub] Failed to clone rocprofiler-sdk-rocpd (return code=${RESULT})"
+                "[profiler-hub] Failed to clone rocpd schema files (return code=${RESULT})"
             )
         endif()
     endif()
@@ -121,10 +121,8 @@ set(SCHEMA_FILES
     "rocpd_views.sql"
     "data_views.sql"
     "summary_views.sql"
-    # Adding for future, not using below files in current implementation
     "rocpd_metadata.sql"
     "rocpd_indexes.sql"
-    "versions.yml"
 )
 
 set(ROCPD_SCHEMA_GIT_URL
@@ -137,54 +135,16 @@ set(ROCPD_SCHEMA_GIT_BRANCH
     CACHE STRING
     "Git branch/tag to clone for rocprofiler-sdk-rocpd schema files"
 )
+
 set(ROCPD_SCHEMA_SDK_SUBDIR
-    "projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd"
+    "projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd/versions/3.0.1"
     CACHE STRING
     "Path (within the cloned repo) to the rocprofiler-sdk-rocpd schema files"
 )
 
-set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD OFF)
-find_package(rocprofiler-sdk-rocpd QUIET)
+rocpd_clone_rocpd_schema_files(_ROCPD_SCHEMA_DIR)
 
-if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPD_HAS_SQL_H FALSE)
-
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH
-            "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd"
-        )
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPD_HAS_SQL_H TRUE)
-        endif()
-    endif()
-
-    if(ROCPD_HAS_SQL_H)
-        set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD ON)
-        message(
-            STATUS
-            "[profiler-hub] rocprofiler-sdk-rocpd found with sql.h - using schema files from rocprofiler-sdk-rocpd library"
-        )
-    else()
-        message(
-            STATUS
-            "[profiler-hub] rocprofiler-sdk-rocpd found but sql.h missing - cloning schema files from rocprofiler-sdk-rocpd library"
-        )
-    endif()
-else()
-    message(
-        STATUS
-        "[profiler-hub] rocprofiler-sdk-rocpd not found - cloning schema files from rocprofiler-sdk-rocpd library"
-    )
-endif()
-
-if(NOT USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    # the schema .sql files are not available in the installed library, so they must be
-    # obtained by cloning rocprofiler-sdk-rocpd library
-    rocpd_clone_rocpd_schema_files(_ROCPD_SCHEMA_DIR)
-
-    rocpd_configure_rocpd_schema_files(
-        ${_ROCPD_SCHEMA_DIR}
-        ${SQL_SCHEMA_BINARY_DIR}
-    )
-endif()
+rocpd_configure_rocpd_schema_files(
+    ${_ROCPD_SCHEMA_DIR}
+    ${SQL_SCHEMA_BINARY_DIR}
+)
