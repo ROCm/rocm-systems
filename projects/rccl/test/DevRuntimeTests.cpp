@@ -418,6 +418,46 @@ TEST_F(DevrFinalizeTest, StreamTeardownFails_StillCompletes) {
   EXPECT_GT(destroy.calls, 0);
 }
 
+// Branch: windows still registered at finalize are drained through
+// symWindowDestroy, which also releases the window table behind them. Deferred
+// until symWindowCreate/Destroy had tests of their own, so reaching this loop
+// no longer exercises untested code.
+TEST_F(DevrFinalizeTest, DrainsRemainingWindows) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+
+  auto handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* addr = reinterpret_cast<void*>(0x100000);
+  ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &handle, 1, addr, 4096, 0, &mem, false), ncclSuccess);
+  ncclWindow_vidmem* winDev = nullptr;
+  ASSERT_EQ(symWindowCreate(comm, mem, 0, addr, 4096, 0, nullptr, &winDev, nullptr, nullptr), ncclSuccess);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  ASSERT_NE(comm->devrState.windowTable, nullptr);
+
+  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// The drain is a loop, so more than one window must come out -- a version that
+// destroyed only the head would leave the rest mapped.
+TEST_F(DevrFinalizeTest, DrainsEveryRemainingWindow) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+
+  auto handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  for (int i = 0; i < 3; i++) {
+    void* addr = reinterpret_cast<void*>(0x100000 + i * 0x1000);
+    ncclDevrMemory* mem = nullptr;
+    ASSERT_EQ(symMemoryObtain(comm, &handle, 1, addr, 4096, 0, &mem, false), ncclSuccess);
+    ASSERT_EQ(symWindowCreate(comm, mem, 0, addr, 4096, 0, nullptr, nullptr, nullptr, nullptr), ncclSuccess);
+  }
+  ASSERT_EQ(comm->devrState.winSortedCount, 3);
+
+  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
 // AICOMRCCL-835: a Device-API consumer can create a symmetric-window resource
 // (leaving an ncclDevrMemory on memHead) without a matching destroy. Finalize
 // must drain those before freeing the flat VA reservation, or every per-rank
