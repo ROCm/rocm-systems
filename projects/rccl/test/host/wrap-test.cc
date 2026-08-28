@@ -1159,3 +1159,263 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_EnvPresentReturnsInvalid) {
   ClearMicroEnv();
   DeleteCommWithArch(comm);
 }
+
+// ===========================================================================
+// rcclUseHierarchicalAllGather -- rccl_wrap.cc:706-713. No cached statics
+// (rcclParamHierarchicalAllGather's real default is 1, the "enabled" value,
+// so the interesting branches are reachable without the g_loadParam seam);
+// plain comm-field setup, no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_FewerThan8NodesReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 7;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_NotInitializedReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = false;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_WithinThresholdReturnsTrue) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8; // rcclHierarchicalTempBufferSize(8, true, false) == 32MiB
+  comm->hierarchicalCommsInitialized = true;
+  // Exactly at the threshold: distinguishes the guard's <= from a plain <.
+  EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1ull << 25));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_AboveThresholdReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/(1ull << 25) + 1)); // > 32MiB
+  delete comm;
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalAllGather_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalAllGather_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_ALLGATHER") == 0 ? int64_t(0) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 8;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// rcclUseAllGatherDirect -- rccl_wrap.cc:715-764. Caches the RCCL_PARAM
+// disable-flag and a real getenv() threshold probe, both in function-local
+// statics; isolated per case.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_DIRECT_ALLGATHER_DISABLE") == 0 ? int64_t(1) : deft;
+        };
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx950WithinAutoThresholdReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_Gfx950WithinAutoThresholdReturnsTrue",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1; // auto threshold -> 8MiB
+        comm->nRanks = 8; // rankMultiple == 0
+        size_t msgSize = 1024;
+        EXPECT_TRUE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_CtaPolicyZeroDisablesOnSingleNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_CtaPolicyZeroDisablesOnSingleNode",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 9; // 9 % 8 != 0
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclUseReduceScatterDirect -- rccl_wrap.cc:1317-1355. Caches the
+// RCCL_PARAM disable-flag in a function-local static; isolated per case.
+// The "PXN disabled" early-return (line 1332) is out of scope: ncclPxnDisable
+// is a plain stub always returning 0 (see wrap_stubs.cc), not yet a
+// controllable seam -- upgrading it is deferred to a future batch.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_DIRECT_REDUCE_SCATTER_DISABLE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_NonGfx950ReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_NonGfx950ReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_TwoNodesInRangeReturnsTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // within [128KiB, 2MiB]
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesBelowRangeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_TwoNodesBelowRangeReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 65536; // below the 128KiB floor
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_FourNodesUpToLimitReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_FourNodesUpToLimitReturnsTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 4;
+        size_t msgSize = 4194304; // exactly at the 4-node 4MiB limit
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EightNodesUnconditionallyTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EightNodesUnconditionallyTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388608; // at the 8MiB hard limit
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_SixteenNodesAboveHardLimitReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_SixteenNodesAboveHardLimitReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 16;
+        size_t msgSize = 8388608 + 1;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclUseHierarchicalReduceScatter -- rccl_wrap.cc:1359-1366. Unlike its
+// AllGather sibling, rcclParamHierarchicalReduceScatter's real default is 0
+// ("disabled"), so without the g_loadParam seam this function can only be
+// proven to always return false -- the true-arm needs the seam.
+// ===========================================================================
+
+TEST(WrapMicrotest, UseHierarchicalReduceScatter_DefaultParamAlwaysFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024)); // param defaults to 0, not 1
+  delete comm;
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_EightNodesParamEnabledReturnsTrue) {
+  // 8 nodes: distinguishes the real "< 8" gate from a mutated "< 16" -- RS's
+  // own threshold is already nonzero (64MiB) at 8 nodes, so the real gate
+  // lets this through while a widened one would reject it.
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_EightNodesParamEnabledReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_REDUCE_SCATTER") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 8;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_ParamEnabledWithinThresholdReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_ParamEnabledWithinThresholdReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_REDUCE_SCATTER") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        // rcclHierarchicalTempBufferSize(8, false, true) == 0 (RS needs >= 16 nodes); use 16 for a nonzero threshold.
+        comm->nNodes = 16; // 64MiB threshold
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
