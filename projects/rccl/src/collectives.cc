@@ -389,12 +389,21 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype,
                                /*query=*/false, /*graphCapturingHint=*/false, &decision));
 
+  // Canonical selection line for addon backends (CE / DDA / Pivot / GDA /
+  // Direct). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
+  // line instead; this names the addon RCCL runs so rcclGetCollImplInfo can be
+  // checked against it. DDA launchers already log grid/block at launch.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AlltoAll impl selected: algo %s", an ? an : "?");
+  }
+
   switch (decision.algo) {
     case RCCL_A2A_PIVOT: {
       struct ncclInfo info = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      INFO(NCCL_COLL, "AlltoAll: Taking RCCL_A2A_PIVOT_PATH");
       return ncclEnqueueCheck(&info);
     }
 #ifdef ENABLE_ROCSHMEM
@@ -402,7 +411,6 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       struct ncclInfo info = {ncclFuncAlltoAllGda, "AlltoAllGda",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      INFO(NCCL_COLL, "AlltoAll: Taking RCCL_A2A_GDA_PATH");
       return ncclEnqueueCheck(&info);
     }
 #endif
@@ -414,16 +422,10 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclSuccess;
 #endif
     case RCCL_DDA_FABRIC_LL:
-      INFO(NCCL_COLL, "AllToAll: DDA fabric LL: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-           comm->nRanks, comm->nNodes, count, (int)datatype, comm->nRanks * count * ncclTypeSize(datatype));
       return ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream);
     case RCCL_DDA_FABRIC_LL128:
-      INFO(NCCL_COLL, "AllToAll: DDA fabric LL128: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-           comm->nRanks, comm->nNodes, count, (int)datatype, comm->nRanks * count * ncclTypeSize(datatype));
       return ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream);
     case RCCL_DDA_FABRIC_VMM:
-      INFO(NCCL_COLL, "AllToAll: DDA fabric VMM: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-           comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
       return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
     case RCCL_DDA_IPC:
       return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
