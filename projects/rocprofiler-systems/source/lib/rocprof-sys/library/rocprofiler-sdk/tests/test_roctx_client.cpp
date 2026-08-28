@@ -228,7 +228,8 @@ protected:
     {
         m_session->subscribe({ .on_pause  = [this]() { stop_count++; },
                                .on_resume = [this]() { start_count++; },
-                               .name      = "test_counters" });
+                               .name      = "test_counters",
+                               .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
                                      .use_perfetto           = false,
@@ -864,7 +865,8 @@ protected:
     {
         m_session->subscribe({ .on_pause  = [this]() { stop_count++; },
                                .on_resume = [this]() { start_count++; },
-                               .name      = "test_counters" });
+                               .name      = "test_counters",
+                               .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
                                      .use_perfetto           = false,
