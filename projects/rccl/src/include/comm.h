@@ -683,8 +683,10 @@ struct ncclComm {
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
+#ifdef ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
   int tdmSimpleMinBytes; // RCCL: smallest slice worth handing to the mover
+#endif
   int localRank;
   int localRanks;
   int maxLocalRanks;

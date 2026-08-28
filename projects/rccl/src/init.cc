@@ -199,9 +199,11 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
+#ifdef ENABLE_TDM_SIMPLE
 // Off by default; the mover path is still under evaluation.
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
 RCCL_PARAM(TdmSimpleMinBytes, "TDM_SIMPLE_MIN_BYTES", 4096);
+#endif
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
@@ -895,8 +897,10 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
+#ifdef ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
   tmpCommAndChans.comm.tdmSimpleMinBytes = comm->tdmSimpleMinBytes;
+#endif
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1826,12 +1830,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                                                                  false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+#ifdef ENABLE_TDM_SIMPLE
   // gfx1250 only; the mover entry points are deleted elsewhere.
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   comm->tdmSimpleMinBytes = (int)rcclParamTdmSimpleMinBytes();
   if (comm->tdmSimpleEnable)
     INFO(NCCL_INIT, "TDM SIMPLE path enabled, min slice %d bytes", comm->tdmSimpleMinBytes);
+#endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {

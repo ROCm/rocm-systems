@@ -753,7 +753,7 @@ template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int Multimem
           typename IntBytes>
 __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
                                            int nDsts, void** dstPtrs, IntBytes nElts) {
-#if TDM_SUPPORTED
+#if TDM_SUPPORTED && defined(ENABLE_TDM_SIMPLE)
   if (!ncclShmem.comm.tdmSimpleEnable) return false;
   // TDM copy is only supported for simple cases without multimem, accumulation, or pipelining
   if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) {

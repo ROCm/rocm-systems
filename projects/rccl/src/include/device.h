@@ -54,7 +54,7 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 
 // Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
 // every kernel pays the LDS: 167KB of 320KB at 16KB/warp.
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) && defined(ENABLE_TDM_SIMPLE)
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
 #else
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
@@ -628,8 +628,10 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+#ifdef ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
   int tdmSimpleMinBytes; // RCCL: smallest slice worth handing to the mover
+#endif
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
