@@ -10,7 +10,8 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/artifact.hpp"
+#include "core/output/registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -67,7 +68,7 @@ generate_db_output_path(int pid)
 {
     auto tag     = std::to_string(pid);
     auto db_name = std::string{ "rocpd" };
-    return rocprofsys::get_database_absolute_path(db_name, tag);
+    return get_database_absolute_path(db_name, tag);
 }
 
 }  // namespace
@@ -887,12 +888,10 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid,
-                                     output_file_registry& output_registry)
+                                     pid_t pid, pid_t ppid)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_output_registry(output_registry)
 , m_db_output_path(generate_db_output_path(pid))
 {
     auto n_info = node_info::get_instance();
@@ -916,7 +915,8 @@ rocpd_processor_t::finalize_processing()
     LOG_DEBUG("Finalizing rocpd processor");
     m_writer->flush_in_memory_data_to_disk();
 
-    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
+    output::registry::instance().register_file(m_db_output_path,
+                                               output::output_format::rocpd);
 
     LOG_INFO("Rocpd processor finalized successfully");
 }

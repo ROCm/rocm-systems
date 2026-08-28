@@ -3,15 +3,12 @@
 
 #pragma once
 
-#include <functional>
 #include <vector>
 
 #include <sys/types.h>
 
 namespace rocprofsys
 {
-class output_file_registry;
-
 namespace core
 {
 // Cached-mode sink: writes per-pid bytes to one .proto file per pid.
@@ -20,7 +17,7 @@ namespace core
 class per_pid_file_sink
 {
 public:
-    per_pid_file_sink(pid_t parent_pid, output_file_registry& registry);
+    explicit per_pid_file_sink(pid_t parent_pid);
 
     per_pid_file_sink(per_pid_file_sink&&) noexcept            = default;
     per_pid_file_sink& operator=(per_pid_file_sink&&) noexcept = default;
@@ -32,8 +29,7 @@ public:
     void finalize();
 
 private:
-    pid_t                                        m_parent_pid{ 0 };
-    std::reference_wrapper<output_file_registry> m_registry;
+    pid_t m_parent_pid{ 0 };
 };
 }  // namespace core
 }  // namespace rocprofsys

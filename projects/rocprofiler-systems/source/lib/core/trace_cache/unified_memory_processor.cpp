@@ -4,6 +4,7 @@
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
+#include "core/output/registry.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
 
@@ -93,12 +94,11 @@ format_time(std::uint64_t nanoseconds)
 }  // namespace detail
 
 unified_memory_processor_t::unified_memory_processor_t(
-    std::shared_ptr<agent_manager> agent_mgr, int pid, output_file_sink_view output_sink)
+    std::shared_ptr<agent_manager> agent_mgr, pid_t pid)
 : processor_t<unified_memory_processor_t>()
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
 , m_output_dir(config::get_ump_absolute_path())
-, m_output_sink(std::move(output_sink))
 {
     const char* xnack    = std::getenv("HSA_XNACK");
     m_data.xnack_enabled = (xnack && std::strcmp(xnack, "1") == 0);
@@ -161,7 +161,7 @@ unified_memory_processor_t::finalize_processing()
     {
         write_text_output(txt_file);
         txt_file.close();
-        m_output_sink.register_file(txt_path, output_format::text);
+        output::registry::instance().register_file(txt_path, output::output_format::text);
         LOG_INFO("Unified memory text report written to: {}", txt_path);
     }
 
@@ -176,7 +176,8 @@ unified_memory_processor_t::finalize_processing()
     {
         write_json_output(json_file);
         json_file.close();
-        m_output_sink.register_file(json_path, output_format::json);
+        output::registry::instance().register_file(json_path,
+                                                   output::output_format::json);
         LOG_INFO("Unified memory JSON report written to: {}", json_path);
     }
 

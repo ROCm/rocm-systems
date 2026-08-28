@@ -5,7 +5,8 @@
 #include "core/perfetto/sinks/io_helpers.hpp"
 
 #include "core/config.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/artifact.hpp"
+#include "core/output/registry.hpp"
 #include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "logger/debug.hpp"
@@ -15,10 +16,8 @@
 
 namespace rocprofsys::core
 {
-single_file_sink::single_file_sink(output_file_registry& registry,
-                                   std::string           output_filename_override)
-: m_registry{ registry }
-, m_output_filename_override{ std::move(output_filename_override) }
+single_file_sink::single_file_sink(std::string output_filename_override)
+: m_output_filename_override{ std::move(output_filename_override) }
 {}
 
 void
@@ -189,7 +188,8 @@ single_file_sink::finalize()
         if(status == locked_append_status::success)
         {
             perfetto_sink_detail::emit_size_line(filename, m_buffer.size());
-            m_registry.get().register_file(filename, output_format::perfetto);
+            output::registry::instance().register_file(std::move(filename),
+                                                       output::output_format::perfetto);
         }
         else
         {
@@ -199,9 +199,11 @@ single_file_sink::finalize()
                       status_name(status));
         }
     }
-    else if(!perfetto_sink_detail::write_proto_to(filename, m_buffer.data(),
-                                                  m_buffer.size(), m_registry.get(),
-                                                  !explicit_non_append_output))
+    else if(!perfetto_sink_detail::write_proto_to(
+                filename, m_buffer.data(), m_buffer.size(),
+                explicit_non_append_output
+                    ? perfetto_sink_detail::status_emission::silent
+                    : perfetto_sink_detail::status_emission::verbose))
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }
