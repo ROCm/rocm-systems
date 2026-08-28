@@ -27,6 +27,69 @@ public:
   std::vector<std::vector<uint32_t>> workgroup_ids;
 };
 
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
+
+private:
+  bool original_;
+};
+
+TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
+  struct Case {
+    uint32_t input;
+    uint32_t expected;
+  };
+  constexpr std::array cases{
+      Case{0x00000000u, 0xFFFFFFFFu}, Case{0xFFFFFFFFu, 0xFFFFFFFFu}, Case{0x00000001u, 31u},
+      Case{0x00000002u, 30u},         Case{0x00000003u, 30u},         Case{0x00000007u, 29u},
+      Case{0x0000FFFFu, 16u},         Case{0x40000000u, 1u},          Case{0x7FFFFFFFu, 1u},
+      Case{0x80000000u, 1u},          Case{0xFFFFFFFEu, 31u},         Case{0xFFFFFC00u, 22u},
+  };
+  constexpr uint32_t kSrc = 0;
+  constexpr uint32_t kDst = 2;
+  const auto vop1 = cdna5::build_vop1(cdna5::kVClsI32Vop1, {.src0 = 256 + kSrc, .vdst = kDst});
+  const auto vop3 = cdna5::build_vop3(cdna5::kVClsI32Vop3, {.vdst = kDst, .src0 = 256 + kSrc});
+
+  ForceScalarGuard force_scalar_guard;
+  for (const bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+
+    Gfx1250Sim sim;
+    auto *wf = sim.dispatch_scratch_wf();
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec((uint64_t{1} << cases.size()) - 1);
+
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < cases.size(); ++lane)
+      sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(decoder, nullptr);
+    auto check_encoding = [&](const auto &words, std::string_view expected_mnemonic) {
+      SCOPED_TRACE(expected_mnemonic);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic);
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane)
+        sim.cu()->write_vgpr(vgpr_base + kDst, lane, 0xDEADBEEFu);
+      sim.cu()->execute_instruction(inst.get(), *wf);
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
+        EXPECT_EQ(sim.cu()->read_vgpr(vgpr_base + kDst, lane), cases[lane].expected)
+            << "lane " << lane << ", input 0x" << std::hex << cases[lane].input;
+      }
+    };
+
+    check_encoding(vop1, "v_cls_i32_e32");
+    check_encoding(vop3, "v_cls_i32");
+  }
+}
+
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   const uint32_t code[] = {
