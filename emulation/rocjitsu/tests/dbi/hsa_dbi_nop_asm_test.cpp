@@ -152,8 +152,6 @@ class HsaDbiNopAsmHardwareBase : public DbiHardwareBase<HsaDbiNopAsmFixture, Par
 protected:
   using Base = DbiHardwareBase<HsaDbiNopAsmFixture, Params>;
 
-  // Opens with a GTEST_SKIP preamble, so it must be the sole statement of its
-  // TEST_F for the skip to end the test rather than fall through.
   void run_trampoline_is_actually_executed_by_gpu();
 };
 
@@ -214,10 +212,6 @@ void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
 // structure, semantically-equivalent dispatch output).
 template <const DbiTargetParams &Params>
 void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gpu() {
-  if (!Base::s_init_ok_)
-    GTEST_SKIP() << "hsa_init failed";
-  if (Base::s_gpu_.handle == 0)
-    GTEST_SKIP() << "No " << Params.isa_substring << " agent present";
   hsa_agent_t gpu = Base::s_gpu_;
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
@@ -309,11 +303,10 @@ void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gp
                                  << "/" << N << " elements - trampoline appears bypassed";
 }
 
-// The concrete suites CMake registers. Each TEST_F is a single call to the
-// shared body above: GTEST_SKIP inside a body returns only from that body, so
-// the call must be the last statement of the test for a skip to end the test.
+// The concrete suites CMake registers. Availability is handled by
+// DbiHardwareBase::SetUp(), so these bodies are ordinary calls.
 
-// --- gfx90a / CDNA2 ---
+// gfx90a / CDNA2.
 
 class HsaDbiNopAsmCdna2Static : public HsaDbiNopAsmFixture {
 protected:

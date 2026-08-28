@@ -2169,7 +2169,7 @@ if(HSA_RUNTIME64)
             )
         endfunction()
 
-        # --- gfx90a / CDNA2 ---
+        # gfx90a / CDNA2.
 
         # Static-only test: no GPU needed, runs anywhere the binary is built.
         register_hsa_dbi_nop_asm_case(Cdna2 Static PatchedElfActuallyContainsInstrumentation)
@@ -2231,7 +2231,7 @@ if(HSA_RUNTIME64)
 
         # Pin the FAIL_ON_SKIP guard, the way GtestFilterGuard.RejectsMissingTest
         # pins the zero-test guard. Launching the gfx90a fixture against a
-        # simulated gfx942 selects one test, find_gfx90a_agent() finds no match,
+        # simulated gfx942 selects one test, find_gpu_agent() finds no match,
         # and GoogleTest exits 0 after skipping it -- so success here means the
         # wrapper turned that skip into a failure instead of a false pass.
         add_test(
@@ -2358,7 +2358,7 @@ if(HSA_RUNTIME64)
                 )
             endfunction()
 
-            # --- gfx90a / CDNA2 ---
+            # gfx90a / CDNA2.
 
             # Static-only test: no GPU needed, runs anywhere the binary builds.
             register_hsa_dbi_nop_probe_case(

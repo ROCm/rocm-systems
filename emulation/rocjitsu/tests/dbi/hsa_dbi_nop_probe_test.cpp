@@ -21,7 +21,8 @@
 ///     builds.
 ///   - HsaDbiNopProbe<Target>Hardware.* - registered as a Sim case
 ///     unconditionally, and bare only when that target's HAS_*_GPU is set;
-///     bodies also GTEST_SKIP at runtime if no matching agent is present.
+///     DbiHardwareBase::SetUp() also skips at runtime if no matching agent is
+///     present.
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -207,8 +208,6 @@ class HsaDbiNopProbeHardwareBase : public DbiHardwareBase<HsaDbiNopProbeFixture,
 protected:
   using Base = DbiHardwareBase<HsaDbiNopProbeFixture, Params>;
 
-  // Opens with a GTEST_SKIP preamble, so it must be the sole statement of its
-  // TEST_F for the skip to end the test rather than fall through.
   void run_probe_body_is_actually_called_by_gpu();
 };
 
@@ -289,10 +288,6 @@ void HsaDbiNopProbeFixture::run_patched_elf_contains_probe_call_instrumentation(
 // unchanged.
 template <const DbiTargetParams &Params>
 void HsaDbiNopProbeHardwareBase<Params>::run_probe_body_is_actually_called_by_gpu() {
-  if (!Base::s_init_ok_)
-    GTEST_SKIP() << "hsa_init failed";
-  if (Base::s_gpu_.handle == 0)
-    GTEST_SKIP() << "No " << Params.isa_substring << " agent present";
   hsa_agent_t gpu = Base::s_gpu_;
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
@@ -342,11 +337,10 @@ void HsaDbiNopProbeHardwareBase<Params>::run_probe_body_is_actually_called_by_gp
       << "reverted (un-sabotaged) probe-call code differs from golden";
 }
 
-// The concrete suites CMake registers. Each TEST_F is a single call to the
-// shared body above: GTEST_SKIP inside a body returns only from that body, so
-// the call must be the last statement of the test for a skip to end the test.
+// The concrete suites CMake registers. Availability is handled by
+// DbiHardwareBase::SetUp(), so these bodies are ordinary calls.
 
-// --- gfx90a / CDNA2 ---
+// gfx90a / CDNA2.
 
 class HsaDbiNopProbeCdna2Static : public HsaDbiNopProbeFixture {
 protected:

@@ -103,7 +103,8 @@ inline bool kernel_wrote_output(const std::vector<float> &out) {
 }
 
 // The expect_* helpers below contain ASSERT_*, which returns only from the
-// function it appears in. Call each as the sole statement of a test body -- the
+// function it appears in. Call each as the last statement of its caller so a
+// failed assertion ends the test rather than falling through -- the
 // DbiHardwareBase run_* methods do exactly that.
 
 /// @brief Load @p elf_bytes into an HSA executable on @p gpu, validate it, and
@@ -203,22 +204,24 @@ protected:
     s_gpu_ = {};
   }
 
-  // Each run_* body opens with a GTEST_SKIP preamble. GTEST_SKIP returns only
-  // from the function it appears in, so a body must be the sole statement of
-  // its TEST_F for the skip to end the test rather than fall through.
-  void run_patched_elf_loads_and_validates() {
+  // Skip before Fixture::SetUp() rather than after. Fixture::SetUp() asserts its
+  // way through the ELF load and Instrumentor::patch, and ASSERT_* returns only
+  // from the function it appears in -- so running it first would need a
+  // HasFatalFailure() guard here, or a genuine patch failure would be reported
+  // as a skip.
+  void SetUp() override {
     if (!s_init_ok_)
       GTEST_SKIP() << "hsa_init failed (no HSA runtime at runtime)";
     if (s_gpu_.handle == 0)
       GTEST_SKIP() << "No " << Params.isa_substring << " agent present";
+    Fixture::SetUp();
+  }
+
+  void run_patched_elf_loads_and_validates() {
     expect_elf_loads_and_validates(this->patched_elf_bytes_, s_gpu_);
   }
 
   void run_patched_kernel_dispatch_matches_original() {
-    if (!s_init_ok_)
-      GTEST_SKIP() << "hsa_init failed";
-    if (s_gpu_.handle == 0)
-      GTEST_SKIP() << "No " << Params.isa_substring << " agent present";
     hsa_agent_t cpu = find_cpu_agent();
     ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
     expect_patched_dispatch_matches_original(this->original_elf_bytes_, this->patched_elf_bytes_,
