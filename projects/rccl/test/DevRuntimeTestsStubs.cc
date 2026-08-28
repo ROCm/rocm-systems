@@ -234,9 +234,19 @@ ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool* pool, void* devObj, voi
 ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) {
   return ncclSuccess;
 }
-ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void** out) {
+// Seam: findCommAndHostWindowFromDeviceWindow resolves a device window through
+// this map, so every public pointer accessor needs it to answer.
+static ncclResult_t DefaultIntruAddressMapFind(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t,
+                                               void** out) {
   if (out) *out = nullptr;
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void**)>
+    g_intruAddressMapFind = DefaultIntruAddressMapFind;
+
+ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped* map, int a, int b, int c,
+                                             uintptr_t key, void** out) {
+  return g_intruAddressMapFind(map, a, b, c, key, out);
 }
 ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t) {
   return ncclSuccess;
@@ -642,6 +652,7 @@ void ResetDevRuntimeFakes() {
   g_shadowPoolAlloc                         = DefaultShadowPoolAlloc;
   g_shadowPoolFree                          = DefaultShadowPoolFree;
   g_shadowPoolToHost                        = DefaultShadowPoolToHost;
+  g_intruAddressMapFind                     = DefaultIntruAddressMapFind;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_hipMemsetAsync                          = DefaultMemsetAsync;
   g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;

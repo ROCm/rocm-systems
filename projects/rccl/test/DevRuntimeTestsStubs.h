@@ -73,6 +73,10 @@ extern std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSe
 extern std::function<ncclResult_t(struct ncclShadowPool*, size_t, void**, void**, hipStream_t)> g_shadowPoolAlloc;
 extern std::function<ncclResult_t(struct ncclShadowPool*, void*, hipStream_t)> g_shadowPoolFree;
 extern std::function<ncclResult_t(struct ncclShadowPool*, void*, void**)> g_shadowPoolToHost;
+
+// Resolves a device window to its host record; the default finds nothing.
+extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void**)>
+    g_intruAddressMapFind;
 extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
                                   struct ncclSegmentWindow**)>
     g_devrAllocAndPopulateSegmentWindows;

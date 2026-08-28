@@ -3758,6 +3758,109 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
 
 
 // ---------------------------------------------------------------------------
+// The public device-pointer accessors. All four resolve the device window to
+// its host record through the global window map first, so a window the map does
+// not know is rejected before anything else is read.
+
+class DevicePointerAccessorTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrWindow win{};
+  ncclWindow_vidmem vidmem{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nRanks = 4;
+    comm->symmetricSupport = 1;
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 2;
+    devr->bigSize = 0x10000;
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
+
+    win.comm = comm;
+    win.userPtr = reinterpret_cast<void*>(0x900000);
+    win.size = 4096;
+    win.bigOffset = 0x200;
+
+    // The map resolves our device handle to this window; anything else misses.
+    g_intruAddressMapFind = [this](ncclIntruAddressMap_untyped*, int, int, int, uintptr_t key, void** out) {
+      *out = (key == reinterpret_cast<uintptr_t>(&vidmem)) ? &win : nullptr;
+      return ncclSuccess;
+    };
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+
+  ncclWindow_t Handle() { return &vidmem; }
+};
+
+// A window the map does not know cannot be resolved, whichever accessor asks.
+TEST_F(DevicePointerAccessorTest, UnknownWindow_ReturnsInvalidArgument) {
+  ncclWindow_vidmem stranger{};
+  void* out = nullptr;
+  EXPECT_EQ(ncclGetLsaDevicePointer(&stranger, 0, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetPeerDevicePointer(&stranger, 0, 0, &out), ncclInvalidArgument);
+}
+
+// The LSA accessor delegates to the same arithmetic ncclDevrGetLsaRankPtr uses.
+TEST_F(DevicePointerAccessorTest, LsaPointer_ResolvesWithinFlatSpace) {
+  void* out = nullptr;
+  ASSERT_EQ(ncclGetLsaDevicePointer(Handle(), 0x40, 1, &out), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(out, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + 1 * devr->bigSize +
+                                         win.bigOffset + 0x40));
+}
+
+// Boundary: a rank at lsaSize is outside the team. This check is the accessor's
+// own, ahead of the one inside ncclDevrGetLsaRankPtr, so it can name lsaSize in
+// the diagnostic.
+TEST_F(DevicePointerAccessorTest, LsaPointerRankPastTeam_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclGetLsaDevicePointer(Handle(), 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
+}
+
+// Boundary: the peer accessor validates against the communicator, not the team,
+// because it takes a world rank.
+TEST_F(DevicePointerAccessorTest, PeerPointerRankPastComm_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclGetPeerDevicePointer(Handle(), 0, comm->nRanks, &out), ncclInvalidArgument);
+}
+
+// Branch: multimem needs a base to offset from.
+TEST_F(DevicePointerAccessorTest, MultimemWithoutBase_ReturnsInvalidArgument) {
+  ncclMultimemHandle mm{};
+  mm.mcBasePtr = nullptr;
+  void* out = nullptr;
+  EXPECT_EQ(ncclGetMultimemDevicePointer(Handle(), 0, mm, &out), ncclInvalidArgument);
+}
+
+// Branch: without NVLS there is no multicast mapping, reported as a null result
+// rather than an error.
+TEST_F(DevicePointerAccessorTest, MultimemWithoutNvls_ReturnsNull) {
+  comm->nvlsSupport = 0;
+  ncclMultimemHandle mm{};
+  mm.mcBasePtr = reinterpret_cast<void*>(0x700000);
+  void* out = reinterpret_cast<void*>(0xdead);
+  EXPECT_EQ(ncclGetMultimemDevicePointer(Handle(), 0, mm, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// Branch: with NVLS the address is the multicast base plus the window's offset
+// plus the caller's -- distinct values so a dropped term shows.
+TEST_F(DevicePointerAccessorTest, MultimemWithNvls_OffsetsFromMulticastBase) {
+  comm->nvlsSupport = 1;
+  ncclMultimemHandle mm{};
+  mm.mcBasePtr = reinterpret_cast<void*>(0x700000);
+  void* out = nullptr;
+  ASSERT_EQ(ncclGetMultimemDevicePointer(Handle(), 0x40, mm, &out), ncclSuccess);
+  EXPECT_EQ(out, reinterpret_cast<void*>(0x700000 + win.bigOffset + 0x40));
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
