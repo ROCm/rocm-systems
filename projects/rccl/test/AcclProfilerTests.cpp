@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 
@@ -37,6 +38,39 @@ extern ncclResult_t acclPluginRecordEventState(void*,
 extern ncclResult_t acclPluginFinalize(void*);
 
 namespace RcclUnitTesting {
+
+// =========================================================================
+// Shared helpers for the lifecycle tests
+// =========================================================================
+
+// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
+// Must be called inside the isolated child, since the filename embeds its pid.
+static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+    char hostname[256] = {0};
+    gethostname(hostname, sizeof(hostname) - 1);
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
+             dir, hostname, (int)getpid(), commHashHex);
+    std::ifstream ifs(path);
+    if (!ifs.good()) return std::string();
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    return ss.str();
+}
+
+// Fills a Coll event descriptor with the fields every lifecycle test needs.
+static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
+                          uint64_t seqNumber, size_t count) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileColl;
+    d->coll.func = "AllReduce";
+    d->coll.algo = "Ring";
+    d->coll.proto = "Simple";
+    d->coll.datatype = "ncclFloat32";
+    d->coll.count = count;
+    d->coll.seqNumber = seqNumber;
+    d->coll.nChannels = nChannels;
+}
 
 // =========================================================================
 // acclDatatypeSize — table-driven coverage of all ncclDatatypeToString outputs
