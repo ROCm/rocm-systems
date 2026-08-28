@@ -2,10 +2,6 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- entries:
-  - file: what-is-rocDecode.rst
-    title: What is rocDecode?
-
 - caption: Install
   entries:
   - file: install/rocDecode-install.rst

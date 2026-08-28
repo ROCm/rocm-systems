@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cuid_device.h"
 #include "cuid_cpu.h"
@@ -98,38 +79,30 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
         }
       }
       break;
-    case AMDCUID_DEVICE_TYPE_CPU:
-      // search by device_node first (unique per logical CPU),
-      // then fall back to package_core_id for backward compatibility
-      {
-        auto cpu = reinterpret_cast<CuidCpu *>(const_cast<CuidDevice *>(this));
-        if (cpu) {
-          // Try device_node first - unique per logical CPU on SMT systems
-          std::string device_path;
-          if (cpu->get_device_path(device_path) == AMDCUID_STATUS_SUCCESS &&
-              !device_path.empty()) {
-            CuidFileEntry entry;
-            status = derived_file.find_by_device_node(device_path, entry);
-            if (status == AMDCUID_STATUS_SUCCESS) {
-              build_derived_id_from_file_entry(entry, id);
-              return AMDCUID_STATUS_SUCCESS;
-            }
-          }
-          // Fallback: package_core_id (not unique on SMT, but needed
-          // for backward compatibility with old CUID files)
-          const auto &info = cpu->get_info();
-          std::string core_id =
-              std::to_string(info.header.fields.cpu.physical_id) + ":" +
-              std::to_string(info.header.fields.cpu.core);
+    case AMDCUID_DEVICE_TYPE_CPU: {
+      auto cpu = reinterpret_cast<CuidCpu *>(const_cast<CuidDevice *>(this));
+      if (cpu) {
+        // Try device_node first - unique per logical CPU on SMT systems
+        std::string device_path;
+        if (cpu->get_device_path(device_path) == AMDCUID_STATUS_SUCCESS &&
+            !device_path.empty()) {
           CuidFileEntry entry;
-          status = derived_file.find_by_package_core_id(core_id, entry);
+          status = derived_file.find_by_device_node(device_path, entry);
           if (status == AMDCUID_STATUS_SUCCESS) {
             build_derived_id_from_file_entry(entry, id);
             return AMDCUID_STATUS_SUCCESS;
           }
         }
+        const auto &info = cpu->get_info();
+        CuidFileEntry entry;
+        status = derived_file.find_by_package_id(
+            info.header.fields.cpu.physical_id, entry);
+        if (status == AMDCUID_STATUS_SUCCESS) {
+          build_derived_id_from_file_entry(entry, id);
+          return AMDCUID_STATUS_SUCCESS;
+        }
       }
-      break;
+    } break;
     case AMDCUID_DEVICE_TYPE_NIC:
       // search by device node
       {
@@ -174,7 +147,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
   // check the temporary bit in the primary CUID to determine whether to use the
   // real HMAC key or the temp key for derived CUID generation
   bool temp = primary.raw_bits[14] &
-              0x04; // check the temp indicator bit in the reserved bits
+              0x20; // check the temp indicator bit in the reserved bits
   if (temp) {
     // machine id is what needs to be protected and under HMAC system, message
     // is not guaranteed protection when output is well known so use machine id
@@ -213,7 +186,6 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool *is_temp) const {
   if (!is_temp) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
-  *is_temp = false;
   // Check the temporary bit in the primary CUID to determine if the CUID is
   // temporary
   amdcuid_primary_id primary;

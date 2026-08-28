@@ -32,40 +32,33 @@ using namespace llvm;
 namespace
 {
 
-constexpr const char* MemoryTraceNames[] = {
-    "addr_trace_load", "addr_trace_store", "addr_trace_atomic"
-};
-constexpr const char* LDSTraceNames[] = {
-    "addr_trace_lds_load", "addr_trace_lds_store", "addr_trace_lds_atomic"
-};
+constexpr const char* MemoryTraceNames[] = {"addr_trace_load", "addr_trace_store", "addr_trace_atomic"};
+constexpr const char* LDSTraceNames[] = {"addr_trace_lds_load", "addr_trace_lds_store", "addr_trace_lds_atomic"};
 constexpr const char* BufferTraceNames[][3] = {
-    {"addr_trace_buffer_load", "addr_trace_buffer_store", "addr_trace_buffer_atomic"},
+    {"addr_trace_buffer_load",        "addr_trace_buffer_store",        "addr_trace_buffer_atomic"       },
     {"addr_trace_struct_buffer_load", "addr_trace_struct_buffer_store", "addr_trace_struct_buffer_atomic"}
 };
 
 unsigned traceOperationIndex(bool isStore, bool isAtomic) { return isAtomic ? 2 : isStore; }
 
-static constexpr const char ExecTraceAsm[] =
-    "s_mov_b32 m0, exec_lo\n"
-    "s_nop 0\n"
-    "s_ttracedata\n"
-    "s_mov_b32 m0, exec_hi\n"
-    "s_nop 0\n"
-    "s_ttracedata";
+static constexpr const char ExecTraceAsm[] = "s_mov_b32 m0, exec_lo\n"
+                                             "s_nop 0\n"
+                                             "s_ttracedata\n"
+                                             "s_mov_b32 m0, exec_hi\n"
+                                             "s_nop 0\n"
+                                             "s_ttracedata";
 
 void emitExecMaskTraces(IRBuilder<>& B)
 {
     LLVMContext& Ctx = B.getContext();
-    B.CreateCall(InlineAsm::get(
-        FunctionType::get(Type::getInt32Ty(Ctx), false), ExecTraceAsm, "={m0}", /*hasSideEffects=*/true
-    ));
+    B.CreateCall(
+        InlineAsm::get(FunctionType::get(Type::getInt32Ty(Ctx), false), ExecTraceAsm, "={m0}", /*hasSideEffects=*/true)
+    );
 }
 
 } // namespace
 
-SQTTInstrumentPass::AddrTraceOp SQTTInstrumentPass::classifyAddrTraceOp(
-    Instruction* I, bool traceMemory, bool traceLDS
-)
+SQTTInstrumentPass::AddrTraceOp SQTTInstrumentPass::classifyAddrTraceOp(Instruction* I, bool traceMemory, bool traceLDS)
 {
     const auto none = [=] { return AddrTraceOp{I, nullptr, AddrTraceKind::None, 0, false}; };
     if (Value* pointer = getMemoryPointer(I))
@@ -77,8 +70,7 @@ SQTTInstrumentPass::AddrTraceOp SQTTInstrumentPass::classifyAddrTraceOp(
         bool isStore = isa<StoreInst>(I);
         unsigned op = traceOperationIndex(isStore, isa<AtomicRMWInst>(I) || isa<AtomicCmpXchgInst>(I));
         if (AS == 3 && traceLDS) return {I, LDSTraceNames[op], AddrTraceKind::LDS, 0, false};
-        if ((AS == 0 || AS == 1) && traceMemory)
-            return {I, MemoryTraceNames[op], AddrTraceKind::Memory, 0, false};
+        if ((AS == 0 || AS == 1) && traceMemory) return {I, MemoryTraceNames[op], AddrTraceKind::Memory, 0, false};
         return none();
     }
 
@@ -104,8 +96,7 @@ SQTTInstrumentPass::AddrTraceOp SQTTInstrumentPass::classifyAddrTraceOp(
                      IID == Intrinsic::amdgcn_ds_bpermute_fi_b32))
     {
         bool isBPermute = IID == Intrinsic::amdgcn_ds_bpermute || IID == Intrinsic::amdgcn_ds_bpermute_fi_b32;
-        return {I, isBPermute ? "addr_trace_ds_bpermute" : "addr_trace_ds_permute", AddrTraceKind::Permute, 0,
-                false};
+        return {I, isBPermute ? "addr_trace_ds_bpermute" : "addr_trace_ds_permute", AddrTraceKind::Permute, 0, false};
     }
     return none();
 }
@@ -145,9 +136,7 @@ std::string SQTTInstrumentPass::getFunctionSourceLoc(Function& F)
     return out;
 }
 
-void SQTTInstrumentPass::emitAddressTrace(
-    IRBuilder<>& B, const AddrTraceOp& op, uint32_t headerID, GfxGen gen
-)
+void SQTTInstrumentPass::emitAddressTrace(IRBuilder<>& B, const AddrTraceOp& op, uint32_t headerID, GfxGen gen)
 {
     Module* M = B.GetInsertBlock()->getParent()->getParent();
     LLVMContext& Ctx = M->getContext();
@@ -187,15 +176,12 @@ void SQTTInstrumentPass::emitAddressTrace(
             if (soffset->getType() != I32) soffset = B.CreateZExtOrTrunc(soffset, I32);
             emitBareTraceValue(B, soffset, M);
             emitReadlaneTraceLoop(B, voffset, nullptr, waveSize);
-            if (vindex)
-                emitReadlaneTraceLoop(B, vindex, nullptr, waveSize);
+            if (vindex) emitReadlaneTraceLoop(B, vindex, nullptr, waveSize);
             break;
         }
         case AddrTraceKind::Permute:
             emitExecMaskTraces(B);
-            emitReadlaneTraceLoop(
-                B, cast<CallInst>(op.I)->getArgOperand(0), nullptr, waveSize
-            );
+            emitReadlaneTraceLoop(B, cast<CallInst>(op.I)->getArgOperand(0), nullptr, waveSize);
             break;
         case AddrTraceKind::Memory:
         case AddrTraceKind::LDS:
@@ -221,12 +207,7 @@ void SQTTInstrumentPass::emitAddressTrace(
     emitTraceBoundary(B, /*after=*/true, schedBarrier);
 }
 
-void SQTTInstrumentPass::emitReadlaneTraceLoop(
-    IRBuilder<>& B,
-    Value* firstValue,
-    Value* secondValue,
-    unsigned waveSize
-)
+void SQTTInstrumentPass::emitReadlaneTraceLoop(IRBuilder<>& B, Value* firstValue, Value* secondValue, unsigned waveSize)
 {
     Function& F = *B.GetInsertBlock()->getParent();
     Module* M = F.getParent();
@@ -293,9 +274,8 @@ bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
     for (auto& op : Ops)
     {
         uint32_t opID = NextEventID++;
-        unsigned extraPayloadCount =
-            2 + (op.Kind == AddrTraceKind::Buffer ? 3 : 0) +
-            waveSize * ((op.Kind == AddrTraceKind::Memory || op.StructBuffer) ? 2 : 1);
+        unsigned extraPayloadCount = 2 + (op.Kind == AddrTraceKind::Buffer ? 3 : 0) +
+                                     waveSize * ((op.Kind == AddrTraceKind::Memory || op.StructBuffer) ? 2 : 1);
         Markers.push_back({opID, MarkerKind::AddressPoint, op.Name, getSourceLoc(op.I), 0, extraPayloadCount});
 
         IRBuilder<> B(op.I);

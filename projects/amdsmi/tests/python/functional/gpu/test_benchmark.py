@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import ctypes
 import json
@@ -853,6 +835,32 @@ class TestGpuBenchmark(unittest.TestCase):
             self._log_test_completion("GPU", i)
 
         self._log_performance_summary("amdsmi_get_gpu_device_uuid", "GPUs", "get_gpu_device_uuid")
+
+    def test_performance_get_gpu_device_cuid(self):
+        self.common.print_func_name("")
+
+        for i, processor in enumerate(self.processors):
+            self._log_test_start("amdsmi_get_gpu_device_cuid", "GPU", i)
+
+            self._print_api_result(amdsmi.amdsmi_get_gpu_device_cuid, i, processor)
+
+            stats = self._measure_api_performance(
+                amdsmi.amdsmi_get_gpu_device_cuid, f"get_gpu_device_cuid_gpu_{i}", processor
+            )
+
+            self.perf_results[f"get_gpu_device_cuid_gpu_{i}"] = stats
+
+            if stats["successful_runs"] > 0:
+                self._print_performance_results(stats)
+
+            else:
+                self.common.print(
+                    f"  GPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                )
+
+            self._log_test_completion("GPU", i)
+
+        self._log_performance_summary("amdsmi_get_gpu_device_cuid", "GPUs", "get_gpu_device_cuid")
 
     def test_performance_get_gpu_driver_info(self):
         self.common.print_func_name("")
@@ -2052,33 +2060,6 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary(
             "amdsmi_get_gpu_vram_usage", "Processors", "get_gpu_vram_usage"
-        )
-
-    def test_performance_get_gpu_vram_vendor(self):
-        self.common.print_func_name("")
-
-        for i, processor in enumerate(self.processors):
-            self._log_test_start("amdsmi_get_gpu_vram_vendor", "Processor", i)
-
-            self._print_api_result(amdsmi.amdsmi_get_gpu_vram_vendor, i, processor)
-
-            stats = self._measure_api_performance(
-                amdsmi.amdsmi_get_gpu_vram_vendor, f"get_gpu_vram_vendor_gpu_{i}", processor
-            )
-
-            self.perf_results[f"get_gpu_vram_vendor_gpu_{i}"] = stats
-
-            if stats["successful_runs"] > 0:
-                self._print_performance_results(stats)
-            else:
-                self.common.print(
-                    f"  Processor {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
-                )
-
-            self._log_test_completion("Processor", i)
-
-        self._log_performance_summary(
-            "amdsmi_get_gpu_vram_vendor", "Processors", "get_gpu_vram_vendor"
         )
 
     def test_performance_get_gpu_xcd_counter(self):
@@ -3361,46 +3342,6 @@ class TestGpuBenchmark(unittest.TestCase):
                     )
 
         self._log_performance_summary("amdsmi_set_gpu_clk_limit", "Processors", "set_gpu_clk_limit")
-
-    def test_performance_set_gpu_clk_range(self):
-        self.common.print_func_name("")
-
-        # Use TODO placeholder values like original test
-        min_clk_value = 100
-        max_clk_value = 200
-
-        for i, processor in enumerate(self.processors):
-            for clk_type_name, clk_type, clk_cond in common.CLK_TYPES:
-                self._log_test_start(
-                    "amdsmi_set_gpu_clk_range",
-                    "Processor",
-                    i,
-                    min_clk_value=min_clk_value,
-                    max_clk_value=max_clk_value,
-                    clk_type=clk_type_name,
-                )
-
-                stats = self._measure_api_performance(
-                    amdsmi.amdsmi_set_gpu_clk_range,
-                    f"set_gpu_clk_range_processor_{i}_clk_{clk_type_name}",
-                    processor,
-                    min_clk_value,
-                    max_clk_value,
-                    clk_type,
-                )
-
-                self.perf_results[f"set_gpu_clk_range_processor_{i}_clk_{clk_type_name}"] = stats
-
-                if stats["successful_runs"] > 0:
-                    self._print_performance_results(stats)
-                else:
-                    self.common.print(
-                        f"  Processor {i} clk={clk_type_name}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
-                    )
-
-                self._log_test_completion("Processor", i, f"clk_type={clk_type_name}")
-
-        self._log_performance_summary("amdsmi_set_gpu_clk_range", "Processors", "set_gpu_clk_range")
 
     def test_performance_set_gpu_compute_partition(self):
         self.common.print_func_name("")

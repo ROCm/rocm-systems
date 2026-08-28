@@ -180,6 +180,7 @@ private:
 
     std::shared_mutex agents_map_mut{};
     std::atomic<int>  post_move_data{0};
+    std::atomic<bool> enabled{false};
 };
 
 class DeviceThreadTracer
@@ -224,9 +225,16 @@ private:
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
-/// Install the thread trace service for newly created contexts.
+/// Install the thread trace service for newly created contexts (builds per-agent
+/// resources; does not program hardware).
 void
 initialize(HsaApiTable* table);
+
+/// Replay start_context() for device thread trace contexts requested before
+/// hsa_init(). Must be called after the HSA queue infrastructure is initialized
+/// (see registration.cpp), not from initialize().
+void
+start_active_contexts();
 
 /// Tear down shared resources when the runtime shuts down.
 void

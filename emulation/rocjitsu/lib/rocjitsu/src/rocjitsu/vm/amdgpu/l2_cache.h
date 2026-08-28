@@ -7,24 +7,28 @@
 #ifndef ROCJITSU_VM_AMDGPU_L2_CACHE_H_
 #define ROCJITSU_VM_AMDGPU_L2_CACHE_H_
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
-
-class GpuMemory; // Forward declaration for backing store writeback.
 
 /// @brief L2 cache component shared per Accelerator Complex Die (XCD).
 ///
@@ -41,22 +45,29 @@ class GpuMemory; // Forward declaration for backing store writeback.
 ///            the backing store so completed dispatches are globally visible.
 ///   - NT: Allocate in L2 (L1 is bypassed, but L2 still caches).
 ///
+/// Ordinary cache entries are keyed by (VMID, GPU virtual line), not resolved
+/// backing identity. Different aliases of the same backing line therefore keep
+/// independent cached copies. Functional write() stores update backing memory
+/// but do not invalidate other aliases; CC/UC access or explicit cache
+/// maintenance is required before an alias refetches that data. Dirty lines are
+/// written back through their owning VMID. Atomic RMW is intentionally stronger:
+/// L2Cache coordinates all registered device caches before the backing RMW,
+/// above GPU-VA-to-host mapping differences.
+///
 /// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
 ///
 /// Provides structural ports for the topology graph (IN for CU L1 miss
 /// requests, OUT for HBM/fabric traffic).
 ///
-/// THREAD SAFETY: The L2's read(), write(), fetch_line(), writeback_line(),
-/// ensure_line(), and flush_line() methods are NOT thread-safe. They operate on
-/// the underlying CacheStore without locking. Only atomic_rmw() is protected
-/// (via striped mutexes for cross-CU atomics to the same L2).
-///
-/// All CUs sharing an L2 instance MUST be assigned to the same simulation
-/// partition. This invariant ensures that only one worker thread accesses the
-/// L2's non-atomic paths at any given time. Violating this constraint (e.g.,
-/// placing CUs connected to the same L2 in different partitions) will cause
-/// data races on the cache data structure. The partitioner must enforce this
-/// constraint.
+/// @par Thread safety
+/// Public cache operations are thread-safe. Normal line operations take a
+/// shared maintenance lock followed by a per-set mutex, so CPU dispatch workers
+/// sharing an XCD-local L2 can make progress on independent cache sets.
+/// Whole-cache maintenance takes the maintenance lock exclusively, avoiding
+/// both concurrent set access and TSan's fixed lock-tracker limit. Each line
+/// operation is atomic with respect to other operations on that set; a request
+/// spanning multiple lines is intentionally not an atomic snapshot of the full
+/// range.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -68,10 +79,13 @@ public:
 
   /// @brief Construct an L2Cache component.
   /// @param name Human-readable name (e.g., "xcd0.l2").
-  explicit L2Cache(std::string name) : simdojo::Component(std::move(name)) {
-    req_port_ = add_port(std::make_unique<simdojo::Port>(
-        "req", 0, this, simdojo::PortDirection::OUT, simdojo::PortProtocol::MEMORY));
-  }
+  explicit L2Cache(std::string name);
+  ~L2Cache() override;
+
+  L2Cache(const L2Cache &) = delete;
+  L2Cache &operator=(const L2Cache &) = delete;
+  L2Cache(L2Cache &&) = delete;
+  L2Cache &operator=(L2Cache &&) = delete;
 
   /// @brief Set the requester port used to reach the backing store.
   /// @param port The OUT port connected to the MSC or HBM controller.
@@ -108,6 +122,8 @@ public:
   void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW,
              uint32_t vmid = 0);
 
+  uint64_t write_count() const { return write_count_.load(std::memory_order_relaxed); }
+
   /// @brief Fetch an entire cache line into the given buffer.
   ///
   /// Convenience method for L1 fills. Returns a full LINE_SIZE-byte line
@@ -123,37 +139,41 @@ public:
   void writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW,
                       uint32_t vmid = 0);
 
+  /// @brief Write back only the modified bytes from a full L1 line snapshot.
+  /// @param line_addr Line-aligned address.
+  /// @param[in] data Full cache line data (LINE_SIZE bytes).
+  /// @param dirty_offset First modified byte within the line.
+  /// @param dirty_size Number of modified bytes.
+  /// @param mtype Memory type for caching policy.
+  /// @param vmid Owning process address space.
+  void writeback_line(uint64_t line_addr, const uint8_t *data, uint32_t dirty_offset,
+                      uint32_t dirty_size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
+
   /// @brief Perform an atomic read-modify-write on a cache line.
   ///
-  /// @details Ensures the line is present in L2, then calls the provided
-  /// function with a pointer to the line data and the byte offset within
-  /// the line. The entire operation is serialized under a mutex so that
-  /// concurrent atomic RMWs (from different simulation threads in
-  /// multi-threaded mode) are correctly ordered, matching real hardware
-  /// L2 arbitration.
+  /// @details Establishes a process-wide device coherence boundary: dirty
+  /// scalar and L2 state is published, the device coherence epoch is advanced,
+  /// and every L2 remains quiescent through the backing RMW. Cached clean lines
+  /// are discarded lazily on their next ordinary access.
   ///
   /// @param addr The memory address of the atomic target.
   /// @param size Access size in bytes (4 or 8).
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
-    uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
-    std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
-    ensure_line(addr, vmid);
+    [[maybe_unused]] auto boundary = DeviceCacheCoherence::instance().acquire_atomic_boundary();
 
-    uint32_t offset = CacheStore::line_offset(addr);
-    uint8_t *line = cache_.line_data_for_write(addr, vmid);
-    assert(line != nullptr && "ensure_line must guarantee hit");
-
-    fn(line, offset);
-
-    send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE, vmid);
-
-    simdojo::CacheTag *ctag = nullptr;
-    cache_.lookup(addr, &ctag, vmid);
-    if (ctag) {
-      ctag->coherence = simdojo::CoherenceState::MODIFIED;
-      ctag->dirty = false;
+    if (backing_memory_) {
+      backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
+      backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+      backing_memory_->atomic_rmw(addr, size, [&](uint8_t *target) { fn(target, 0); }, vmid);
+    } else {
+      assert((size == sizeof(uint32_t) || size == sizeof(uint64_t)) &&
+             "L2 atomic size must be 4 or 8 bytes");
+      std::array<uint8_t, sizeof(uint64_t)> target{};
+      send_backing(addr, target.data(), size, simdojo::MessageOp::READ, vmid);
+      fn(target.data(), 0);
+      send_backing(addr, target.data(), size, simdojo::MessageOp::WRITE, vmid);
     }
   }
 
@@ -166,7 +186,18 @@ public:
   void flush_line(uint64_t addr, uint32_t vmid = 0);
 
   /// @brief Invalidate all L2 lines.
-  void invalidate_all() { cache_.invalidate_all(); }
+  void invalidate_all() {
+    auto maintenance_lock = acquire_cache_maintenance();
+    cache_.invalidate_all();
+    clear_all_dirty_bytes();
+  }
+
+  /// @brief Invalidate L2 lines covering an address range.
+  /// @details Used after a host/SDMA write has completed. Bytes inside the
+  /// range are authoritative in backing memory. Dirty bytes outside a partial
+  /// line update are preserved before the target VMID's line is invalidated.
+  /// @param vmid Owning process address space to invalidate.
+  void invalidate_range(uint64_t addr, uint32_t size, uint32_t vmid);
 
   /// @brief Flush all dirty L2 lines to HBM and invalidate.
   /// @param vmid Ignored. Each dirty line is written back under its own owning
@@ -195,22 +226,92 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
+  friend class DeviceCacheCoherence;
+
+  static constexpr uint64_t MAX_INVALIDATE_RANGE_SET_LOCKS = 64;
+
+  std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
+
+  class SetRangeLocks {
+  public:
+    SetRangeLocks(std::array<std::mutex, NUM_SETS> &mutexes, uint64_t line_start,
+                  uint64_t line_count)
+        : mutexes_(mutexes) {
+      std::array<bool, NUM_SETS> seen{};
+      for (uint64_t i = 0; i < line_count; ++i) {
+        const uint64_t line_addr = line_start + i * LINE_SIZE;
+        uint32_t set = CacheStore::set_index(line_addr);
+        if (!seen[set]) {
+          seen[set] = true;
+          sets_[count_++] = set;
+        }
+      }
+
+      std::sort(sets_.begin(), sets_.begin() + count_);
+      try {
+        for (size_t i = 0; i < count_; ++i) {
+          mutexes_[sets_[i]].lock();
+          ++locked_;
+        }
+      } catch (...) {
+        unlock_all();
+        throw;
+      }
+    }
+
+    SetRangeLocks(const SetRangeLocks &) = delete;
+    SetRangeLocks &operator=(const SetRangeLocks &) = delete;
+
+    ~SetRangeLocks() { unlock_all(); }
+
+  private:
+    void unlock_all() {
+      while (locked_ > 0) {
+        --locked_;
+        mutexes_[sets_[locked_]].unlock();
+      }
+    }
+
+    std::array<std::mutex, NUM_SETS> &mutexes_;
+    std::array<uint32_t, NUM_SETS> sets_{};
+    size_t count_ = 0;
+    size_t locked_ = 0;
+  };
+
+  SetRangeLocks lock_sets_for_range(uint64_t line_start, uint64_t line_count) const {
+    return SetRangeLocks(set_mutexes_, line_start, line_count);
+  }
+
+  std::shared_lock<std::shared_mutex> acquire_cache_access();
+  std::unique_lock<std::shared_mutex> acquire_cache_maintenance();
+  void synchronize_epoch_locked();
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
+  void flush_dirty_locked();
+  using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
+  void mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);
+  bool clear_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);
+  void publish_dirty_bytes(uint64_t line_addr, const uint8_t *data, uint32_t vmid,
+                           uint32_t discard_offset = 0, uint32_t discard_size = 0);
+  void clear_all_dirty_bytes();
+  void invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid, uint64_t line_start,
+                               uint64_t line_count);
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                     uint32_t vmid = 0);
 
-  static constexpr uint32_t ATOMIC_STRIPE_COUNT = 64;
-
   CacheStore cache_;
+  mutable std::shared_mutex maintenance_mutex_;
+  mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
-  /// @brief Striped locks for atomic RMW serialization. Each stripe covers
-  /// a range of cache lines, allowing atomics to different lines to proceed
-  /// in parallel (matching real L2 arbitration behavior).
-  std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
+  uint64_t coherence_epoch_ = 0;
+  std::mutex dirty_bytes_mutex_;
+  std::map<std::pair<uint32_t, uint64_t>, DirtyMask> dirty_bytes_;
+  std::atomic<bool> has_dirty_lines_{false};
   std::vector<simdojo::Port *> cpl_ports_;
-  uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
-  // Relaxed atomics: striped atomic_rmw() calls can update these concurrently.
+  std::atomic<uint64_t> write_count_ = 0; ///< Debug: total L2 writes (for trace).
+  // Relaxed atomics: independent cache operations can update these counters
+  // concurrently; the values are diagnostic only.
   std::atomic<uint64_t> backing_read_transactions_{0};
   std::atomic<uint64_t> backing_write_transactions_{0};
 };

@@ -128,6 +128,8 @@
     {"dme": "GPU_XGMI_LINK_TX", "rdc": "RDC_FI_XGMI_0_WRITE_KB", "status": "mapped", "note": "RDC has per-link fields"},
     {"dme": "GPU_HEALTH", "rdc": null, "status": "missing", "reason": "P3: needs investigation for composite health field"},
     {"dme": "GPU_AFID_ERRORS", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
+    {"dme": "GPU_VIOLATION_LOW_UTILIZATION_ACCUMULATED", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
+    {"dme": "GPU_VIOLATION_LOW_UTILIZATION_PERCENTAGE", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
     {"dme": "GPU_PROCESS_CU_OCCUPANCY", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
     {"dme": "GPU_PROF_CPC_CPC_STAT_BUSY", "rdc": "RDC_FI_PROF_CPC_CPC_STAT_BUSY", "status": "mapped"},
     {"dme": "GPU_PROF_CPC_CPC_STAT_IDLE", "rdc": "RDC_FI_PROF_CPC_CPC_STAT_IDLE", "status": "mapped"},

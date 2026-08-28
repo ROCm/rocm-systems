@@ -9,7 +9,7 @@ Install hipFile
 ****************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see :doc:`Install AMD ROCm <rocm:install/rocm>`.
 
 For source builds, CMake options, and sparse-checkout layout from ``rocm-systems``,
 see :doc:`./build-from-source`. For the Python bindings after the C library is on
@@ -86,6 +86,18 @@ Where:
          .. code:: shell
 
             sudo zypper install amdrocm-<group>-devel
+
+
+.. note::
+
+   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux. 
+
+   ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
+   
+   NFSoRDMA requires ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``.
+
+   See :doc:`/reference/hipFile-io-backends` for information on file type rules.
+
 
 .. _hipfile-install-nightly:
 

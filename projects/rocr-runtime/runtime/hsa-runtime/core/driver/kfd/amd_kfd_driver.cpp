@@ -42,11 +42,13 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
+#if defined(__linux__) || defined(__FreeBSD__)
+    #include <sys/ioctl.h>
+    #include <link.h>
+#endif
+
 #if defined(__linux__)
-#include <amdgpu_drm.h>
-#include <link.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
+    #include <amdgpu_drm.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
@@ -348,7 +350,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // no need to map
     // For local memory, only map it to the owning GPU. Mapping to other GPU,
     // if the access is allowed, is performed on AllowAccess.
-    HsaMemMapFlags map_flag = m_region.map_flags();
+    HsaMemFlags mem_flags = m_region.mem_flags();
     size_t map_node_count = 1;
     const uint32_t owner_node_id = m_region.owner()->node_id();
     const uint32_t *map_node_id = &owner_node_id;
@@ -382,7 +384,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     uint64_t alternate_va = 0;
 
     const bool is_resident = (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
-                                  mem, size, &alternate_va, map_flag, map_node_count,
+                                  mem, size, &alternate_va, mem_flags, map_node_count,
                                   const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
@@ -669,17 +671,6 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-#if defined(__linux__)
-  /*
-   * We converted mem into a driver handle. The driver handle will keep the reference count
-   * inside the KMD so we can free the original KFD allocation.
-   */
-  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
-#endif
-
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
@@ -689,6 +680,22 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
+#if defined(__linux__)
+  /*
+   * Keep the original KFD allocation alive in handle->vaddr; DestroyMemoryHandle releases it.
+   *
+   * The DRM import alone keeps the buffer's reference count up, but a buffer that KFD no longer
+   * tracks is only revalidated from the command submission path. ROCr dispatches through KFD user
+   * mode queues and never submits through amdgpu_cs, so a peer dma-buf attach that migrates the
+   * buffer would leave the exporting agent with stale page table entries. While the KFD allocation
+   * exists the buffer carries KFD's eviction fence, so the migration goes through KFD
+   * evict/restore, which also revalidates the mappings KFD does not manage.
+   */
+  handle->vaddr = mem;
+#else
+  // Windows KFD and DRM handles are equivalent, so targetHandle already owns the allocation.
+  handle->vaddr = nullptr;
+#endif
   /*
    * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
    * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
@@ -700,13 +707,20 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
+  // Attempt every release even if an earlier one fails, so a failure to free the imported BO
+  // does not leak the KFD allocation retained by CreateShareableHandle.
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  if (memhandle != nullptr) {
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR;
-    }
+  if (memhandle != nullptr &&
+      HSAKMT_CALL(hsaKmtMemHandleFree(memhandle)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
   }
+
+  // Release the KFD allocation retained by CreateShareableHandle, if any.
+  if (handle->vaddr != nullptr &&
+      HSAKMT_CALL(hsaKmtFreeMemory(handle->vaddr, handle->size)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
+  }
+
   *handle = {};
   return ret;
 }
@@ -953,7 +967,7 @@ hsa_status_t KfdDriver::DeregisterMemory(void* ptr) const {
 }
 
 hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                           const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                           const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                            const uint32_t* nodes) const {
   if (mem_flags == nullptr && nodes == nullptr) {
     if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va)) !=

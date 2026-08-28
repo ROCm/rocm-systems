@@ -17,18 +17,27 @@
 namespace rocjitsu {
 
 class Instruction;
+class Gfx1250VgprMsbAnalysis;
+
+/// @brief How to represent a gfx1250 VGPR definition whose physical bank is unknown.
+enum class UnknownVgprDefPolicy : uint8_t {
+  Omit,      ///< Do not claim a must-write for liveness kill computation.
+  ExpandAll, ///< Mark every possible physical tuple for whole-kernel usage scans.
+};
 
 /// @brief Registers read and written by one decoded instruction.
 class InstDefUse {
 public:
   /// @brief Extract explicit operand register refs.
   /// @param inst Decoded instruction whose operands have stable lifetimes.
-  InstDefUse(const Instruction &inst);
+  InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr,
+             UnknownVgprDefPolicy unknown_vgpr_defs = UnknownVgprDefPolicy::Omit);
 
-  RegisterSet defs;                        ///< Registers overwritten by the instruction.
-  RegisterSet uses;                        ///< Registers read before the instruction writes defs.
-  bool has_exec_masked_vector_def = false; ///< True if any vector def is predicated by EXEC.
-  bool has_predicated_def = false;         ///< True if defs preserve old values on some paths.
+  RegisterSet defs; ///< Registers overwritten by the instruction.
+  RegisterSet uses; ///< Registers read before the instruction writes defs.
+  bool has_exec_masked_vector_def =
+      false; ///< True if the instruction doesn't ignore EXEC and has a vector def.
+  bool has_predicated_def = false; ///< True if defs preserve old values on some paths.
 };
 
 } // namespace rocjitsu

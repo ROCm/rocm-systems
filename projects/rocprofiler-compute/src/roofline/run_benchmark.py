@@ -30,6 +30,8 @@ BENCHMARKING_SUPPORTED = [
     "gfx1150",
     "gfx1151",
     "gfx1152",
+    "gfx1153",
+    "gfx1250",
 ]
 
 

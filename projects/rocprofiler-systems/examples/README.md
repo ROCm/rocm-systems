@@ -18,9 +18,8 @@ This directory contains example applications demonstrating various profiling sce
 
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
-| [user-api](user-api/) | User API for named regions, annotations, and selective thread tracing | rocprofiler-systems user library |
 | [roctx](roctx/) | ROCTx range/marker API with thread naming, pause/resume, and device labeling | rocprofiler-sdk-roctx, HIP |
-| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems user library |
+| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems causal API library |
 | [rewrite-caller](rewrite-caller/) | Minimal call chain for binary rewrite instrumentation testing | None |
 | [trace-time-window](trace-time-window/) | Mixed CPU-bound and sleep workload for time-windowed trace analysis | None |
 
@@ -53,6 +52,7 @@ This directory contains example applications demonstrating various profiling sce
 | --------- | ------------- | -------------- |
 | [jpegdecode](jpegdecode/) | Batch JPEG decoding performance benchmark using rocJPEG | HIP, rocJPEG |
 | [videodecode](videodecode/) | Batch video decoding benchmark using ROCDecode with VCN hardware | HIP, ROCDecode, FFmpeg |
+| [hipfile](hipfile/) | hipFILE (GPU-direct storage) API tracing demo | HIP, hipFILE, ROCProfiler-SDK 1.3.5+ |
 
 ### HPC
 
