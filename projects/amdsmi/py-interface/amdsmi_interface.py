@@ -3588,6 +3588,7 @@ def amdsmi_get_gpu_cper_entries(
             "record_id": entry_ptr.contents.record_id,
             "flags": entry_ptr.contents.flags,
             "persistence_info": entry_ptr.contents.persistence_info,
+            "source": "gpu",
             # "reserved" : entry_ptr.contents.reserved
             # "cper_valid_bit" : entry_ptr.contents.cper_valid_bits,
             # "partition_id" : entry_ptr.contents.partition_id,
@@ -3701,6 +3702,7 @@ def amdsmi_get_fabric_cper_entries(
             "flags": entry_ptr.contents.flags,
             "persistence_info": entry_ptr.contents.persistence_info,
             "partition_id": entry_ptr.contents.partition_id,
+            "source": "fabric",
         }
 
         entries[i] = cper_entry.copy()
