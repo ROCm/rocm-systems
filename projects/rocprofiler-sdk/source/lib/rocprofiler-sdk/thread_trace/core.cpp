@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -72,7 +73,7 @@ struct cbdata_t
 };
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
-// start requests are deferred and replayed by initialize().
+// start requests are deferred and replayed by start_active_contexts().
 std::atomic<bool>&
 hsa_inited()
 {
@@ -407,6 +408,12 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
+    if(enabled.exchange(false, std::memory_order_acq_rel))
+    {
+        if(auto* controller = hsa::get_queue_controller())
+            controller->disable_serialization(configured_agents());
+    }
+
     ROCP_TRACE << "Clearing agents";
     auto lk = std::unique_lock{agents_map_mut};
     agents.clear();
@@ -431,6 +438,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         rocprof_corr_id.internal = corr_id->internal;
     }
     // TODO: Get external
+
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
 
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
@@ -468,17 +477,19 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
-        post_move_data.fetch_sub(1);
+        auto it = agents.find(pkt->GetAgent());
+        if(it == agents.end() || it->second == nullptr) continue;
 
+        post_move_data.fetch_sub(1);
         if(pkt->after_krn_pkt.empty()) continue;
 
-        auto it = agents.find(pkt->GetAgent());
-        if(it != agents.end() && it->second != nullptr)
-            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
 }
 
@@ -519,15 +530,21 @@ DispatchThreadTracer::start_context()
     // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
     // context. An empty set still means every agent.
     const auto serialization_agents = configured_agents();
+    enabled.store(true, std::memory_order_release);
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
 }
 
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
+    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
+    // registered so packets already in the queues can drain through the serializer transition.
+    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
+
+    hsa::queue_controller_sync();
+
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
-
     const auto serialization_agents = configured_agents();
     controller->disable_serialization(serialization_agents);
 }
@@ -572,7 +589,7 @@ void
 DeviceThreadTracer::start_context()
 {
     // Per-agent resources don't exist until HSA is registered; the request is
-    // cached in the active-context array and replayed by initialize().
+    // cached in the active-context array and replayed by start_active_contexts().
     if(!hsa_inited().load())
     {
         ROCP_INFO << "Device thread trace start requested before hsa_init; deferring";
@@ -639,12 +656,17 @@ initialize(HsaApiTable* table)
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
     }
+}
 
+void
+start_active_contexts()
+{
     // HSA resources now exist; allow start_context() to program the hardware.
     hsa_inited().store(true);
 
     // Replay device contexts started before hsa_init() (their start_context()
-    // returned early above). Dispatch mode needs no replay.
+    // returned early). Must run after the queue infrastructure is initialized
+    // (see registration.cpp); starting the SQTT hardware earlier hangs the GPU.
     for(auto& ctx : context::get_active_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->start_context();

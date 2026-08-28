@@ -92,6 +92,11 @@ public:
   /// Total events ever allocated (including trimmed).
   int totalAllocated() const { return base_offset_ + size(); }
 
+  /// Whether @p id names an event still present in this registry.
+  bool contains(EventId id) const {
+    return id.isValid() && id.value >= base_offset_ && id.value < totalAllocated();
+  }
+
   /// Number of events trimmed so far.
   int trimmedCount() const { return base_offset_; }
 

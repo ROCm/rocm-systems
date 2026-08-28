@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef __FDINFO__
 #define __FDINFO__
@@ -31,8 +12,18 @@
 extern "C" {
 #endif
 
+// Determine, via KFD, whether process `pid` uses the GPU identified by `bdf`.
+// `known_kfd_gpu_id` is this device's KFD gpu id; supplying it lets the lookup
+// skip rebuilding the entire KFD topology just to translate the BDF. Pass 0 or
+// UINT64_MAX to force the topology-discovery fallback that re-derives the id.
+amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid, uint64_t known_kfd_gpu_id);
+
+// Populate `info` with per-process GPU usage for `pid` on the device `bdf`.
+// `kfd_gpu_id` is this device's KFD gpu id, forwarded to gpu_is_in_kfd_pid() so
+// the lookup need not rebuild the KFD topology. Pass 0 or UINT64_MAX to fall
+// back to topology discovery.
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
-                                     amdsmi_proc_info_t& info);
+                                     amdsmi_proc_info_t& info, uint64_t kfd_gpu_id);
 
 #ifdef __cplusplus
 }  // extern "C"

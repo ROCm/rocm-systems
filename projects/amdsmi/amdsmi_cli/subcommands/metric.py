@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import json
 import logging
@@ -530,6 +513,21 @@ class MetricCommands:
                                 current_xcp
                             ]
                         engine_usage["vcn_busy"] = new_xcp_dict
+                    else:
+                        # On devices without XCP partitions (e.g. Navi), vcn_busy_percent
+                        # is available via sysfs; there is no equivalent sysfs for gfx_busy_inst
+                        # or jpeg_busy on these devices.
+                        try:
+                            engine_usage["vcn_busy"] = amdsmi_interface.amdsmi_get_vcn_busy_percent(
+                                args.gpu
+                            )
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            logging.debug(
+                                "Failed to get vcn busy percent for gpu %s | %s",
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                            engine_usage["vcn_busy"] = "N/A"
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
 

@@ -76,7 +76,10 @@ endif()
 
 if(BUILD_INTEGRATION_TESTS)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
-    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    find_package(
+        Python3 3.8
+        COMPONENTS Interpreter
+        REQUIRED)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import elftools"
         RESULT_VARIABLE PYELFTOOLS_IMPORT_RESULT
@@ -124,19 +127,16 @@ if(BUILD_INTEGRATION_TESTS)
     list(JOIN PYTHON_API_DEP_LIBRARY_PATH ":" PYTHON_API_DEP_LIBRARY_PATH)
     set(PYTHON_API_LD_LIBRARY_PATH "${CMAKE_BINARY_DIR}/lib")
     if(PYTHON_API_DEP_LIBRARY_PATH)
-        set(PYTHON_API_LD_LIBRARY_PATH
-            "${PYTHON_API_LD_LIBRARY_PATH}:${PYTHON_API_DEP_LIBRARY_PATH}")
+        set(PYTHON_API_LD_LIBRARY_PATH "${PYTHON_API_LD_LIBRARY_PATH}:${PYTHON_API_DEP_LIBRARY_PATH}")
     endif()
 
     add_test(NAME csv-launch COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH})
     set_tests_properties(csv-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
-    add_test(NAME python-api-launch COMMAND ${Python3_EXECUTABLE} ${PYTHON_API_PY} --lib
-                                             ${LIB_PATH})
+    add_test(NAME python-api-launch COMMAND ${Python3_EXECUTABLE} ${PYTHON_API_PY} --lib ${LIB_PATH})
     set(PYTHON_API_TEST_ENV
         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python"
-        "LD_LIBRARY_PATH=${PYTHON_API_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
-        "ROCM_PATH=${CMAKE_INSTALL_PREFIX}")
+        "LD_LIBRARY_PATH=${PYTHON_API_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}" "ROCM_PATH=${CMAKE_INSTALL_PREFIX}")
     set_tests_properties(
         python-api-launch
         PROPERTIES TIMEOUT
@@ -149,45 +149,23 @@ if(BUILD_INTEGRATION_TESTS)
                    "${PYTHON_API_TEST_ENV}")
 
     add_test(NAME codegen-funcmap-metadata COMMAND ${Python3_EXECUTABLE} ${CODEGEN_TEST_PY})
-    set_tests_properties(
-        codegen-funcmap-metadata
-        PROPERTIES TIMEOUT
-                   30
-                   LABELS
-                   "integration-tests"
-                   ENVIRONMENT
-                   "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    set_tests_properties(codegen-funcmap-metadata PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     add_test(NAME att-marker-clock-correction COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_TEST_PY})
-    set_tests_properties(
-        att-marker-clock-correction
-        PROPERTIES
-            TIMEOUT
-            30
-            LABELS
-            "integration-tests"
-            ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    set_tests_properties(att-marker-clock-correction PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)
-        add_test(
-            NAME python-api-install
-            COMMAND ${CMAKE_COMMAND} -P
-                    ${CMAKE_CURRENT_BINARY_DIR}/python_api_install_test.cmake)
-        set_tests_properties(
-            python-api-install
-            PROPERTIES TIMEOUT
-                       300
-                       LABELS
-                       "integration-tests"
-                       DEPENDS
-                       python-api-launch)
+        add_test(NAME python-api-install COMMAND ${CMAKE_COMMAND} -P
+                                                 ${CMAKE_CURRENT_BINARY_DIR}/python_api_install_test.cmake)
+        set_tests_properties(python-api-install PROPERTIES TIMEOUT 300 LABELS "integration-tests" DEPENDS
+                                                           python-api-launch)
     endif()
 
     add_test(NAME att-launch COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --help)
-    set_tests_properties(att-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY
-                                               ${TEST_BIN_DIR})
+    set_tests_properties(att-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
     add_test(NAME decompress COMMAND ${TEST_BIN_DIR}/unpack.sh)
     set_tests_properties(
@@ -260,9 +238,8 @@ if(BUILD_INTEGRATION_TESTS)
         endif()
 
         if(NOT USES_VCMPX)
-            add_test(NAME ${DATA}_execute
-                     COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name 1_results
-                             ${TEST_BIN_DIR}/${DATA})
+            add_test(NAME ${DATA}_execute COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name
+                                                  1_results ${TEST_BIN_DIR}/${DATA})
             set_tests_properties(
                 ${DATA}_execute
                 PROPERTIES TIMEOUT

@@ -12,6 +12,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
+
+#include <sys/types.h>
 
 namespace rocjitsu::fb {
 struct DbtGuestConfig;
@@ -25,10 +28,22 @@ enum class DbtExecutionBackend {
   Simulator, ///< Forward execution-facing operations to a RocJITsu simulated GPU.
 };
 
+/// @brief Silicon revision for a DBT translation side.
+///
+/// @details gfx1250 A0 and B0 share an ELF machine ID, so the revision is
+/// carried out of band and selects the corresponding translation profile.
+/// Unspecified is the default for architectures whose machine ID identifies
+/// the silicon.
+enum class DbtSiliconRevision {
+  Unspecified,
+  Gfx1250A0,
+  Gfx1250B0,
+};
+
 /// @brief Host target selected for DBT translation and execution.
 struct DbtHostConfig {
   std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
-  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to isa.
+  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 selects the first ISA match.
   DbtExecutionBackend backend = DbtExecutionBackend::Hardware; ///< Hardware or simulator execution.
   std::string simulator_config_path; ///< Optional external simulator host config.
 };
@@ -47,6 +62,16 @@ struct DbtGuestConfig {
   int log_level = 0;             ///< DBT hook logging level loaded from the config file.
   bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
   KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
+  /// @brief Guest silicon revision (gfx1250 A0/B0 disambiguation); Unspecified otherwise.
+  DbtSiliconRevision guest_revision = DbtSiliconRevision::Unspecified;
+  /// @brief Host silicon revision for DBT output; Unspecified otherwise.
+  DbtSiliconRevision host_revision = DbtSiliconRevision::Unspecified;
+};
+
+/// @brief Parsed per-invocation config handoff shared by child runtime layers.
+struct DbtRuntimeConfigHandoff {
+  std::string config_path;
+  std::optional<std::string> resolved_gpu_id;
 };
 
 /// @brief Resolve the simulator host config selected by a DBT guest config.
@@ -80,6 +105,25 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 /// sections.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
+
+/// @brief Apply the launcher's resolved GPU to an automatic DBT host config.
+/// @details Child processes read this value from the second line of the
+/// per-invocation config handoff. Explicit nonzero config values remain authoritative.
+/// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value);
+
+/// @brief Atomically write the per-invocation runtime config handoff.
+/// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid);
+
+/// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
+/// @returns std::nullopt when the first line does not contain a config path.
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents);
+
+/// @brief Load and validate the DBT guest config referenced by a runtime handoff.
+/// @throws std::runtime_error when automatic DBT host selection lacks a resolved GPU ID.
+DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///

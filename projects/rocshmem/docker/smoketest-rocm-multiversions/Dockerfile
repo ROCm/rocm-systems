@@ -1,7 +1,7 @@
 # =============================================================================
 # Multi-ROCm-version rocSHMEM smoketest
 #
-# Installs multiple ROCm versions side-by-side (6.3, 6.4, 7.0, 7.2 + 7.13 TheRock),
+# Installs multiple ROCm versions side-by-side (6.3, 6.4, 7.0, 7.2 + 7.13/7.14 TheRock),
 # builds rocshmem against a default subset, runs ping-pong smoketest + Python wheel.
 #
 # Build from local checkout:
@@ -11,6 +11,15 @@
 # Build from GitHub branch:
 #   docker build -f docker/smoketest-rocm-multiversions/Dockerfile \
 #     --build-arg ROCSHMEM_REF=develop -t rocshmem-multiversion .
+#
+# Add a TheRock nightly tarball from rocm.nightlies.amd.com:
+#   docker build ... \
+#     --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260731 \
+#     --build-arg ROCM_NIGHTLY_ARCH=gfx950 \
+#     -t rocshmem-multiversion .
+#   # Or resolve the latest automatically:
+#   docker build ... --build-arg ROCM_NIGHTLY_VERSION=latest \
+#     --build-arg ROCM_NIGHTLY_ARCH=gfx950 -t rocshmem-multiversion .
 #
 # Run (compile-only, no GPU needed):
 #   docker run --rm rocshmem-multiversion --build-only
@@ -23,7 +32,8 @@
 FROM ubuntu:24.04
 
 ARG ROCM_LEGACY_VERSIONS="6.3.3 6.4.3 7.0.2 7.2.4"
-ARG ROCM_THEROCK_VERSION=7.13
+ARG ROCM_THEROCK_VERSIONS="7.13 7.14"
+ARG ROCM_THEROCK_GPU_TARGETS="gfx942 gfx950 gfx1250"
 
 ###############################################################################
 # System dependencies
@@ -41,7 +51,7 @@ RUN apt-get update \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
-# ROCm 6.3 + 7.2 (traditional repo.radeon.com)
+# ROCm legacy versions (traditional repo.radeon.com)
 ###############################################################################
 RUN mkdir -p /etc/apt/keyrings \
  && wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key \
@@ -57,10 +67,11 @@ RUN mkdir -p /etc/apt/keyrings \
  && for ver in ${ROCM_LEGACY_VERSIONS}; do \
       apt-get install -y rocm${ver}; \
     done \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ && { update-alternatives --query rocm >/dev/null 2>&1 && update-alternatives --remove-all rocm; }
 
 ###############################################################################
-# ROCm 7.13 (TheRock repo.amd.com)
+# ROCm TheRock versions (repo.amd.com)
 ###############################################################################
 RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
     | gpg --dearmor > /etc/apt/keyrings/amdrocm.gpg \
@@ -68,19 +79,21 @@ RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
       https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" \
       > /etc/apt/sources.list.d/amdrocm.list \
  && apt-get update \
- && apt-get install -y \
-      amdrocm-core-dev${ROCM_THEROCK_VERSION} \
-      amdrocm-core${ROCM_THEROCK_VERSION}-gfx942 \
-      amdrocm-core${ROCM_THEROCK_VERSION}-gfx950 \
-      amdrocm-developer-tools${ROCM_THEROCK_VERSION} \
-      amdrocm-runtime-dev \
- && ln -sf /opt/rocm/core/.info /opt/rocm/.info \
+ && for ver in ${ROCM_THEROCK_VERSIONS}; do \
+      pkgs="amdrocm-developer-tools${ver} amdrocm-runtime-dev${ver} amdrocm-runtime${ver} amdrocm-llvm${ver} amdrocm-sysdeps${ver}"; \
+      for gpu in ${ROCM_THEROCK_GPU_TARGETS}; do \
+        for pkg in "amdrocm-core${ver}-${gpu}" "amdrocm-core-dev${ver}-${gpu}"; do \
+          apt-cache show "${pkg}" >/dev/null 2>&1 && pkgs="${pkgs} ${pkg}"; \
+        done; \
+      done; \
+      apt-get install -y ${pkgs}; \
+    done \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
 # UCX (shared across all ROCm versions, built against the newest)
 ###############################################################################
-ARG UCX_COMMIT=18770fdc1c3b5de202d14a088a14b734d2c4bbf3
+ARG UCX_COMMIT=b6a9d47fccce849c28111f05a7fa8f1c930ff17d
 ARG UCX_INSTALL=/opt/ucx
 RUN git clone https://github.com/ROCm/ucx.git /tmp/ucx \
  && cd /tmp/ucx && git checkout ${UCX_COMMIT} \
@@ -142,9 +155,51 @@ RUN if [ -n "${BUILD_THEROCK}" ]; then \
     fi
 
 ###############################################################################
-# Python wheel dependencies
+# TheRock nightly tarball (optional)
+# Downloads a pre-built nightly from https://rocm.nightlies.amd.com/tarball-multi-arch/
+# and installs it under /opt/rocm-<version> so build_and_test.sh picks it up.
+#
+# ROCM_NIGHTLY_ARCH:    GPU arch slice, e.g. gfx950, gfx94X (default: gfx94X)
+# ROCM_NIGHTLY_VERSION: version+date string, e.g. 10.1.0a20260731
+#                       Set to "latest" to auto-resolve the most recent build.
 ###############################################################################
-RUN pip install --break-system-packages pybind11 pytest
+ARG ROCM_NIGHTLY_VERSION=
+ARG ROCM_NIGHTLY_ARCH=gfx94X
+ARG ROCM_NIGHTLY_BASE_URL=https://rocm.nightlies.amd.com/tarball-multi-arch
+RUN if [ -n "${ROCM_NIGHTLY_VERSION}" ]; then \
+      arch="${ROCM_NIGHTLY_ARCH}" \
+      && ver="${ROCM_NIGHTLY_VERSION}" \
+      && if [ "${ver}" = "latest" ]; then \
+           ver=$(curl -fsSL "${ROCM_NIGHTLY_BASE_URL}/" \
+                 | grep -oE "therock-dist-linux-${arch}-dcgpu-[0-9]+\.[0-9]+\.[0-9]+a[0-9]+\.tar\.gz" \
+                 | sed "s/therock-dist-linux-${arch}-dcgpu-//;s/\.tar\.gz//" \
+                 | sort -t'a' -k1,1V -k2,2n | tail -1); \
+           echo "Resolved latest nightly: ${ver}"; \
+         fi \
+      && tarball="therock-dist-linux-${arch}-dcgpu-${ver}.tar.gz" \
+      && dest="/opt/rocm-${ver}" \
+      && mkdir -p "${dest}" \
+      && echo "Downloading ${tarball} -> ${dest}" \
+      && curl -fSL "${ROCM_NIGHTLY_BASE_URL}/${tarball}" \
+           | tar -xz -C "${dest}" \
+      && echo "Installed TheRock nightly ${ver} at ${dest}"; \
+    fi
+
+###############################################################################
+# Python venv + wheel dependencies
+###############################################################################
+# Install Python build deps declared in rocshmem's own pyproject.toml into a
+# dedicated venv so the system Python install is not modified.
+# COPY from local context so local changes are respected (works for both
+# USE_SRC and ROCSHMEM_REF builds since the build context is always local).
+COPY python/pyproject.toml /tmp/rocshmem-pyproject.toml
+ENV ROCSHMEM_VENV=/opt/rocshmem-venv
+RUN python3 -m venv ${ROCSHMEM_VENV} \
+ && ${ROCSHMEM_VENV}/bin/pip install \
+      $(python3 -c "import tomllib; f=open('/tmp/rocshmem-pyproject.toml','rb'); d=tomllib.load(f); print(' '.join(d.get('build-system',{}).get('requires',[])))") \
+      pytest \
+      pyyaml
+ENV PATH="${ROCSHMEM_VENV}/bin:${PATH}"
 
 ###############################################################################
 # Environment

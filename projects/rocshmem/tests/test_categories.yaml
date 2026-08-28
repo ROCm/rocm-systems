@@ -156,6 +156,7 @@ test_categories:
       - "broadcast_wave_.*"
       - "fcollect_wave_.*"
       - "reduce_wave_.*"
+      - "teamreducescatterwave_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
@@ -215,6 +216,7 @@ test_categories:
       # Tile collective tests (IPC-only)
       - "tile_broadcast_.*"
       - "tile_allgather_.*"
+      - "tile_reduce_.*"
 
     labels:
       - "nightly"

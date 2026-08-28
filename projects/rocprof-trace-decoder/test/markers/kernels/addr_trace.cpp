@@ -22,24 +22,23 @@
 
 #include <hip/hip_runtime.h>
 
-#define HIP_CALL(call)                                                                             \
-    do                                                                                             \
-    {                                                                                              \
-        hipError_t err = call;                                                                     \
-        if(err != hipSuccess)                                                                      \
-        {                                                                                          \
-            fprintf(stderr, "%s\n", hipGetErrorString(err));                                       \
-            abort();                                                                               \
-        }                                                                                          \
-    } while(0)
+#define HIP_CALL(call)                                                                                                 \
+    do {                                                                                                               \
+        hipError_t err = call;                                                                                         \
+        if (err != hipSuccess)                                                                                         \
+        {                                                                                                              \
+            fprintf(stderr, "%s\n", hipGetErrorString(err));                                                           \
+            abort();                                                                                                   \
+        }                                                                                                              \
+    }                                                                                                                  \
+    while (0)
 
 // Force the pointer through a device function to generate flat memory access
 // (no address space annotation -> generic/flat)
-__device__ __noinline__ float flat_load(float *p, int idx) {
-    return p[idx];
-}
+__device__ __noinline__ float flat_load(float* p, int idx) { return p[idx]; }
 
-__global__ void addr_trace_kernel(float *out, int n) {
+__global__ void addr_trace_kernel(float* out, int n)
+{
     __shared__ float shm[256];
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
@@ -65,9 +64,10 @@ __global__ void addr_trace_kernel(float *out, int n) {
     out[idx] = val + shm[0];
 }
 
-int main() {
+int main()
+{
     const int N = 256;
-    float *d_out;
+    float* d_out;
     hipMalloc(&d_out, N * sizeof(float));
 
     float h_data[N];

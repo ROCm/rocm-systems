@@ -1,22 +1,5 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                   Cmake amdcuid library                           ")
@@ -59,6 +42,7 @@ set(CUID_SOURCES
     ${SRC_DIR}/pci_util.cc
     ${SRC_DIR}/acpi_parser.cc
     ${SRC_DIR}/smbios_util.cc
+    ${SRC_DIR}/gim_util.cc
 )
 
 set(CUID_HEADERS
@@ -78,18 +62,15 @@ set(CUID_HEADERS
     ${SRC_DIR}/acpi_parser.h
     ${SRC_DIR}/smbios_util.h
     ${SRC_DIR}/cuid_internal.h
+    ${SRC_DIR}/gim_util.h
 )
 
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
-add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
+
+set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(
     amdcuid_static
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_include_directories(
-    amdcuid_shared
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -101,33 +82,12 @@ target_compile_definitions(
     amdcuid_static
     PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
-target_compile_definitions(
-    amdcuid_shared
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
-)
 
 if(WIN32)
-    target_link_libraries(amdcuid_shared PRIVATE bcrypt)
     target_link_libraries(amdcuid_static PUBLIC bcrypt)
 else()
-    target_link_libraries(amdcuid_shared PRIVATE OpenSSL::Crypto)
     target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
 endif()
-
-# Shared library
-install(
-    TARGETS amdcuid_shared
-    RUNTIME
-        DESTINATION
-            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
-    LIBRARY
-        DESTINATION
-            ${CMAKE_INSTALL_LIBDIR} # Linux .so
-    ARCHIVE
-        DESTINATION
-            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
-        COMPONENT ${LIB_COMPONENT}
-)
 
 # Static library
 install(

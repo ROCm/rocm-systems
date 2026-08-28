@@ -233,6 +233,29 @@ static const CounterRegInfo SqcCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PE
                                                     REG_32B_NULL,
                                                     REG_32B_NULL}};
 
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+// SP shares the SQ perfcounter registers
+static const CounterRegInfo SpCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL}};
+#endif
 #if GFX12_VARIANT != GFX12_VARIANT_1250
 // Special handling of GCVML2 (SPM only):
 static const CounterRegInfo Gcvml2CounterRegAddr[] = {
@@ -618,6 +641,18 @@ static const GpuBlockInfo SqcCounterBlockInfo = {
     gfx12_cntx_prim::sq_select_value,
     CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSqAttr,
     BLOCK_DELAY_NONE};
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+static const GpuBlockInfo SpCounterBlockInfo = {
+    "SP",
+    __BLOCK_ID(SP),
+    SpCounterBlockNumInstances,
+    SpCounterBlockMaxEvent,
+    SpCounterBlockNumCounters,
+    SpCounterRegAddr,
+    gfx12_cntx_prim::sq_select_value,
+    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSqAttr,
+    BLOCK_DELAY_NONE};
+#endif
 static const GpuBlockInfo TaCounterBlockInfo = {
     "TA",
     __BLOCK_ID_HSA(TA),

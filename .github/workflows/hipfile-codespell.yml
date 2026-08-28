@@ -36,3 +36,4 @@ jobs:
         with:
           ignore_words_file: |
             projects/hipfile/.codespellignore
+          skip: "./projects/hipfile/third-party,./projects/hipfile/third-party/*"

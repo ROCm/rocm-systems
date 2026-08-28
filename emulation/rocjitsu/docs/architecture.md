@@ -84,7 +84,8 @@ Hand-written files handle address calculation (`addr_calc_flat.h`),
 matrix math execution (`mma_exec.h`), and ISA-specific traits.
 
 See [codegen.md](codegen.md) for the full codegen pipeline and
-regeneration commands.
+regeneration commands. See [isa-target-providers.md](isa-target-providers.md)
+for target identity, static provider composition, and model-only linkage.
 
 ### KMD — Kernel Mode Driver Emulation (`kmd/linux/`)
 

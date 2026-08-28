@@ -119,7 +119,6 @@ public:
   const amd::options::PrefixOption* Substitute() const { return &substitute; }
 
   bool TrampolineEnabled() const { return trampoline_enabled_; }
-  bool TrampolineNoWaEnabled() const { return trampoline_no_wa_enabled_; }
 
   bool ParseOptions(const std::string& options);
   void Reset();
@@ -141,7 +140,6 @@ private:
   amd::options::PrefixOption substitute;
   amd::options::OptionParser option_parser;
   bool trampoline_enabled_ = false;
-  bool trampoline_no_wa_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -162,17 +160,11 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&dump_dir);
   option_parser.AddOption(&substitute);
 
-  // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines.
-  // LOADER_ENABLE_TRAMPOLINE_NO_WA=1: enable trampolines without the global_wb
-  // cache-writeback workaround (s_mov + s_set_pc only). Trampolines are disabled
-  // by default; these env vars are for testing only.
+  // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines (disabled
+  // by default; for testing only).
   const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
   if (enable_trampoline && std::strcmp(enable_trampoline, "1") == 0) {
     trampoline_enabled_ = true;
-  }
-  const char* enable_trampoline_no_wa = getenv("LOADER_ENABLE_TRAMPOLINE_NO_WA");
-  if (enable_trampoline_no_wa && std::strcmp(enable_trampoline_no_wa, "1") == 0) {
-    trampoline_no_wa_enabled_ = true;
   }
 }
 
@@ -204,14 +196,15 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 // rewritten so dispatch lands in the stub first.
 //
 // The jump is absolute (the pool is not within S_BRANCH range of the code), so
-// the stub does a global cache writeback (SCOPE_CU) and a v_nop, then loads the
-// 64-bit entry address into a scratch SGPR pair and sets PC.
-// s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
-// these indices are well above the preloaded user+system SGPRs (<= ~20), so they
-// are never a live kernel input -- the kernel writes them before it reads them.
+// the stub does the unclaused-VMEM workaround (global_prefetch_b8 scope:SCOPE_SE
+// + v_nop), then loads the 64-bit entry address into a scratch SGPR pair and sets
+// PC. s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs
+// and these indices are well above the preloaded user+system SGPRs (<= ~20), so
+// they are never a live kernel input -- the kernel writes them before it reads them.
 //
 // gfx1250 encodings verified with: llvm-mc --arch=amdgcn --mcpu=gfx1250 --show-encoding
-//   global_wb   <scope:SCOPE_CU>       ->   0xEE0B007C, 0x00000000, 0x00000000
+//   global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT
+//                                       ->  0xEE174000, 0x00040000, 0x00000000
 //   v_nop        (padding)              ->  0x7E000000
 //   s_mov_b32    s100, <lit> + literal  ->  0xBEE400FF
 //   s_mov_b32    s101, <lit> + literal  ->  0xBEE500FF
@@ -232,14 +225,17 @@ static constexpr size_t kTrampolineStubStride =
 // and readable, which the allocation's zero-fill already guarantees.
 static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
 
-// The GFX1250 unclaused-VMEM workaround prologue (llvm PR #208467). The compiler
-// emits these 4 dwords -- global_wb <scope:SCOPE_CU> followed by v_nop -- at every
-// hardware kernel entry so the first VMEM instruction is unclaused. It is exactly
-// the sequence the entry trampoline itself prepends, so when a kernel's entry
-// already begins with it the trampoline would only duplicate the workaround.
+// The GFX1250 unclaused-VMEM workaround prologue. The compiler (SIInsertWaitcnts)
+// emits these 4 dwords -- global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE
+// th:TH_LOAD_RT followed by v_nop -- at every hardware kernel entry so the first
+// VMEM instruction is unclaused. It is exactly the sequence the entry trampoline
+// prepends, so when a kernel's entry already begins with it the trampoline would
+// only duplicate the workaround. gfx1250 encoding verified with
+// llvm-mc --mcpu=gfx1250 --show-encoding (TH_LOAD_RT is the default TH=0;
+// SCOPE_SE sets bit 0x04 in the third encoding byte).
 static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
-    0xEE0B007C,  // global_wb <scope:SCOPE_CU>
-    0x00000000,  // :
+    0xEE174000,  // global_prefetch_b8 v0, [s0, s1] ...
+    0x00040000,  // ... scope:SCOPE_SE th:TH_LOAD_RT
     0x00000000,  // :
     0x7E000000,  // v_nop
 };
@@ -247,8 +243,8 @@ static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
 
-  w[0] = kGfx1250UnclausedVmemPrologue[0];  // global_wb <scope:SCOPE_CU>
-  w[1] = kGfx1250UnclausedVmemPrologue[1];  // :
+  w[0] = kGfx1250UnclausedVmemPrologue[0];  // global_prefetch_b8 v0, [s0, s1]
+  w[1] = kGfx1250UnclausedVmemPrologue[1];  //   scope:SCOPE_SE th:TH_LOAD_RT
   w[2] = kGfx1250UnclausedVmemPrologue[2];  // :
   w[3] = kGfx1250UnclausedVmemPrologue[3];  // v_nop (padding)
   w[4] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
@@ -257,20 +253,6 @@ static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   w[7] = static_cast<uint32_t>(target >> 32);
   w[8] = 0xBE804864;  // s_set_pc_i64 s[100:101]
   for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
-    w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
-}
-
-// Minimal stub: load the 64-bit entry address into s[100:101] and set PC, with no
-// global_wb / v_nop cache-writeback workaround.
-static void BuildTrampolineGfx1250NoWa(uint8_t* buf, uint64_t target) {
-  auto* w = reinterpret_cast<uint32_t*>(buf);
-
-  w[0] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
-  w[1] = static_cast<uint32_t>(target);
-  w[2] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
-  w[3] = static_cast<uint32_t>(target >> 32);
-  w[4] = 0xBE804864;  // s_set_pc_i64 s[100:101]
-  for (size_t i = 5; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
 }
 
@@ -1393,12 +1375,10 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
 
   // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
-  // Set LOADER_ENABLE_TRAMPOLINE=1 or LOADER_ENABLE_TRAMPOLINE_NO_WA=1 to enable
-  // (for testing only). NO_WA selects the minimal stub without global_wb.
-  trampoline_no_wa_gfx125x_ = loaderOptions.TrampolineNoWaEnabled();
+  // Set LOADER_ENABLE_TRAMPOLINE=1 to enable (for testing only). The stub leads
+  // with the unclaused-VMEM workaround (global_prefetch_b8 scope:SCOPE_SE + v_nop).
   trampoline_enabled_gfx125x_ =
-      (loaderOptions.TrampolineEnabled() || trampoline_no_wa_gfx125x_) &&
-      CodeObjectIsaIsGfx125Family(codeIsa);
+      loaderOptions.TrampolineEnabled() && CodeObjectIsaIsGfx125Family(codeIsa);
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1637,9 +1617,9 @@ static bool KernelEntryHasUnclausedVmemPrologue(Context* context, Segment* code_
 
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   // Skip kernels whose entry already carries the compiler-inserted unclaused-VMEM
-  // workaround prologue (llvm PR #208467): a trampoline would only duplicate the
-  // global_wb/v_nop that is already there, so dispatch can go straight to the real
-  // entry. Kernels still needing the workaround keep their trampoline.
+  // workaround prologue: a trampoline would only duplicate the
+  // global_prefetch_b8/v_nop that is already there, so dispatch can go straight to
+  // the real entry. Kernels still needing the workaround keep their trampoline.
   std::vector<KdFixup> fixups;
   fixups.reserve(kd_fixups_.size());
   for (const auto& f : kd_fixups_) {
@@ -1687,15 +1667,11 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
     uint8_t blob[kTrampolineStubStride];
-    if (trampoline_no_wa_gfx125x_) {
-      BuildTrampolineGfx1250NoWa(blob, entry_dev);
-    } else {
-      BuildTrampolineGfx1250(blob, entry_dev);
-    }
+    BuildTrampolineGfx1250(blob, entry_dev);
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
 
     // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
-    logger_ << "Loader: injecting gfx125x entry trampoline for kernel " << f.name << "\n";
+    logger_ << "Loader: injecting gfx125x entry trampoline (global_prefetch_b8 scope:SCOPE_SE) for kernel " << f.name << "\n";
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
     int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);

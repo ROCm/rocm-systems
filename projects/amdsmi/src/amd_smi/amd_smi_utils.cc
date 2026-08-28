@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_utils.h"
 
@@ -55,7 +36,6 @@
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -704,7 +684,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;
@@ -798,6 +778,41 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
   *enabled = false;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
+                                                uint32_t* vcn_busy_percent) {
+  if (vcn_busy_percent == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+
+  std::ifstream fs(fullpath.c_str());
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string line;
+  if (std::getline(fs, line)) {
+    try {
+      uint32_t line_value = std::stoul(std::string(trim(line)));
+      if (line_value > 100) {
+        // max of uint32_t is used to indicate the erroneous value
+        *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+      }
+      *vcn_busy_percent = line_value;
+      return AMDSMI_STATUS_SUCCESS;
+    } catch (const std::exception&) {
+      *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+  }
+
+  *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+  return AMDSMI_STATUS_UNEXPECTED_DATA;
 }
 
 std::string smi_amdgpu_split_string(std::string str, char delim) {
