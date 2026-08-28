@@ -2682,8 +2682,10 @@ void associate_ordinary_acquire_sync_sequences(
 [[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
                                               const ConSanSyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
-  for (const std::string &identity : sequence.member_event_identities) {
-    const ConSanSyncEvent *event = result.program_inventory.sync().find_event(identity);
+  for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
+    SemanticSiteId event_identity = identity;
+    event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+    const ConSanSyncEvent *event = result.program_inventory.sync().find_event(event_identity);
     if (event == nullptr || event->container_name != sequence.container_name ||
         event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
         event->text_offset < sequence.begin_text_offset ||
