@@ -639,7 +639,7 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
     // scarce GPU hardware queue via create/destroy on every VMM allocation.
     // Fall back to a private non-blocking stream when no scope is active.
     cudaStream_t sidestream = nullptr, zeroStream = nullptr;
-    NCCLCHECK(getSideStream(&sidestream));
+    NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
     zeroStream = sidestream;
     if (sidestream == nullptr)
       CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
