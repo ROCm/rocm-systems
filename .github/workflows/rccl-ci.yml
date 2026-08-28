@@ -50,7 +50,7 @@ permissions:
 # Per-PR: a new push cancels the previous GitHub run. submit_slurm_job.py
 # scancels the Slurm allocation so cancelled GIN jobs do not keep holding
 # rccl_ci nodes until wall clock.
-# cancel-probe: start (push 2 while SLURM is live to capture scancel)
+# cancel-probe: mid-run push to cancel GitHub job 33210619684 / SLURM 19184
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
