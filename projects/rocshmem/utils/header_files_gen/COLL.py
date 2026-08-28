@@ -38,6 +38,8 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16")
 ]
 
 def alltoall_ctx_wg_api(T, TNAME):
