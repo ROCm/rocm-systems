@@ -2839,6 +2839,207 @@ TEST_F(WindowRegisterNonSymTest, StreamCreateFails_ClearsOutput) {
 
 
 // ---------------------------------------------------------------------------
+// windowRegisterNonSym stages 1 and 2. Stage 1 exchanges IPC handles across the
+// node-local team and maps each peer, except our own slot and any peer sharing
+// our address space. Stage 2 registers an inter-node MR when the team is
+// smaller than the communicator.
+
+class WindowRegisterNonSymIpcTest : public WindowRegisterNonSymTest {
+protected:
+  // Mirrors the ExchangeEntry symMemory's caller all-gathers. Layout must match
+  // for the hook to publish values the function then reads back.
+  struct ExchangeEntry {
+    hipIpcMemHandle_t handle;
+    uint64_t hostHash;
+    uint64_t pidHash;
+    size_t userOffset;
+    size_t userSize;
+  };
+
+  void SetUp() override {
+    WindowRegisterNonSymTest::SetUp();
+    comm->nRanks = 4;
+    comm->devrState.lsaSize = 3;
+    comm->devrState.lsaSelf = 0;
+    lsaRankList.assign({0, 1, 2});
+    comm->devrState.lsaRankList = lsaRankList.data();
+    // Distinct host/pid hashes per rank, so no peer looks like our own process.
+    for (int r = 0; r < 4; r++) {
+      peers[r].hostHash = 100 + r;
+      peers[r].pidHash = 200 + r;
+    }
+  }
+
+  // Publish the team's exchange entries, as the all-gather would. Each peer
+  // reports a distinct process unless told to impersonate ours.
+  std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherPeers(int sameProcRank = -1) {
+    return [this, sameProcRank](void*, int*, int self, int size, void* buf, int) {
+      auto* e = static_cast<ExchangeEntry*>(buf);
+      for (int r = 0; r < size; r++) {
+        e[r].hostHash = (r == self || r == sameProcRank) ? peers[0].hostHash : 500 + r;
+        e[r].pidHash = (r == self || r == sameProcRank) ? peers[0].pidHash : 600 + r;
+        e[r].userOffset = 64 * r;
+        e[r].userSize = 4096;
+      }
+      return ncclSuccess;
+    };
+  }
+};
+
+// Stage 1: peers in other processes are mapped; our own slot reuses the local
+// pointer rather than opening a handle against ourselves.
+TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(open.calls, 2);  // ranks 1 and 2, not ourselves
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  ASSERT_EQ(win->ipcPeerCount, 3);
+  EXPECT_EQ(win->ipcPeerPtrs[0], kUserPtr);  // self reuses the caller's pointer
+  // Peers are the mapped base advanced by the offset each reported.
+  EXPECT_EQ(win->ipcPeerPtrs[1], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 64);
+  EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
+}
+
+// Branch: a peer in our own process is left unmapped -- opening an IPC handle
+// against the same address space is not supported here.
+TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers(/*sameProcRank=*/1));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(open.calls, 1);  // only rank 2
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  EXPECT_EQ(win->ipcPeerPtrs[1], nullptr);
+  EXPECT_EQ(win->ipcPeerPtrsAllocBase[1], nullptr);
+}
+
+// Branch: the address-range lookup fails, so the exchange never happens.
+TEST_F(WindowRegisterNonSymIpcTest, AddressRangeFails_ReturnsErrorWithoutGathering) {
+  ScopedHook range(g_hipMemGetAddressRange,
+                   [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; });
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(out, nullptr);
+}
+
+// Branch: our own handle cannot be exported.
+TEST_F(WindowRegisterNonSymIpcTest, IpcGetHandleFails_ReturnsError) {
+  ScopedHook ipcGet(g_hipIpcGetMemHandle,
+                    [](hipIpcMemHandle_t*, void*) { return hipErrorInvalidValue; });
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+}
+
+// Branch: mapping a peer fails. The peers already opened must be closed rather
+// than leaked, which is the only observable difference between a clean failure
+// and a leaking one.
+TEST_F(WindowRegisterNonSymIpcTest, PeerOpenFails_ClosesAlreadyOpenedPeers) {
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  int opened = 0;
+  ScopedHook open(g_hipIpcOpenMemHandle, [&](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    if (++opened == 2) return hipErrorInvalidValue;  // rank 1 maps, rank 2 fails
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(open.calls, 2);
+  EXPECT_EQ(close.calls, 1);  // the one that succeeded
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: the post-mapping barrier fails, which happens after the window is
+// already in the sorted list -- so registration must take it back out.
+TEST_F(WindowRegisterNonSymIpcTest, BarrierFails_RevertsSortedInsert) {
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier,
+                     [](void*, int*, int, int, int) { return ncclSystemError; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);  // insert reverted
+}
+
+// Stage 2: a team smaller than the communicator means remote ranks exist, so
+// the inter-node MR is registered.
+TEST_F(WindowRegisterNonSymIpcTest, HostRmaWithRemoteRanks_RegistersMr) {
+  comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook connect(g_rmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+// Branch: the team spans the whole communicator, so there is no remote rank to
+// reach and the MR is skipped even with host RMA available.
+TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
+  comm->hostRmaSupport = true;
+  comm->nRanks = 3;  // equal to lsaSize
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: the MR registration fails.
+TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
+  comm->hostRmaSupport = true;
+  ScopedHook gather(g_bootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook reg(g_rmaProxyRegister,
+                 [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
