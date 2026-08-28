@@ -56,7 +56,8 @@ def compute_summary(reports: List[ShaderReport]) -> dict:
     A mutant that never executed says nothing about the detector, so it is
     counted as inconclusive rather than killed and is excluded from the
     mutation score. Counting it as killed turns a run where every process
-    crashed into a 100% score.
+    crashed into a 100% score. A baseline that never ran cleanly is held apart
+    for the same reason, whatever its report happens to hold.
     """
     total = sum(len(r.mutants) for r in reports)
     killed = sum(1 for r in reports for m in r.mutants if m.ran and not m.correct)
@@ -69,9 +70,11 @@ def compute_summary(reports: List[ShaderReport]) -> dict:
             sl = status_label(m)
             by_status[sl] = by_status.get(sl, 0) + 1
 
-    # False positives: baseline (unmodified) shaders where hazards were reported
+    # False positives: unmodified shaders that ran cleanly and were still
+    # reported on. A baseline that crashed or timed out may have flushed part of
+    # a report on its way out, which convicts the plugin of nothing.
     false_positives = sum(
-        1 for r in reports if r.build_ok and r.baseline_hazard_count > 0
+        1 for r in reports if r.baseline_ok and r.baseline_hazard_count > 0
     )
     # False negatives: killed mutants (wait was needed) where no new hazards detected
     false_negatives = sum(
@@ -84,11 +87,15 @@ def compute_summary(reports: List[ShaderReport]) -> dict:
     # Confusion matrix: plugin detection vs ground truth
     tp = fn = fp = tn = na = 0
     for r in reports:
-        if r.build_ok:
-            if r.baseline_hazard_count > 0:
-                fp += 1
-            else:
-                tn += 1
+        # The baseline is the negative case: a clean shader the plugin should
+        # stay quiet about. One that never ran cleanly is no such case, the same
+        # way a mutant that never ran is none.
+        if not r.baseline_ok:
+            na += 1
+        elif r.baseline_hazard_count > 0:
+            fp += 1
+        else:
+            tn += 1
         for m in r.mutants:
             if not m.ran:
                 na += 1
@@ -164,7 +171,7 @@ class JSONReportWriter(AbstractReportWriter):
             shader_total = len(rpt.mutants)
             shader_killed = sum(1 for m in rpt.mutants if m.ran and not m.correct)
             shader_inconclusive = sum(1 for m in rpt.mutants if not m.ran)
-            shader_fp = 1 if rpt.build_ok and rpt.baseline_hazard_count > 0 else 0
+            shader_fp = 1 if rpt.baseline_ok and rpt.baseline_hazard_count > 0 else 0
             shader_fn = sum(
                 1
                 for m in rpt.mutants
@@ -449,8 +456,11 @@ class MarkdownReportWriter(AbstractReportWriter):
         if shader_total:
             lines.append(f"| Killed / Total | {shader_killed} / {shader_total} |")
         if rpt.baseline_hazard_count > 0:
+            # Hazards left by a baseline that did not finish say nothing about
+            # the plugin, so they are shown without being held against it.
+            verdict = "false positive" if rpt.baseline_ok else "baseline did not finish"
             lines.append(
-                f"| Baseline hazards | \u274c **{rpt.baseline_hazard_count}** (false positive) |"
+                f"| Baseline hazards | \u274c **{rpt.baseline_hazard_count}** ({verdict}) |"
             )
         lines.append("")
 
@@ -632,8 +642,14 @@ class TerminalReportWriter:
             if benchmark_active and benchmarker.has(rpt.shader):
                 print(f"    Baseline time: {benchmarker.elapsed(rpt.shader):.3f}s")
             if has_hazard_report:
-                fp_tag = " (FALSE POSITIVE)" if rpt.baseline_hazard_count > 0 else ""
-                print(f"    Baseline hazards: {rpt.baseline_hazard_count}{fp_tag}")
+                tag = ""
+                if rpt.baseline_hazard_count > 0:
+                    tag = (
+                        " (FALSE POSITIVE)"
+                        if rpt.baseline_ok
+                        else " (BASELINE DID NOT FINISH)"
+                    )
+                print(f"    Baseline hazards: {rpt.baseline_hazard_count}{tag}")
             print(f"    Wait instructions found: {len(rpt.waits_found)}")
 
             if not rpt.mutants:

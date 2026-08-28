@@ -307,8 +307,9 @@ so and exits non-zero, because such a run measured nothing.
 The **Detection** column, present only under `--hazard-detection`, is about the
 plugin: `DETECTED (n)` means the mutant produced `n` hazards beyond the
 baseline, and `FN (n)` means it produced no new hazards even though the wait was
-removed. Hazards reported on an unmutated baseline are counted as false
-positives.
+removed. Hazards reported on an unmutated baseline that ran cleanly are counted
+as false positives; a baseline that crashed or timed out may have flushed part
+of a report on its way out, so its hazards are shown but held against nothing.
 
 **Important**: `MATCH` does not prove the wait is unnecessary. A hazard can be
 benign on one run and not on the next, so the status column is a weaker signal
