@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # detect_asic_filter.sh — Detect the GPU ASIC and build the appropriate
 # gtest negative filter from amdsmitst.exclude.
 #
