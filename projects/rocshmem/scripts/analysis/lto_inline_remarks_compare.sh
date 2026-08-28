@@ -12,7 +12,7 @@
 # resource_usage_compare.sh, so the main working tree is never touched.
 #
 # Builds here use a SEPARATE build-cache namespace
-# ($PROJECTS_DIR/build-cache-lto-remarks) from resource_usage_compare.sh's
+# ($PARENT_DIR/build-cache-lto-remarks) from resource_usage_compare.sh's
 # build-cache: this script forces BUILD_TOOLS=OFF, BUILD_UNIT_TESTS=OFF,
 # BUILD_EXAMPLES=OFF so rocshmem_functional_tests is the only executable
 # target that performs a -fgpu-rdc LTO link -- with more than one
@@ -33,6 +33,11 @@
 #   --build-config CFG    Build config script under scripts/build_configs/
 #                         (default: all_backends). Use a lighter config
 #                         (e.g. ipc_single) for a faster first look.
+#   --config-path PATH    Direct path to an executable build-config script,
+#                         used instead of the --build-config name search.
+#                         Relative paths are resolved inside each commit's
+#                         isolated worktree; absolute paths are used as-is.
+#                         See "Portability" below.
 #   --force-rebuild       Force a fresh rebuild even if the commit is already
 #                         cached (see resource_usage_compare.sh's header for
 #                         why this matters for a real before/after decision --
@@ -41,7 +46,7 @@
 #   --top N               Rows shown in the dashboard's per-commit charts and
 #                         report panels/CSV sections (default: 20).
 #   --output-dir DIR      Where to write the report. Default:
-#                         $PROJECTS_DIR/lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/
+#                         $PARENT_DIR/lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/
 #
 # Also generates one self-contained interactive HTML dashboard
 # (lto_inline_dashboard.html, always on -- no flag needed): a baseline-vs-branch comparison table on top
@@ -51,6 +56,18 @@
 # Example:
 #   ./lto_inline_remarks_compare.sh --commit1 HEAD~1 --commit2 HEAD \
 #     --build-config ipc_single
+#
+# Portability: this whole scripts/analysis/ directory can be copied into any
+# other CMake project, dropped in next to that project's top-level
+# CMakeLists.txt (i.e. <project>/scripts/analysis/*), and pointed at that
+# project's own build via --config-path (a build script anywhere in the
+# repo, no directory convention required) instead of --build-config (which
+# stays rocSHMEM's own scripts/build_configs/ name search, used by default).
+# Note: -DBUILD_TOOLS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_EXAMPLES=OFF below
+# are rocSHMEM CMake option names used to guarantee exactly one LTO-linked
+# executable gets built (see the build-cache note above for why that
+# matters); cmake harmlessly ignores them for any other project, whose own
+# build script is responsible for the same one-LTO-executable guarantee.
 ###############################################################################
 set -euo pipefail
 shopt -s inherit_errexit
@@ -59,6 +76,7 @@ COMMIT_1=""
 COMMIT_2=""
 GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
+CONFIG_PATH=""
 FORCE_REBUILD=false
 TOP_N=20
 OUTPUT_DIR=""
@@ -76,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --commit2)       _need_arg "$1" "$#"; COMMIT_2="$2";      shift 2 ;;
     --gpu-target)    _need_arg "$1" "$#"; GPU_TARGET="$2";    shift 2 ;;
     --build-config)  _need_arg "$1" "$#"; BUILD_CONFIG="$2";  shift 2 ;;
+    --config-path)   _need_arg "$1" "$#"; CONFIG_PATH="$2";   shift 2 ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --top)           _need_arg "$1" "$#"; TOP_N="$2";         shift 2 ;;
     --output-dir)    _need_arg "$1" "$#"; OUTPUT_DIR="$2";    shift 2 ;;
@@ -87,21 +106,34 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
-ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PROJECTS_DIR="$(cd "$ROCSHMEM_DIR/.." && pwd)"
-cd "$ROCSHMEM_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PARENT_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 
-TOOLS_DIR="$ROCSHMEM_DIR/scripts/analysis"
+# Distinguishes cache/build/output dirs and the CSV build-config tag between
+# the two ways of pointing at a build, so a --config-path run never collides
+# with (or silently reuses) a --build-config run's cache -- see "Portability"
+# note above.
+if [[ -n "$CONFIG_PATH" ]]; then
+  CONFIG_LABEL="path-$(echo "$CONFIG_PATH" | tr '/' '_')"
+else
+  CONFIG_LABEL="$BUILD_CONFIG"
+fi
+
+TOOLS_DIR="$PROJECT_DIR/scripts/analysis"
 
 CURRENT_WORKTREE=""
 _cleanup_worktree() {
   if [[ -n "$CURRENT_WORKTREE" ]]; then
-    git -C "$ROCSHMEM_DIR" worktree remove --force "$CURRENT_WORKTREE" 2>/dev/null || true
+    git -C "$PROJECT_DIR" worktree remove --force "$CURRENT_WORKTREE" 2>/dev/null || true
     CURRENT_WORKTREE=""
   fi
 }
 trap _cleanup_worktree EXIT
 
+# Only used for --build-config (name search); --config-path bypasses this
+# entirely. The second candidate is a legacy fallback for rocSHMEM's own
+# rocm-systems monorepo nesting -- harmless no-op for any other project.
 _find_build_config() {
   local worktree="$1" config="$2" result=""
   for candidate in \
@@ -115,12 +147,38 @@ _find_build_config() {
   echo "$result"
 }
 
+# Resolves the build-config script to invoke for this commit's worktree:
+# --config-path (direct path, relative-to-worktree or absolute) takes
+# precedence over --build-config (name search under scripts/build_configs/).
+_resolve_build_config() {
+  local worktree="$1"
+  local result=""
+  if [[ -n "$CONFIG_PATH" ]]; then
+    if [[ "$CONFIG_PATH" = /* ]]; then
+      result="$CONFIG_PATH"
+    else
+      result="$worktree/$CONFIG_PATH"
+    fi
+    if [[ ! -x "$result" ]]; then
+      echo "ERROR: --config-path $CONFIG_PATH is not an executable file ($result)" >&2
+      exit 1
+    fi
+  else
+    result="$(_find_build_config "$worktree" "$BUILD_CONFIG")"
+    if [[ -z "$result" ]]; then
+      echo "ERROR: Cannot find $BUILD_CONFIG in worktree" >&2
+      exit 1
+    fi
+  fi
+  echo "$result"
+}
+
 # measure_commit <commit> <sha> -> prints the path to that commit's remarks
 # CSV (raw .yaml lives alongside it in the same cache dir).
 measure_commit() {
   local commit="$1" sha="$2"
-  local build_dir="$PROJECTS_DIR/build-cache-lto-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
-  local cache_dir="$PROJECTS_DIR/lto-inline-remarks/cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
+  local build_dir="$PARENT_DIR/build-cache-lto-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
+  local cache_dir="$PARENT_DIR/lto-inline-remarks/cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
   local yaml="$cache_dir/remarks-${sha}.yaml"
   local csv="$cache_dir/remarks-${sha}.csv"
 
@@ -130,18 +188,14 @@ measure_commit() {
     return
   fi
 
-  echo "  [$sha] building ($GPU_TARGET / $BUILD_CONFIG)..." >&2
-  local worktree="/tmp/rocshmem-lto-remarks-${sha}-$$"
+  echo "  [$sha] building ($GPU_TARGET / $CONFIG_LABEL)..." >&2
+  local worktree="/tmp/lto-remarks-worktree-${sha}-$$"
 
-  git -C "$ROCSHMEM_DIR" worktree add "$worktree" "$commit" --detach >&2
+  git -C "$PROJECT_DIR" worktree add "$worktree" "$commit" --detach >&2
   CURRENT_WORKTREE="$worktree"
 
   local FOUND_BUILD_CONFIG
-  FOUND_BUILD_CONFIG="$(_find_build_config "$worktree" "$BUILD_CONFIG")"
-  if [[ -z "$FOUND_BUILD_CONFIG" ]]; then
-    echo "ERROR: Cannot find $BUILD_CONFIG in worktree" >&2
-    exit 1
-  fi
+  FOUND_BUILD_CONFIG="$(_resolve_build_config "$worktree")"
 
   rm -rf "$build_dir"
   mkdir -p "$build_dir" "$cache_dir"
@@ -168,7 +222,7 @@ measure_commit() {
       2>&1 | tee "$cache_dir/build.log" >&2
   )
 
-  git -C "$ROCSHMEM_DIR" worktree remove "$worktree" >&2 || true
+  git -C "$PROJECT_DIR" worktree remove "$worktree" >&2 || true
   CURRENT_WORKTREE=""
 
   if [[ ! -s "$yaml" ]]; then
@@ -177,7 +231,7 @@ measure_commit() {
   fi
 
   python3 "$TOOLS_DIR/lto_inline_remarks_to_csv.py" --yaml "$yaml" --out "$csv" \
-    --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" >&2
+    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$sha" >&2
 
   echo "$csv"
 }
@@ -185,11 +239,11 @@ measure_commit() {
 COMMIT_1="${COMMIT_1:-HEAD}"
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 
-echo "=== LTO inline remarks: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $BUILD_CONFIG) ==="
+echo "=== LTO inline remarks: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $CONFIG_LABEL) ==="
 CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
 
 if [[ -z "$COMMIT_2" ]]; then
-  OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/lto-inline-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}}"
+  OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}}"
   mkdir -p "$OUTDIR"
   cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
   python3 "$TOOLS_DIR/lto_inline_remarks_report.py" \
@@ -211,7 +265,7 @@ fi
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
 CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
 
-OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/lto-inline-remarks/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}}"
+OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/lto-inline-remarks/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}-vs-${SHA_2}}"
 mkdir -p "$OUTDIR"
 cp "$CSV_1" "$OUTDIR/remarks-${SHA_1}.csv"
 cp "$CSV_2" "$OUTDIR/remarks-${SHA_2}.csv"

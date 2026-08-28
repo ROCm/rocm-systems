@@ -4,14 +4,14 @@
 # between two commits (or one commit vs the current working tree).
 #
 # Builds are cached per (gpu_target, build_config, commit) under
-# $PROJECTS_DIR/build-cache and reused by default. Pass --force-rebuild for a
+# $PARENT_DIR/build-cache and reused by default. Pass --force-rebuild for a
 # "matched-fresh-pair" rebuild of both sides before a real before/after
 # decision: AMDGPU LTO codegen (register allocation, scheduling, symbol
 # layout) is NON-DETERMINISTIC build-to-build even for identical source, so
 # diffing a fresh build against a stale cached one can show spurious deltas
 # that are pure build noise. The durable outputs of a build (res-<sha>.csv,
 # build.log, resource_usage_summary.log) live separately under
-# $PROJECTS_DIR/resource-usage/cache, so build-cache can be wiped for disk
+# $PARENT_DIR/resource-usage/cache, so build-cache can be wiped for disk
 # space without losing prior measurements.
 #
 # Each commit is built in an isolated git worktree under /tmp so the main
@@ -43,6 +43,15 @@
 #   --gpu-target ARCH     GPU target architecture (default: gfx950).
 #   --build-config CFG    Build config script under scripts/build_configs/
 #                         (default: all_backends).
+#   --config-path PATH    Direct path to an executable build-config script,
+#                         used instead of the --build-config name search.
+#                         Relative paths are resolved inside each commit's
+#                         isolated worktree (so the version of the script
+#                         checked in at that commit is used); absolute
+#                         paths are used as-is. The script is invoked the
+#                         same way a --build-config script is (same cwd,
+#                         same appended -D... args) -- see "Portability"
+#                         below.
 #   --skip-build          Reuse cached builds when available (default
 #                         behavior; flag accepted as a no-op for
 #                         explicitness).
@@ -58,7 +67,7 @@
 #                         (default: 50).
 #   --output-dir DIR      Directory to write the comparison report (CSVs +
 #                         charts) to. Default:
-#                         $PROJECTS_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
+#                         $PARENT_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
 #
 # Also generates one self-contained interactive HTML dashboard per variant
 # (resource_dashboard.html, and resource_dashboard_bitcode.html when bitcode
@@ -76,6 +85,16 @@
 # Example: pin a specific kernel to the top of every report/chart
 #   ./resource_usage_compare.sh --commit1 673440d --commit2 da18d28 \
 #     --match alltoall_test
+#
+# Portability: this whole scripts/analysis/ directory can be copied into any
+# other CMake project, dropped in next to that project's top-level
+# CMakeLists.txt (i.e. <project>/scripts/analysis/*), and pointed at that
+# project's own build via --config-path (a build script anywhere in the
+# repo, no directory convention required) instead of --build-config (which
+# stays rocSHMEM's own scripts/build_configs/ name search, used by default).
+# The device-bitcode measurement below (measure_device_bitcode) is a
+# rocSHMEM-specific extra check for librocshmem_device_<arch>.bc and
+# silently no-ops for any project that doesn't produce a matching artifact.
 ###############################################################################
 set -euo pipefail
 # Without this, command substitution runs in a subshell with errexit silently
@@ -86,6 +105,7 @@ COMMIT_1=""
 COMMIT_2=""
 GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
+CONFIG_PATH=""
 PR_NUM=""
 BASE_BRANCH="origin/develop"
 SKIP_BUILD=true
@@ -110,6 +130,7 @@ while [[ $# -gt 0 ]]; do
     --base-branch)   _need_arg "$1" "$#"; BASE_BRANCH="$2";   shift 2 ;;
     --gpu-target)    _need_arg "$1" "$#"; GPU_TARGET="$2";    shift 2 ;;
     --build-config)  _need_arg "$1" "$#"; BUILD_CONFIG="$2";  shift 2 ;;
+    --config-path)   _need_arg "$1" "$#"; CONFIG_PATH="$2";   shift 2 ;;
     --skip-build)    SKIP_BUILD=true;    shift ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --match)         _need_arg "$1" "$#"; MATCH="$2";         shift 2 ;;
@@ -123,12 +144,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
-ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PROJECTS_DIR="$(cd "$ROCSHMEM_DIR/.." && pwd)"
-cd "$ROCSHMEM_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PARENT_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 
+# Distinguishes cache/build/output dirs and the CSV build-config tag between
+# the two ways of pointing at a build, so a --config-path run never collides
+# with (or silently reuses) a --build-config run's cache -- see "Portability"
+# note above.
+if [[ -n "$CONFIG_PATH" ]]; then
+  CONFIG_LABEL="path-$(echo "$CONFIG_PATH" | tr '/' '_')"
+else
+  CONFIG_LABEL="$BUILD_CONFIG"
+fi
 
-TOOLS_DIR="$ROCSHMEM_DIR/scripts/analysis"
+TOOLS_DIR="$PROJECT_DIR/scripts/analysis"
 
 # Must match resource_usage_diff.py's NUMERIC_COLS -- these are the valid
 # --sort-by values. Also duplicated in .claude/skills/rocshmem-resource-usage/
@@ -143,12 +173,15 @@ SORT_BY_TYPE=(
 CURRENT_WORKTREE=""
 _cleanup_worktree() {
   if [[ -n "$CURRENT_WORKTREE" ]]; then
-    git -C "$ROCSHMEM_DIR" worktree remove --force "$CURRENT_WORKTREE" 2>/dev/null || true
+    git -C "$PROJECT_DIR" worktree remove --force "$CURRENT_WORKTREE" 2>/dev/null || true
     CURRENT_WORKTREE=""
   fi
 }
 trap _cleanup_worktree EXIT
 
+# Only used for --build-config (name search); --config-path bypasses this
+# entirely. The second candidate is a legacy fallback for rocSHMEM's own
+# rocm-systems monorepo nesting -- harmless no-op for any other project.
 _find_build_config() {
   local worktree="$1"
   local config="$2"
@@ -161,6 +194,32 @@ _find_build_config() {
       break
     fi
   done
+  echo "$result"
+}
+
+# Resolves the build-config script to invoke for this commit's worktree:
+# --config-path (direct path, relative-to-worktree or absolute) takes
+# precedence over --build-config (name search under scripts/build_configs/).
+_resolve_build_config() {
+  local worktree="$1"
+  local result=""
+  if [[ -n "$CONFIG_PATH" ]]; then
+    if [[ "$CONFIG_PATH" = /* ]]; then
+      result="$CONFIG_PATH"
+    else
+      result="$worktree/$CONFIG_PATH"
+    fi
+    if [[ ! -x "$result" ]]; then
+      echo "ERROR: --config-path $CONFIG_PATH is not an executable file ($result)" >&2
+      exit 1
+    fi
+  else
+    result="$(_find_build_config "$worktree" "$BUILD_CONFIG")"
+    if [[ -z "$result" ]]; then
+      echo "ERROR: Cannot find $BUILD_CONFIG in worktree" >&2
+      exit 1
+    fi
+  fi
   echo "$result"
 }
 
@@ -201,7 +260,7 @@ measure_device_bitcode() {
   fi
 
   local workdir
-  workdir="$(mktemp -d /tmp/rocshmem-device-bitcode-XXXXXX)"
+  workdir="$(mktemp -d /tmp/device-bitcode-XXXXXX)"
   # RETURN traps aren't scoped to this function -- clear it as it fires, or
   # it re-fires on the caller's next return once $workdir is out of scope.
   trap 'rm -rf "$workdir"; trap - RETURN' RETURN
@@ -242,8 +301,8 @@ measure_device_bitcode() {
 measure_commit() {
   local commit="$1"
   local sha="$2"
-  local build_dir="$PROJECTS_DIR/build-cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
-  local cache_dir="$PROJECTS_DIR/resource-usage/cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
+  local build_dir="$PARENT_DIR/build-cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
+  local cache_dir="$PARENT_DIR/resource-usage/cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
   local csv="$cache_dir/res-${sha}.csv"
 
   if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
@@ -252,18 +311,14 @@ measure_commit() {
     return
   fi
 
-  echo "  [$sha] building ($GPU_TARGET / $BUILD_CONFIG)..." >&2
-  local worktree="/tmp/rocshmem-resource-usage-${sha}-$$"
+  echo "  [$sha] building ($GPU_TARGET / $CONFIG_LABEL)..." >&2
+  local worktree="/tmp/resource-usage-worktree-${sha}-$$"
 
-  git -C "$ROCSHMEM_DIR" worktree add "$worktree" "$commit" --detach >&2
+  git -C "$PROJECT_DIR" worktree add "$worktree" "$commit" --detach >&2
   CURRENT_WORKTREE="$worktree"
 
   local FOUND_BUILD_CONFIG
-  FOUND_BUILD_CONFIG="$(_find_build_config "$worktree" "$BUILD_CONFIG")"
-  if [[ -z "$FOUND_BUILD_CONFIG" ]]; then
-    echo "ERROR: Cannot find $BUILD_CONFIG in baseline worktree" >&2
-    exit 1
-  fi
+  FOUND_BUILD_CONFIG="$(_resolve_build_config "$worktree")"
 
   # cmake --fresh is unreliable at fully resetting state between commits, so
   # wipe the build dir ourselves.
@@ -293,23 +348,24 @@ measure_commit() {
       "$cache_dir/build.log" >"$cache_dir/resource_usage_summary.log" || true
   )
 
-  git -C "$ROCSHMEM_DIR" worktree remove "$worktree" >&2 || true
+  git -C "$PROJECT_DIR" worktree remove "$worktree" >&2 || true
   CURRENT_WORKTREE=""
 
   # Same stdout-capture constraint as above: redirect this script's own
   # report to stderr.
   python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
     --log "$cache_dir/resource_usage_summary.log" \
-    --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" \
+    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$sha" \
     --out "$csv" >&2
 
   # rocshmem_device_bitcode is declared ALL, so the build above already
   # produced it -- measure its whole-program opt -O3 codegen too, not just
-  # the production library's cost-gated-LTO numbers.
+  # the production library's cost-gated-LTO numbers. rocSHMEM-specific:
+  # silently skipped (note below) for any other project's build.
   local bc_file="$build_dir/librocshmem_device_${GPU_TARGET}.bc"
   local bitcode_csv="$cache_dir/res-${sha}-bitcode.csv"
   if [[ -f "$bc_file" ]]; then
-    measure_device_bitcode "$bc_file" "$GPU_TARGET" "$BUILD_CONFIG" "$sha" "$bitcode_csv"
+    measure_device_bitcode "$bc_file" "$GPU_TARGET" "$CONFIG_LABEL" "$sha" "$bitcode_csv"
   else
     echo "  [$sha] note: no $bc_file -- skipping device-bitcode resource-usage measurement" >&2
   fi
@@ -332,7 +388,7 @@ generate_dashboard() {
 
 if [[ -n "$PR_NUM" ]]; then
   echo "  Fetching PR #${PR_NUM}..." >&2
-  git -C "$ROCSHMEM_DIR" fetch origin "pull/${PR_NUM}/head"
+  git -C "$PROJECT_DIR" fetch origin "pull/${PR_NUM}/head"
   COMMIT_2="${COMMIT_2:-FETCH_HEAD}"
   if [[ -z "$COMMIT_1" ]]; then
     COMMIT_1="$(git merge-base FETCH_HEAD "$BASE_BRANCH")" || {
@@ -355,7 +411,7 @@ if [[ -n "$COMMIT_2" && "$FORCE_REBUILD" == false ]]; then
   echo "  build-to-build deterministic)." >&2
 fi
 
-echo "=== resource usage: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $BUILD_CONFIG) ==="
+echo "=== resource usage: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $CONFIG_LABEL) ==="
 
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
@@ -383,7 +439,7 @@ fi
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
 CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
 
-OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/resource-usage/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}}"
+OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/resource-usage/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}-vs-${SHA_2}}"
 mkdir -p "$OUTDIR"
 cp "$CSV_1" "$OUTDIR/res-${SHA_1}.csv"
 cp "$CSV_2" "$OUTDIR/res-${SHA_2}.csv"
