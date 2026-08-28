@@ -30,6 +30,7 @@ set(SRC_FILES
   dev_runtime.cc
   dev_runtime_segments.cc
   dev_runtime_internal.h
+  algorithms/direct_a2a/all_reduce/direct_a2a_all_reduce.cu
   algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
   algorithms/dda/all_gather/dda_all_gather_ipc.cu
@@ -161,6 +162,7 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
+  algorithms/direct_a2a/all_reduce/direct_a2a_all_reduce.h
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   algorithms/dda/all_gather/dda_all_gather.h
@@ -808,6 +810,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "direct_a2a_all_reduce\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")

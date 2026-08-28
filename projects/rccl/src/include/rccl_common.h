@@ -64,7 +64,7 @@ typedef enum {
 // space. Values extend the native NCCL_ALGO_* range so a single integer (and a
 // single rcclGetAlgoName() lookup) can name any backend RCCL might run. These
 // are not just "algorithms" in the ring/tree sense — they include full backends
-// (Symmetric, CE, DDA). See struct rcclCollDecision.
+// (Symmetric, CE, DDA, DIRECT_A2A). See struct rcclCollDecision.
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
@@ -80,6 +80,7 @@ typedef enum {
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
   RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
+  RCCL_DIRECT_A2A,      // gfx1151 full-mesh grouped-P2P AllReduce
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -153,8 +154,8 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          ncclDataType_t dataType, ncclRedOp_t op, const void* sendbuff, void* recvbuff, int graphCapturing, int* algo,
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
-// priority chain (symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
-// -> kernel) and returns the decision.
+// priority chain (symmetric -> CE 2-shot -> DIRECT_A2A -> DDA LL/LL128/VMM/IPC ->
+// CE registered -> kernel) and returns the decision.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
 //                 is ignored.
