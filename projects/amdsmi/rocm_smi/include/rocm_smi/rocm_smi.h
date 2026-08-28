@@ -16,6 +16,10 @@
 
 #include "rocm_smi/kfd_ioctl.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
  *  All required function, structure, enum, etc. definitions should be defined
