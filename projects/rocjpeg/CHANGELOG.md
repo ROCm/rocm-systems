@@ -3,11 +3,12 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (unreleased) rocJPEG 1.8.0
+## (unreleased) rocJPEG 1.9.0
 
 ### Added
 
 * Added rocJpegDecodeBatchedAsync and rocJpegDecodeBatchedSync APIs to support asynchronous batched JPEG decoding.
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
 
 ## rocJPEG 1.7.0
 
