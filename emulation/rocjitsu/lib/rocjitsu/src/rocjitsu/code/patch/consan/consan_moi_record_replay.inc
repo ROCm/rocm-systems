@@ -1247,8 +1247,15 @@ void try_apply_first_light_access_record_patch(
                 "ConSan MOI first-light probe lost its dense runtime workgroup sources");
             return;
           }
+          const auto gate_plan = plan_moi_runtime_workgroup_gate(
+              candidate_options, *planned_patch.runtime_workgroup_sources, arch);
+          if (!gate_plan) {
+            result.errors.emplace_back(
+                "ConSan MOI first-light probe lost its dense runtime workgroup gate plan");
+            return;
+          }
           auto gate = build_moi_runtime_workgroup_gate_call_words(
-              bytes.subspan(candidate.file_offset, candidate.size()), candidate_options,
+              bytes.subspan(candidate.file_offset, candidate.size()), *gate_plan,
               *planned_patch.runtime_workgroup_sources, cave_text_offset,
               planned_patch.placement.return_target, runtime_gate_island_words, arch);
           if (!gate) {

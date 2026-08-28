@@ -2893,19 +2893,13 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
-    std::span<const uint8_t> guest_bytes, const MoiOptions &options,
+    std::span<const uint8_t> guest_bytes, const MoiRuntimeWorkgroupGatePlan &plan,
     const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,
     uint64_t return_text_offset, uint64_t reserved_word_count, rj_code_arch_t arch) {
-  const std::optional<ConSanMoiWorkgroupSource> cached_selection =
-      moi_runtime_workgroup_selection_source(options, arch);
-  const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||
-      (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
-       !moi_permits_literal_dispatch_identity(options, arch)))
+  if (plan.sample_stride <= 1u)
     return std::nullopt;
-  const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
-  const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
+  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
+  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
   // Dense gfx1250 Record/Replay callers keep their s_call_i64 return PC in
   // base+6:base+7 until the body returns with s_setpc. The indirect-PC pair at
   // base+0 is dead after the dispatcher reaches this gate and is reinitialized
@@ -2913,14 +2907,13 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // word for that engine without destroying the live call return. Sampled
   // returns with its ordinary indirect-PC pair and retains the established
   // residue slot.
-  const uint16_t residue = options.moi_engine == ConSanMoiEngine::RecordReplay &&
-                                   target->direct_call_form == ConSanDirectCallForm::SCallI64
-                               ? *options.moi_exec_save_sgpr
-                               : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
-  const uint16_t shift =
-      scalar_positive_inline_u32(std::countr_zero(options.moi_runtime_sample_stride));
-  const uint32_t mask = options.moi_runtime_sample_stride - 1u;
-  const uint32_t selected_residue = options.moi_runtime_sample_offset & mask;
+  const uint16_t residue =
+      plan.record_replay && plan.direct_call_form == ConSanDirectCallForm::SCallI64
+          ? plan.exec_save_sgpr
+          : static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
+  const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(plan.sample_stride));
+  const uint32_t mask = plan.sample_stride - 1u;
+  const uint32_t selected_residue = plan.sample_offset & mask;
 
   std::vector<uint32_t> words;
   words.reserve(reserved_word_count);
@@ -2929,13 +2922,13 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   if (!save_scc_word)
     return std::nullopt;
   words.push_back(*save_scc_word);
-  if (cached_selection) {
+  if (plan.cached_selection) {
     uint16_t selected_source = 0u;
-    if (cached_selection->scalar_src) {
-      selected_source = *cached_selection->scalar_src;
-    } else if (cached_selection->vector_src) {
-      const auto read =
-          instrumentation::build_v_readfirstlane_b32(quotient, *cached_selection->vector_src, arch);
+    if (plan.cached_selection->scalar_src) {
+      selected_source = *plan.cached_selection->scalar_src;
+    } else if (plan.cached_selection->vector_src) {
+      const auto read = instrumentation::build_v_readfirstlane_b32(
+          quotient, *plan.cached_selection->vector_src, arch);
       const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!read || !wait)
         return std::nullopt;
@@ -2951,11 +2944,11 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
       return std::nullopt;
     words.push_back(*selected);
   } else {
-    if (record_replay) {
+    if (plan.record_replay) {
       words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
     } else {
-      const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
-          scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
+      const uint16_t dispatch_mix = plan.dispatch_id_sgpr.value_or(
+          scalar_positive_inline_u32(static_cast<uint32_t>(plan.literal_dispatch_id) & 63u));
       const auto mix_dispatch = instrumentation::build_s_sub_u32(
           residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
       if (!mix_dispatch)
@@ -2991,7 +2984,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     words.push_back(word);
   }
   if (!append_moi_scc_preserving_indirect_jump(words, gate_text_offset, return_text_offset,
-                                               *options.moi_exec_save_sgpr, saved_scc,
+                                               plan.exec_save_sgpr, saved_scc,
                                                /*capture_scc=*/false, arch))
     return std::nullopt;
   const size_t selected_index = words.size();

@@ -4200,6 +4200,48 @@ moi_has_probe_entry_runtime_workgroup_gate(const MoiOptions &options,
   return moi_runtime_workgroup_selection_source(options, arch).has_value() || register_backed_tuple;
 }
 
+/// Immutable input to the common runtime workgroup gate emitter.
+///
+/// Selection policy is resolved before emission so the encoder does not need
+/// an engine's complete, mutable `MoiOptions`. The target call form is kept as
+/// an explicit ABI fact because dense Record/Replay uses a different residue
+/// register while an s_call_i64 return address remains live.
+struct MoiRuntimeWorkgroupGatePlan {
+  uint16_t exec_save_sgpr = 0;
+  uint32_t sample_stride = 1;
+  uint32_t sample_offset = 0;
+  bool record_replay = false;
+  std::optional<ConSanMoiWorkgroupSource> cached_selection;
+  std::optional<uint16_t> dispatch_id_sgpr;
+  uint64_t literal_dispatch_id = 0;
+  ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+};
+
+[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan>
+plan_moi_runtime_workgroup_gate(const MoiOptions &options,
+                                const ConSanMoiWorkgroupSources &workgroup_sources,
+                                rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const auto cached_selection = moi_runtime_workgroup_selection_source(options, arch);
+  const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
+  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||
+      !moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch) ||
+      (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
+       !moi_permits_literal_dispatch_identity(options, arch))) {
+    return std::nullopt;
+  }
+  return MoiRuntimeWorkgroupGatePlan{
+      .exec_save_sgpr = *options.moi_exec_save_sgpr,
+      .sample_stride = options.moi_runtime_sample_stride,
+      .sample_offset = options.moi_runtime_sample_offset,
+      .record_replay = record_replay,
+      .cached_selection = cached_selection,
+      .dispatch_id_sgpr = options.moi_dispatch_id_sgpr,
+      .literal_dispatch_id = options.moi_report_dispatch_id,
+      .direct_call_form = target->direct_call_form,
+  };
+}
+
 struct MoiSampledPublicationStateSgprs {
   uint16_t original_exec_save_sgpr = 0;
   uint16_t selection_vcc_save_sgpr = 0;
