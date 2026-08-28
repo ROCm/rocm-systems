@@ -72,6 +72,9 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
 
     // calculate chunk size
     int proto = tcoll.protocol;
+  #ifdef ENABLE_TDM_SIMPLE
+    if (comm->tdmSimpleEnable && proto == NCCL_PROTO_SIMPLE) plan->hasTdmSimpleWork = true;
+  #endif
     int chunkSteps = 1;
     int sliceSteps = 1;
     int stepSize = comm->buffSizes[proto] / NCCL_STEPS;

@@ -82,6 +82,26 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 #endif
 }
 
+#ifdef ENABLE_TDM_SIMPLE
+constexpr int rcclTdmStageOffset(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
+#ifdef RCCL_DEVICE_LINKER
+  (void)cudaArch;
+  (void)WarpSize;
+  return 0;
+#else
+  int scratchBytes = rcclShmemDynamicSize(cudaArch, WarpSize);
+  return (scratchBytes + RCCL_TDM_ALIGN - 1) & ~(RCCL_TDM_ALIGN - 1);
+#endif
+}
+
+constexpr int rcclShmemDynamicSizeWithTdm(int cudaArch, int WarpSize, int nThreads) {
+  return cudaArch == 1250 ?
+           rcclTdmStageOffset(cudaArch, WarpSize) +
+             RCCL_TDM_STAGE_BYTES_PER_WARP_MAX * (nThreads / WarpSize) :
+           rcclShmemDynamicSize(cudaArch, WarpSize);
+}
+#endif
+
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
 NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 0);
@@ -99,6 +119,10 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
   int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
+#ifdef ENABLE_TDM_SIMPLE
+  const int maxNthreads = (cudaArch == 950) ? RCCL_GFX950_MAX_NTHREADS : RCCL_DEFAULT_MAX_NTHREADS;
+  ncclMaxSharedMem = rcclShmemDynamicSizeWithTdm(cudaArch, WarpSize, maxNthreads);
+#endif
 
 #ifdef GENERATE_SYM_KERNELS
   for (int sym = 0; sym <= 1; sym++) {
@@ -833,6 +857,9 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
+#ifdef ENABLE_TDM_SIMPLE
+    if (comm->tdmSimpleEnable && task->protocol == NCCL_PROTO_SIMPLE) plan->hasTdmSimpleWork = true;
+#endif
     struct ncclDevWorkColl* devWork = (struct ncclDevWorkColl*)(workNode + 1);
     size_t elementSize = ncclTypeSize(task->datatype);
 
@@ -1302,6 +1329,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     ssize_t latencyThreshold = useLL128SendRecv ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
     if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
     protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
+#ifdef ENABLE_TDM_SIMPLE
+    if (comm->tdmSimpleEnable && bytes[dir] > 0 && protocol[dir] == NCCL_PROTO_SIMPLE)
+      plan->hasTdmSimpleWork = true;
+#endif
 
     // Emit the selected protocol so tests (and NCCL_DEBUG=INFO) can confirm the latency protocol
     // was actually chosen rather than silently falling back to SIMPLE.
@@ -2225,6 +2256,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
   int smem = plan->isSymColl ? plan->kernelDynSmem : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
+#ifdef ENABLE_TDM_SIMPLE
+  if (!plan->isSymColl && plan->hasTdmSimpleWork)
+    smem = rcclShmemDynamicSizeWithTdm(comm->cudaArch, comm->WarpSize, plan->threadPerBlock);
+#endif
   cudaStream_t launchStream = planner->streams->stream;
 
   // Verify actual kernel launch geometry against init-time channel counts.

@@ -95,10 +95,6 @@ struct ncclShmemData {
   uint64_t faults;
 #endif
   uint64_t barrier_pat;
-#if RCCL_TDM_STAGE_BYTES_PER_WARP
-  // A separate __shared__ should work better as it does not instantiate this for LL and LL128
-  alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
-#endif
 };
 
 #ifdef RCCL_DEVICE_LINKER
@@ -115,8 +111,20 @@ extern __shared__ ulong2
 #endif
 
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
+extern __shared__ alignas(RCCL_TDM_ALIGN) char ncclTdmDynamicShmem[];
+
+__device__ constexpr size_t ncclTdmStageOffset() {
+#ifdef RCCL_DEVICE_LINKER
+  return 0;
+#else
+  constexpr size_t scratchBytes =
+    ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE);
+  return (scratchBytes + RCCL_TDM_ALIGN - 1) & ~(size_t)(RCCL_TDM_ALIGN - 1);
+#endif
+}
+
 __device__ inline void* ncclTdmStageForWarp(int warp) {
-  return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
+  return ncclTdmDynamicShmem + ncclTdmStageOffset() + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
 }
 #endif
 
