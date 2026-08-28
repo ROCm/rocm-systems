@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU power: power cap set."""
 
 import unittest
@@ -133,24 +117,24 @@ class TestGpuPower(unittest.TestCase):
 
     def test_set_gpu_power_profile(self):
         self.common.print_func_name("")
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            for (
-                power_profile_preset_mask_name,
-                power_profile_preset_mask,
-                power_profile_preset_masks_cond,
-            ) in common.POWER_PROFILE_PRESET_MASKS:
-                msg = f"\t### amdsmi_set_gpu_power_profile(gpu={i}, power_profile_preset_mask={power_profile_preset_mask_name}):"
-                try:
-                    amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, power_profile_preset_mask)
-                    self.common.print(msg, "")
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, power_profile_preset_masks_cond):
-                        self.raise_exception = e
-                self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
+        # Valid rejections (although driver may include others)
+        refused = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,  # eg. guest devices, or sysfs node absent
+            amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,  # eg. invalid input
+            amdsmi.AmdSmiStatus.NO_PERM,  # eg. R/O sysfs in a container (EROFS)
+        ]
+        # All valid responses
+        applied_or_refused = [amdsmi.AmdSmiStatus.SUCCESS, *refused]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                for mask_name, mask, _ in common.POWER_PROFILE_PRESET_MASKS:
+                    accept = refused if mask_name == "INVALID" else applied_or_refused
+                    msg = (
+                        f"\t### amdsmi_set_gpu_power_profile(gpu={i}, "
+                        f"power_profile_preset_mask={mask_name}):"
+                    )
+                    with self.common.expect_status(msg, accept):
+                        amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
+                    self.common.print("")
         return
-
-    # pisolates

@@ -57,4 +57,14 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size);
 
+/// @brief Decode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
+[[nodiscard]] uint32_t
+kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+                                  const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief Encode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
+void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+                                           rocr::llvm::amdhsa::kernel_descriptor_t &desc,
+                                           uint32_t user_sgpr_count);
+
 } // namespace rocjitsu

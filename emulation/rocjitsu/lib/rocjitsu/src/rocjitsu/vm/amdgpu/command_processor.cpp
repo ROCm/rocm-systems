@@ -475,24 +475,42 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
     uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
-    uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
+    uint64_t scratch_slot = global_wave_idx;
+    if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+      const uint32_t shader_engine_count =
+          std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+      const uint32_t shader_engine_id = wf->shader_engine_id();
+      const uint32_t scoreboard_id = wf->scratch_scoreboard_id();
+      assert(shader_engine_id < shader_engine_count);
+      assert(scoreboard_id < scratch_waves_per_se_);
+      scratch_slot =
+          (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
+              scratch_waves_per_se_ +
+          scoreboard_id;
+    } else {
+      // Legacy CWSR records use the dispatch-wide logical scratch slot.
+      wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
+    }
+    uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
     if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
         scratch_allocator_) {
-      // Size against the whole grid, not this XCD's share: wave_scratch above is
-      // indexed by the grid-wide workgroup id, so every XCD of a fanned-out
-      // dispatch addresses the same full-size pool. Sizing it from total_wgs would
-      // leave the tail of the grid unbacked and would re-enter the allocator, which
-      // remaps the pool VA and would drop live waves' spill data.
-      uint64_t total_scratch = per_wave_size * pkt.grid_total_wgs() * waves_per_wg;
+      // Size against the whole grid, not this XCD's share: every XCD of a
+      // fanned-out dispatch shares the allocation. CDNA5 uses the complete
+      // physical XCC/SE/scoreboard address space instead of logical grid slots.
+      uint64_t scratch_slots = static_cast<uint64_t>(pkt.grid_total_wgs()) * waves_per_wg;
+      if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+        const uint32_t shader_engine_count =
+            std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+        scratch_slots =
+            static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count * scratch_waves_per_se_;
+      }
+      uint64_t total_scratch = per_wave_size * scratch_slots;
       scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
     }
 
     wf->set_scratch_base(wave_scratch);
     wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
-    // The scoreboard id is this wave's slot in the queue's scratch allocation;
-    // rocm-dbgapi multiplies it by the per-wave size to find the wave's scratch.
-    wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     // CDNA compiler-generated functions use s32 as the private stack pointer
     // and s33 as its current frame value for explicit scratch SADDR operands.
     // The pointer is an offset within the per-wave scratch slice, not the SRD
@@ -1842,7 +1860,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     throw std::runtime_error("unsupported kernel wave size for VGPR descriptor decoding");
   uint32_t vgprs = (vgpr_gran + 1) * *vgpr_granularity;
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
-  uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+  uint32_t user_sgprs = kernel_descriptor_user_sgpr_count(arch, kd);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
   uint64_t code_load_bias = 0;
 
@@ -1937,20 +1955,37 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       // the queue; the emulator's ROCr instead sets the backing via
       // SET_SCRATCH_BACKING_VA and leaves these fields zero, so the CP fills
       // them here. Field layout per rocdbgapi architecture.cpp
-      // gfx9_architecture_t::scratch_memory_region: waves = tmpring[0:11],
-      // wavesize = tmpring[12:24] * 1024 bytes.
+      // scratch-memory region. The WAVES field is common, while ISA properties
+      // describe the generation-specific WAVESIZE unit and field width.
       if (dp.scratch_backing_addr != 0 && !cus_.empty()) {
         uint64_t per_wave_bytes =
             static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
-        uint32_t wavesize_kb = static_cast<uint32_t>((per_wave_bytes + 1023) / 1024);
-        // The WAVES field must be a nonzero multiple of the shader-engine-per-XCC
-        // count, or rocm-dbgapi disables private access (scratch_memory_region
-        // warns and returns size 0). Round the dispatch's wave count up to it.
-        uint32_t se = std::max(1u, scratch_wave_divisor_);
-        uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
-        uint32_t waves_field =
-            static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
-        uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_kb & 0x1FFFu) << 12);
+        // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode
+        // that actual stride, rather than merely rounding to the register's
+        // unit, so flat_scratch agrees with rocm-dbgapi for every scoreboard
+        // slot after slot zero.
+        const uint64_t per_wave_stride = ((per_wave_bytes + 1023) / 1024) * 1024;
+        const auto properties = isa_properties(arch);
+        const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
+        assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
+        const uint32_t wavesize_field = static_cast<uint32_t>(per_wave_stride / wavesize_unit);
+        uint32_t waves_field = 0;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          // gfx12 interprets WAVES as the number of physical scratch slots per
+          // shader engine. The CWSR wave word supplies the SE plus its per-SE
+          // scoreboard slot, so publish the same capacity used by allocation.
+          waves_field = scratch_waves_per_se_;
+        } else {
+          // Older debugger layouts interpret WAVES as a device-wide count and
+          // require it to be divisible by the shader-engine count.
+          uint32_t se = std::max(1u, scratch_wave_divisor_);
+          uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
+          waves_field =
+              static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
+        }
+        const uint32_t wavesize_mask =
+            util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
+        uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_field & wavesize_mask) << 12);
         memory_->write64(scratch_loc_va, dp.scratch_backing_addr, queue.process_id);
         memory_->write32(dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), tmpring,
                          queue.process_id);
@@ -2188,7 +2223,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
                             *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
                                                           queue.doorbell_offset))
                             .load(std::memory_order_acquire);
-      if (db_val > write_idx)
+      if (db_val != std::numeric_limits<uint64_t>::max() && db_val > write_idx)
         write_idx = db_val;
     }
     util::Logger::cp([&](auto &os) {

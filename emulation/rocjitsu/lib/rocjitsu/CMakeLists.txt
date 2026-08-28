@@ -30,6 +30,15 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+# Vendored DRM/amdgpu UAPI headers. kfd_ioctl.h includes <libdrm/drm.h>, so
+# attach this target privately at the HSA include chokepoints.
+add_library(rocjitsu_drm_headers INTERFACE)
+target_include_directories(
+    rocjitsu_drm_headers
+    SYSTEM
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
+)
+
 add_subdirectory(src/rocjitsu/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
