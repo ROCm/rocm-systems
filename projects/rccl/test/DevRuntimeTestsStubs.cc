@@ -68,8 +68,22 @@ const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 // ---------------------------------------------------------------------------
 ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
 ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
-ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
-ncclResult_t bootstrapIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
+// Seams: symMemoryMapLsaTeam NCCLCHECKGOTOs both of these, so their failure
+// arms are only reachable by driving them.
+static ncclResult_t DefaultIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier = DefaultIntraNodeBarrier;
+
+ncclResult_t bootstrapIntraNodeBarrier(void* bs, int* ranks, int self, int size, int tag) {
+  return g_bootstrapIntraNodeBarrier(bs, ranks, self, size, tag);
+}
+
+static ncclResult_t DefaultIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather =
+    DefaultIntraNodeAllGather;
+
+ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int size, void* buf, int bytes) {
+  return g_bootstrapIntraNodeAllGather(bs, ranks, self, size, buf, bytes);
+}
 
 // ---------------------------------------------------------------------------
 // Arg checks / comm readiness.
@@ -252,7 +266,7 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 // uncommitted anonymous mapping (MAP_NORESERVE). This makes multi-GB flat-VA
 // reservations cheap and never dereferenced (all cuMemMap/SetAccess are no-ops),
 // so no physical memory is committed.
-HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t, void*, unsigned long long) {
+static hipError_t DefaultMemAddressReserve(void** ptr, size_t size, size_t, void*, unsigned long long) {
   // The real driver rejects a zero-size reservation; a zero here would be a bug
   // in the code under test, so surface it rather than silently substituting one.
   assert(size != 0);
@@ -260,6 +274,13 @@ HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t, void*,
   if (p == MAP_FAILED) return hipErrorOutOfMemory;
   *ptr = p;
   return hipSuccess;
+}
+std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_hipMemAddressReserve =
+    DefaultMemAddressReserve;
+
+HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t align, void* addr,
+                                         unsigned long long flags) {
+  return g_hipMemAddressReserve(ptr, size, align, addr, flags);
 }
 HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   assert(size != 0);
@@ -416,5 +437,8 @@ void ResetDevRuntimeFakes() {
   g_hipMemMap                               = DefaultMemMap;
   g_hipMemRelease                           = DefaultMemRelease;
   g_proxyClientGetFdBlocking                = DefaultProxyClientGetFdBlocking;
+  g_hipMemAddressReserve                    = DefaultMemAddressReserve;
+  g_bootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
+  g_bootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_loadParam                               = DefaultLoadParam;
 }

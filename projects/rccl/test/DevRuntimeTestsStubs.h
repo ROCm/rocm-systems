@@ -41,6 +41,11 @@ extern std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHa
     g_hipMemMap;
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease;
 
+extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_hipMemAddressReserve;
+
+extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
+extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather;
+
 // Hands back an fd the caller must close; the default opens /dev/null.
 extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_proxyClientGetFdBlocking;
 

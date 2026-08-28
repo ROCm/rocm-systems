@@ -24,6 +24,23 @@
 #define NCCL_PARAM(name, env, deftVal) \
   int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
 
+// ncclCalloc's failure arms cannot be reached while it always succeeds, and it
+// is a macro rather than a symbol, so route it through a call counter.
+// TRAP: the substitution is textual and TU-wide, so the index counts every
+// ncclCalloc the *test* reaches, not only the unit under test's.
+// TRAP: both statics are TU-local, so a fixture must reset them itself --
+// ResetDevRuntimeFakes() cannot see them.
+#include "alloc.h"
+static int g_callocCallIndex = 0;
+static int g_callocFailAt = -1;  // -1 = never fail; otherwise a 0-based call index
+template <typename... Args>
+static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args&&... args) {
+  if (g_callocCallIndex++ == g_callocFailAt) return ncclSystemError;
+  return ncclCallocDebug(std::forward<Args>(args)..., file, line, fn, true);
+}
+#undef ncclCalloc
+#define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
+
 #include DEV_RUNTIME_CC_PATH
 
 #include <gtest/gtest.h>
@@ -36,6 +53,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ---------------------------------------------------------------------------
