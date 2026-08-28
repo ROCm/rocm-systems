@@ -348,7 +348,7 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tShould be used only when profiling PyTorch applications."
+            "\t\t\tRequires PyTorch 2.13 or 2.14."
         ),
     )
     profile_group.add_argument(

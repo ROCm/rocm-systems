@@ -900,7 +900,7 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* Valid PyTorch installation in the profiling environment.
+* PyTorch 2.13 or 2.14 in the profiling environment.
 * PyTorch application must be run as a Python script or a Python command.
 
 Usage
@@ -955,11 +955,10 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` uses ``torch_trace_collector``, a C++ extension built for a
-specific PyTorch version. Profiling requires a matching
-``torch_trace_collector-<torch-version>.so``. If none is available, profiling
-stops with an error that lists the supported PyTorch versions and the workload
-version.
+``--torch-trace`` loads ``torch_trace_collector-<torch-version>.so`` for the
+workload PyTorch version (2.13 or 2.14). If no matching module is available,
+profiling stops with an error that lists the supported versions and the
+workload version.
 
 Output
 ------
@@ -1053,7 +1052,7 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* A valid PyTorch installation must be available in the environment where the workload runs.
+* Requires PyTorch 2.13 or 2.14 in the workload environment.
 
 * The workload’s Python version must match the Python version used by ``roctx``.
 

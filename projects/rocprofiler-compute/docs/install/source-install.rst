@@ -76,12 +76,9 @@ follows.
 
     * - ``BUILD_TORCH_TRACE_COLLECTOR``
       - Build ``torch_trace_collector`` for :ref:`Torch trace <torch-operator-mapping>`.
-        ``AUTO`` (default) builds when PyTorch is available, ``ON`` requires
-        PyTorch, and ``OFF`` skips the build.
-
-    * - ``TORCH_TRACE_PYTHON``
-      - Python interpreter used to build ``torch_trace_collector``. Defaults to
-        the ``python3`` interpreter that CMake locates.
+        Requires PyTorch 2.13 or 2.14 at ``$ROCM_PATH/../torch``.
+        ``AUTO`` (default) builds when that Torch is found, ``ON`` requires it,
+        and ``OFF`` skips the build.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
