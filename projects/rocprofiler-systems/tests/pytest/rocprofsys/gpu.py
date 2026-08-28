@@ -94,7 +94,6 @@ class GPUInfo:
         return [f"rocprof-device-[0-9]-{name}*.txt" for name in self.counter_names]
 
 
-
 def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
     """Get the path to the rocminfo executable.
 

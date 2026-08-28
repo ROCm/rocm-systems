@@ -136,7 +136,6 @@ class TestGPUInfo(RocprofsysTest):
         assert gpu_info.counter_names == ["SQ_WAVES"]
 
 
-
 @pytest.mark.class_name("test-result")
 class TestTestResult(RocprofsysTest):
     def test_rocpd_files_prefers_default_database(self, tmp_path):
