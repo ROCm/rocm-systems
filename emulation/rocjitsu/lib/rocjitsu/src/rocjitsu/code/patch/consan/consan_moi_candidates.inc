@@ -367,102 +367,25 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
     result.errors.emplace_back("ConSan MOI access policy received an invalid engine");
     return false;
   }
-  const ConSanAccessPolicyRequest request{
-      .engine = *engine,
-      .native_lds_enabled = true,
-      .group_flat_enabled = true,
-      .flat_provenance_mode = mode,
-      .container_filter = options.test_kernel_name_filter,
-      .reserved_for_synchronization = synchronization_sites,
-  };
-  ConSanAccessPolicyResult policy = plan_consan_access_observation(inventory, request);
-  result.observation_plan = std::move(policy.plan);
-  const ConSanBarrierPolicyResult barrier_policy = plan_consan_barrier_observation(
+  ConSanObservationProduct observation = assemble_consan_observation_product(
       inventory, {
                      .engine = *engine,
-                     .tracking_enabled = options.moi_track_barriers,
+                     .native_lds_enabled = true,
+                     .group_flat_enabled = true,
+                     .flat_provenance_mode = mode,
+                     .barrier_tracking_enabled = options.moi_track_barriers,
+                     .include_atomic_fence_policy = true,
+                     .atomic_fence_tracking_enabled = options.moi_track_atomics,
                      .container_filter = options.test_kernel_name_filter,
+                     .reserved_for_synchronization = synchronization_sites,
                  });
-  const bool barrier_plan_appended = result.observation_plan.append(barrier_policy.plan);
-  const bool sampled_access_window_available =
-      std::ranges::any_of(result.observation_plan.probe_intents, [](const auto &intent) {
-        return intent.kind == ConSanProbeIntentKind::SampledAccess;
-      });
-  const ConSanAtomicFencePolicyResult atomic_fence_policy = plan_consan_atomic_fence_observation(
-      inventory, {
-                     .engine = *engine,
-                     .tracking_enabled = options.moi_track_atomics,
-                     .sampled_access_window_available = sampled_access_window_available,
-                     .container_filter = options.test_kernel_name_filter,
-                 });
-  const bool atomic_fence_plan_appended = result.observation_plan.append(atomic_fence_policy.plan);
-  result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
-  if (!policy.errors.empty() || !barrier_policy.errors.empty() ||
-      !atomic_fence_policy.atomic_errors.empty() || !atomic_fence_policy.fence_errors.empty() ||
-      !barrier_plan_appended || !atomic_fence_plan_appended || !result.observation_plan.valid()) {
-    for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
-      if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
-        continue;
-      std::string aliases;
-      for (const std::string &name : decision.source_containers) {
-        if (!aliases.empty())
-          aliases += "', '";
-        aliases += name;
-      }
-      result.errors.emplace_back(
-          "ConSan MOI physical access at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through aliases '" + aliases + "'");
-    }
-    for (const ConSanBarrierSiteDecision &decision :
-         result.observation_plan.barrier_site_decisions) {
-      if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
-        continue;
-      std::string aliases;
-      for (const std::string &name : decision.source_containers) {
-        if (!aliases.empty())
-          aliases += "', '";
-        aliases += name;
-      }
-      result.errors.emplace_back(
-          "ConSan MOI physical barrier at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through aliases '" + aliases + "'");
-    }
-    for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
-      if (decision.reason != ConSanAtomicPolicyReason::ConflictingPhysicalAliases)
-        continue;
-      std::string aliases;
-      for (const std::string &name : decision.source_containers) {
-        if (!aliases.empty())
-          aliases += "', '";
-        aliases += name;
-      }
-      result.errors.emplace_back(
-          "ConSan MOI physical atomic at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through aliases '" + aliases + "'");
-    }
-    for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
-      if (decision.reason != ConSanFencePolicyReason::ConflictingPhysicalAliases)
-        continue;
-      std::string aliases;
-      for (const std::string &name : decision.source_containers) {
-        if (!aliases.empty())
-          aliases += "', '";
-        aliases += name;
-      }
-      result.errors.emplace_back(
-          "ConSan MOI physical fence at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through aliases '" + aliases + "'");
-    }
-    if (result.errors.empty())
-      result.errors.emplace_back("ConSan MOI policy produced an invalid observation plan");
-    return false;
-  }
-
-  return true;
+  const bool valid = observation.valid();
+  result.observation_plan = std::move(observation.plan);
+  result.coverage_ledger = std::move(observation.initial_coverage);
+  result.errors.insert(result.errors.end(),
+                       std::make_move_iterator(observation.diagnostics.begin()),
+                       std::make_move_iterator(observation.diagnostics.end()));
+  return valid;
 }
 
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,

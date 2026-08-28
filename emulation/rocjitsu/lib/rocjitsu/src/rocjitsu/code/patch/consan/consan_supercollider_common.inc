@@ -18,69 +18,28 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
 
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
                                                  ConSanTransformArtifacts &result) {
-  const ConSanAccessPolicyRequest request{
-      .engine = ConSanCapabilityEngine::SuperCollider,
-      .native_lds_enabled = options.probe_lds_check_trap,
-      .group_flat_enabled = options.probe_flat_check_trap,
-      .flat_provenance_mode = options.flat_provenance_mode,
-      // A test-only selection filter must not shrink the physical coverage
-      // denominator. Current lowerers may still use it to choose work.
-      .container_filter = {},
-      .reserved_for_synchronization = {},
-  };
-  ConSanAccessPolicyResult policy =
-      plan_consan_access_observation(result.program_inventory, request);
-  result.observation_plan = std::move(policy.plan);
-  const ConSanBarrierPolicyResult barrier_policy = plan_consan_barrier_observation(
-      result.program_inventory, {
-                                    .engine = ConSanCapabilityEngine::SuperCollider,
-                                    .tracking_enabled = true,
-                                    .container_filter = {},
-                                });
-  const bool barrier_plan_appended = result.observation_plan.append(barrier_policy.plan);
-  result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
-  if (!policy.errors.empty() || !barrier_policy.errors.empty() || !barrier_plan_appended ||
-      !result.observation_plan.valid()) {
-    for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
-      if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
-        continue;
-      std::string aliases;
-      for (const std::string &name : decision.source_containers) {
-        if (!aliases.empty())
-          aliases += "', '";
-        aliases += name;
-      }
-      const auto access =
-          std::ranges::find_if(result.program_inventory.access_sites(), [&](const auto &candidate) {
-            return candidate.physical_id == decision.semantic_site.physical;
-          });
-      const std::string_view access_kind =
-          access != result.program_inventory.access_sites().end() &&
-                  access->origin == ConSanAccessOrigin::Flat
-              ? "FLAT"
-              : "native-LDS";
-      result.errors.emplace_back(
-          "ConSan SuperCollider " + std::string(access_kind) + " access at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through aliases '" + aliases + "'");
-    }
-    for (const ConSanBarrierSiteDecision &decision :
-         result.observation_plan.barrier_site_decisions) {
-      if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
-        continue;
-      result.errors.emplace_back(
-          "ConSan SuperCollider barrier at original text offset " +
-          std::to_string(decision.semantic_site.physical.original_text_offset) +
-          " was decoded inconsistently through physical aliases");
-    }
-    if (result.errors.empty()) {
-      result.errors.emplace_back(
-          "ConSan SuperCollider access policy produced an invalid observation plan");
-    }
-    return false;
-  }
-
-  return true;
+  ConSanObservationProduct observation = assemble_consan_observation_product(
+      result.program_inventory,
+      {
+          .engine = ConSanCapabilityEngine::SuperCollider,
+          .native_lds_enabled = options.probe_lds_check_trap,
+          .group_flat_enabled = options.probe_flat_check_trap,
+          .flat_provenance_mode = options.flat_provenance_mode,
+          .barrier_tracking_enabled = true,
+          .include_atomic_fence_policy = false,
+          .atomic_fence_tracking_enabled = false,
+          // A test-only selection filter must not shrink the physical coverage
+          // denominator. Current lowerers may still use it to choose work.
+          .container_filter = {},
+          .reserved_for_synchronization = {},
+      });
+  const bool valid = observation.valid();
+  result.observation_plan = std::move(observation.plan);
+  result.coverage_ledger = std::move(observation.initial_coverage);
+  result.errors.insert(result.errors.end(),
+                       std::make_move_iterator(observation.diagnostics.begin()),
+                       std::make_move_iterator(observation.diagnostics.end()));
+  return valid;
 }
 
 [[nodiscard]] std::vector<ConSanProbeIntentId>

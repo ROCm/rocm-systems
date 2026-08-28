@@ -835,6 +835,70 @@ TEST(ConSanAccessPolicy, RelaxedLdsAtomicAccessUsesTargetCapabilityAndExactMnemo
             ConSanAccessPolicyReason::OperationKindExcluded);
 }
 
+TEST(ConSanObservationPolicy, OneAuthorityAssemblesPlanAndInitialLedgerForEveryEngine) {
+  const ProgramInventory inventory = one_native_access_inventory();
+  for (const ConSanCapabilityEngine engine : kConSanCapabilityEngines) {
+    const bool supercollider = engine == ConSanCapabilityEngine::SuperCollider;
+    const ConSanObservationProduct product = assemble_consan_observation_product(
+        inventory, {.engine = engine,
+                    .native_lds_enabled = true,
+                    .group_flat_enabled = true,
+                    .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
+                    .barrier_tracking_enabled = true,
+                    .include_atomic_fence_policy = !supercollider,
+                    .atomic_fence_tracking_enabled = !supercollider,
+                    .container_filter = {},
+                    .reserved_for_synchronization = {}});
+    SCOPED_TRACE(consan_capability_engine_name(engine));
+    ASSERT_TRUE(product.valid());
+    EXPECT_EQ(product.plan.engine, engine);
+    EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan));
+    EXPECT_TRUE(product.barrier_fragment_appended);
+    EXPECT_EQ(product.atomic_fence_fragment_required, !supercollider);
+    EXPECT_EQ(product.atomic_fence_fragment_appended, !supercollider);
+    ASSERT_EQ(product.plan.probe_intents.size(), 1u);
+    ASSERT_EQ(product.initial_coverage.intent_entries().size(), 1u);
+    EXPECT_EQ(product.initial_coverage.intent_entries().front().intent,
+              product.plan.probe_intents.front());
+  }
+}
+
+TEST(ConSanObservationPolicy, ConflictingAliasesFailInTheAssembledProduct) {
+  AccessInventoryInput input;
+  ConSanFunctionInfo first;
+  first.name = "first_alias";
+  first.entry_text_offset = 0;
+  stage_policy_access(input, first, make_policy_lds_site());
+  input.functions.push_back(std::move(first));
+  ConSanFunctionInfo second;
+  second.name = "second_alias";
+  second.entry_text_offset = 0;
+  ConSanAccessInventorySite conflicting = make_policy_lds_site();
+  conflicting.decoded_width_bits = 64;
+  stage_policy_access(input, second, std::move(conflicting));
+  input.functions.push_back(std::move(second));
+
+  const ConSanObservationProduct product =
+      assemble_consan_observation_product(build_policy_inventory(std::move(input)),
+                                          {.engine = ConSanCapabilityEngine::RecordReplay,
+                                           .native_lds_enabled = true,
+                                           .group_flat_enabled = true,
+                                           .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
+                                           .barrier_tracking_enabled = true,
+                                           .include_atomic_fence_policy = true,
+                                           .atomic_fence_tracking_enabled = true,
+                                           .container_filter = {},
+                                           .reserved_for_synchronization = {}});
+  EXPECT_FALSE(product.valid());
+  EXPECT_EQ(product.access_errors,
+            (std::vector{ConSanAccessPolicyReason::ConflictingPhysicalAliases}));
+  ASSERT_EQ(product.diagnostics.size(), 1u);
+  EXPECT_EQ(product.diagnostics.front(),
+            "ConSan MOI physical access at original text offset 32 was decoded inconsistently "
+            "through aliases 'first_alias', 'second_alias'");
+  EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan));
+}
+
 TEST(ConSanAccessPolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInventory) {
   const ProgramInventory inventory = one_native_access_inventory();
   const std::vector<ConSanAccessInventorySite> before(inventory.access_sites().begin(),

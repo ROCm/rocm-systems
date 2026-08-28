@@ -1222,6 +1222,66 @@ private:
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
 };
 
+/// Complete engine-policy request consumed by observation assembly.
+///
+/// This is the only production request that composes access, barrier, and
+/// optional atomic/fence policy. Borrowed filters and site reservations are
+/// consumed during the call and are never retained by the resulting value.
+struct ConSanObservationPolicyRequest {
+  /// Engine whose complete observation contract should be assembled.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Whether native LDS and direct-to-LDS accesses belong to this request.
+  bool native_lds_enabled = false;
+  /// Whether group-FLAT accesses belong to this request.
+  bool group_flat_enabled = false;
+  /// Confidence threshold for conservatively inferred group-FLAT provenance.
+  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  /// Whether decoded barrier events should be observed.
+  bool barrier_tracking_enabled = false;
+  /// Whether this engine participates in atomic/fence policy assembly.
+  ///
+  /// SuperCollider currently has no atomic/fence observation contract and
+  /// therefore leaves the fragment absent instead of manufacturing excluded
+  /// decisions that were not part of its prior policy product.
+  bool include_atomic_fence_policy = false;
+  /// Whether atomic and associated-fence tracking is enabled when included.
+  bool atomic_fence_tracking_enabled = false;
+  /// Optional diagnostic-only container substring filter.
+  std::string_view container_filter;
+  /// Physical ordinary-memory sites delegated to synchronization policy.
+  std::span<const PhysicalSiteId> reserved_for_synchronization;
+};
+
+/// Validated composition of every semantic policy fragment for one engine.
+///
+/// The plan and its initial ledger are published together so engine lowerers
+/// cannot append another policy fragment or initialize a ledger independently.
+/// Typed fragment failures remain available for invariant tests; diagnostics
+/// are rendered once at this boundary for transform consumers.
+struct ConSanObservationProduct {
+  ConSanObservationPlan plan;
+  ConSanCoverageLedger initial_coverage;
+  std::vector<ConSanAccessPolicyReason> access_errors;
+  std::vector<ConSanBarrierPolicyReason> barrier_errors;
+  std::vector<ConSanAtomicPolicyReason> atomic_errors;
+  std::vector<ConSanFencePolicyReason> fence_errors;
+  bool barrier_fragment_appended = false;
+  bool atomic_fence_fragment_appended = false;
+  bool atomic_fence_fragment_required = false;
+  std::vector<std::string> diagnostics;
+
+  /// Return whether every requested fragment composed into one valid plan and
+  /// the initial ledger is exactly the projection of that plan.
+  [[nodiscard]] bool valid() const {
+    return access_errors.empty() && barrier_errors.empty() && atomic_errors.empty() &&
+           fence_errors.empty() && barrier_fragment_appended &&
+           (!atomic_fence_fragment_required || atomic_fence_fragment_appended) && plan.valid() &&
+           initial_coverage == ConSanCoverageLedger(plan) && diagnostics.empty();
+  }
+
+  bool operator==(const ConSanObservationProduct &) const = default;
+};
+
 /// Evaluate target-neutral access applicability and admission without mutating
 /// inventory, options, diagnostics, candidates, resource plans, or patches.
 [[nodiscard]] ConSanAccessPolicyResult
@@ -1241,3 +1301,9 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
 [[nodiscard]] ConSanAtomicFencePolicyResult
 plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                                      const ConSanAtomicFencePolicyRequest &request);
+
+/// Assemble the sole engine observation product in dependency order: access,
+/// barrier, then optional atomic/fence policy, followed by its initial ledger.
+[[nodiscard]] ConSanObservationProduct
+assemble_consan_observation_product(const ProgramInventory &inventory,
+                                    const ConSanObservationPolicyRequest &request);
