@@ -65,6 +65,52 @@ static_assert(KfdProcess::kPageSize == simdojo::SparseMemory::PAGE_SIZE,
 /// hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
+  class PageTableRequestGuard {
+  public:
+    PageTableRequestGuard() = default;
+    PageTableRequestGuard(PageTableRequestGuard &&) noexcept = default;
+    PageTableRequestGuard &operator=(PageTableRequestGuard &&) noexcept = default;
+    PageTableRequestGuard(const PageTableRequestGuard &) = delete;
+    PageTableRequestGuard &operator=(const PageTableRequestGuard &) = delete;
+
+    bool owns_lock() const { return lock_.owns_lock(); }
+    bool cacheable() const { return owns_lock() && generation_ != nullptr; }
+    uint64_t registry_generation() const {
+      assert(owns_lock());
+      return registry_generation_;
+    }
+    uint64_t page_table_generation() const {
+      assert(cacheable());
+      return *generation_;
+    }
+    void unlock() {
+      if (owns_lock())
+        lock_.unlock();
+    }
+
+  private:
+    friend class GpuMemory;
+
+    explicit PageTableRequestGuard(std::shared_ptr<std::shared_mutex> mutex)
+        : mutex_(std::move(mutex)),
+          lock_(mutex_ ? std::shared_lock(*mutex_) : std::shared_lock<std::shared_mutex>{}) {}
+
+    void bind(KfdProcess::PageTable *page_table, std::shared_mutex *page_table_mutex,
+              const uint64_t *generation, uint64_t registry_generation) {
+      page_table_ = page_table;
+      page_table_mutex_ = page_table_mutex;
+      generation_ = generation;
+      registry_generation_ = registry_generation;
+    }
+
+    std::shared_ptr<std::shared_mutex> mutex_;
+    std::shared_lock<std::shared_mutex> lock_;
+    KfdProcess::PageTable *page_table_ = nullptr;
+    std::shared_mutex *page_table_mutex_ = nullptr;
+    const uint64_t *generation_ = nullptr;
+    uint64_t registry_generation_ = 0;
+  };
+
   explicit GpuMemory(std::string name)
       : simdojo::SparseMemory(std::move(name)),
         // Function-static TLS translation caches may outlive a GpuMemory on a
@@ -90,33 +136,88 @@ public:
   /// @brief Register a process's page table in the VMID table.
   /// @param generation Optional mutation counter used by translation caches.
   ///        Omitting it disables the per-thread fast path for this page table.
+  /// @param request_mutex Optional lease that stabilizes batched page-table
+  ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
   void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu,
-                        const uint64_t *generation = nullptr) {
+                        const uint64_t *generation = nullptr,
+                        std::shared_ptr<std::shared_mutex> request_mutex = {}) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
-    std::unique_lock lk(vmid_mutex_);
-    vmid_table_[pid] = {
-        .page_table = pt,
-        .mutex = mu,
-        .client_pid = 0,
-        .client_mem_fd = {},
-        .generation = generation,
-    };
-    // The VMID may now select a different page table even though neither page
-    // table changed. Invalidate TLS entries that cached the old registration.
-    ++vmid_registry_generation_;
+    update_vmid_registration(pid, [&](auto) {
+      vmid_table_[pid] = {
+          .page_table = pt,
+          .mutex = mu,
+          .client_pid = 0,
+          .client_mem_fd = {},
+          .generation = generation,
+          .request_mutex = std::move(request_mutex),
+      };
+      return true;
+    });
+  }
+
+  /// @brief Stabilize a registered process's page table for one MTYPE lookup.
+  /// @details Page-table mutations take the exclusive side of this lease before
+  /// the ordinary page-table lock. Callers must release the lease before a
+  /// backing-memory access, whose allocator metadata query may reenter KFD.
+  PageTableRequestGuard acquire_page_table_request(uint32_t vmid) const {
+    if (vmid == 0)
+      return {};
+    while (true) {
+      std::shared_ptr<std::shared_mutex> request_mutex;
+      {
+        std::shared_lock lock(vmid_mutex_);
+        auto it = vmid_table_.find(vmid);
+        if (it == vmid_table_.end() || !it->second.request_mutex)
+          return {};
+        request_mutex = it->second.request_mutex;
+      }
+
+      PageTableRequestGuard guard(request_mutex);
+      std::shared_lock lock(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it != vmid_table_.end() && it->second.request_mutex == request_mutex) {
+        guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
+                   vmid_registry_generation_);
+        return guard;
+      }
+    }
+  }
+
+  /// @brief Reacquire a previously discovered request lease and revalidate its
+  /// VMID binding.
+  /// @details The cached mutex avoids the initial VMID-table lookup on the hot
+  /// path. The binding is still checked after locking because replacement can
+  /// install a different page table while the lease is released.
+  bool reacquire_page_table_request(uint32_t vmid, PageTableRequestGuard &guard) const {
+    if (vmid == 0)
+      return false;
+    if (guard.mutex_) {
+      guard.lock_.lock();
+      std::shared_lock lock(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it != vmid_table_.end() && it->second.request_mutex == guard.mutex_) {
+        guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
+                   vmid_registry_generation_);
+        return true;
+      }
+      guard.lock_.unlock();
+      guard = {};
+    }
+    guard = acquire_page_table_request(vmid);
+    return guard.owns_lock();
   }
 
   /// @brief Unregister a process from the VMID table.
   void unregister_process(uint32_t pid) {
     util::Logger::cp("VMID_UNREG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec);
-    std::unique_lock lk(vmid_mutex_);
-    auto it = vmid_table_.find(pid);
-    if (it == vmid_table_.end())
-      return;
-    vmid_table_.erase(it);
-    ++vmid_registry_generation_;
+    update_vmid_registration(pid, [&](auto it) {
+      if (it == vmid_table_.end())
+        return false;
+      vmid_table_.erase(it);
+      return true;
+    });
   }
 
   void set_process_client_pid(uint32_t pid, pid_t client_pid) {
@@ -218,13 +319,28 @@ public:
   }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
+  /// @details This reads only the page-wide policy. It deliberately avoids the
+  /// host-extent copy, addressability checks, and external allocator queries
+  /// needed by accesses that expose backing storage.
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
       return Mtype::RW;
-    static thread_local PteCache cache;
-    return cached_walk(addr, vmid, cache, [](const KfdProcess::PageTableEntry *pte) {
-      return pte ? pte->mtype : Mtype::RW;
-    });
+    std::shared_lock vmid_lock(vmid_mutex_);
+    auto vmid_entry = vmid_table_.find(vmid);
+    if (vmid_entry == vmid_table_.end())
+      return Mtype::RW;
+    std::shared_lock page_table_lock(*vmid_entry->second.mutex);
+    auto pte = vmid_entry->second.page_table->find(addr >> PAGE_SHIFT);
+    return pte != vmid_entry->second.page_table->end() ? pte->second.mtype : Mtype::RW;
+  }
+
+  /// @brief Look up PTE MTYPE through an already validated request lease.
+  Mtype pte_mtype(uint64_t addr, const PageTableRequestGuard &guard) const {
+    assert(guard.owns_lock());
+    assert(guard.page_table_ != nullptr && guard.page_table_mutex_ != nullptr);
+    std::shared_lock page_table_lock(*guard.page_table_mutex_);
+    auto pte = guard.page_table_->find(addr >> PAGE_SHIFT);
+    return pte != guard.page_table_->end() ? pte->second.mtype : Mtype::RW;
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
@@ -899,7 +1015,40 @@ private:
     /// Debugger-authorized /proc/<target>/mem fd, or empty.
     util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
+    std::shared_ptr<std::shared_mutex> request_mutex;
   };
+
+  /// @brief Update a VMID binding while excluding an in-progress MTYPE lookup.
+  /// @details The lease is acquired without holding vmid_mutex_, then the
+  /// binding is revalidated under the exclusive VMID lock. This prevents a
+  /// replacement or removal from overtaking an active lookup without
+  /// introducing a lock-order cycle.
+  template <typename F> void update_vmid_registration(uint32_t pid, F &&update) {
+    while (true) {
+      std::shared_ptr<std::shared_mutex> request_mutex;
+      {
+        std::shared_lock lock(vmid_mutex_);
+        auto it = vmid_table_.find(pid);
+        if (it != vmid_table_.end())
+          request_mutex = it->second.request_mutex;
+      }
+
+      std::unique_lock<std::shared_mutex> request_lock;
+      if (request_mutex)
+        request_lock = std::unique_lock(*request_mutex);
+
+      std::unique_lock lock(vmid_mutex_);
+      auto it = vmid_table_.find(pid);
+      const auto current_request_mutex =
+          it != vmid_table_.end() ? it->second.request_mutex : nullptr;
+      if (current_request_mutex != request_mutex)
+        continue;
+
+      if (update(it))
+        ++vmid_registry_generation_;
+      return;
+    }
+  }
 
   struct PteCache {
     const GpuMemory *memory = nullptr;

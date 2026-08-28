@@ -44,12 +44,15 @@ per-API notes on why each gap exists.
    = one test executable.
 
 2. **Write `test_hip_<domain>_contract.cc`.** Use the Catch2 `HIP_TEST_CASE`
-   macro and name each case `Contract_<Area>_<Behavior>` so the intent is legible
-   in `ctest` output. Put an `// @asserts:` intent tag on the line directly above
-   each case (see the checklist below — it feeds the generated test plan). Include
-   `hip_test_common.hh` (pulls in Catch2, `HT_AMD`, `CHECK_IMAGE_SUPPORT`,
-   `HIP_CHECK`, `HIP_SKIP_TEST`) and, if you allocate anything,
-   `contract_cleanup.hh`. See the skeleton below or copy `TEMPLATE.cc.txt`.
+   macro and name each case
+   `Contract_<DomainPascal>_<Subject>_<Scenario>_<ExpectedOutcome>` so the intent
+   is legible in `ctest` output. The static coverage check enforces this shape;
+   standard dimensional API terms such as `2D` and `3DAllocation` are allowed.
+   Put an `// @asserts:` intent tag on the line directly above each case (see the
+   checklist below — it feeds the generated test plan). Include `hip_test_common.hh`
+   (pulls in Catch2, `HT_AMD`, `CHECK_IMAGE_SUPPORT`, `HIP_CHECK`, `HIP_SKIP_TEST`)
+   and, if you allocate anything, `contract_cleanup.hh`. See the skeleton below or
+   copy `TEMPLATE.cc.txt`.
 
 3. **Add a `CMakeLists.txt`** in the domain dir:
 
@@ -67,7 +70,7 @@ per-API notes on why each gap exists.
    `catch/config/configs/contract.yaml`:
 
    ```yaml
-     Contract_<Area>_<Behavior>:
+     Contract_<DomainPascal>_<Subject>_<Scenario>_<ExpectedOutcome>:
        <<: *level_0
        tags: [<domain>]
    ```
@@ -177,7 +180,7 @@ A minimal starting point (also in `TEMPLATE.cc.txt`):
 // One or two sentences: which public API this pins and what portable guarantee
 // the case asserts (round-trip / accepted-or-unsupported / rejection).
 // @asserts: hipSomeApi - one-line portable invariant this case pins
-HIP_TEST_CASE(Contract_<Area>_<Behavior>) {
+HIP_TEST_CASE(Contract_<DomainPascal>_<Subject>_<Scenario>_<ExpectedOutcome>) {
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;

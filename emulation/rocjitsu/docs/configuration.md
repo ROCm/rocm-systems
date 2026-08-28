@@ -10,6 +10,7 @@ Pre-built simulator configs are in `configs/`:
 
 | File | Description |
 |---|---|
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
