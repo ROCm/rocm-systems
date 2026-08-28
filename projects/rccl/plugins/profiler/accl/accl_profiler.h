@@ -83,7 +83,11 @@ struct acclCollInfo {
   const char* proto;
   uint64_t    seqNumber;
   size_t      msgSizeBytes;
-  uint8_t     nChannels;
+  // Completion target for acclShouldFinalize(). Wider than the v5 ABI's uint8_t
+  // so it can hold ACCL_MAX_CHANNELS; see acclPluginStartEvent() for why a
+  // reported 0 is promoted rather than taken at face value.
+  uint16_t    nChannels;
+  uint8_t     nChannelsRaw;  // value exactly as the v5 descriptor reported it
 
   // Host timestamps
   uint64_t    tsCollStartUs;
@@ -112,7 +116,8 @@ struct acclCompletedRecord {
   const char* proto;
   uint64_t    seqNumber;
   size_t      msgSizeBytes;
-  uint8_t     nChannels;
+  uint16_t    nChannels;
+  uint8_t     nChannelsRaw;
   int         rank;
   int         nRanks;
 

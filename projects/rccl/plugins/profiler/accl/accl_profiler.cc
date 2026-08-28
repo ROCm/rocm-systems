@@ -188,7 +188,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     "\"coll_perf\":{"
     "\"coll\":\"%s\",\"coll_sn\":%lu,\"coll_msg_size_bytes\":%zu,"
     "\"coll_algo\":\"%s\",\"coll_proto\":\"%s\","
-    "\"coll_n_channels\":%d,"
+    "\"coll_n_channels\":%d,\"coll_n_channels_reported\":%d,"
     "\"coll_exec_time_us\":%.2f,"
     "\"coll_algobw_gbs\":%.6f,\"coll_busbw_gbs\":%.6f,"
     "\"coll_timing_source\":\"%s\","
@@ -209,7 +209,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     rec->rank, rec->nRanks,
     safeStr(rec->func), (unsigned long)rec->seqNumber, rec->msgSizeBytes,
     safeStr(rec->algo), safeStr(rec->proto),
-    rec->nChannels,
+    rec->nChannels, rec->nChannelsRaw,
     rec->totalExecUs,
     algoBw, busBw,
     rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock",
@@ -259,6 +259,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   rec.seqNumber = coll->seqNumber;
   rec.msgSizeBytes = coll->msgSizeBytes;
   rec.nChannels = coll->nChannels;
+  rec.nChannelsRaw = coll->nChannelsRaw;
   rec.rank = ctx->rank;
   rec.nRanks = ctx->nRanks;
 
@@ -493,11 +494,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       return ncclSuccess;
     }
 
-    if (eDescr->coll.nChannels == 0) {
-      *eHandle = NULL;
-      return ncclSuccess;
-    }
-
     struct acclCollInfo* coll = acclAllocColl(ctx);
     if (!coll) {
       *eHandle = NULL;
@@ -508,7 +504,20 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->algo = eDescr->coll.algo;
     coll->proto = eDescr->coll.proto;
     coll->seqNumber = eDescr->coll.seqNumber;
-    coll->nChannels = eDescr->coll.nChannels;
+    // eDescr->coll.nChannels is uint8_t (profiler_v5.h), but RCCL's
+    // ncclTaskColl::nChannels is uint16_t (enqueue.cc) and MAXCHANNELS is 256 —
+    // deliberately raised so NCCL_MAX_NCHANNELS=256 is a supported setting. A
+    // 256-channel collective therefore arrives here as 0.
+    //
+    // Promote a reported 0 to ACCL_MAX_CHANNELS instead of taking it literally.
+    // Erring high only delays finalization: the slot stays allocated and is
+    // reclaimed by the drain in acclPluginFinalize(). Erring low would satisfy
+    // acclShouldFinalize() at coll-stop and free the slot while the proxy
+    // thread is still delivering KernelCh events into it — RCCL fires coll-stop
+    // immediately after ncclProxyStart(), not after the collective completes.
+    coll->nChannelsRaw = eDescr->coll.nChannels;
+    coll->nChannels = eDescr->coll.nChannels ? eDescr->coll.nChannels
+                                             : ACCL_MAX_CHANNELS;
     coll->msgSizeBytes = msgSize;
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;

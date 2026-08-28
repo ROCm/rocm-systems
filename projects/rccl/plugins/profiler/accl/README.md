@@ -27,7 +27,8 @@ Per-collective JSONL records with timing decomposition:
   "header": {"rank": 0, "n_ranks": 8},
   "coll_perf": {
     "coll": "AllReduce", "coll_sn": 10, "coll_msg_size_bytes": 4194304,
-    "coll_algo": "Ring", "coll_proto": "Simple", "coll_n_channels": 4,
+    "coll_algo": "Ring", "coll_proto": "Simple",
+    "coll_n_channels": 4, "coll_n_channels_reported": 4,
     "coll_exec_time_us": 150.30,
     "coll_algobw_gbs": 0.027907, "coll_busbw_gbs": 0.048836,
     "coll_timing_source": "gpu_globaltimer",
@@ -47,6 +48,27 @@ Per-collective JSONL records with timing decomposition:
   }
 }
 ```
+
+`coll_n_channels` is the channel count the plugin uses as its completion target.
+`coll_n_channels_reported` is the raw value from the profiler v5 descriptor, whose
+`nChannels` field is a `uint8_t`: a collective using the full 256 channels
+(`NCCL_MAX_NCHANNELS=256`) reports `0`. The plugin promotes a reported `0` to 256,
+so the two fields differ only in that wrapped case.
+
+The last line of every file is a summary, written on every clean finalize:
+
+```json
+{"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
+             "pool_size": 256, "complete": true}}
+```
+
+- `dropped_collectives` — never got a pool slot because the pool was full.
+- `leaked_collectives` — got a slot but never completed, because RCCL's teardown
+  drain skipped some of their kernel-channel events; reclaimed at finalize.
+- `complete` — false if either counter is non-zero. **A file with no summary line
+  at all means the process did not reach finalize**, so its data is also suspect.
+  `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
+  against a full one.
 
 ## Build
 
