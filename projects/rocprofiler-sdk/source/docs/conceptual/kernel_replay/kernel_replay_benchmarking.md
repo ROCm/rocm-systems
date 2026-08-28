@@ -102,8 +102,9 @@ for(const auto& count : record.read())
 ```
 
 Since every pass of a replayed dispatch shares that dispatch id, every pass's counters attach to one
-event, and `rocpd_pmc_event` has no column that could tell them apart. The kernel dispatch row is
-deduplicated by the same id, so the dispatch appears once with the timestamps of the first pass.
+event, and `rocpd_pmc_event` has no column that could tell them apart. Each pass is written through
+the same packet path and so is traced as its own dispatch, but the dispatch rows are deduplicated by
+that shared id, leaving one row carrying whichever pass happened to be written first.
 
 For counters unique to one group that is survivable: each lands once and a pivot by counter name
 reconstructs the row. For a counter that appears in more than one group -- which is the normal
