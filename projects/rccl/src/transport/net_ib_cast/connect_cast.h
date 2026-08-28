@@ -106,6 +106,13 @@ struct ncclIbConnectionMetadata {
   int isP2p;
   bool isRMA;
 };
+static_assert(offsetof(struct ncclIbConnectionMetadata, ndevs) ==
+                offsetof(struct ncclIbConnectionMetadata, addr) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->addr),
+              "CAST connection metadata must preserve legacy field offsets");
+static_assert(sizeof(struct ncclIbConnectionMetadata) ==
+                offsetof(struct ncclIbConnectionMetadata, isRMA) + 8,
+              "CAST connection metadata must preserve legacy trailing padding");
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);

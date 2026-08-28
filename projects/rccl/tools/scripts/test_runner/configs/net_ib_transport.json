@@ -456,6 +456,7 @@
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
+        "NCCL_NET":                         "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE":          "1",
         "RCCL_IB_QP_SCHED_WRR_ENABLE":      "1",
         "RCCL_IB_QP_SCHED_WEIGHT":          "0",
@@ -463,6 +464,26 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL":  "60000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":  "65536"
       }
+    },
+
+    "cast_multisegment": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiSegment_All",
+          "description": "CAST registration, asymmetric/cross-boundary transfer, multi-receive, flush, limits, and single-segment regressions",
+          "test_filter": "NetIbMultiSegmentMPITest.*"
+        }
+      ]
     },
 
     "cast_wrr_split": {
@@ -614,70 +635,70 @@
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_properties_cast": {
       "extends": "net_ib_properties",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_connection_cast": {
       "extends": "net_ib_connection",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_memory_cast": {
       "extends": "net_ib_memory",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_flush_cast": {
       "extends": "net_ib_flush",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vdevice_cast": {
       "extends": "net_ib_vdevice",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_functional_cast": {
       "extends": "net_ib_vnic_functional",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_edge_cast": {
       "extends": "net_ib_vnic_edge",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_stress_cast": {
       "extends": "net_ib_vnic_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
@@ -967,13 +988,13 @@
     "net_ib_cast_gin_peermem": {
       "extends": "net_ib_gin_peermem",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_cast_gin_dmabuf": {
       "extends": "net_ib_gin_dmabuf",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_multithread_independent": {
@@ -1284,6 +1305,12 @@
       "name": "NET IB - Multithread Independent Connections (16)",
       "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment P2P",
+      "description": "Two-node CAST multi-segment registration, transfer, completion-size, and flush coverage",
+      "config": "cast_multisegment",
       "enabled": true
     }
   ]
