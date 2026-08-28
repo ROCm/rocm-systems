@@ -21,18 +21,18 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'device_storage_%'"
                 },
                 {
-                    "comparison": "greater_than",
+                    "comparison": "equals",
                     "description": "Check for hipFile per-GPU byte counter descriptions",
                     "error_message": "hipFile 'Read Bytes' / 'Write Bytes' PMC info not found",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol IN ('Read Bytes', 'Write Bytes')"
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(DISTINCT symbol) as count FROM {table_name} WHERE name LIKE 'device_storage_%' AND symbol IN ('Read Bytes', 'Write Bytes')"
                 },
                 {
-                    "comparison": "greater_than",
+                    "comparison": "equals",
                     "description": "Check for the hipFile fastpath/fallback split",
                     "error_message": "hipFile fastpath/fallback PMC info not found",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol IN ('Fastpath Reads', 'Fallback Reads', 'Fastpath Writes', 'Fallback Writes')"
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(DISTINCT symbol) as count FROM {table_name} WHERE name LIKE 'device_storage_%' AND symbol IN ('Fastpath Reads', 'Fallback Reads', 'Fastpath Writes', 'Fallback Writes')"
                 },
                 {
                     "comparison": "equals",
