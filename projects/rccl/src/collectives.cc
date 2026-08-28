@@ -394,6 +394,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       struct ncclInfo info = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
+      INFO(NCCL_COLL, "AlltoAll: Taking RCCL_A2A_PIVOT_PATH");
       return ncclEnqueueCheck(&info);
     }
 #ifdef ENABLE_ROCSHMEM
@@ -401,6 +402,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       struct ncclInfo info = {ncclFuncAlltoAllGda, "AlltoAllGda",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
+      INFO(NCCL_COLL, "AlltoAll: Taking RCCL_A2A_GDA_PATH");
       return ncclEnqueueCheck(&info);
     }
 #endif
@@ -427,13 +429,16 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
     case RCCL_CE_REGISTERED:
       // CE dispatch (registered, hierarchical, or scratch) handled in taskAppend() via ncclEnqueueCheck.
-      // Fall through to ring enqueue; enqueue.cc will route to CE.
+      // Fall through to the p2p enqueue; enqueue.cc will route to CE.
+      break;
+    case RCCL_DIRECT_ALLTOALL:
+      // No collective kernel: taskAppend() splits this into per-peer Send/Recv.
       break;
     default:
       break;
   }
 
-  // Ring fallback (and CE: enqueue.cc gates to CE when eligible).
+  // Direct (per-peer Send/Recv) path, and CE when enqueue.cc gates to it.
   struct ncclInfo info = {
     ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
     ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS

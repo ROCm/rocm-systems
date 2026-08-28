@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib> // getenv (grid-shape tuning overrides)
+#include <utility>
 
 // Runtime-adjustable LL128 AllToAll block size (threads/block). Must be a
 // multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
@@ -85,6 +86,19 @@ static inline int ddaLL128A2ABlocksPerPeer(size_t perChunkBytes) {
   return (int)bpp;
 }
 
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
+// per-peer line split, clamped so flatBlockId (nRanks*bpp-1) stays within the
+// device epoch array.
+static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
+  const unsigned threads = ddaLL128A2AThreads(1024); // multiple of 16 (lanes/line)
+  int blocksPerPeer = ddaLL128A2ABlocksPerPeer(perChunkBytes);
+  if (comm->nRanks * blocksPerPeer > comm->ddaLLEpochLen) {
+    blocksPerPeer = comm->ddaLLEpochLen / comm->nRanks;
+    if (blocksPerPeer < 1) blocksPerPeer = 1;
+  }
+  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
@@ -93,21 +107,14 @@ static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   const int nRanks = comm->nRanks;
   const size_t perChunkBytes = count * sizeof(T);
 
-  const unsigned threads = ddaLL128A2AThreads(1024); // multiple of 16 (lanes/line)
-  int blocksPerPeer = ddaLL128A2ABlocksPerPeer(perChunkBytes);
-
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  // Clamp so flatBlockId (nRanks*bpp-1) stays within the device epoch array.
-  if (nRanks * blocksPerPeer > epochLen) {
-    blocksPerPeer = epochLen / nRanks;
-    if (blocksPerPeer < 1) blocksPerPeer = 1;
-  }
-
-  dim3 block(threads);
-  dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
+  auto gridBlock = ddaAllToAllFabricLL128Geom(comm, perChunkBytes);
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
+  const int blocksPerPeer = (int)grid.y;
 
   INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
@@ -169,6 +176,11 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   }
 
   return true;
+}
+
+uint32_t ncclAllToAllDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllToAllFabricLL128Geom(comm, count * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

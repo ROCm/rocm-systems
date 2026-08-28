@@ -475,6 +475,15 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
+  // AlltoAll has no tuned ring/tree kernel: taskAppend() splits it into per-peer
+  // Send/Recv over the p2p channels, so report that shape. The backend-aware
+  // answer (DDA / CE / pivot for these operands) comes from rcclGetCollImplInfo().
+  if (coll == ncclFuncAlltoAll) {
+    *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
+    *protocol = NCCL_PROTO_SIMPLE;
+    *maxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
   struct ncclTaskColl task = {};
   task.func = coll;
   task.count = count;
@@ -497,11 +506,11 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
 
-  // AllReduce and AllGather are wired to the unified decision. They return the
-  // actual backend (CE / DDA / symmetric / kernel) for these operands so
-  // rccl-tests can label numbers with the implementation that ran. graphCapturing
-  // lets the caller declare graph mode, which the (out-of-capture) query cannot
-  // detect on its own -- see the header comment.
+  // AllReduce, AllGather, ReduceScatter, and AlltoAll are wired to the unified
+  // decision. They return the actual backend (CE / DDA / symmetric / kernel) for
+  // these operands so rccl-tests can label numbers with the implementation that
+  // ran. graphCapturing lets the caller declare graph mode, which the
+  // (out-of-capture) query cannot detect on its own -- see the header comment.
   if (coll == ncclFuncAllReduce) {
     struct rcclCollDecision decision;
     NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*stream=*/nullptr,
@@ -621,6 +630,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       *algoName = "Hier";
       break;
     case rcclAddonAlgos_t::RCCL_DIRECT_REDUCESCATTER:
+      *algoName = "Direct";
+      break;
+    case rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL:
       *algoName = "Direct";
       break;
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
@@ -1494,6 +1506,22 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
       rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
     decision->algo = RCCL_A2A_PIVOT;
+    // Pivot is a ring kernel over the collective channels, not p2p Send/Recv, so
+    // ask the tuner the way the live path does: taskAppend() rewrites the task to
+    // a per-peer byte count on ncclInt8 before getAlgoInfo() sees it. The kernel
+    // is only specialized for RING/SIMPLE, so the protocol default stands.
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAlltoAllPivot;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = rankOffset;
+      task.datatype = ncclInt8;
+      NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1));
+      decision->nMaxChannels = rcclKernelPackedChannels(comm, ncclFuncAlltoAllPivot, rankOffset, ncclInt8,
+                                                        decision->protocol, task.nMaxChannels);
+    }
     return ncclSuccess;
   }
 
@@ -1503,6 +1531,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     size_t msgSize = totalBytes;
     if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
       decision->algo = RCCL_A2A_GDA;
+      decision->nMaxChannels = 1;  // getAlgoInfo() pins the GDA kernels to one channel
       return ncclSuccess;
     }
   }
@@ -1527,20 +1556,24 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
+        decision->nMaxChannels = ncclAllToAllDdaFabricLLBlocks(comm, count, datatype);
         return ncclSuccess;
       }
       if (rcclParamDdaLL128() && ll128Thresh > 0 && totalBytes <= ll128Thresh &&
           ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
+        decision->nMaxChannels = ncclAllToAllDdaFabricLL128Blocks(comm, count, datatype);
         return ncclSuccess;
       }
       if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
+        decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);
         return ncclSuccess;
       }
     } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
       decision->algo = RCCL_DDA_IPC;
+      decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
       return ncclSuccess;
     }
   }
@@ -1550,18 +1583,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // enqueues normally (mirroring rcclSelectAllGather).
   const bool ceCapturing = query ? graphCapturingHint : false;  // live: enqueue.cc gates this
   if (!ceCapturing) {
-    // Probe real window registration on the live path (mirrors rcclSelectAllGather).
-    // Query path uses a pointer-equality heuristic: different pointers => recv likely registered.
+    // Probe real window registration on both paths so the reported decision and
+    // the dispatched one cannot disagree. The lookups are null-safe, so the
+    // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
     struct ncclDevrWindow* sendWin = nullptr;
     struct ncclDevrWindow* recvWin = nullptr;
     ncclSymRegType_t winRegType;
-    if (query) {
-      winRegType = (sendbuff != recvbuff) ? ncclSymSendNonregRecvReg : ncclSymSendRegRecvReg;
-    } else {
-      ncclDevrFindWindow(comm, sendbuff, &sendWin);
-      ncclDevrFindWindow(comm, recvbuff, &recvWin);
-      NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-    }
+    ncclDevrFindWindow(comm, sendbuff, &sendWin);
+    ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
       decision->algo = RCCL_CE_REGISTERED;
@@ -1588,24 +1618,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     }
   }
 
-  // (7) Ring fallback kernel. Query fills algo/proto/channels via getAlgoInfo.
-  decision->algo = NCCL_ALGO_RING;
+  // (7) Direct (p2p) fallback. AllToAll has no collective kernel: taskAppend()
+  // decomposes it into one Send and one Recv task per peer, which run Simple
+  // over the p2p channels -- the same shape rcclSelectAllGather reports as
+  // Direct, so it is named that way rather than Ring. The ring/tree tuning model
+  // has no AllToAll entry, so querying it would only invent an algorithm this
+  // collective never runs.
+  decision->algo = RCCL_DIRECT_ALLTOALL;
   decision->protocol = NCCL_PROTO_SIMPLE;
-  if (query) {
-    struct ncclTaskColl task;
-    memset(&task, 0, sizeof(task));
-    task.func = ncclFuncAlltoAll;
-    task.sendbuff = sendbuff;
-    task.recvbuff = recvbuff;
-    task.count = count;
-    task.datatype = datatype;
-    NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, nullptr));
-    decision->protocol = task.protocol;
-    int packed = rcclKernelPackedChannels(comm, ncclFuncAlltoAll, count, datatype, task.protocol,
-                                          task.nMaxChannels);
-    decision->nMaxChannels = packed;
-    decision->algo = task.algorithm;
-  }
+  decision->nMaxChannels = comm->p2pnChannels;
   return ncclSuccess;
 }
 

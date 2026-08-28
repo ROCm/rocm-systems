@@ -84,6 +84,9 @@ typedef enum {
   RCCL_A2A_PIVOT,       // AlltoAll pivot algorithm (large, aligned messages)
   RCCL_A2A_GDA,         // AlltoAll via GDA/RocSHMEM
   RCCL_A2A_GIN_SDMA,    // AlltoAll via GIN LSA/SDMA
+  // Appended rather than grouped with the other Direct entries so existing
+  // values stay stable.
+  RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -145,8 +148,8 @@ NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, 
 // the full backend RCCL would actually run (CE, DDA, symmetric, or kernel) for
 // the given operands, so rccl-tests can attribute numbers to the right label.
 // `algo` returns a native NCCL_ALGO_* or rcclAddonAlgos_t value; name it with
-// rcclGetAlgoName(). Currently implemented for AllReduce and AllGather; other
-// collectives fall back to rcclGetAlgoInfo().
+// rcclGetAlgoName(). Currently implemented for AllReduce, AllGather,
+// ReduceScatter, and AlltoAll; other collectives fall back to rcclGetAlgoInfo().
 //
 // graphCapturing: pass non-zero if the collective will execute under HIP/CUDA
 // graph capture. This query is normally issued outside capture (before/after the
