@@ -93,6 +93,7 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS:
             {
                 uint64_t n = (param.value == 0) ? 1 : param.value;
+                if(n == 2) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 if(n > rocprofiler::thread_trace::triple_buffer_shared_data_t::MAX_SLOTS)
                     return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 pack.num_buffers = n;

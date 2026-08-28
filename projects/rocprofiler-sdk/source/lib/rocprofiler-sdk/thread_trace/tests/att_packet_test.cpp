@@ -419,10 +419,21 @@ TEST(thread_trace, triple_buffer_multiple_shader)
             if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
             auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {3}});
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {2}});
             parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
 
-            auto status = rocprofiler_configure_device_thread_trace_service(
+            auto invalid_status = rocprofiler_configure_device_thread_trace_service(
+                *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+                agent->id,
+                parameters.data(),
+                parameters.size(),
+                [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
+                rocprofiler_user_data_t{});
+            if(invalid_status != ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
+                return ROCPROFILER_STATUS_ERROR;
+
+            parameters.front().value = 3;
+            auto status              = rocprofiler_configure_device_thread_trace_service(
                 *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
                 agent->id,
                 parameters.data(),
