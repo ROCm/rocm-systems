@@ -3145,6 +3145,150 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 
 
 // ---------------------------------------------------------------------------
+// ncclDevrWindowRegisterInGroup, symmetric path. Resolve the allocation the
+// user pointer sits in, validate the layout, retain a handle per physical
+// segment, then hand the handles to symMemoryObtain and build the window.
+//
+// The walk over segments is ncclCuMemGetAddressRange (a static inline in
+// alloc.h, so only drivable through the cuMemGetAddressRange seam). It advances
+// by the size each query reports, so a zero size -- the seam's default -- spins
+// forever. AddressRangeOf() supplies a real one.
+
+class DevrWindowRegisterInGroupSymTest : public DevrWindowRegisterInGroupTest {
+protected:
+  void SetUp() override {
+    DevrWindowRegisterInGroupTest::SetUp();
+    comm->symmetricSupport = 1;
+    comm->devrState.bigSize = size_t(1) << 32;
+    comm->devrState.granularity = 4096;
+    comm->devrState.lsaFlatBase = reinterpret_cast<void*>(0x40000000);
+  }
+
+  // Report the queried pointer as its own allocation base, with segments of
+  // `segSize`. The walk terminates after userSize / segSize iterations.
+  std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> AddressRangeOf(size_t segSize) {
+    return [segSize](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+      if (pbase) *pbase = dptr;
+      if (psize) *psize = segSize;
+      return hipSuccess;
+    };
+  }
+
+  // Report every segment as a given location type.
+  std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)> SegmentsOfType(
+      hipMemLocationType type) {
+    return [type](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+      if (prop) {
+        *prop = hipMemAllocationProp{};
+        prop->location.type = type;
+      }
+      return hipSuccess;
+    };
+  }
+};
+
+// The happy path: one device-backed segment, registered end to end.
+TEST_F(DevrWindowRegisterInGroupSymTest, SingleDeviceSegment_RegistersWindow) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_NE(out, nullptr);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  EXPECT_NE(comm->devrState.winSorted[0].win->memory, nullptr);  // symmetric: has backing memory
+}
+
+// Branch: the symmetric-collective flag defers kernel init until a window that
+// needs it exists, so it is only paid for on request.
+TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, NCCL_WIN_COLL_SYMMETRIC, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSorted[0].win->winFlags, NCCL_WIN_COLL_SYMMETRIC);
+}
+
+// Branch: resolving the allocation fails, so nothing is registered.
+TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistration) {
+  ScopedHook range(g_hipMemGetAddressRange,
+                   [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; });
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: a window not aligned to NCCL_WIN_REQUIRED_ALIGNMENT within its
+// allocation is rejected. The base is reported one byte below the user pointer,
+// which is the smallest offset that cannot satisfy the requirement.
+TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument) {
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - 1);
+    if (psize) *psize = 8192;
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: CPU-backed segments need the elastic-buffer param, and are rejected
+// with a specific code when it is off rather than failing later.
+TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeHost));
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
+  });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: with the param on, the same CPU-backed layout is accepted.
+TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeHost));
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: a segment that is neither host nor device is rejected -- symmetric
+// memory has no mapping strategy for anything else.
+TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidArgument) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeInvalid));
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: retaining a segment handle fails part-way, so the handles already
+// retained are released rather than leaked.
+TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_ReleasesEarlierHandles) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  int retained = 0;
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+    if (++retained > 2) return hipErrorInvalidValue;  // the address-range walk retains once first
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    return hipSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
