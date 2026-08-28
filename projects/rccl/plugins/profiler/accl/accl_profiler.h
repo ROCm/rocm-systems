@@ -159,7 +159,9 @@ struct acclCompletedRecord {
 // Per-communicator context (owns all pools)
 struct acclCommContext {
   int         refCount;
-  uint64_t    droppedCollectives;
+  uint64_t    droppedCollectives;   // never allocated a slot: pool was full
+  uint64_t    leakedCollectives;    // allocated but never finalized; freed by the drain
+  int         poolExhaustedWarned;  // one-shot guard for the pool-exhaustion WARN
   uint64_t    commHash;
   int         rank;
   int         nRanks;

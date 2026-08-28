@@ -430,10 +430,12 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
 
+            // Count coll records only. finalize() always appends a
+            // {"summary":...} line, so a raw line count is not a record count.
             int lineCount = 0;
             std::string line;
             while (std::getline(ifs, line)) {
-                if (!line.empty()) lineCount++;
+                if (line.find("\"coll_perf\"") != std::string::npos) lineCount++;
             }
             EXPECT_EQ(lineCount, 1)
                 << "Expected exactly 1 record, got " << lineCount;

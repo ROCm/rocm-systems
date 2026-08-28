@@ -56,10 +56,19 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
       return &ctx->collPool[i];
     }
   }
+  // Pool is full. Warn once: a per-drop WARN emits one line per collective for
+  // the rest of the run, which buries the very message it is trying to deliver.
+  // The end-of-run summary carries the totals.
   ctx->droppedCollectives++;
+  int firstExhaustion = !ctx->poolExhaustedWarned;
+  ctx->poolExhaustedWarned = 1;
   pthread_mutex_unlock(&ctx->collPoolMutex);
-  ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots), dropping collective (total dropped: %lu)",
-            ACCL_COLL_POOL_SIZE, (unsigned long)ctx->droppedCollectives);
+  if (firstExhaustion) {
+    ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots). Profiling output for this "
+              "communicator is now INCOMPLETE and must not be compared against a full "
+              "run. Further drops are counted in the end-of-run summary only.",
+              ACCL_COLL_POOL_SIZE);
+  }
   return NULL;
 }
 
@@ -442,6 +451,10 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
       if (!coll->finalized) {
+        // Never reached its completion predicate — teardown skipped one or more
+        // of its kernel-channel events. Count it so the loss is visible; no
+        // record is emitted for it.
+        ctx->leakedCollectives++;
         acclFreeCollProxyOps(ctx, coll);
       }
       coll->finalized = 1;
@@ -454,13 +467,22 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
 
   // Write drop summary and close output before tearing down mutexes.
   if (ctx->outputFile) {
-    if (ctx->droppedCollectives > 0) {
-      fprintf(ctx->outputFile,
-        "{\"summary\":{\"dropped_collectives\":%lu,\"pool_size\":%d}}\n",
-        (unsigned long)ctx->droppedCollectives, ACCL_COLL_POOL_SIZE);
-      fflush(ctx->outputFile);
-      ACCL_WARN("ACCL Profiler: rank=%d dropped %lu collectives due to pool exhaustion",
-                ctx->rank, (unsigned long)ctx->droppedCollectives);
+    // Emit the summary unconditionally, including on a clean run: a consumer
+    // that finds no summary line cannot distinguish "nothing was lost" from
+    // "the process died before finalize".
+    int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0);
+    fprintf(ctx->outputFile,
+      "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
+      "\"pool_size\":%d,\"complete\":%s}}\n",
+      (unsigned long)ctx->droppedCollectives,
+      (unsigned long)ctx->leakedCollectives,
+      ACCL_COLL_POOL_SIZE, complete ? "true" : "false");
+    fflush(ctx->outputFile);
+    if (!complete) {
+      ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE — %lu collectives dropped "
+                "(pool exhausted), %lu slots leaked (teardown-skipped kernel events)",
+                ctx->rank, (unsigned long)ctx->droppedCollectives,
+                (unsigned long)ctx->leakedCollectives);
     }
     fclose(ctx->outputFile);
     ctx->outputFile = NULL;

@@ -133,11 +133,19 @@ def load_summaries(path: str) -> List[dict]:
 
 
 def print_drop_warnings(summaries: List[dict]):
+    # The plugin emits a summary on every clean finalize, so its absence is a
+    # stronger signal than any counter — check that before reading the counters.
+    if not summaries:
+        print("\n*** WARNING: no profiler summary found. The run did not reach "
+              "finalize; treat this output as incomplete. ***\n", file=sys.stderr)
+        return
     total_dropped = sum(s.get('dropped_collectives', 0) for s in summaries)
-    if total_dropped > 0:
-        print(f"\n*** WARNING: {total_dropped} collectives dropped due to pool "
-              f"exhaustion (pool_size={summaries[0].get('pool_size', '?')}). "
-              f"Profiling data is incomplete. ***\n", file=sys.stderr)
+    total_leaked = sum(s.get('leaked_collectives', 0) for s in summaries)
+    if total_dropped > 0 or total_leaked > 0:
+        print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
+              f"dropped (pool exhausted, pool_size={summaries[0].get('pool_size', '?')}), "
+              f"{total_leaked} slots leaked (teardown-skipped kernel events). "
+              f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
 
 
 def load_dir_or_file(path: str, warmup: int) -> List[Record]:
