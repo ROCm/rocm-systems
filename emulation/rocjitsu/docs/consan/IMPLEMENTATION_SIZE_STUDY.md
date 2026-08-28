@@ -756,6 +756,57 @@ and no private copy of shared inventory, allocation, target ABI, or emission
 mechanics. The goal is not equal flavor sizes; it is that size differences
 correspond to real semantic differences.
 
+#### Stage 7 exit evidence
+
+Stage 7 is complete. InlineShadow now owns only exact shadow representation,
+epoch/token transitions, exact evidence, and the native operations that realize
+those semantics. Sampled owns address selection, sampling windows, and sampled
+access/synchronization evidence. Record/Replay owns event payload meaning,
+causal replay evidence, and host replay semantics. Shared candidate ordering,
+synchronization inventory, resource and descriptor planning, placement,
+appended-access application, runtime-workgroup gating, routing, and return
+mechanics are no longer reimplemented by those flavors.
+
+The last broad Record/Replay emission adapter was replaced by immutable
+`MoiRecordEventEmissionPlan`; atomic, fence, and barrier builders consume that
+narrow plan rather than a mutable `MoiOptions` projection. Runtime workgroup
+selection similarly uses `MoiRuntimeWorkgroupGatePlan`. File ownership now
+matches semantic ownership: Sampled access and atomic emission, Record/Replay
+event emission, and the shared runtime gate have dedicated units instead of
+being physically nested in InlineShadow or Sampled synchronization files.
+
+The target boundary deliberately remains active through Stage 8.
+`ConSanTargetProfile` is the single authority for dense-route capacity,
+far-route support, call form, dispatch identity, selectable VGPR banks, and raw
+memory-order requirements. A lexical exit audit found no direct product,
+encoding-family, or architecture-helper decision in the flavor-owned files;
+typed profile facts and the shared native emitters remain because they are the
+justified ABI/native-emission boundary, not a compatibility adapter.
+
+Whole-file physical ownership is now 5,506 InlineShadow lines, 6,373 Sampled
+lines, and 2,965 Record/Replay lines. The individual changes from Stage 6 are
+mostly reclassification: 2,326 Sampled and Record/Replay emission lines had
+previously lived in files named for another flavor. Their combined
+flavor-specific body fell from 15,362 to 14,844 physical lines. Across the full
+production scope, the Stage 6-to-7 diff adds 4,872 and deletes 4,747 physical
+lines. The resulting 83-file implementation has 95,368 physical and 90,938
+nonblank lines, net changes of +125 and +103 respectively; four focused files
+replace mixed-ownership regions, while the typed plans and target facts account
+for the small total increase.
+
+Focused gates included 541 cross-flavor atomic, fence, barrier, Record/Replay,
+Sampled, and InlineShadow tests. A physical gfx1201 Sampled TopK test exposed a
+statistical single-dispatch false negative after 32 consecutive passes. Its
+incorrect workload now retains one fixed cross-wave publication at the same
+missing barrier; all 51 emulated TopK rows and all 10 physical rows passed, and
+the formerly flaky row then passed 100 consecutive serialized runs.
+
+At code revision `14db0ed83b`, the complete checked-in Stage 7 gate passed all
+5,302 tests. The `-j16` nonphysical tier passed 4,667/4,667 in 255.21 seconds,
+including all 2,908 device-emulation rows across gfx942, gfx950, gfx1250,
+gfx1100, and gfx1201. The serialized `-j1` physical gfx1201 tier passed
+635/635 in 106.96 seconds. No E2E qualification was used as an iteration gate.
+
 ### Stage 8: transport the production boundaries to SuperCollider
 
 SuperCollider is 6,879 lines and shrank only 3.7% during the deletion-driven
