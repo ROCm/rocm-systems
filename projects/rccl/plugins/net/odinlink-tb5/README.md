@@ -41,7 +41,8 @@ cmake -S plugins/net/odinlink-tb5 -B /tmp/odl-tb5-plugin
 cmake --build /tmp/odl-tb5-plugin -j$(nproc)
 ```
 
-In-tree (optional): configure RCCL with `BUILD_PLUGIN_EXAMPLES=ON`.
+In-tree (optional): configure RCCL with
+`BUILD_TESTS=ON -DBUILD_PLUGIN_EXAMPLES=ON`.
 
 ## Use
 

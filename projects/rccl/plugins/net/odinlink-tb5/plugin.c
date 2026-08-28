@@ -110,7 +110,6 @@ struct odl_port {
 /* Discovered TB5 links. RCCL dev ids index this compact port table. */
 static struct odl_port g_ports[ODL_MAX_DEVICES];
 static int             g_num_devices;
-static ncclDebugLogger_t g_logger;
 
 /* Stats shared-memory region (populated by stats_init). */
 static struct odl_rccl_stats *g_stats;
@@ -845,7 +844,7 @@ static ncclResult_t odl_init(ncclDebugLogger_t logFunction)
 {
 	const char *virtual_env;
 
-	g_logger = logFunction;
+	(void)logFunction;
 	g_trace = env_flag_enabled("ODL_TB5_TRACE");
 	virtual_env = getenv(ODL_VIRTUAL_DEV_ENV);
 	g_virtual_single_dev = !(virtual_env && strcmp(virtual_env, "0") == 0);
