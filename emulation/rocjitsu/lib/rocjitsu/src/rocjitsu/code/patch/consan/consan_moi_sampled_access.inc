@@ -2,87 +2,26 @@
                                                              const MoiOptions &options) {
   if (!options.moi_track_barriers)
     return 0u;
-  uint64_t count = 0u;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    count += kernel.barrier_sites.size();
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    count += function.barrier_sites.size();
+  const uint64_t count =
+      std::ranges::count(result.observation_plan.probe_intents,
+                         ConSanProbeIntentKind::SampledBarrierEpoch, &ConSanProbeIntent::kind);
   return std::min<uint64_t>(count, options.max_patches);
-}
-
-[[nodiscard]] uint32_t
-sampled_qualified_atomic_sequence_count(const ConSanTransformArtifacts &result,
-                                        const MoiOptions &options) {
-  if (!options.moi_track_atomics)
-    return 0u;
-  uint32_t count = 0u;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    if (sequence.kind != ConSanSyncSequenceKind::Atomic || sequence.width_bits != 32u ||
-        !consan_sync_confidence_meets(sequence.confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        !consan_sync_confidence_meets(sequence.memory_role_confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        (sequence.memory_role != ConSanSyncMemoryRole::Release &&
-         sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
-         sequence.memory_role != ConSanSyncMemoryRole::AcquireRelease) ||
-        (sequence.rmw_outcome != ConSanSyncRmwOutcome::NoReturn &&
-         sequence.rmw_outcome != ConSanSyncRmwOutcome::ReturnsOldValue &&
-         sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange))
-      continue;
-    bool eligible = false;
-    for (const std::string &identity : sequence.member_event_identities) {
-      const ConSanSyncEvent *event = result.program_inventory.sync().find_event(identity);
-      if (event == nullptr || event->kind != ConSanSyncEventKind::Atomic)
-        continue;
-      const ConSanAtomicSite *site = nullptr;
-      if (event->in_kernel) {
-        const ConSanKernelInfo *kernel =
-            result.program_inventory.find_kernel_by_name(event->container_name);
-        if (kernel != nullptr) {
-          const auto found = std::ranges::find(kernel->atomic_sites, event->text_offset,
-                                               &ConSanAtomicSite::text_offset);
-          if (found != kernel->atomic_sites.end())
-            site = &*found;
-        }
-      } else {
-        const ConSanFunctionInfo *function =
-            result.program_inventory.find_function_by_name(event->container_name);
-        if (function != nullptr) {
-          const auto found = std::ranges::find(function->atomic_sites, event->text_offset,
-                                               &ConSanAtomicSite::text_offset);
-          if (found != function->atomic_sites.end())
-            site = &*found;
-        }
-      }
-      const bool supported_scope =
-          sequence.raw_scope ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
-                             : result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                   site != nullptr && site->mnemonic.starts_with("ds_");
-      if (site != nullptr && supported_scope &&
-          (site->mnemonic.starts_with("flat_atomic") ||
-           site->mnemonic.starts_with("global_atomic") ||
-           (result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-            site->mnemonic.starts_with("ds_"))) &&
-          (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
-           site->returns_old_value.value_or(false))) {
-        eligible = true;
-        break;
-      }
-    }
-    if (eligible && count != std::numeric_limits<uint32_t>::max())
-      ++count;
-  }
-  return count;
 }
 
 [[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanTransformArtifacts &result,
                                                             const MoiOptions &options) {
+  if (!options.moi_track_atomics)
+    return 0u;
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   const uint32_t patch_budget = options.max_patches_is_expert_limit
                                     ? options.max_patches
                                     : std::numeric_limits<uint32_t>::max();
-  return std::min({patch_budget, layout.sampled_watchpoint_capacity,
-                   sampled_qualified_atomic_sequence_count(result, options)});
+  const size_t planned =
+      std::ranges::count(result.observation_plan.probe_intents,
+                         ConSanProbeIntentKind::SampledAtomicOrdering, &ConSanProbeIntent::kind);
+  return static_cast<uint32_t>(
+      std::min({static_cast<size_t>(patch_budget),
+                static_cast<size_t>(layout.sampled_watchpoint_capacity), planned}));
 }
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
@@ -92,7 +31,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (!consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
     result.warnings.emplace_back("ConSan MOI sampled probe does not support this architecture");
     return;
   }
@@ -130,20 +70,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         "be less than stride");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(admitted);
-  apply_test_kernel_filter(candidates, options);
-  std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
-    return lhs->anchor() < rhs->anchor();
-  });
   // Sampled atomic metadata wraps the relocated guest instruction in a
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
-  const std::unordered_set<uint64_t> ordering_atomic_offsets =
-      collect_moi_ordering_atomic_offsets(result, options.moi_track_atomics);
-  std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
-    return !ordering_atomic_offsets.contains(candidate->anchor());
-  });
+  std::vector<const ConSanMoiCandidate *> candidates =
+      order_moi_replay_access_candidates(admitted, result, options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled probe found no native LDS or likely group flat load/store candidate");
@@ -228,9 +159,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // smaller layout so nearby bodies are not needlessly displaced.
   constexpr size_t kLargeExplicitKeyRelayCandidateCount = 1024u;
   const bool needs_large_explicit_key_relay =
-      arch != ROCJITSU_CODE_ARCH_CDNA5 && candidates.size() >= kLargeExplicitKeyRelayCandidateCount;
+      target->direct_call_form != ConSanDirectCallForm::SCallI64 &&
+      candidates.size() >= kLargeExplicitKeyRelayCandidateCount;
   const uint64_t ordinary_access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 20u : (needs_large_explicit_key_relay ? 20u : 10u);
+      target->direct_call_form == ConSanDirectCallForm::SCallI64
+          ? 20u
+          : (needs_large_explicit_key_relay ? 20u : 10u);
   const uint64_t access_relay_words =
       std::max(ordinary_access_relay_words, access_island_word_count);
   const bool has_function_candidate =
@@ -456,9 +390,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
         candidate_options.automatic_moi_record_replay_sgpr_spill);
-    std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<SgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
+      scalar_spill = build_moi_sgpr_spill_sequence(
           result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
@@ -581,7 +515,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const bool capture_high_bank_address =
         moi_access_requires_high_bank_address_capture(candidate, arch);
     const bool wrap_embedded_guest_vgpr_bank =
-        (use_indirect_appended || capture_high_bank_address) && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        (use_indirect_appended || capture_high_bank_address) && target->has_selectable_vgpr_bank &&
         candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
     const uint64_t high_bank_capture_bytes =
         capture_high_bank_address

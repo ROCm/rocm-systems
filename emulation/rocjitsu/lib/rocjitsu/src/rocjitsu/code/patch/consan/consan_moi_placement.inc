@@ -15,6 +15,27 @@ collect_moi_ordering_atomic_offsets(const ConSanTransformArtifacts &result, bool
   return offsets;
 }
 
+/// Return the shared placement order for replayable access bodies. Physical
+/// order is deterministic, while an access that is also an admitted atomic
+/// communication event moves to the tail so the later synchronization pass
+/// can still wrap its relocated guest within direct-branch reach. This is a
+/// placement constraint shared by Record/Replay and Sampled, not evidence
+/// selection; the input already contains only policy-admitted candidates.
+[[nodiscard]] std::vector<const ConSanMoiCandidate *>
+order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
+                                   const ConSanTransformArtifacts &result, bool track_atomics) {
+  std::vector<const ConSanMoiCandidate *> candidates = make_moi_candidate_pointer_view(admitted);
+  std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
+    return lhs->anchor() < rhs->anchor();
+  });
+  const std::unordered_set<uint64_t> ordering_atomic_offsets =
+      collect_moi_ordering_atomic_offsets(result, track_atomics);
+  std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
+    return !ordering_atomic_offsets.contains(candidate->anchor());
+  });
+  return candidates;
+}
+
 struct MoiLocalNopIsland {
   uint64_t text_offset = 0;
   bool claimed = false;
@@ -76,48 +97,49 @@ struct MoiRecordReplayAccessOutput {
   std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
 };
 
-[[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
-                                                         const MoiOptions &options) {
-  const auto count_all = [](const auto &container) {
-    return static_cast<uint64_t>(container.barrier_sites.size());
-  };
-  const auto count_record_replay = [](const auto &container) {
-    return static_cast<uint64_t>(
-        std::ranges::count_if(container.barrier_sites, [](const ConSanBarrierSite &site) {
-          return site.operation != ConSanBarrierSite::Operation::Signal;
-        }));
-  };
-  uint64_t count = 0u;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        kernel.name.starts_with("__amd_rocclr_")) {
-      continue;
-    }
-    count += options.moi_engine == ConSanMoiEngine::RecordReplay &&
-                     options.moi_record_replay_dense_barrier_router
-                 ? count_record_replay(kernel)
-                 : count_all(kernel);
-  }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-    count += options.moi_engine == ConSanMoiEngine::RecordReplay &&
-                     options.moi_record_replay_dense_barrier_router
-                 ? count_record_replay(function)
-                 : count_all(function);
-  }
-  return std::min<uint64_t>(count, options.max_patches);
-}
-
-[[nodiscard]] uint64_t
-moi_reserved_record_replay_sync_island_count(const ConSanTransformArtifacts &result,
-                                             const MoiOptions &options) {
+/// Count synchronization entry islands that an access pass must leave for its
+/// downstream evidence pass. Placement consumes the observation plan's
+/// complete barrier-decision ledger instead of rebuilding it from decoded
+/// container inventories. Decisions that do not ultimately emit evidence
+/// still leave useful pristine relay capacity in large objects; in particular,
+/// adjacent barriers coalesced by policy form a generated relay spine whose
+/// reach is independent of the number of admitted evidence intents.
+///
+/// Record/Replay's dense barrier router deliberately uses one entry for a
+/// signal/wait sequence: the completing non-signal member owns that shared
+/// route. Record/Replay runtime-kernel decisions are the one excluded class,
+/// matching the engine's explicit no-instrumentation contract. Only
+/// Record/Replay emits independent admitted `FenceRecord` probes.
+[[nodiscard]] uint64_t moi_reserved_access_sync_island_count(const ConSanTransformArtifacts &result,
+                                                             const MoiOptions &options) {
+  const SynchronizationInventoryView synchronization = result.program_inventory.sync();
   const uint64_t barrier_count =
-      options.moi_track_barriers ? moi_reserved_barrier_island_count(result, options) : 0u;
-  const uint64_t fence_count =
-      options.moi_track_atomics
+      options.moi_track_barriers
           ? std::min<uint64_t>(
-                std::ranges::count_if(result.program_inventory.sync().moi_fence_candidates,
-                                      &ConSanMoiFenceCandidate::eligible),
+                std::ranges::count_if(
+                    result.observation_plan.barrier_site_decisions,
+                    [&](const ConSanBarrierSiteDecision &decision) {
+                      if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+                          decision.reason == ConSanBarrierPolicyReason::RuntimeKernelExcluded) {
+                        return false;
+                      }
+                      if (options.moi_engine != ConSanMoiEngine::RecordReplay ||
+                          !options.moi_record_replay_dense_barrier_router) {
+                        return true;
+                      }
+                      const ConSanSyncEvent *event = synchronization.find_unique_event(
+                          ConSanSyncEventKind::Barrier, decision.semantic_site.physical);
+                      return event == nullptr ||
+                             event->operation != ConSanSyncOperation::BarrierSignal;
+                    }),
                 options.max_patches)
+          : 0u;
+  const uint64_t fence_count =
+      options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_track_atomics
+          ? std::min<uint64_t>(std::ranges::count(result.observation_plan.probe_intents,
+                                                  ConSanProbeIntentKind::FenceRecord,
+                                                  &ConSanProbeIntent::kind),
+                               options.max_patches)
           : 0u;
   return barrier_count + fence_count;
 }
@@ -3877,16 +3899,6 @@ resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandi
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
   return plan == nullptr ? std::nullopt
                          : resolve_moi_scratch_plan(*plan, options, options, expected_count);
-}
-
-void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidates,
-                              const MoiOptions &options) {
-  if (options.test_kernel_name_filter.empty())
-    return;
-  std::erase_if(candidates, [&](const ConSanMoiCandidate *candidate) {
-    return candidate == nullptr ||
-           candidate->container.name.find(options.test_kernel_name_filter) == std::string::npos;
-  });
 }
 
 [[nodiscard]] constexpr std::optional<uint16_t>

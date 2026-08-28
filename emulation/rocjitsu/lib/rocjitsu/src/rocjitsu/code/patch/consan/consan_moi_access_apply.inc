@@ -351,3 +351,76 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
   }
   return body;
 }
+
+[[nodiscard]] bool
+moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &result,
+                                             const ResolvedMoiScratchPlan &resources,
+                                             const MoiOptions &options) {
+  if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
+    return false;
+  }
+  return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
+    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(offset);
+    return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
+  });
+}
+
+/// Build the common scalar-preservation transaction selected by resource
+/// planning. Dynamic-stack owners borrow the already-established VGPR spill
+/// frame; fixed-stack owners use the planned lane-backed reservoir. Engine
+/// policy decides whether scalar spilling is enabled, but no engine privately
+/// interprets the owner stack model or reservoir geometry.
+[[nodiscard]] std::optional<SgprSpillSequence> build_moi_sgpr_spill_sequence(
+    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
+    const MoiOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
+    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
+    const VgprSpillSequence *vgpr_spill = nullptr) {
+  if ((!options.automatic_moi_inline_sgpr_spill &&
+       !options.automatic_moi_record_replay_sgpr_spill) ||
+      !options.moi_exec_save_sgpr)
+    return std::nullopt;
+  if (!consan_is_capability_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
+    warnings.emplace_back(
+        "ConSan MOI spill-backed scalar state requires at least one supported kernel owner");
+    return std::nullopt;
+  }
+  const auto private_limit = consan_address_free_private_limit(arch);
+  if (!private_limit) {
+    warnings.emplace_back("ConSan MOI spill-backed Inline scalar state has no private capacity");
+    return std::nullopt;
+  }
+  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+  if (moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
+    if (vgpr_spill == nullptr || !vgpr_spill->uses_dynamic_stack_frame) {
+      warnings.emplace_back(
+          "ConSan MOI dynamic-stack scalar spill requires an established VGPR spill frame");
+      return std::nullopt;
+    }
+    auto sequence = build_dynamic_stack_sgpr_spill_sequence(
+        *options.moi_exec_save_sgpr, count, resources.base, *vgpr_spill,
+        static_cast<uint32_t>(resources.count) * SpillManager::kSlotBytes, arch);
+    if (!sequence)
+      warnings.emplace_back("ConSan MOI could not encode the dynamic-stack scalar spill sequence");
+    return sequence;
+  }
+  (void)managers;
+  (void)private_layout_base;
+  const uint32_t reservoir_end = static_cast<uint32_t>(resources.base) + resources.count + 1u;
+  if (reservoir_end > REGISTER_SET_MAX_VGPRS || resources.required_vgpr_count < reservoir_end ||
+      (vgpr_spill && (vgpr_spill->vgpr_base != resources.base ||
+                      vgpr_spill->vgpr_count != resources.count + 1u))) {
+    warnings.emplace_back(
+        "ConSan MOI fixed-stack scalar spill has no planned lane-backed VGPR reservoir");
+    return std::nullopt;
+  }
+  const uint16_t reservoir_vgpr = static_cast<uint16_t>(reservoir_end - 1u);
+  const uint32_t total_private_bytes =
+      vgpr_spill ? vgpr_spill->total_private_bytes : resources.original_private_segment_size;
+  auto sequence = build_lane_sgpr_spill_sequence(*options.moi_exec_save_sgpr, count, reservoir_vgpr,
+                                                 total_private_bytes, arch);
+  if (!sequence) {
+    warnings.emplace_back("ConSan MOI could not encode the lane-backed scalar spill sequence");
+    return std::nullopt;
+  }
+  return sequence;
+}

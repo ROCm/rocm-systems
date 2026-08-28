@@ -818,10 +818,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
-    size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
-    bool already_runtime_workgroup_gated,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
+    uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
@@ -1436,7 +1435,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiOptions &options, const VgprSpillSequence *spill,
-    const InlineSgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
+    const SgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     std::span<const uint32_t> trailing_guest_words) {
@@ -1546,7 +1545,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
@@ -1843,7 +1842,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors,

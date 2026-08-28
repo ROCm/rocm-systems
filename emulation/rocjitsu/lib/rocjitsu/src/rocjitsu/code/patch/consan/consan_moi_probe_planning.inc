@@ -52,9 +52,9 @@ plan_moi_probe_resources(ConSanTransformArtifacts &result, ResolvedMoiScratchPla
   }
   std::optional<SgprSpillSequence> scalar_spill;
   if (scalar_spill_required) {
-    scalar_spill = build_inline_sgpr_spill_sequence(result, resources, options, spill_managers,
-                                                    arch, result.warnings, private_layout_base,
-                                                    spill ? &*spill : nullptr);
+    scalar_spill = build_moi_sgpr_spill_sequence(result, resources, options, spill_managers, arch,
+                                                 result.warnings, private_layout_base,
+                                                 spill ? &*spill : nullptr);
     if (!scalar_spill)
       return std::nullopt;
   }

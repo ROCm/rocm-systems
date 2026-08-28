@@ -471,8 +471,14 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
   return count;
 }
 
+/// Make a non-owning traversal view over access candidates already admitted by
+/// the observation plan. This helper deliberately performs no filtering:
+/// container selection, target support, operation shape, and engine
+/// applicability have one authority in semantic policy. Current placement
+/// code uses pointers only because it reorders candidates without moving the
+/// immutable values retained by its caller.
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_first_light_access_record_candidates(std::span<const ConSanMoiCandidate> admitted) {
+make_moi_candidate_pointer_view(std::span<const ConSanMoiCandidate> admitted) {
   std::vector<const ConSanMoiCandidate *> selected;
   selected.reserve(admitted.size());
   for (const ConSanMoiCandidate &candidate : admitted)

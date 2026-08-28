@@ -164,10 +164,9 @@ private:
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const MoiBarrierEvidenceSitePlan &candidate,
     const MoiOptions &options, const VgprSpillSequence *spill,
-    const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
-    uint64_t cave_text_offset, uint64_t return_text_offset,
-    const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
+    size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
+    uint64_t return_text_offset, const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
@@ -392,7 +391,7 @@ private:
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
     const ConSanBarrierSite &site, const MoiOptions &options, rj_code_arch_t arch,
     std::optional<uint16_t> visible_evidence_scratch_vgpr, const VgprSpillSequence *spill,
-    const InlineSgprSpillSequence *scalar_spill, uint32_t original_barrier_word,
+    const SgprSpillSequence *scalar_spill, uint32_t original_barrier_word,
     uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
     std::vector<std::string> &errors) {
@@ -614,11 +613,10 @@ private:
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_private_epoch_barrier_cave_words(
     const ConSanBarrierSite &site, const MoiOptions &options, uint16_t scratch_vgpr,
-    uint32_t epoch_offset, const VgprSpillSequence &spill,
-    const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
-    std::vector<std::string> &errors) {
+    uint32_t epoch_offset, const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill,
+    rj_code_arch_t arch, uint32_t original_barrier_word, uint64_t cave_text_offset,
+    uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
+    std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
   const auto load_epoch = instrumentation::build_private_load_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
   const auto increment_epoch = instrumentation::build_v_add_u32(
@@ -1033,7 +1031,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
     ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<SgprSpillSequence> scalar_spill;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
   };
@@ -1140,9 +1138,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           if (!spill)
             continue;
         }
-        std::optional<InlineSgprSpillSequence> scalar_spill;
+        std::optional<SgprSpillSequence> scalar_spill;
         if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-          scalar_spill = build_inline_sgpr_spill_sequence(
+          scalar_spill = build_moi_sgpr_spill_sequence(
               result, *resources, candidate_options, visible_evidence_spill_managers, arch,
               result.warnings, persistent_end, spill ? &*spill : nullptr);
           if (!scalar_spill)
@@ -1254,7 +1252,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       continue;
     std::optional<uint16_t> scratch_vgpr;
     std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<SgprSpillSequence> scalar_spill;
     uint32_t required_private_bytes = 0u;
     const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
     const bool needs_record_replay_scalar_spill =
@@ -1295,7 +1293,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            *spill);
       }
       if (needs_scalar_spill) {
-        scalar_spill = build_inline_sgpr_spill_sequence(
+        scalar_spill = build_moi_sgpr_spill_sequence(
             result, *resources, candidate_options, visible_evidence_spill_managers, arch,
             result.warnings, std::nullopt, spill ? &*spill : nullptr);
         if (!scalar_spill)
@@ -1340,7 +1338,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       options.moi_exec_save_sgpr
           ? find_record_replay_reserved_barrier_island_begin(
                 old_text, result, arch, access_output, planned_candidates.size(),
-                moi_reserved_record_replay_sync_island_count(result, options))
+                moi_reserved_access_sync_island_count(result, options))
           : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
@@ -2478,24 +2476,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     return;
   }
-  std::vector<std::pair<uint64_t, uint64_t>> borrowed_barrier_protected_ranges;
-  const auto append_borrowed_barrier_protected_ranges = [&](const auto &container) {
-    for (const ConSanBarrierSite &site : container.barrier_sites) {
-      borrowed_barrier_protected_ranges.emplace_back(site.text_offset,
-                                                     site.text_offset + site.size);
-    }
-    for (const ConSanFenceSite &site : container.fence_sites)
-      borrowed_barrier_protected_ranges.emplace_back(site.text_offset,
-                                                     site.text_offset + site.size);
-    for (const ConSanAtomicSite &site : container.atomic_sites)
-      borrowed_barrier_protected_ranges.emplace_back(site.text_offset,
-                                                     site.text_offset + site.size);
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_borrowed_barrier_protected_ranges(kernel);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_borrowed_barrier_protected_ranges(function);
-  std::ranges::sort(borrowed_barrier_protected_ranges);
+  const std::vector<std::pair<uint64_t, uint64_t>> borrowed_barrier_protected_ranges =
+      collect_moi_synchronization_ranges(result);
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
@@ -2503,7 +2485,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (options.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, access_output, selected_candidates.size(),
-        moi_reserved_record_replay_sync_island_count(result, options));
+        moi_reserved_access_sync_island_count(result, options));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
                                       reserved_barrier_island_layout->slot_words;

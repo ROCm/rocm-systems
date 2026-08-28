@@ -42,21 +42,12 @@ void try_apply_first_light_access_record_patch(
         "0..100");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(admitted);
-  apply_test_kernel_filter(candidates, options);
-  std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
-    return lhs->anchor() < rhs->anchor();
-  });
   // Ordering instrumentation composes around the relocated guest access in a
   // second text-growth pass. Keep those access bodies at the tail so their
   // one-word branch anchors remain in direct reach of the appended ordering
   // caves even for very large code objects.
-  const std::unordered_set<uint64_t> ordering_atomic_offsets =
-      collect_moi_ordering_atomic_offsets(result, options.moi_track_atomics);
-  std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
-    return !ordering_atomic_offsets.contains(candidate->anchor());
-  });
+  std::vector<const ConSanMoiCandidate *> candidates =
+      order_moi_replay_access_candidates(admitted, result, options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI first-light probe found no native LDS or likely group "
                                  "flat load/store candidate");
@@ -148,7 +139,7 @@ void try_apply_first_light_access_record_patch(
   // plus every fence candidate; otherwise the access pass can consume every
   // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
-      use_indirect_appended ? moi_reserved_record_replay_sync_island_count(result, options) : 0u;
+      use_indirect_appended ? moi_reserved_access_sync_island_count(result, options) : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
           ? kMoiRecordReplayBarrierRelaySlotWords
@@ -270,28 +261,14 @@ void try_apply_first_light_access_record_patch(
     const ConSanMoiCandidate *access = nullptr;
   };
   std::vector<BorrowedEntryProtectedRange> borrowed_entry_protected_ranges;
-  borrowed_entry_protected_ranges.reserve(
-      candidates.size() + result.program_inventory.kernels().size() +
-      result.program_inventory.functions().size() + resource_state.reserved_ranges.size());
+  borrowed_entry_protected_ranges.reserve(candidates.size() + synchronization_ranges.size() +
+                                          resource_state.reserved_ranges.size());
   for (const ConSanMoiCandidate *candidate : candidates) {
     borrowed_entry_protected_ranges.push_back(
         {candidate->anchor(), candidate->anchor() + candidate->size(), candidate});
   }
-  const auto append_borrowed_entry_sync_ranges = [&](const auto &container) {
-    for (const ConSanBarrierSite &site : container.barrier_sites)
-      borrowed_entry_protected_ranges.push_back(
-          {site.text_offset, site.text_offset + site.size, nullptr});
-    for (const ConSanFenceSite &site : container.fence_sites)
-      borrowed_entry_protected_ranges.push_back(
-          {site.text_offset, site.text_offset + site.size, nullptr});
-    for (const ConSanAtomicSite &site : container.atomic_sites)
-      borrowed_entry_protected_ranges.push_back(
-          {site.text_offset, site.text_offset + site.size, nullptr});
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_borrowed_entry_sync_ranges(kernel);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_borrowed_entry_sync_ranges(function);
+  for (const auto &[begin, end] : synchronization_ranges)
+    borrowed_entry_protected_ranges.push_back({begin, end, nullptr});
   for (const ConSanPreappliedReservedRange &range : resource_state.reserved_ranges) {
     borrowed_entry_protected_ranges.push_back(
         {range.text_offset, range.text_offset + range.size, nullptr});
@@ -644,9 +621,9 @@ void try_apply_first_light_access_record_patch(
     }
     const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
         candidate_options.automatic_moi_record_replay_sgpr_spill);
-    std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<SgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
+      scalar_spill = build_moi_sgpr_spill_sequence(
           result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
@@ -1110,7 +1087,7 @@ void try_apply_first_light_access_record_patch(
   // passes are independent downstream consumers of that frontier. Preserve
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
-  if (moi_reserved_record_replay_sync_island_count(result, options) != 0u) {
+  if (moi_reserved_access_sync_island_count(result, options) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }

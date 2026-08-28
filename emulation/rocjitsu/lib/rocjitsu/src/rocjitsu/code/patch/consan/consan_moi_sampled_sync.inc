@@ -104,7 +104,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
     const MoiOptions &options, const VgprSpillSequence *spill,
-    const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
     std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
@@ -674,7 +674,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                                           ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target_profile = consan_target_profile(arch);
+  if (!options.moi_report_buffer_address || target_profile == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI sampled barrier sync requires a supported report-buffer target");
     return;
@@ -1101,13 +1102,17 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   // case on the ordinary direct-cave path is also important for a shared
   // helper: B0-to-A0 translation clones the helper per kernel owner, whereas
   // an absolute call-return dispatcher only names one physical clone.
-  const bool gfx1250_single_direct_barrier =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 && selected.size() == 1u &&
+  const bool translated_single_direct_barrier =
+      target_profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation &&
+      selected.size() == 1u &&
       compute_sopp_branch_simm16(selected.front().candidate.barrier.site.text_offset,
                                  new_text.size())
           .has_value();
+  const bool direct_gfx12_transport =
+      target_profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
+      target_profile->code_transport == ConSanCodeTransportModel::DirectCodeObject;
   const bool has_stranded_barrier =
-      (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+      (consan_uses_gfx9_cdna_encoding(arch) || direct_gfx12_transport) &&
       std::ranges::any_of(std::views::iota(size_t{0}, selected.size()), [&](size_t index) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         const uint64_t reserved_island =
@@ -1116,8 +1121,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                !compute_sopp_branch_simm16(anchor, reserved_island);
       });
   const bool use_dense_barrier_relay =
-      (arch == ROCJITSU_CODE_ARCH_CDNA5 && !gfx1250_single_direct_barrier) ||
-      (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u) || has_stranded_barrier;
+      (target_profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation &&
+       !translated_single_direct_barrier) ||
+      (direct_gfx12_transport && selected.size() >= 8u) || has_stranded_barrier;
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
@@ -1139,7 +1145,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     // appended dispatcher without embedding a clone address.
     constexpr size_t kMaxGfx1250CloneLocalRoutes = 63u;
     const auto groups = consan_detail::partition_moi_dense_route_sites(
-        route_sites, arch == ROCJITSU_CODE_ARCH_CDNA5 ? kMaxGfx1250CloneLocalRoutes : 0u);
+        route_sites,
+        target_profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation
+            ? kMaxGfx1250CloneLocalRoutes
+            : 0u);
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + selected.size());
@@ -1394,7 +1403,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         dispatcher_words.push_back(
             build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+      if (!derive_key_at_entry &&
+          target_profile->direct_call_form != ConSanDirectCallForm::SCallI64) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1424,17 +1434,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                                      (key_encodes_scc ? 2u : 1u));
         }
         std::vector<uint32_t> matched_words;
-        if (key_encodes_scc) {
-          const uint16_t bitcmp_opcode =
-              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
-          const auto normalize = instrumentation::build_s_cselect_b32(
-              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-          if (!normalize)
-            return false;
-          matched_words.push_back(
-              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
-          matched_words.push_back(*normalize);
-        }
+        if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
+                                   matched_words, {.encoded_sgpr = key_sgpr}, *target_profile))
+          return false;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
@@ -1537,7 +1539,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                          ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target_profile = consan_target_profile(arch);
+  if (!options.moi_report_buffer_address || target_profile == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI sampled atomic sync requires a supported report-buffer target");
     return;
@@ -2538,17 +2541,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
                                    (key_encodes_scc ? 2u : 1u));
         std::vector<uint32_t> matched_words;
-        if (key_encodes_scc) {
-          const uint16_t bitcmp_opcode =
-              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
-          const auto normalize = instrumentation::build_s_cselect_b32(
-              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-          if (!normalize)
-            return false;
-          matched_words.push_back(
-              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
-          matched_words.push_back(*normalize);
-        }
+        if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
+                                   matched_words, {.encoded_sgpr = key_sgpr}, *target_profile))
+          return false;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
@@ -2917,9 +2912,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
-    size_t fence_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
+    uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
@@ -2928,7 +2923,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  const bool requires_raw_th = !consan_uses_gfx9_cdna_encoding(arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    errors.emplace_back("ConSan MOI fence record patch has no supported target profile");
+    return std::nullopt;
+  }
+  const bool requires_raw_th = target->encoding_family == ConSanEncodingFamily::Gfx11 ||
+                               target->encoding_family == ConSanEncodingFamily::Gfx12;
   if (!address_plan.supported() || !candidate.communication_site.raw_scope ||
       (requires_raw_th && !candidate.communication_site.raw_th) || !candidate.is_well_formed()) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
@@ -3008,7 +3009,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     words = std::move(*gate);
   }
   const std::optional<uint16_t> vgpr_msb_mode =
-      arch == ROCJITSU_CODE_ARCH_CDNA5
+      target->has_selectable_vgpr_bank
           ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
                                      candidate.container_entry_text_offset,
                                      candidate.patch_file_offset)

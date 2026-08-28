@@ -3042,7 +3042,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &input_options,
-    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,
     size_t inline_atomic_release_slots_offset, uint32_t inline_atomic_release_capacity,
     size_t inline_causal_snapshots_offset, uint32_t inline_causal_snapshot_capacity,

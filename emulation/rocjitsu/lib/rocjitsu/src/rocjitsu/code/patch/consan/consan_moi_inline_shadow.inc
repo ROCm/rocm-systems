@@ -1,80 +1,11 @@
-using InlineSgprSpillSequence = SgprSpillSequence;
-
-[[nodiscard]] bool
-moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &result,
-                                             const ResolvedMoiScratchPlan &resources,
-                                             const MoiOptions &options) {
-  if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
-    return false;
-  }
-  return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
-    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(offset);
-    return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
-  });
-}
-
-[[nodiscard]] std::optional<InlineSgprSpillSequence> build_inline_sgpr_spill_sequence(
-    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-    const MoiOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
-    const VgprSpillSequence *vgpr_spill = nullptr) {
-  if ((!options.automatic_moi_inline_sgpr_spill &&
-       !options.automatic_moi_record_replay_sgpr_spill) ||
-      !options.moi_exec_save_sgpr)
-    return std::nullopt;
-  if (!consan_is_capability_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
-    warnings.emplace_back(
-        "ConSan MOI spill-backed scalar state requires at least one supported kernel owner");
-    return std::nullopt;
-  }
-  const auto private_limit = consan_address_free_private_limit(arch);
-  if (!private_limit) {
-    warnings.emplace_back("ConSan MOI spill-backed Inline scalar state has no private capacity");
-    return std::nullopt;
-  }
-  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
-  if (moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
-    if (vgpr_spill == nullptr || !vgpr_spill->uses_dynamic_stack_frame) {
-      warnings.emplace_back(
-          "ConSan MOI dynamic-stack scalar spill requires an established VGPR spill frame");
-      return std::nullopt;
-    }
-    auto sequence = build_dynamic_stack_sgpr_spill_sequence(
-        *options.moi_exec_save_sgpr, count, resources.base, *vgpr_spill,
-        static_cast<uint32_t>(resources.count) * SpillManager::kSlotBytes, arch);
-    if (!sequence)
-      warnings.emplace_back("ConSan MOI could not encode the dynamic-stack scalar spill sequence");
-    return sequence;
-  }
-  (void)managers;
-  (void)private_layout_base;
-  const uint32_t reservoir_end = static_cast<uint32_t>(resources.base) + resources.count + 1u;
-  if (reservoir_end > REGISTER_SET_MAX_VGPRS || resources.required_vgpr_count < reservoir_end ||
-      (vgpr_spill && (vgpr_spill->vgpr_base != resources.base ||
-                      vgpr_spill->vgpr_count != resources.count + 1u))) {
-    warnings.emplace_back(
-        "ConSan MOI fixed-stack scalar spill has no planned lane-backed VGPR reservoir");
-    return std::nullopt;
-  }
-  const uint16_t reservoir_vgpr = static_cast<uint16_t>(reservoir_end - 1u);
-  const uint32_t total_private_bytes =
-      vgpr_spill ? vgpr_spill->total_private_bytes : resources.original_private_segment_size;
-  auto sequence = build_lane_sgpr_spill_sequence(*options.moi_exec_save_sgpr, count, reservoir_vgpr,
-                                                 total_private_bytes, arch);
-  if (!sequence) {
-    warnings.emplace_back("ConSan MOI could not encode the lane-backed scalar spill sequence");
-    return std::nullopt;
-  }
-  return sequence;
-}
-
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (!consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow probe does not support this architecture");
     return;
@@ -95,9 +26,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates =
-      find_inline_shadow_access_candidates(admitted);
-  apply_test_kernel_filter(candidates, options);
+  std::vector<const ConSanMoiCandidate *> candidates = make_moi_candidate_pointer_view(admitted);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();
   });
@@ -149,7 +78,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   // match, guest-return adjustment, conditional branch, and long jump), plus
   // the final terminator. Keep RDNA4's compact spacing: its explicit-key
   // groups do not carry the gfx1250 call-return and adjustment sequences.
-  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 28u : 20u;
+  const uint64_t access_relay_words =
+      target->direct_call_form == ConSanDirectCallForm::SCallI64 ? 28u : 20u;
   const bool has_function_candidate =
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return !candidate->container.is_kernel();
@@ -176,15 +106,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
-  uint64_t reserved_barrier_island_count = 0u;
-  if (use_indirect_appended && options.moi_track_barriers) {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-      reserved_barrier_island_count += kernel.barrier_sites.size();
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      reserved_barrier_island_count += function.barrier_sites.size();
-    reserved_barrier_island_count =
-        std::min<uint64_t>(reserved_barrier_island_count, options.max_patches);
-  }
+  const uint64_t reserved_barrier_island_count =
+      use_indirect_appended ? moi_reserved_access_sync_island_count(result, options) : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
       candidates.size() * access_relay_words * sizeof(uint32_t);
@@ -220,8 +143,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     branch_router.retire_range(offset, static_cast<uint64_t>(words) * sizeof(uint32_t));
   };
 
+  const bool uses_gfx9_cdna_encoding = target->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+                                       target->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
   const size_t dense_group_capacity =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : (consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u);
+      target->has_selectable_vgpr_bank ? 0u : (uses_gfx9_cdna_encoding ? 31u : 64u);
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result, options, arch, resource_state, original_text, candidates, dense_group_capacity,
       access_island_begin, access_relay_words, use_indirect_appended,
@@ -577,9 +502,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       if (!spill)
         continue;
     }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<SgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_inline_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
+      scalar_spill = build_moi_sgpr_spill_sequence(
           result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
@@ -845,7 +770,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         // reservation keeps later body addresses stable while their
         // instruction words are regenerated during emission.
         const uint64_t return_bytes =
-            (use_dense_call && arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1u : 7u) * sizeof(uint32_t);
+            (use_dense_call && target->direct_call_form == ConSanDirectCallForm::SCallI64 ? 1u
+                                                                                          : 7u) *
+            sizeof(uint32_t);
         std::string placement_error;
         const auto reservation =
             placement_planner.plan_indirect_appended(candidate.anchor(), displaced_original_size,
@@ -1303,7 +1230,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           }
           cave_words->push_back(build_s_branch(*ret, arch));
         } else if (planned_patch.dense_call_anchor) {
-          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          if (target->direct_call_form == ConSanDirectCallForm::SCallI64) {
             empty_exec_continuation_word_offset = cave_words->size();
             insert_deferred_guest(cave_words->size());
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
@@ -3085,7 +3012,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // returns with its ordinary indirect-PC pair and retains the established
   // residue slot.
   const uint16_t residue =
-      options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_CDNA5
+      options.moi_engine == ConSanMoiEngine::RecordReplay && consan_arch_has_s_call_i64(arch)
           ? *options.moi_exec_save_sgpr
           : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t shift =

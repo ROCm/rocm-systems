@@ -842,12 +842,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   }
   bool inline_atomic_without_access = false;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    std::vector<const ConSanMoiCandidate *> inline_access_candidates =
-        find_inline_shadow_access_candidates(moi_candidates);
-    apply_test_kernel_filter(inline_access_candidates, effective_options);
-    effective_options.moi_inline_access_present = !inline_access_candidates.empty();
-    inline_atomic_without_access = inline_access_candidates.empty() &&
-                                   effective_options.moi_track_atomics && atomic_or_fence_relevant;
+    effective_options.moi_inline_access_present = !moi_candidates.empty();
+    inline_atomic_without_access =
+        moi_candidates.empty() && effective_options.moi_track_atomics && atomic_or_fence_relevant;
   }
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts

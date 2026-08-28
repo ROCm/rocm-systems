@@ -2462,29 +2462,6 @@ private:
                                        consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
 }
 
-[[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate) {
-  const auto &ranges = candidate.ranges;
-  if (ranges.empty())
-    return false;
-  for (const ConSanAccessRange &range : ranges) {
-    const ConSanMoiLdsCellRange cell_range =
-        consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
-    if (cell_range.cell_count == 0)
-      return false;
-  }
-  return true;
-}
-
-[[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_inline_shadow_access_candidates(std::span<const ConSanMoiCandidate> admitted) {
-  std::vector<const ConSanMoiCandidate *> candidates;
-  for (const ConSanMoiCandidate &candidate : admitted) {
-    if (is_inline_shadow_access_candidate(candidate))
-      candidates.push_back(&candidate);
-  }
-  return candidates;
-}
-
 [[nodiscard]] bool append_extract_exact_shadow_field(std::vector<uint32_t> &words,
                                                      uint16_t destination_vgpr,
                                                      uint16_t packed_vgpr, uint16_t shift,
