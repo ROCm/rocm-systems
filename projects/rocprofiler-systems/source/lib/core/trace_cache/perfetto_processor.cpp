@@ -1444,7 +1444,6 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     }
 }
 
-// NOLINTBEGIN(readability-function-size)
 void
 perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile_sample)
 {
@@ -1475,7 +1474,6 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
                       _metric.value(_hipfile_sample.metric_values));
     }
 }
-// NOLINTEND(readability-function-size)
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
