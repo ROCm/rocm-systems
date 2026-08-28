@@ -437,7 +437,7 @@ TEST(thread_trace, triple_buffer_multiple_shader)
 
     auto status = rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
-    ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
 
     context::pop_client(1);
 }

@@ -41,8 +41,10 @@
 
 #include <hsa/hsa_api_trace.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -65,10 +67,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent      = {.handle = 0};
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
-    const rocprofiler_user_data_t*                  userdata   = nullptr;
-    uint64_t                                        next_chunk = 0;
+    rocprofiler_agent_id_t                          agent    = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
+    const rocprofiler_user_data_t*                  userdata = nullptr;
+    std::vector<uint64_t>                           next_chunks{};
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -94,7 +96,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.data             = buffer;
     shader_data.data_size        = size;
     shader_data.shader_engine_id = shader;
-    shader_data.chunk_index      = cb_data.next_chunk++;
+    shader_data.chunk_index      = next_chunk_id(cb_data.next_chunks, shader);
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
@@ -143,6 +145,20 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+
+    // The public mask is wider than the set of shader engines implemented by an agent. Filter it
+    // before constructing AQLProfile resources and buffering packets so, for example, 0xFFFFFFFF
+    // becomes 0xF on a four-SE agent instead of creating packets for non-existent engines.
+    constexpr uint32_t max_shader_engines = std::numeric_limits<uint32_t>::digits;
+    num_shader_engines = std::min(agent->get_rocp_agent()->num_shader_banks, max_shader_engines);
+    const auto valid_shader_engine_mask =
+        (num_shader_engines == max_shader_engines)
+            ? static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())
+            : ((uint64_t{1} << num_shader_engines) - 1);
+    params.shader_engine_mask &= valid_shader_engine_mask;
+
+    if(params.shader_engine_mask == 0)
+        throw std::runtime_error("Thread trace shader-engine mask does not select a valid engine");
 
     size_t staging_size = (params.num_buffers > 1) ? params.buffer_size : 0ul;
     size_t staging_n    = (params.num_buffers > 1) ? params.num_buffers : 0ul;
@@ -207,6 +223,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
+    cb_dt.next_chunks.resize(num_shader_engines);
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
@@ -313,13 +330,14 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         for(size_t i = 0; i < worker_data->num_buffers; i++)
             worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
 
-        auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = worker_flag;
-        producer_data.start_pkt_signal = shared_signal;
-        producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = copy_data_sync;
-        producer_data.shared           = worker_data;
-        producer_data.buffer_packets   = std::move(buffer_packets);
+        auto producer_data               = triple_buffer_producer_data_t{};
+        producer_data.producer_running   = worker_flag;
+        producer_data.start_pkt_signal   = shared_signal;
+        producer_data.control_packet     = std::move(control_packet_copy);
+        producer_data.copy_data_fn       = copy_data_sync;
+        producer_data.shared             = worker_data;
+        producer_data.num_shader_engines = num_shader_engines;
+        producer_data.buffer_packets     = std::move(buffer_packets);
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.
