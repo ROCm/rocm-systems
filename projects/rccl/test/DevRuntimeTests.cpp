@@ -1876,6 +1876,145 @@ TEST_F(SymMemoryObtainSetupTest, MemoryAllocFails_ReturnsErrorWithoutLinking) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryObtain, second half: once space is reserved and the LSA team mapped,
+// bind every existing team, register with GIN or RMA where enabled, and link
+// the memory onto devrState.memHead.
+
+class SymMemoryObtainRegisterTest : public SymMemoryObtainSetupTest {
+protected:
+  void SetUp() override {
+    SymMemoryObtainSetupTest::SetUp();
+    // Every rank agrees on one 4096-byte segment unless a test says otherwise.
+    agreeing = GatherReporting({{1, false, 4096}, {1, false, 4096}, {1, false, 4096}, {1, false, 4096}});
+  }
+
+  std::function<ncclResult_t(void*, void*, int)> agreeing;
+
+  // Satisfy every condition of rmaProxyEnabled except the param, which each
+  // test leaves at its default (RMA_DISABLE=0, i.e. enabled).
+  void EnableRmaPrerequisites() {
+    comm->nRanks = 4;
+    comm->devrState.nLsaTeams = 2;
+    comm->config.numRmaCtx = 1;
+    comm->globalRmaProxySupport = true;
+  }
+};
+
+// Branch: a caller with no VA of its own gets the LSA mapping instead --
+// lsaFlatBase advanced by our slot in the flat space, plus our offset.
+TEST_F(SymMemoryObtainRegisterTest, NullPrimaryAddr_DerivesFromLsaMapping) {
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook alloc(g_spaceAlloc, [](ncclSpace*, int64_t, int64_t, int, int64_t* out) {
+    *out = 8192;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(symMemoryObtain(comm, memHandles.data(), 1, /*memAddr=*/nullptr, 4096, 0, &obtained, false), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(obtained->primaryAddr,
+            static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + 8192);
+}
+
+// Branch: a caller that supplied a VA keeps it.
+TEST_F(SymMemoryObtainRegisterTest, CallerPrimaryAddr_IsKept) {
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_EQ(obtained->primaryAddr, reinterpret_cast<void*>(0x100000));
+}
+
+// Branch: GIN is on, so the memory is registered with it.
+TEST_F(SymMemoryObtainRegisterTest, GinEnabled_RegistersWithGin) {
+  comm->devrState.ginEnabled = true;
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+// Branch: GIN is off, so registration is skipped and the segment count is
+// provisionally 1 -- recomputed later if GIN is activated.
+TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(obtained->numGinSegments, 1);
+}
+
+// Branch: every rmaProxyEnabled condition holds and the layout is single
+// segment, so RMA registration runs.
+TEST_F(SymMemoryObtainRegisterTest, RmaPrerequisitesMet_RegistersWithRma) {
+  EnableRmaPrerequisites();
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_TRUE(comm->devrState.rmaProxyEnabled);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+// Branch: a single LSA team means there is no remote peer to reach over RMA.
+TEST_F(SymMemoryObtainRegisterTest, SingleLsaTeam_LeavesRmaProxyDisabled) {
+  EnableRmaPrerequisites();
+  comm->devrState.nLsaTeams = 1;
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_FALSE(comm->devrState.rmaProxyEnabled);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: RMA_DISABLE overrides the other three conditions.
+TEST_F(SymMemoryObtainRegisterTest, RmaDisabledByParam_LeavesRmaProxyDisabled) {
+  EnableRmaPrerequisites();
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
+  });
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_FALSE(comm->devrState.rmaProxyEnabled);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: the proxy is enabled but the layout is multi-segment, which RMA does
+// not handle -- so the flag is set while registration is skipped.
+TEST_F(SymMemoryObtainRegisterTest, RmaEnabledButMultiSegment_SkipsRegistration) {
+  EnableRmaPrerequisites();
+  ScopedHook gather(g_bootstrapAllGather,
+                    GatherReporting({{1, false, 4096}, {2, false, 4096}, {1, false, 4096}, {1, false, 4096}}));
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_TRUE(comm->devrState.rmaProxyEnabled);
+  EXPECT_EQ(obtained->maxGlobalNumSegments, 2);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// The memory is pushed onto memHead, ahead of anything already there.
+TEST_F(SymMemoryObtainRegisterTest, LinksOntoMemHeadAndReportsOut) {
+  ncclDevrMemory existing{};
+  comm->devrState.memHead = &existing;
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_EQ(comm->devrState.memHead, obtained);
+  EXPECT_EQ(obtained->next, &existing);
+  // `existing` is a stack object, so drop it from the chain before TearDown.
+  // memHead must keep pointing at `obtained`: symMemoryDestroy walks the list
+  // to unlink and dereferences null if its argument is not on it.
+  obtained->next = nullptr;
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy: the original lifecycle regression.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
