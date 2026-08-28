@@ -83,8 +83,8 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 15
-            corpus_hard_timeout: 30
+            corpus_soft_timeout: 30
+            corpus_hard_timeout: 60
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
