@@ -59,20 +59,6 @@ repos:
         language: system
         require_serial: true
 
-  # The root clang-format hook matches only \.(c|cpp|cc|h|hpp|m|mm)$, so
-  # configure-time templates such as source/lib/common/defines.h.in are not
-  # covered there. Keep `rev` in sync with the root config's clang-format pin.
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.4
-    hooks:
-      - id: clang-format
-        name: clang-format (configure-time templates)
-        files: ^projects/rocprofiler-systems/.*\.(c|cpp|h|hpp)\.in$
-        # The upstream hook restricts itself to files that `identify` tags as
-        # C/C++. A `.h.in` template is tagged only as `text`, so the default
-        # filter would skip it entirely; `files:` above is the real selector.
-        types_or: [file]
-
   # JSON hooks: the root config has no JSON handling.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
