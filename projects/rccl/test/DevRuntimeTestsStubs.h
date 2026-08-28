@@ -48,6 +48,10 @@ extern std::function<hipError_t(void*, size_t)> g_hipMemUnmap;
 extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_hipMemcpyAsync;
 extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync;
 
+extern std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_hipIpcGetMemHandle;
+extern std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_hipIpcOpenMemHandle;
+extern std::function<hipError_t(void*)> g_hipIpcCloseMemHandle;
+
 extern std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather;

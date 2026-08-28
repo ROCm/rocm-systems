@@ -2638,6 +2638,79 @@ TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
 
 
 // ---------------------------------------------------------------------------
+// windowCloseIpcPeers releases the IPC mappings a non-symmetric window opened
+// onto its node-local peers. Our own slot was never opened, and a peer that
+// failed to map has a null entry, so both are skipped.
+
+class WindowCloseIpcPeersTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrWindow win{};
+  std::vector<void*> allocBase;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->devrState.lsaSelf = 1;  // differs from 0 so "skip self" is observable
+
+    allocBase = {reinterpret_cast<void*>(0xA000), reinterpret_cast<void*>(0xB000),
+                 reinterpret_cast<void*>(0xC000)};
+    win.ipcPeerPtrsAllocBase = allocBase.data();
+    win.ipcPeerCount = 3;
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+};
+
+// Branch: no peer table means IPC was never active for this window.
+TEST_F(WindowCloseIpcPeersTest, NoPeerTable_ClosesNothing) {
+  win.ipcPeerPtrsAllocBase = nullptr;
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+
+  windowCloseIpcPeers(comm, &win);
+  EXPECT_EQ(close.calls, 0);
+}
+
+// Branch: every peer is closed except our own slot, which was never opened.
+TEST_F(WindowCloseIpcPeersTest, ClosesPeersButNotSelf) {
+  std::vector<void*> closed;
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
+    closed.push_back(p);
+    return hipSuccess;
+  });
+
+  windowCloseIpcPeers(comm, &win);
+  ASSERT_EQ(closed.size(), 2u);
+  EXPECT_EQ(closed[0], allocBase[0]);
+  EXPECT_EQ(closed[1], allocBase[2]);  // index 1 is lsaSelf
+}
+
+// Branch: a peer that never mapped has a null entry and is skipped.
+TEST_F(WindowCloseIpcPeersTest, NullPeerEntry_IsSkipped) {
+  allocBase[0] = nullptr;
+  std::vector<void*> closed;
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
+    closed.push_back(p);
+    return hipSuccess;
+  });
+
+  windowCloseIpcPeers(comm, &win);
+  ASSERT_EQ(closed.size(), 1u);
+  EXPECT_EQ(closed[0], allocBase[2]);
+}
+
+// The close is CUDACHECKIGNORE'd, so one failure must not abandon the rest --
+// this runs during teardown, where stopping early would leak the remaining
+// mappings.
+TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipErrorInvalidValue; });
+
+  windowCloseIpcPeers(comm, &win);
+  EXPECT_EQ(close.calls, 2);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

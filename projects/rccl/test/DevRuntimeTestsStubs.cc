@@ -485,6 +485,34 @@ std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = De
 HIP_FAKE hipError_t hipMemsetAsync(void* dst, int value, size_t n, hipStream_t stream) {
   return g_hipMemsetAsync(dst, value, n, stream);
 }
+
+// IPC handles for the non-symmetric intra-node path. Unfaked these reach the
+// real driver, as hipMemcpyAsync did.
+static hipError_t DefaultIpcGetMemHandle(hipIpcMemHandle_t* handle, void*) {
+  if (handle) *handle = hipIpcMemHandle_t{};
+  return hipSuccess;
+}
+std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_hipIpcGetMemHandle = DefaultIpcGetMemHandle;
+
+HIP_FAKE hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* ptr) {
+  return g_hipIpcGetMemHandle(handle, ptr);
+}
+
+static hipError_t DefaultIpcOpenMemHandle(void** ptr, hipIpcMemHandle_t, unsigned int) {
+  if (ptr) *ptr = reinterpret_cast<void*>(0x9000);
+  return hipSuccess;
+}
+std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_hipIpcOpenMemHandle =
+    DefaultIpcOpenMemHandle;
+
+HIP_FAKE hipError_t hipIpcOpenMemHandle(void** ptr, hipIpcMemHandle_t handle, unsigned int flags) {
+  return g_hipIpcOpenMemHandle(ptr, handle, flags);
+}
+
+static hipError_t DefaultIpcCloseMemHandle(void*) { return hipSuccess; }
+std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultIpcCloseMemHandle;
+
+HIP_FAKE hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -574,6 +602,9 @@ void ResetDevRuntimeFakes() {
   g_shadowPoolFree                          = DefaultShadowPoolFree;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_hipMemsetAsync                          = DefaultMemsetAsync;
+  g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
+  g_hipIpcOpenMemHandle                     = DefaultIpcOpenMemHandle;
+  g_hipIpcCloseMemHandle                    = DefaultIpcCloseMemHandle;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }
