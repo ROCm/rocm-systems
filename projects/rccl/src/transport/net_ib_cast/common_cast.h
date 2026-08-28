@@ -58,6 +58,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "net_ib/rma_multiseg.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -322,6 +323,7 @@ struct ncclIbRequest {
   // zero it means that the request was fully completed on that device.
   int events[NCCL_IB_MAX_DEVS_PER_NIC];
   int ctsEvents[NCCL_IB_MAX_DEVS_PER_NIC];
+  int rmaNwrs;
   // Array of pointers to the per-device base structures to make it easier to
   // poll the device's CQ when the request is tested for progress.
   // The pointers are initialized only for the devices that the request expects
@@ -475,6 +477,11 @@ struct ncclIbQp {
 #define NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
+// Preserve two send WQEs (data + signal) and one flush WQE per request, plus
+// enough room to replace one regular request with the largest segmented chain.
+// Runtime credits prevent multiple large chains from exceeding these depths.
+#define NCCL_IB_RMA_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS - 2)
+#define NCCL_IB_RMA_MAX_FLUSH_WRS (NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS - 1)
 
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {
@@ -529,6 +536,8 @@ struct ncclIbResiliency;
 struct alignas(32) ncclIbNetCommBase {
   ncclNetVDeviceProps_t vProps;
   bool isSend;
+  bool isRma;
+  int rmaWrsOutstanding;
   struct ncclIbRequest reqs[NET_IB_MAX_REQUESTS];
   struct ncclIbQp qps[NCCL_IB_MAX_QPS];
   // Array of pointers to the "actual" QPs that are used for data transfers.

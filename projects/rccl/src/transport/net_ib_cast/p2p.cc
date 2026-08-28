@@ -31,6 +31,7 @@ ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbReque
       r->sock = NULL;
       memset(r->devBases, 0, sizeof(r->devBases));
       memset(r->events, 0, sizeof(r->events));
+      r->rmaNwrs = 0;
       r->tel_post_ts = 0;
       *req = r;
       return ncclSuccess;
