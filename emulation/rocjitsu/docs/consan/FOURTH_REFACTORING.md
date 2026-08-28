@@ -10,13 +10,79 @@ from two independent investigations of the current implementation:
 The two views are related but not interchangeable. A well-layered program can
 still duplicate every engine/target combination, while a compact shared helper
 can still violate every intended dependency boundary. The refactoring must
-improve both properties.
+put the design in order on both axes.
+
+Implementation size is a diagnostic, not the governing objective. There is no
+line-count quota and no requirement that every intermediate or final checkpoint
+be smaller. The working hypothesis is that the current size and resistance to
+deletion reflect muddied ownership, duplicated authority, hidden state
+machines, and mode/target interactions. Correcting those causes should make
+later simplification and deletion natural. Shrinking code by weakening tests,
+validation, diagnostics, or explicit contracts would be a failure; temporary
+growth that establishes a real boundary or regression test can be justified.
 
 The destination design in this document is deliberately a set of hypotheses
 and invariants, not a frozen class diagram. Each extraction must be tested as a
 vertical slice, measured, and either generalized, revised, or removed before
 the next slice. The freedom to discover a better interface during the work is
 part of the plan; parallel authorities and unmeasured rewrites are not.
+
+## Mandate and scope
+
+This is a mandate to **deep-fix ConSan's design**, not merely to tidy files
+around the current implementation. The de-facto components identified below
+are a diagnosis of today's ownership, not boundaries that the refactoring must
+preserve. The work may move, split, merge, or replace components; redesign
+internal contracts and intermediate representations; replace coordinators and
+state machines; change file and target structure; and delete obsolete paths.
+Existing names and include closures have no architectural authority of their
+own.
+
+The destination should be easy to explain and easy to navigate. When the
+design documents are updated after the implementation stabilizes, their
+component map should correspond directly to source ownership and build
+boundaries. A reader should be able to determine where a fact is created, who
+may transform it, who consumes it, and where mode- or target-specific behavior
+lives without tracing textual include order or reverse-engineering a broad
+artifact bundle.
+
+The primary scope is all ConSan production, host/runtime, test, build, and
+documentation code in Rocjitsu. Immediate shared Rocjitsu infrastructure may
+change when a clean ConSan boundary genuinely requires it; unrelated Rocjitsu
+or ROCm redesign is outside scope. Adding features, engines, or targets is not
+an objective, except where a regression fix or a second consumer is needed to
+prove an abstraction.
+
+The non-negotiable operating constraints are:
+
+1. **Preserve tested behavior throughout.** The complete ConSan test inventory
+   must continue to pass at periodic convergence checkpoints, with focused and
+   relevant matrix tests between them. Testing must be frequent enough to
+   localize regressions but batched enough that the full matrix does not
+   dominate every small edit.
+2. **Treat discovered bugs as immediate work.** Characterize each bug, add a
+   regression test that would have caught it, fix it, and validate the affected
+   modes and targets before continuing past that boundary. Do not preserve a
+   known bug merely to call a change behavior-neutral.
+3. **Move toward one legible component architecture.** Each fact and decision
+   must have one authority, dependencies must flow through explicit typed
+   products, and source/build boundaries must make the intended visibility
+   enforceable.
+4. **Contain target variation.** Raw architecture encodings, generated ISA
+   types, register constants, and target recipes should live in files owned by
+   one target or a named target family. Target-neutral semantic and engine code
+   should consume normalized target operations rather than branch on gfx
+   architecture.
+5. **Contain mode variation.** Mode-specific policy, planning, emission, and
+   analysis should live in mode-owned regions or files. Behavior genuinely
+   shared by a subset of modes should have a named subset component and
+   contract; it should not be duplicated or left as unexplained mode switches
+   in nominally common code.
+
+These constraints govern the work more strongly than the provisional stage
+sequence later in this document. Deep changes remain incremental in the sense
+that they must be reviewable, tested, bisectable, and leave one authority at a
+time; they need not be shallow or preserve the present component graph.
 
 The measurements below use commit
 `01e6a6f1a23997866ff7a318966f6d809f9de6b8`. They cover production code under:
@@ -148,8 +214,9 @@ the broad `ConSanTransformArtifacts` aggregate.
 
 ### 1.2 Boundaries that are already strong
 
-The fourth refactoring should preserve and build on these parts rather than
-redesigning them gratuitously.
+The fourth refactoring should preserve and build on the properties of these
+parts rather than redesigning them gratuitously. Their types or physical homes
+may still change when a deeper boundary requires it.
 
 #### Immutable inventory
 
@@ -780,18 +847,19 @@ products.
 ## 4. Governing rules for the fourth refactoring
 
 The refactoring should optimize for enforceable ownership, dependency
-direction, and additive growth across the mode and target dimensions. A
-smaller implementation is desirable, especially where duplicate classifiers,
-target routes, and reverse mappings can be deleted. Line count alone is not a
-stage gate, but a boundary that makes the interaction term larger without a
-clear semantic gain is suspect.
+direction, a source tree that matches the conceptual map, and additive growth
+across the mode and target dimensions. A smaller implementation is an expected
+long-term consequence of deleting duplicate authorities and accidental
+adapters, not a numeric acceptance criterion. Added structure must still earn
+its keep: a boundary that grows the interaction term or leaves its predecessor
+alive without a clear semantic gain is suspect.
 
-1. **Preserve semantic authorities already established by the completed
-   reimplementation stages.** Preserve the immutable inventory ownership
-   model, pure semantic-policy functions and typed intents, focused evidence
-   sizing, independent final validation, and pure runtime trust evaluation.
-   Do not treat the current resource fixed-point or retrospective pipeline as
-   boundaries that must be preserved unchanged.
+1. **Preserve verified semantics and useful properties, not present shapes.**
+   Retain immutable ownership, pure decisions, typed intent, independent final
+   validation, and pure trust evaluation as architectural properties. Their
+   current types, files, and component assignments may move when a cleaner
+   design preserves or strengthens those properties. The current resource
+   fixed-point and retrospective pipeline have no presumption of survival.
 2. **Move truth forward; do not reconstruct it downstream.** When a stage knows
    an intent ID, normalized operation, resource decision, or static mapping, it
    must publish that typed fact for its consumers.
@@ -805,7 +873,9 @@ clear semantic gain is suspect.
    patch inspection are assets.
 6. **Preserve behavior, ABI, and user-visible diagnostics by default.** Any
    intended change must be called out and reviewed separately from a boundary
-   move.
+   move. A discovered bug is the exception: first capture it in a regression
+   test, then fix it and validate the affected matrix rather than codifying the
+   bad behavior as a refactoring invariant.
 7. **Make new components directly testable.** A classifier, transaction,
    decoder, analyzer, or trust evaluator should not require a complete ELF and
    HSA execution when its immediate inputs can be constructed directly.
@@ -813,16 +883,25 @@ clear semantic gain is suspect.
    contracts should not become twenty scalar parameters.
 9. **Use frequent, reviewable commits.** Each completed cut must leave one
    authoritative path and a passing relevant test set.
-10. **Apply the normal ConSan gates.** Stage-specific tests come first. Each
-    completed fourth-refactoring stage is then checked on all five emulated
-    targets with `-j16`, followed by the serialized physical `gfx1201` gate with
-    `-j1`. Physical GPU jobs must never run concurrently.
-11. **Assign variation to one dimension.** Engine policy may select a semantic
-    operation; target lowering may realize it. Do not let each engine recreate
-    the same target call, routing, identity, or register-state mechanism.
-12. **Retain subset sharing explicitly.** Shared MOI, exact-shadow, gfx9,
-    gfx12, CDNA, and other real subsets are preferable to duplication. They must
-    have named contracts rather than being inferred from textual inclusion.
+10. **Apply the normal ConSan gates at useful convergence points.** Focused
+    tests come first, followed by the relevant engine/target matrix. Run the
+    complete nonphysical suite periodically during a long stage and after each
+    coherent cross-component migration, not after every mechanical edit. Each
+    completed fourth-refactoring stage is checked on all five emulated targets
+    with `-j16`, followed by the serialized physical `gfx1201` gate with `-j1`.
+    Physical GPU jobs must never run concurrently.
+11. **Assign variation to one dimension and contain it physically.** Engine
+    policy may select a semantic operation; target lowering may realize it. Do
+    not let each engine recreate the same target call, routing, identity, or
+    register-state mechanism. Generated ISA headers, raw gfx constants, and
+    target recipes must migrate out of common semantic and mode code into
+    target- or target-family-owned files.
+12. **Retain subset sharing explicitly and visibly.** Shared MOI, exact-shadow,
+    Record/Replay-plus-InlineShadow, gfx9, gfx12, CDNA, and other real subsets
+    are preferable to duplication. They must have named contracts and owned
+    files or regions rather than being inferred from textual inclusion or
+    scattered switches. Common code must not become a dumping ground for
+    behavior that merely has two consumers.
 13. **Measure both exclusive lines and incidence.** The four exclusive buckets
     detect physical growth. Per-mode and per-target incidence detects blast
     radius. Neither should be replaced by lexical token counts.
@@ -830,6 +909,22 @@ clear semantic gain is suspect.
     bind/retry protocol is required, model both passes explicitly. Do not infer
     a forward pipeline by inspecting a monolithic lowerer's final artifact
     bundle.
+15. **Shift component boundaries when the evidence calls for it.** The region
+    ledger in Section 1 describes current responsibility, not the desired
+    package graph. Merge concepts that share one invariant, split concepts with
+    different authorities, and move responsibilities across host, pipeline,
+    policy, solver, mode, and target boundaries when that produces a clearer
+    dependency direction.
+16. **Optimize for a stable mental map.** Every resulting component should have
+    a short purpose statement, explicit inputs and outputs, one reason to
+    change, owned tests, and an enforceable visibility boundary. A reader
+    should not need knowledge of include order, patch-kind conventions, or
+    option-bus folklore to locate behavior.
+17. **Do not optimize the ledger directly.** Temporary implementation growth is
+    acceptable for regression tests, typed products, or migration adapters.
+    Adapters must have a deletion condition, and the final accounting must
+    explain durable growth or remaining duplication, but no stage succeeds or
+    fails merely by crossing 80,000 lines.
 
 ## 5. Provisional convergence route
 
@@ -840,13 +935,23 @@ Later cuts use the proven typed products to reduce visibility and split
 physical translation units. These stages are labeled `F0` through `F9` to
 distinguish them from the completed reimplementation stages.
 
-There are two workstreams inside this order:
+This route is a dependency hypothesis, not a limit on the mandate. A deep read
+during implementation may show that a proposed product belongs to another
+component, that two stages must be split, or that an earlier boundary must be
+replaced before the next vertical slice can work. Reorder or revise the route
+when evidence requires it, document the reason, and preserve tested checkpoints
+and one authority throughout the migration.
+
+There are three workstreams inside this order:
 
 - the **boundary workstream** moves coverage, static mapping, options, runtime
   analysis, and proof to their rightful owners; and
 - the **variability workstream** extracts repeated engine/target interactions
   into reusable target operations and verifies that a second engine can consume
-  them without importing target internals.
+  them without importing target internals; and
+- the **component-realization workstream** moves target, mode, subset-shared,
+  solver, host, and validation responsibilities into owned files and compiled
+  boundaries whose dependency graph matches the conceptual design.
 
 The workstreams converge at the classifier, stage-contract, and compiled-
 component cuts. A stage may revise an earlier interface when a second vertical
@@ -1106,6 +1211,14 @@ headers only for true external contracts. The goal is not one translation unit
 per current `.inc` file; it is a small set of coherent translation units whose
 include graph enforces the intended dependency direction.
 
+Do not realize the target boundary as one new mega-backend full of architecture
+switches. Use a target-neutral operation contract, named family-shared
+implementations where the ISA fact is genuinely shared, and gfx-member-owned
+sources for member-specific recipes. Apply the analogous rule to modes: each
+engine owns its policy/planning/emission and host analysis, while exact
+multi-mode subsets receive a named internal component only after their shared
+invariant is stated.
+
 Move the target-address planning/emission tail out of
 `consan_moi_model.cpp` as part of this stage.
 
@@ -1164,6 +1277,11 @@ checks for the architectural rules that can be stated mechanically:
 
 - semantic policy cannot include generated target instruction headers or raw
   target constants;
+- target-neutral and mode-owned sources cannot contain raw gfx-member recipes;
+- raw gfx-member recipes occur only in that member's files, with named
+  family-shared files for real family-wide behavior;
+- common sources cannot contain deep mode switches for behavior owned by one
+  mode or an exact subset of modes;
 - hooks cannot include lowerer-private patch or resource headers;
 - coverage code cannot inspect patch kinds or geometry;
 - native emitters cannot accept `MoiOptions`;
@@ -1179,39 +1297,69 @@ region must be reviewed as one of:
 - debt with a named next extraction.
 
 Recompute implementation lines and all dependency metrics. A reduction is
-expected from deleting reverse coverage reconstruction, duplicate exact
-classifiers, broad adapter fields, and redundant runtime mappings. Falling
-below 80,000 lines would be welcome, but it is not sufficient evidence of a
-successful refactoring and is not worth preserving a second authority or
-weakening validation.
+plausible after deleting reverse coverage reconstruction, duplicate exact
+classifiers, broad adapter fields, redundant runtime mappings, and migration
+scaffolding. It is not required. The central hypothesis is that a tidy design
+will unlock simplification that cannot be forced safely while ownership is
+muddied. Falling below 80,000 lines would therefore be an outcome to explain,
+not a target to optimize; remaining above it is acceptable when every durable
+component and line category has a clear owner and purpose.
 
 ## 6. Test and commit discipline
 
 Each stage should be a sequence of small local commits. A useful commit changes
 one authority or one consumer set, adds or updates its focused tests, and leaves
 the tree in a bisectable state. Never leave both old and new authorities active
-across a stage boundary.
+across a stage boundary. Do not knowingly commit a regression in the tests
+relevant to the cut; the full matrix is a periodic checkpoint rather than a
+tax on every edit.
 
 For each stage:
 
 1. run the focused host/unit tests for the component being changed;
 2. run the relevant engine and architecture matrix while iterating;
-3. at stage completion, build with `-j16` and run the complete nonphysical
+3. during a long stage, run the complete nonphysical ConSan suite at coherent
+   convergence points, particularly after replacing an authority or changing
+   a cross-component contract;
+4. at stage completion, build with `-j16` and run the complete nonphysical
    ConSan suite with `ctest -j16`;
-4. then run the physical `gfx1201` tests alone with `ctest -j1`;
-5. compare the test inventory with the baseline so that a green result caused
+5. then run the physical `gfx1201` tests alone with `ctest -j1`;
+6. compare the test inventory with the baseline so that a green result caused
    by lost test discovery cannot pass the gate;
-6. update this document or the handoff with the stage result and exact commit.
+7. update this document or the handoff with the stage result and exact commit.
 
 The five emulated targets remain the routine cross-architecture gate. Physical
 GPU tests are serialized and less frequent during iteration, but mandatory at
 each completed stage. Existing paired device tests must not be weakened to make
 a boundary change pass.
 
+When investigation exposes an existing bug, treat it as part of the current
+work rather than deferring it behind the refactoring:
+
+1. reduce the bug to the smallest useful reproducer and identify the affected
+   modes and targets;
+2. add a regression test that fails for the bug for the right reason;
+3. fix the bug at the component that owns the violated invariant, even when
+   that requires adjusting the provisional boundary;
+4. run the focused test, affected mode/target matrix, and any neighboring
+   contract tests; and
+5. commit the bug fix and regression test as a distinct reviewable change when
+   practical, then resume the boundary migration.
+
+A test that only encodes the current implementation shape is not a substitute
+for a semantic regression test. Conversely, an architecture- or mode-specific
+bug should have a specific fixture when that specificity is real; it should not
+force target or mode knowledge back into common code.
+
 ## 7. Definition of success
 
 The fourth refactoring is complete when all of the following are true:
 
+- the production source and build graph present a short, stable component map
+  whose names, purposes, inputs, outputs, and dependency direction can be
+  explained without reference to textual include order;
+- every cross-component semantic fact and decision has one named authority and
+  a typed forward product;
 - coverage is produced directly from intent-bound commit/rejection events and
   contains no patch-shape reconstruction;
 - runtime registration, replay, and analysis consume a validated semantic
@@ -1235,8 +1383,17 @@ The fourth refactoring is complete when all of the following are true:
   emitted program;
 - the two mega-translation-units have been replaced by compiled components with
   declared interfaces and enforced dependency direction;
+- raw gfx-member-specific implementation lives in that target's owned files,
+  and genuinely family-shared implementation lives in named family-owned
+  files; common semantic and engine components do not contain scattered raw
+  architecture recipes;
+- mode-specific implementation lives in mode-owned files or regions, and code
+  shared by an exact subset of modes lives in a named subset component rather
+  than being duplicated or hidden behind deep common-code switches;
 - all five emulated architectures and serialized physical `gfx1201` tests pass,
   with no loss of test inventory;
+- every bug discovered during the work has a regression test and an owner-level
+  fix validated on its affected modes and targets;
 - implementation size and coupling metrics are recomputed and documented;
 - the mode/target interaction bucket is smaller, or every surviving region has
   an explicit justification and owner;
@@ -1245,6 +1402,13 @@ The fourth refactoring is complete when all of the following are true:
   require editing each engine for an already-normalized operation;
 - shared-MOI and other subset-shared implementations have declared contracts
   and enforced visibility rather than relying on textual inclusion.
+
+There is deliberately no success condition tied to an 80,000-line threshold.
+The final accounting should reveal whether clarified ownership unlocked
+deletion, but legibility, correctness, containment, and enforceable dependency
+direction decide completion. The final component inventory should be direct
+source material for the later design-document update, not another forensic
+survey of what the code actually does.
 
 The key outcome is not merely a rearranged source tree. It is that a future
 change to a patch kind cannot alter semantic coverage, a new target encoding
