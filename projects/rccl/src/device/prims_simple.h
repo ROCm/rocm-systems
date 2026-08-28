@@ -278,14 +278,13 @@ class Primitives<T, RedOp, Fan, Direct,
             && MultimemSrcs == 0 && MultimemDsts == 0 && !Src) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send && Dst && ncclShmem.groups[group].srcs[0] != ncclShmem.groups[group].dsts[1]) {
-            printf("DirectRecv and DirectSend with overlapping srcs and dsts\n");
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend, /*PreOpSrcs*/ 0>(
               tid, nworkers, /*redArg*/ 0, /*postOp*/ false, 1, ncclShmem.groups[group].srcs, fan.nsend(),
               ncclShmem.groups[group].dsts + 1, workSize);
           }
         } else if (DirectSend && !DirectRecv && SrcBuf != Input && ncclShmem.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
-          printf("DirectSend with empty destination\n");
+
           reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/ 0>(
             tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv, ncclShmem.groups[group].srcs, Dst,
             ncclShmem.groups[group].dsts, workSize);
@@ -295,7 +294,6 @@ class Primitives<T, RedOp, Fan, Direct,
                                     DirectRecv * MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1 + NCCL_MAX_DIRECT_ARITY) :
                                                                                     1;
           if (Send && Dst && ncclShmem.groups[group].dsts[1] == nullptr) {
-            printf("DirectSend with registered buffers and send to net peer\n");
             // this case should only be directCopySend() with registered buffers and send to net peer
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
                        Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
@@ -483,7 +481,6 @@ private:
             void* src0 = (T*)ncclShmem.groups[group].srcs[0] + pOffset;
             ssize_t realPeerSize = min(realSize, totalElem - pOffset);
             if (realPeerSize > 0 && ncclShmem.groups[group].dsts[i] != nullptr) {
-              printf("Reducing peer %d with realPeerSize=%zd\n", i, realPeerSize);
               reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, PreOpSrcs>(
                 tid, nworkers, ncclShmem.groups[group].redOpArgs, false, 1, &src0, 1, ncclShmem.groups[group].dsts + i,
                 realPeerSize);
@@ -506,12 +503,10 @@ private:
             void* dst0 = (T*)ncclShmem.groups[group].dsts[0] + pOffset;
             ssize_t realPeerSize = min(realSize, totalElem - pOffset);
             if (DirectRecv && ncclShmem.groups[group].srcs[i] == dst0) realPeerSize = 0;
-            if (realPeerSize > 0) {
-              printf("Receiving from peer %d with realPeerSize=%zd\n", i, realPeerSize);
+            if (realPeerSize > 0)
               reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
                 tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, 1, ncclShmem.groups[group].srcs + i, 1, &dst0,
                 realPeerSize);
-              }
           }
         }
       }
@@ -744,8 +739,10 @@ public:
     if (tid < 32 && ((1UL << tid) < nranks)) {
       int rank = ncclShmem.comm.rank;
       uint32_t delta = 1 << tid;
+      // When sharing, RS and AG both recv from rank-delta and send to rank+delta; otherwise AG mirrors RS.
+      const bool shared = ncclShmem.comm.patSharedQps != 0;
       // Load recv peer
-      int recvPeer = mode == primsModePatRs ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int recvPeer = (shared || mode == primsModePatRs) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       struct ncclPatPeer* peer = ((struct ncclPatPeer*)recvPeers) + tid;
       struct ncclConnInfo* conn = peer->conn = channel->peers[recvPeer]->recv + connIndexRecv;
       peer->step = conn->step;
@@ -755,7 +752,7 @@ public:
       peer->accSize = 0;
       peer->connStepSize = conn->stepSize / sizeof(T);
       // Load send peer
-      int sendPeer = mode == primsModePatAg ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int sendPeer = (!shared && mode == primsModePatAg) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       peer = ((struct ncclPatPeer*)sendPeers) + tid;
       conn = peer->conn = channel->peers[sendPeer]->send + connIndexSend;
       peer->step = conn->step;
