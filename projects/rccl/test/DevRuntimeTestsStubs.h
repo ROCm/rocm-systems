@@ -51,6 +51,8 @@ extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsy
 extern std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_hipIpcGetMemHandle;
 extern std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_hipIpcOpenMemHandle;
 extern std::function<hipError_t(void*)> g_hipIpcCloseMemHandle;
+extern std::function<hipError_t(int*)> g_hipGetDevice;
+extern std::function<hipError_t(int)> g_hipSetDevice;
 extern std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> g_hipMemGetAddressRange;
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)> g_hipMemRetainAllocationHandle;
 

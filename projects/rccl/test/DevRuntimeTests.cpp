@@ -3974,6 +3974,158 @@ TEST_F(DevrGetGinAnvilMemLayoutTest, UnknownAddress_ReturnsInvalidArgument) {
 
 
 // ---------------------------------------------------------------------------
+// ncclCommWindowRegister_impl is the public entry point. It does not register
+// anything itself -- it validates, then queues a task for the group machinery
+// to run at ncclGroupEnd.
+
+class CommWindowRegisterImplTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> rankToNode;
+  std::vector<ncclPeerInfo> peers;
+  ncclWindow_vidmem* out = nullptr;
+  void* const kUserPtr = reinterpret_cast<void*>(0x100000);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 1;
+    comm->localRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    comm->symmetricSupport = 1;
+    rankToNode.assign({0});
+    comm->rankToNode = rankToNode.data();
+    // ncclDevrInitOnce's proxy-only path rebuilds the team from this.
+    localRankToRank.assign({0});
+    comm->localRankToRank = localRankToRank.data();
+    peers.assign(1, ncclPeerInfo{});
+    peers[0].totalGlobalMem = 1u << 20;
+    comm->peerInfo = peers.data();
+  }
+
+  std::vector<int> localRankToRank;
+
+  void TearDown() override {
+    // Drain whatever the call queued; the group machinery would normally own it.
+    while (!ncclIntruQueueEmpty(&comm->devrState.regTaskQueue)) {
+      free(ncclIntruQueueDequeue(&comm->devrState.regTaskQueue));
+    }
+    while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+      free(ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue));
+    }
+    free(comm->devrState.lsaRankList);
+    g_callocCallIndex = 0;
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// The work is deferred: a task carrying the caller's arguments is queued, and
+// the out-pointer it will later fill is recorded rather than written now.
+TEST_F(CommWindowRegisterImplTest, Succeeds_QueuesTaskCarryingArguments) {
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclSuccess);
+  ASSERT_FALSE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+
+  ncclDevrRegTask* task = ncclIntruQueueHead(&comm->devrState.regTaskQueue);
+  EXPECT_EQ(task->userPtr, kUserPtr);
+  EXPECT_EQ(task->userSize, 8192u);
+  EXPECT_EQ(task->winFlags, NCCL_WIN_COLL_SYMMETRIC);
+  EXPECT_EQ(task->outWinDev, &out);
+  EXPECT_EQ(out, nullptr);  // cleared on entry, filled when the group runs
+}
+
+// Branch: a null pointer is rejected before anything is queued.
+TEST_F(CommWindowRegisterImplTest, NullUserPtr_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, nullptr, 8192, &out, 0), ncclInvalidArgument);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
+// Branch: so is a zero-length window.
+TEST_F(CommWindowRegisterImplTest, ZeroSize_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 0, &out, 0), ncclInvalidArgument);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
+// Branch: a communicator supporting neither symmetric nor host-RMA windows has
+// nothing to register, which is success with no work queued -- not an error.
+TEST_F(CommWindowRegisterImplTest, NoWindowSupport_SucceedsWithoutQueueing) {
+  comm->symmetricSupport = 0;
+  comm->hostRmaSupport = false;
+
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+  EXPECT_EQ(out, nullptr);
+}
+
+// Host-RMA alone is enough to accept the window, even without symmetric support.
+TEST_F(CommWindowRegisterImplTest, HostRmaOnly_QueuesTask) {
+  comm->symmetricSupport = 0;
+  comm->hostRmaSupport = true;
+
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
+  EXPECT_FALSE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
+// Branch: the RMA CE init is queued lazily on the first window, since it is
+// collective and cannot run from this non-collective entry point.
+TEST_F(CommWindowRegisterImplTest, FirstWindow_QueuesRmaCeInit) {
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
+  EXPECT_FALSE(ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue));
+}
+
+// Branch: already initialised, so no second init is queued.
+TEST_F(CommWindowRegisterImplTest, RmaCeAlreadyInitialised_SkipsInitTask) {
+  comm->rmaState.rmaCeState.initialized = true;
+
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue));
+}
+
+// Branch: the task allocation fails, so nothing is queued.
+TEST_F(CommWindowRegisterImplTest, TaskAllocFails_ReturnsErrorWithoutQueueing) {
+  g_callocFailAt = g_callocCallIndex;  // the register task is the next ncclCalloc
+
+  EXPECT_NE(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclCommWindowDeregister_impl routes to whichever teardown matches how the
+// window was registered.
+
+class CommWindowDeregisterImplTest : public WindowRegisterNonSymTest {};
+
+// Branch: a null window is a no-op, so double-deregister at the API level is
+// benign rather than an error.
+TEST_F(CommWindowDeregisterImplTest, NullWindow_ReturnsSuccess) {
+  EXPECT_EQ(ncclCommWindowDeregister_impl(comm, nullptr), ncclSuccess);
+}
+
+// Branch: without symmetric support the non-symmetric teardown runs.
+TEST_F(CommWindowDeregisterImplTest, NonSymmetric_RoutesToNonSymTeardown) {
+  comm->symmetricSupport = 0;
+  ncclWindow_t winDev = nullptr;
+  ASSERT_EQ(windowRegisterNonSym(comm, kUserPtr, 4096, 0, nullptr, &winDev), ncclSuccess);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+
+  EXPECT_EQ(ncclCommWindowDeregister_impl(comm, winDev), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: an unregistered handle is rejected by the teardown it routes to,
+// and that error reaches the caller rather than being swallowed here.
+TEST_F(CommWindowDeregisterImplTest, NonSymmetricUnknownWindow_PropagatesError) {
+  comm->symmetricSupport = 0;
+  ncclWindow_vidmem stranger{};
+
+  EXPECT_NE(ncclCommWindowDeregister_impl(comm, &stranger), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

@@ -552,6 +552,22 @@ static hipError_t DefaultIpcCloseMemHandle(void*) { return hipSuccess; }
 std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultIpcCloseMemHandle;
 
 HIP_FAKE hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
+
+// Current-device get/set, used by the public window API to scope its work to
+// the comm's device. Unfaked they reach the real driver, as the memcpy/memset
+// pair did.
+static hipError_t DefaultGetDevice(int* dev) {
+  if (dev) *dev = 0;
+  return hipSuccess;
+}
+std::function<hipError_t(int*)> g_hipGetDevice = DefaultGetDevice;
+
+HIP_FAKE hipError_t hipGetDevice(int* dev) { return g_hipGetDevice(dev); }
+
+static hipError_t DefaultSetDevice(int) { return hipSuccess; }
+std::function<hipError_t(int)> g_hipSetDevice = DefaultSetDevice;
+
+HIP_FAKE hipError_t hipSetDevice(int dev) { return g_hipSetDevice(dev); }
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -653,6 +669,8 @@ void ResetDevRuntimeFakes() {
   g_shadowPoolFree                          = DefaultShadowPoolFree;
   g_shadowPoolToHost                        = DefaultShadowPoolToHost;
   g_intruAddressMapFind                     = DefaultIntruAddressMapFind;
+  g_hipGetDevice                            = DefaultGetDevice;
+  g_hipSetDevice                            = DefaultSetDevice;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_hipMemsetAsync                          = DefaultMemsetAsync;
   g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
