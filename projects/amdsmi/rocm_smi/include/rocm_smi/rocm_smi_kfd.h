@@ -4,6 +4,7 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
@@ -76,7 +77,10 @@ class KFDNode {
   std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_;
   std::map<std::string, uint64_t> properties_;
   std::shared_ptr<Device> amdgpu_device_;
-  uint64_t total_memory_ = 0;  // cached mem_banks sum; 0 = not yet computed
+  // Cached mem_banks sum; 0 = not yet computed. Atomic because one KFDNode is
+  // shared by every logical device behind the same PCI BDF (the partitioned
+  // case), and those devices are serialized by different per-device mutexes.
+  std::atomic<uint64_t> total_memory_{0};
 };
 
 int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes);
