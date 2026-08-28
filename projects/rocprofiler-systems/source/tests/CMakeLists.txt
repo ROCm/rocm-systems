@@ -7,6 +7,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:sdk-tracing-config-tests>
     $<TARGET_OBJECTS:control-posix-clock-tests>
+    $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>

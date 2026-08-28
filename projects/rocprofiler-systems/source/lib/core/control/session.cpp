@@ -8,20 +8,42 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::control
 {
+namespace
+{
+using callback_list = std::vector<std::function<void()>>;
+
+void
+invoke_all(const callback_list& callbacks)
+{
+    for(const auto& callback : callbacks)
+    {
+        callback();
+    }
+}
+
+bool
+listens_to(const subscriber& sub, scope event_scope)
+{
+    return sub.scopes.contains(event_scope);
+}
+}  // namespace
+
 session::session() noexcept
 {
     for(auto& tracing_flag : m_scope_tracing)
     {
-        tracing_flag.store(true, std::memory_order_relaxed);
+        tracing_flag.store(true, std::memory_order_release);
     }
 }
 
@@ -29,6 +51,7 @@ void
 session::shutdown()
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const std::scoped_lock notify_lk{ m_notify_mutex };
     {
         const std::scoped_lock subs_lk{ m_subscribers_mutex };
         m_subscribers.clear();
@@ -41,7 +64,7 @@ session::shutdown()
         }
         for(auto& tracing_flag : m_scope_tracing)
         {
-            tracing_flag.store(true, std::memory_order_relaxed);
+            tracing_flag.store(true, std::memory_order_release);
         }
     }
 }
@@ -95,6 +118,11 @@ session::apply_locked_transition(const std::function<void()>& mutate,
     // a separate mutex from m_actions_mutex (released below, before
     // notify_pause()/notify_resume() run) so a subscriber callback that
     // re-enters is_active()/is_active_without() cannot deadlock.
+    //
+    // WARNING: on_pause/on_resume run with this mutex still held (see
+    // notify_pause/notify_resume below). A callback must never call
+    // set_action() itself, directly or transitively - that re-enters
+    // m_notify_mutex and deadlocks.
     const std::scoped_lock notify_lk{ m_notify_mutex };
 
     const auto scope_idx  = static_cast<std::size_t>(event_scope);
@@ -103,10 +131,10 @@ session::apply_locked_transition(const std::function<void()>& mutate,
     {
         const std::scoped_lock action_lk{ m_actions_mutex };
 
-        was_active = m_scope_tracing[scope_idx].load(std::memory_order_relaxed);
+        was_active = m_scope_tracing[scope_idx].load(std::memory_order_acquire);
         mutate();
         now_active = resolve_locked(event_scope);
-        m_scope_tracing[scope_idx].store(now_active, std::memory_order_relaxed);
+        m_scope_tracing[scope_idx].store(now_active, std::memory_order_release);
     }
 
     if(was_active == now_active)
@@ -147,20 +175,12 @@ session::is_active_without(std::string_view name, scope event_scope) const noexc
     });
 }
 
-namespace
+callback_list
+session::collect_pause_callbacks(scope event_scope)
 {
-bool
-listens_to(const subscriber& sub, scope event_scope)
-{
-    return sub.scopes.contains(event_scope);
-}
-}  // namespace
-
-void
-session::notify_pause(scope event_scope)
-{
-    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    const std::scoped_lock notify_lk{ m_subscribers_mutex };
+    callback_list          to_fire;
+    const std::scoped_lock subs_lk{ m_subscribers_mutex };
+    to_fire.reserve(m_subscribers.size());
     for(const auto& sub : m_subscribers)
     {
         if(!listens_to(sub, event_scope))
@@ -170,16 +190,25 @@ session::notify_pause(scope event_scope)
         LOG_DEBUG("session: pausing subscriber '{}'", sub.name);
         if(sub.on_pause)
         {
-            sub.on_pause();
+            to_fire.push_back(sub.on_pause);
         }
     }
+    return to_fire;
 }
 
 void
-session::notify_resume(scope event_scope)
+session::notify_pause(scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    const std::scoped_lock notify_lk{ m_subscribers_mutex };
+    invoke_all(collect_pause_callbacks(event_scope));
+}
+
+callback_list
+session::collect_resume_callbacks(scope event_scope)
+{
+    callback_list          to_fire;
+    const std::scoped_lock subs_lk{ m_subscribers_mutex };
+    to_fire.reserve(m_subscribers.size());
     for(const auto& sub : m_subscribers)
     {
         if(!listens_to(sub, event_scope))
@@ -195,8 +224,16 @@ session::notify_resume(scope event_scope)
         LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
         if(sub.on_resume)
         {
-            sub.on_resume();
+            to_fire.push_back(sub.on_resume);
         }
     }
+    return to_fire;
+}
+
+void
+session::notify_resume(scope event_scope)
+{
+    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    invoke_all(collect_resume_callbacks(event_scope));
 }
 }  // namespace rocprofsys::control

@@ -128,7 +128,7 @@ public:
     {
         assert(static_cast<std::size_t>(event_scope) < SCOPE_COUNT);
         return m_scope_tracing[static_cast<std::size_t>(event_scope)].load(
-            std::memory_order_relaxed);
+            std::memory_order_acquire);
     }
 
     /// True iff every trigger of @p event_scope except @p name currently has
@@ -151,6 +151,11 @@ private:
     [[nodiscard]] bool resolve_locked(scope event_scope) const noexcept;
     void               notify_pause(scope event_scope);
     void               notify_resume(scope event_scope);
+
+    [[nodiscard]] std::vector<std::function<void()>> collect_pause_callbacks(
+        scope event_scope);
+    [[nodiscard]] std::vector<std::function<void()>> collect_resume_callbacks(
+        scope event_scope);
 
     /// Applies @p mutate to the scoped action map under lock, recomputes
     /// that scope's active state, and broadcasts if it changed. Shared by

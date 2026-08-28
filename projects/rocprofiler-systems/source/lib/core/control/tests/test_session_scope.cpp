@@ -3,8 +3,13 @@
 
 #include "core/control/session.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
+#include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace
@@ -12,6 +17,9 @@ namespace
 using rocprofsys::control::action;
 using rocprofsys::control::scope;
 using rocprofsys::control::session;
+
+constexpr auto CALLBACK_REENTRY_TIMEOUT = std::chrono::seconds{ 5 };
+constexpr auto SLOW_CALLBACK_SLEEP      = std::chrono::milliseconds{ 200 };
 
 // Minimal trigger stub: registers under a fixed name and scope, and exposes
 // set_action() so a test can drive a later action change.
@@ -174,4 +182,79 @@ TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
     }
     EXPECT_FALSE(s.is_active(scope::sampling))
         << "unregistering the global window must not remove the same-named sampling one";
+}
+
+// The failure mode is a deadlock, not a wrong value, so the publish runs on a
+// worker thread against a deadline. Everything that thread touches is
+// shared_ptr-owned and captured by the thread itself: a deadlocked worker can
+// only be detached, and must not be left holding references into this frame.
+TEST(session_callback_test, callback_may_re_enter_the_session)
+{
+    const auto sess = std::make_shared<session>();
+    const auto gate =
+        std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
+    const auto reentered = std::make_shared<std::atomic<int>>(0);
+
+    sess->subscribe({ .on_pause =
+                          [owner = sess.get(), reentered]() {
+                              owner->subscribe({ .on_pause  = nullptr,
+                                                 .on_resume = nullptr,
+                                                 .name      = "added_from_callback",
+                                                 .scopes    = { scope::global } });
+                              reentered->fetch_add(1);
+                          },
+                      .on_resume = nullptr,
+                      .name      = "reentrant_sub",
+                      .scopes    = { scope::global } });
+
+    std::packaged_task<void()> publish{ [sess, gate]() {
+        gate->set_action(action::pause);
+    } };
+    const auto  done = publish.get_future();
+    std::thread worker{ std::move(publish) };
+
+    if(done.wait_for(CALLBACK_REENTRY_TIMEOUT) != std::future_status::ready)
+    {
+        worker.detach();
+        FAIL() << "subscriber callback deadlocked re-entering the session";
+    }
+
+    worker.join();
+    EXPECT_EQ(reentered->load(), 1);
+}
+
+// Finalization tears down the subsystems these callbacks touch well before it
+// joins the trigger threads that can fire them, so a callback that outlives
+// shutdown() reaches freed state.
+TEST(session_callback_test, shutdown_waits_for_an_in_flight_callback)
+{
+    const auto sess = std::make_shared<session>();
+    const auto gate =
+        std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
+
+    std::atomic<bool> callback_entered{ false };
+    std::atomic<bool> callback_finished{ false };
+
+    sess->subscribe({ .on_pause =
+                          [&callback_entered, &callback_finished]() {
+                              callback_entered.store(true);
+                              std::this_thread::sleep_for(SLOW_CALLBACK_SLEEP);
+                              callback_finished.store(true);
+                          },
+                      .on_resume = nullptr,
+                      .name      = "slow_sub",
+                      .scopes    = { scope::global } });
+
+    std::thread publisher{ [gate]() { gate->set_action(action::pause); } };
+
+    while(!callback_entered.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{ 1 });
+    }
+
+    sess->shutdown();
+    EXPECT_TRUE(callback_finished.load())
+        << "shutdown() returned while a subscriber callback was still running";
+
+    publisher.join();
 }
