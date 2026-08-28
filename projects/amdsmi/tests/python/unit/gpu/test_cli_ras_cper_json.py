@@ -58,6 +58,20 @@ class _FakeHandle:
         self.value = value
 
 
+def _fabric_entry(timestamp, error_severity):
+    """A fabric CPER entry shaped like ``amdsmi_get_fabric_cper_entries`` returns one.
+
+    The IFoE placeholder GUID maps to no known notify type, so the formatted
+    ``notify_type`` is ``"Unknown"``; ``source`` is what marks it as fabric.
+    """
+    return {
+        "timestamp": timestamp,
+        "error_severity": error_severity,
+        "notify_type": "Unknown",
+        "source": "fabric",
+    }
+
+
 class _FakeLibraryException(Exception):
     def __init__(self, code=0, message="mock error"):
         super().__init__(message)
@@ -349,12 +363,7 @@ class TestCliRasCperJson(unittest.TestCase):
             seen = counts_fabric.get(handle.value, 0)
             counts_fabric[handle.value] = seen + 1
             if seen == 0:
-                # IFoE fabric CPER with all-zeros GUID
-                entry = {
-                    "timestamp": "2026/08/24 12:05:00",
-                    "error_severity": "non_fatal_uncorrected",  # linkdown
-                    "notify_type": "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
-                }
+                entry = _fabric_entry("2026/08/24 12:05:00", "non_fatal_uncorrected")
                 return ({0: entry}, cursor + 1, [b""], 0)
             return ({}, cursor, [], 0)
 
@@ -383,11 +392,7 @@ class TestCliRasCperJson(unittest.TestCase):
             seen = counts_fabric.get(handle.value, 0)
             counts_fabric[handle.value] = seen + 1
             if seen == 0:
-                entry = {
-                    "timestamp": "2026/08/24 13:00:00",
-                    "error_severity": "fatal",  # fabric-fatal
-                    "notify_type": "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00",
-                }
+                entry = _fabric_entry("2026/08/24 13:00:00", "fatal")
                 return ({0: entry}, cursor + 1, [b""], 0)
             return ({}, cursor, [], 0)
 
