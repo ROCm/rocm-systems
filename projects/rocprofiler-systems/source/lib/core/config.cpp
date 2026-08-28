@@ -1464,9 +1464,9 @@ configure_settings(bool _init)
     // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        const auto papi_events                = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
-        const bool all_events_network_related = std::ranges::all_of(papi_events,
-            [](const std::string& _e) { return _e.starts_with("net:::"); });
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [](const std::string& _e) { return _e.starts_with("net:::"); });
         if(!all_events_network_related)
         {
             LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
@@ -1489,10 +1489,11 @@ configure_settings(bool _init)
         {
             if(!papi_events.empty())
             {
-                LOG_INFO("perf_event_paranoid={} but all PAPI events use the net component "
-                         "(reads /proc/net/dev, no perf_event required). "
-                         "Proceeding with NIC profiling.",
-                         _paranoid);
+                LOG_INFO(
+                    "perf_event_paranoid={} but all PAPI events use the net component "
+                    "(reads /proc/net/dev, no perf_event required). "
+                    "Proceeding with NIC profiling.",
+                    _paranoid);
             }
         }
     }
