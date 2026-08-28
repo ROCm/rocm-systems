@@ -96,6 +96,14 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_alltoall_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_alltoall_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_alltoall_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
+
 __device__ ATTR_NO_INLINE void rocshmem_float_alltoall_wg(
     rocshmem_team_t team, float *dest, const float *source, int nelems);
 
@@ -134,6 +142,12 @@ __device__ ATTR_NO_INLINE void rocshmem_ulong_alltoall_wg(
 
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
     rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_half_alltoall_wg(
+    rocshmem_team_t team, __half *dest, const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_alltoall_wg(
+    rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nelems);
 
 /**
  * @name ROCSHMEM_ALLTOALLMEM_WG
@@ -806,6 +820,14 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_fcollect_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_fcollect_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
+
 /**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
@@ -893,6 +915,14 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_fcollect_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_fcollect_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_half_fcollect_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_fcollect_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
 
 /**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE
