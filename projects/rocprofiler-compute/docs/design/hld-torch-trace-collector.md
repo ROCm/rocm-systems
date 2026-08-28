@@ -4,8 +4,7 @@
 
 `--torch-trace` attributes GPU kernel counters to PyTorch operators.
 
-- Profile records hardware counters per GPU kernel. Kernel names come from
-  the device runtime. They do not name the operator that launched the work.
+- Profile mode does not name the operator that launched the GPU work.
 - `--torch-trace` emits ROCTX ranges around operators. Analyze joins those
   ranges to kernel counters (`--list-torch-operators`, `--torch-operator`).
 - This HLD is the C++ `RecordFunction` collector that `--torch-trace` loads
@@ -18,9 +17,6 @@ Surrounding pieces:
   location. Wraps run only on the Python thread. The wrap set does not
   change when the collector loads. With the collector, wrap frames share
   the collector stack; without it they go to the Python ROCTX path.
-- Today `--torch-trace` wraps module forward, `Tensor.backward`,
-  distributed collectives, optimizer step, tensor methods, compile, CUDA
-  graphs, and similar entry points.
 - `TorchDispatchMode` can emit ATen ranges on the Python thread only.
   Autograd workers run backward in C++ and never enter that context.
 - RecordFunction runs on every thread that executes an op and sees the
@@ -105,101 +101,17 @@ flowchart LR
 - Python wraps push frames for entry points ATen does not name.
 - When the collector is loaded, ATen ops use the callback only
   (`TorchDispatchMode` is off).
-- If the module fails to load or install, profile falls back to
+- If the module fails to install, profile falls back to
   `TorchDispatchMode` and warns.
 - An unsupported PyTorch version is an error, not a fallback.
 - This collector needs two wraps: module forward
   (`nn.Module.{Class}.forward`) and `Tensor.backward`.
-- The rest of the wrap surface (System Context) is leftover from the
-  Python tracer.
-- Tensor methods often repeat an ATen op RecordFunction already names.
-- Optimizer step, collectives, and compile are Python entry points
-  RecordFunction does not name (`torch.distributed.all_reduce` is
-  wrap-only).
-- Whether to keep those wraps is an open question.
+- The rest of the wrap surface is leftover from the Python tracer
+  (see the LLD).
 
-### Decision 2: How workers see Python scopes
+### Decision 2: How backward joins forward
 
-- Worker RecordFunction sees ATen and autograd names
-  (`evaluate_function`, `AddmmBackward0`). It does not see Python wraps
-- The worker never runs those wraps, so debug info is how wrap frames
-  reach it.
-- Without that copy, worker ranges start at `evaluate_function` and omit
-  `Tensor.backward`. Forward module and ATen names still appear from the
-  snapshot.
-- Python wraps store the live wrap stack in PyTorch's per-thread debug
-  info.
-- After forward returns, module wraps have popped, so when autograd
-  queues the worker this is typically just `Tensor.backward`.
-- Autograd copies that onto the worker. On the first op on an empty
-  worker stack, those wrap frames are copied onto the worker stack.
-- The forward snapshot is a separate process-wide snapshot store
-  (Decision 3). It is not debug info.
-- A snapshot is the entire stack at the forward op, keyed by sequence
-  number and thread id.
-- The forward thread pushes into that store. The backward thread reads
-  (pops) from it.
-
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": true, "curve": "linear", "nodeSpacing": 8, "rankSpacing": 70, "padding": 4}}}%%
-flowchart TB
-  subgraph top [ ]
-    direction LR
-    subgraph main [Main thread]
-      direction TB
-      D["debug info"]
-      P["forward snapshot"]
-    end
-    AG(["autograd"])
-    subgraph worker [Worker thread]
-      direction TB
-      WpadT["<br/>"]
-      subgraph wflow [ ]
-        direction LR
-        S1["overlay"] -->|"operator starts"| S2["RecordFunction"]
-        S2 -->|"push leaf"| S3["snapshot + leaf"]
-        S3 -->|"emit range"| FIN["ROCTX range"]
-      end
-      WpadB["<br/>"]
-    end
-    D -->|"copies debug info<br/>onto the worker task"| AG
-    AG -->|"first RecordFunction,<br/>empty stack"| S1
-  end
-  subgraph store [Process-wide snapshot store]
-    direction TB
-    SpadT["<br/>"]
-    KEY["(seqNr, thread id)"]
-    SpadB["<br/>"]
-  end
-  store -->|"backward op lookup"| S3
-  S3 ~~~ store
-  style top fill:none,stroke:none
-  style wflow fill:none,stroke:none
-  style WpadT fill:none,stroke:none,color:transparent
-  style WpadB fill:none,stroke:none,color:transparent
-  style SpadT fill:none,stroke:none,color:transparent
-  style SpadB fill:none,stroke:none,color:transparent
-```
-
-| Step | From | Stack |
-| --- | --- | --- |
-| debug info | wrap stack on the main thread | **Tensor.backward** |
-| forward snapshot | process-wide snapshot store (Decision 3) | **SimpleNet.forward / Linear.forward / aten::linear / aten::addmm** |
-| overlay | debug info copied onto the worker | **Tensor.backward** |
-| RecordFunction | worker callback | **Tensor.backward / evaluate_function: AddmmBackward0** |
-| leaf | current op on the worker | **evaluate_function: AddmmBackward0 / AddmmBackward0** |
-| snapshot + leaf | snapshot store + backward leaf | **… / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm / AddmmBackward0** |
-| ROCTX range | full worker stack | **Tensor.backward / evaluate_function: AddmmBackward0 / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm / AddmmBackward0** |
-
-- Debug info shares the wrap stack still live on the main thread. In this
-  example that is `Tensor.backward`.
-- It does not include `SimpleNet.forward` or `aten::addmm`; those frames
-  have already left the stack.
-- The worker has the current operator name (`evaluate_function`,
-  `AddmmBackward0`) and gets the entire forward stack from the snapshot.
-- The ROCTX range is those three pieces together.
-
-### Decision 3: How backward joins forward
+**Snapshot store keyed by `(seqNr, thread id)` : Join while the forward stack still exists using a Process-wide map
 
 - A snapshot is the entire stack at a forward op with a sequence number.
 - The forward thread pushes it under `(seqNr, thread id)` in a
@@ -211,7 +123,7 @@ flowchart TB
 - Name matching is not used: several ops can share a name; seqNr is the
   ATen correlation id.
 
-### Decision 4: How the C++ callback is shipped
+### Decision 3: How the C++ callback is shipped
 
 | Option | Pros | Cons |
 | --- | --- | --- |
@@ -232,12 +144,7 @@ Details: `lld-torch-trace-collector.md`.
 
 ## Validation, security and debuggability
 
-- gtest: snapshot store, wire format, leaf labels, scope balance, GPU
-  forward/backward with ROCTX intercepted.
 - Profile/analyze tests for `--torch-trace` output and operator listing.
-- Collector stats: push/pop balance, snapshot hit rate, callback errors.
-  RecordFunction callbacks must not throw into PyTorch; errors are counted
-  instead.
 
 ---
 
@@ -245,7 +152,7 @@ Details: `lld-torch-trace-collector.md`.
 
 | Item | Notes |
 | --- | --- |
-| Inductor static launcher | Those kernels launch without Triton's Python entry point, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
-| Python wrap surface | See System Context. Collectives, optimizer step, tensor methods, compile, and similar wraps are broader than module forward and `Tensor.backward`. Cleanup is separate from this collector. |
+| Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
+| Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
 | Further Torch versions | Each new version needs a built artifact and a CMake version gate. |
-| DispatchMode fallback | Unsupported version is fatal; other load failures fall back. Whether fallback should remain is not settled. |
+| DispatchMode fallback | Unsupported version is fatal; install failures fall back. Whether fallback should remain is not settled. |

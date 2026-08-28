@@ -2,201 +2,175 @@
 
 ## Motivation
 
-This document covers the implementation of torch operator attribution described
-in `hld-torch-trace-collector.md`. User-facing behavior is in
-`docs/how-to/profile/mode.rst` (`--torch-trace`).
+Implementation of the RecordFunction collector in `hld-torch-trace-collector.md`.
 
 ---
 
-## Data flow
+## Code flow
 
 ```mermaid
 flowchart LR
-  profile["rocprof-compute profile --torch-trace"] --> inject["inject_roctx"]
-  inject --> py["Python wraps<br/>push_user_scope"]
-  inject --> so["versioned collector module<br/>RecordFunction start / end"]
-  py --> tls["per-thread stack"]
-  so --> tls
-  tls --> roctx["roctxRangePushA"]
-  roctx --> csv["marker_api_trace.csv"]
-  csv --> analyze["analyze splits Function on :#"]
+  launch["launch.py"] --> torch["torch.py"]
+  torch --> loader["torch_cpp_loader.py"]
+  loader --> finder["native_tool_finder.py"]
+  loader --> so["torch_trace_collector-*.so"]
+  so --> module["torch_trace_collector_module.cpp"]
+  torch --> module
+  module --> core["torch_trace_collector.cpp"]
+  core --> snap["snapshot_store.cpp"]
+  core --> roctx["roctxRangePushA"]
 ```
 
-- `inject_roctx` loads the versioned module and wraps Python entry points.
-- Wraps call `push_user_scope` / `pop_user_scope`.
-- ATen ops use the RecordFunction callback. `TorchDispatchMode` is off when
-  the collector is loaded.
-- Both paths share one per-thread stack. Each ROCTX range is the full stack.
-- The wrap set does not change when the collector loads. Wrap frames go to
-  the collector stack when it is loaded, and to the Python ROCTX path
-  otherwise.
-- An unsupported PyTorch version is an error. Other load/install failures
-  fall back to `TorchDispatchMode` and warn.
-
-Python API: `install`, `uninstall`, `push_user_scope`, `pop_user_scope`,
-`dump_stats`.
+The wrap set lives in `torch.py` and does not change when the collector loads.
 
 ---
 
-## Python wraps
+## Threading
 
-**Capture.** `nn.Module.__call__` is wrapped (not `forward()`, so hooks are
-covered). On each call it records:
+How workers see Python scopes:
 
-| Field | Value |
-| --- | --- |
-| Marker | `nn.Module.{ClassName}.forward` |
-| Context | `#{n}@{file:line}` — call count on that instance, and the first caller outside the profiler and PyTorch |
-
-`Tensor.backward` is the same pattern with marker `torch.Tensor.backward`.
-Nested calls push nested frames. Exit pops the matching frame.
-
-`--torch-trace` also wraps distributed collectives, optimizer step, tensor
-methods, compile, CUDA graphs, and similar entry points. Those also call
-`push_user_scope` when the collector is loaded. This collector needs module
-forward and `Tensor.backward`; the rest is leftover from the Python tracer
-(HLD open question). `torch.distributed.all_reduce` is wrap-only.
-
-**Use.**
-
-1. **Operator tree.** Later ATen ranges on that thread keep wrap frames as
-   prefix, so analyze shows `SimpleNet.forward / Linear.forward / aten::addmm`
-   instead of a bare `aten::addmm`.
-2. **Autograd workers.** `push_user_scope` publishes the live wrap stack into
-   PyTorch thread-local debug info. Autograd copies that onto the worker.
-   After forward returns, module wraps have popped, so at `backward()` this
-   is typically `Tensor.backward`. If the worker stack is empty at the first
-   op, that chain is overlaid. Without the copy, worker ranges omit
-   `Tensor.backward`.
-3. **Forward–backward join.** The snapshot is the entire stack at the forward
-   op (module frames plus ATen leaves), saved under `(seqNr, thread id)`.
-   The matching backward op pops it. That is how `AddmmBackward0` includes
-   `SimpleNet.forward / Linear.forward / aten::addmm`. It is not debug info.
-
-`self.fc1(x)` in `tests/simple_net.py`:
+- Worker RecordFunction sees ATen and autograd names
+  (`evaluate_function`, `AddmmBackward0`). It does not see Python wraps.
+- The worker never runs those wraps, so debug info is how wrap frames
+  reach it.
+- Without that copy, worker ranges start at `evaluate_function` and omit
+  `Tensor.backward`. Forward module and ATen names still appear from the
+  snapshot.
+- Python wraps store the live wrap stack in PyTorch's per-thread debug
+  info.
+- After forward returns, module wraps have popped, so when autograd
+  queues the worker this is typically just `Tensor.backward`.
+- Autograd copies that onto the worker. Whenever the worker stack is empty,
+  those wrap frames are copied onto it.
 
 ```mermaid
-sequenceDiagram
-  participant Wrap as Python wrap
-  participant RF as RecordFunction
-  participant Stack as per-thread stack
-  participant ROCTX as ROCTX
-
-  Wrap->>Stack: push nn.Module.SimpleNet.forward
-  Stack->>ROCTX: SimpleNet.forward
-  Wrap->>Stack: push nn.Module.Linear.forward
-  Stack->>ROCTX: SimpleNet.forward / Linear.forward
-  RF->>Stack: push aten::linear
-  Stack->>ROCTX: ... / aten::linear
-  RF->>Stack: push aten::addmm
-  Stack->>ROCTX: ... / aten::linear / aten::addmm
+%%{init: {"flowchart": {"htmlLabels": true, "curve": "linear", "nodeSpacing": 8, "rankSpacing": 70, "padding": 4}}}%%
+flowchart TB
+  subgraph top [ ]
+    direction LR
+    subgraph main [Main thread]
+      direction TB
+      D["debug info"]
+      P["forward snapshot"]
+    end
+    AG(["autograd"])
+    subgraph worker [Worker thread]
+      direction TB
+      WpadT["<br/>"]
+      subgraph wflow [ ]
+        direction LR
+        S1["overlay"] --> S2["consume snapshot"]
+        S2 --> S3["push leaf"]
+        S3 --> FIN["ROCTX range"]
+      end
+      WpadB["<br/>"]
+    end
+    D -->|"copies debug info<br/>onto the worker task"| AG
+    AG -->|"RecordFunction,<br/>empty stack"| S1
+  end
+  subgraph store [Process-wide snapshot store]
+    direction TB
+    SpadT["<br/>"]
+    KEY["(seqNr, thread id)"]
+    SpadB["<br/>"]
+  end
+  store -->|"backward op lookup"| S2
+  S2 ~~~ store
+  style top fill:none,stroke:none
+  style wflow fill:none,stroke:none
+  style WpadT fill:none,stroke:none,color:transparent
+  style WpadB fill:none,stroke:none,color:transparent
+  style SpadT fill:none,stroke:none,color:transparent
+  style SpadB fill:none,stroke:none,color:transparent
 ```
 
-`nn.Module.SimpleNet.forward` is only from the wrap. RecordFunction does not
-emit it.
+| Step | From | Stack |
+| --- | --- | --- |
+| debug info | wrap stack on the main thread | **Tensor.backward** |
+| forward snapshot | saved on the main thread during forward | **SimpleNet.forward / Linear.forward / aten::linear / aten::addmm** |
+| overlay | debug info copied onto the worker | **Tensor.backward** |
+| consume snapshot | process-wide store, prefix dedup | **Tensor.backward / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm** |
+| push leaf | RecordFunction name | **… / AddmmBackward0** |
+| ROCTX range | full worker stack | **Tensor.backward / SimpleNet.forward / Linear.forward / aten::linear / aten::addmm / AddmmBackward0** |
+
+- Debug info shares the wrap stack still live on the main thread. In this
+  example that is `Tensor.backward`.
+- It does not include `SimpleNet.forward` or `aten::addmm`; those frames
+  have already left the stack.
+- Consume appends that frozen forward nest, then the leaf is pushed.
+  Save is not this path; it already ran on the forward thread.
+- The ROCTX range is wrap + forward nest + leaf.
+
+- Stack and debug-info guards are `thread_local` (`torch_trace_collector.cpp`).
+- Snapshot store and install handle are process-wide.
+- Python thread's `push_user_scope` publishes the **live** wrap stack into `ThreadLocalDebugInfo`.
+- Autograd copies the main thread's `ThreadLocalState` onto the worker thread before `evaluate_function`.
+- Overlay copies that restored `ThreadLocalDebugInfo` chain onto the worker's empty marker stack.
 
 ---
 
-## Design
+## RecordFunction start and end
+####  `torch_trace_collector.cpp`
 
-**Stack.** Frames are `(marker, context)`. `push_user_scope` publishes the
-stack through PyTorch thread-local debug info. Autograd copies that onto the
-worker task. Overlay runs only when the worker stack is empty at the first
-op. Frames already present as a shared prefix are not pushed again.
-
-**RecordFunction start.** Order on each start:
-
-1. If the stack is empty, overlay debug info.
-2. If the scope is `BACKWARD_FUNCTION` and `seqNr >= 0`, pop the snapshot
-   keyed by `(seqNr, forwardThreadId)` and push missing frames.
+1. If the stack is empty, overlay debug info. If overlay pushed frames, the leaf is nested.
+2. If the scope is `BACKWARD_FUNCTION`, `seqNr >= 0`, and `forwardThreadId() != 0`, consume `(seqNr, forwardThreadId)` and push frames that are not already a shared prefix. `forwardThreadId() == 0` means no forward identity (`evaluate_function` and other non-Node backward records).
 3. Push the leaf (RecordFunction name plus default leaf context).
-4. If the scope is `FUNCTION` and `seqNr >= 0`, save the stack under
-   `(seqNr, current thread id)`.
-5. Format the full stack and `roctxRangePushA`.
+4. If the scope is `FUNCTION` and `seqNr >= 0`, save the stack (including the leaf) under `(seqNr, currentThreadId())`.
+5. Format the stack, append `|torch`, `roctxRangePushA`.
 
-**Forward snapshot.** A snapshot is the entire stack at that forward op,
-including the leaf just pushed. Name matching is not used.
+Overlay and consumed snapshot frames are extra pushes. `end_cb` pops the
+ROCTX range, the leaf, then those extras.
 
-**Wire format.** The string passed to ROCTX is:
+---
 
-```text
-marker1/.../markerN:context1/.../contextN[|backend]
-```
+## Snapshot store
+#### `snapshot_store.cpp`, `torch_trace_collector.cpp`
 
-- Marker `%` and `/` are encoded as `%25` and `%2F`. Contexts are not encoded.
-- RecordFunction ranges append `|torch`.
-- User-scope ranges append `|<backend>` when `backend` is non-empty.
-- Profile post-processing moves `|backend` into a `Backend` column.
-  Unrecognized suffixes are tagged `unknown`.
-- Analyze splits `Function` on `:#`.
+- **Insert:** After a forward leaf with a valid `seqNr` is pushed, the collector copies that thread's stack into this map. The matching backward often runs later on a worker, after those frames have popped.
+- **Consume:** The matching backward looks up `(seqNr, forward thread id(non-zero))` and pushes frames the stack does not already have. This map is not debug info.
+- **Overlay:** If this thread's stack is empty, copy the live wrap chain from debug info onto it (typically `Tensor.backward`). Autograd copied that TLS; it is not this map.
+- **Entry:** Wrap frames plus nested ATen names, including the forward leaf.
+- **Key:** `(seqNr, thread id)`. Save uses `currentThreadId()`; consume uses `forwardThreadId()`. Consume moves the entry out. A second save of the same key overwrites.
+- **Shards:** 64 shards. Hash of the key picks the shard. Each has its own map, LRU, and lock. Keys in the same shard share that lock.
+- **LRU:** Each shard keeps at most 10000 entries. A new key past that drops the oldest in that shard (`snapshots_dropped`).
+- **Lifetime:** `pending()` is the sum of shard sizes. `uninstall()` / `clear()` empties every shard. Detached forwards stay until LRU evicts them.
+- **Counters:** `dump_stats()`: `snapshots_saved`, `snapshots_consumed`, `snapshots_dropped`, `snapshots_overwritten`, and `pending()` as `snapshots_pending`.
 
-**Leaf context:**
+---
 
-| When | Context |
-| --- | --- |
-| Forward, stack empty after overlay | `#1@aten:0` |
-| Forward, stack non-empty after overlay | `#1@aten.nested:0` |
-| Backward with `seqNr >= 0` | `#1@autograd.bwd:0` |
-| Backward with no sequence number | `#1@autograd.engine:0` |
+## Wire format
+#### `wire_format.h`
 
-**Example.** `tests/simple_net.py`: `self.fc1(x)` then `loss.backward()`.
+- Each ROCTX range name is the full stack: `marker1/.../markerN:context1/.../contextN[|backend]`.
+- Marker `%` and `/` are `%25` and `%2F`. Contexts are not encoded.
+- RecordFunction ranges append `|torch`. User-scope ranges append `|<backend>` when `backend` is non-empty.
+- Profile post-processing moves `|backend` into a `Backend` column. Unrecognized suffixes are `unknown`.
 
-User scopes:
-
-```text
-nn.Module.SimpleNet.forward:#1@simple_net.py:50
-nn.Module.SimpleNet.forward/nn.Module.Linear.forward:#1@simple_net.py:50/#1@simple_net.py:35
-```
-
-ATen leaf:
-
-```text
-nn.Module.SimpleNet.forward/nn.Module.Linear.forward/aten::linear/aten::addmm:#1@simple_net.py:50/#1@simple_net.py:35/#1@aten.nested:0/#1@aten.nested:0
-```
-
-Backward leaf on a worker thread:
-
-```text
-torch.Tensor.backward/autograd::engine::evaluate_function: AddmmBackward0/nn.Module.SimpleNet.forward/nn.Module.Linear.forward/aten::linear/aten::addmm/AddmmBackward0:#1@simple_net.py:52/#1@aten.nested:0/#1@simple_net.py:50/#1@simple_net.py:35/#1@aten.nested:0/#1@aten.nested:0/#1@autograd.bwd:0
-```
-
-- `torch.Tensor.backward` is the launcher wrap, from debug info.
-- `evaluate_function` and `AddmmBackward0` are RecordFunction names on the
-  worker.
-- `SimpleNet.forward / Linear.forward / aten::linear / aten::addmm` is the
-  snapshot.
-
-**Errors.** RecordFunction callbacks increment `callback_errors` and do not
-propagate exceptions. `push_user_scope` rolls back and re-raises.
+- **Leaf context** (`leaf_context.h`). RecordFunction runs in C++ and does not carry a location; unlike wrap frames that have it. Dummy locations are set by `leaf_context.h` based on RecordFunction scope, `seqNr`, and whether the stack was empty after overlay — e.g. a backward op vs a nested ATen op.
 
 ---
 
 ## Build and load
 
-- `BUILD_TORCH_TRACE_COLLECTOR` is `AUTO` (skip if unavailable), `ON`
-  (require), or `OFF`.
-- Torch is loaded from `$ROCM_PATH/../torch`. Supported versions are 2.13
-  and 2.14.
-- The module requires Python 3 development headers.
-- The artifact is `torch_trace_collector-<version>.so` under
-  `<libdir>/rocprofiler-compute/`.
-- The loader selects the file whose version matches the workload
-  `torch.__version__` with a local `+...` suffix removed.
+- `BUILD_TORCH_TRACE_COLLECTOR` in `src/lib/torch_trace_collector/CMakeLists.txt` is `AUTO` (skip if Torch / ROCTX / Python headers are missing), `ON` (require), or `OFF`. CMake looks for the PyTorch install in the `torch` directory beside `$ROCM_PATH` (sibling of the ROCm prefix).
+- PyTorch version must match `^2\.(13|14)([.]|$)` after stripping a `+...` suffix. The MODULE links `Python3::Module` (no `torch_python`). `PREFIX` is empty.
+- CMake names the artifact `torch_trace_collector-<Torch_VERSION>.so` (local `+...` stripped). Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
+- `torch_cpp_loader.py` keys on the workload `torch.__version__` with a local `+...` suffix removed. That string must equal the filename version; 2.13.1 does not load `torch_trace_collector-2.13.0.so`. The filename does not encode the CPython ABI; the MODULE is built against the configure-time `Python3::Module`.
+
+Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
+
+1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector-*.so`
+2. `$CMAKE_BINARY_DIR/lib` when that env var is set
+3. `<package_root>/../build/lib`
+4. `<package_root>/lib/_build/lib`
+
+First unique resolved path per version wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`. `CMAKE_BINARY_DIR` does not override an installed module with the same version.
 
 ---
 
-## Validation
+## Tests
 
-- gtest: snapshot store, wire round-trip, leaf labels, install/uninstall,
-  scope balance, GPU forward/backward (ROCTX intercepted).
-- Profile/analyze tests for `--torch-trace` output and operator listing.
-- `dump_stats()`: push/pop balance, snapshot hit rate, callback errors.
-
-## Limitations
-
-- Inductor kernels launched through the static launcher appear as torch
-  ranges (they do not go through Triton's Python entry point). Direct
-  Triton launches are `--triton-trace`.
-- Python wraps run only on the Python thread. Worker wrap names come from
-  debug info overlay and the snapshot, not from running the wraps on the
-  worker.
+  - `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp`: verifies snapshot join of backward to forward, overlay of wrap frames on a worker, dummy locations, marker encoding, and install.
+  - `tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py`: verifies the loader finds a matching collector artifact.
+  - `tests/integration/test_profile_torch_trace.py`: verifies end-to-end `--torch-trace` on a sample workload.
+  - `tests/integration/test_torch_trace_coverage.py`: compares `--torch-trace` operator and kernel coverage to `torch.profiler`.
