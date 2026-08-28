@@ -328,8 +328,6 @@ def write_graph_launch_csv(importData, config) -> None:
 
 def write_hip_event_csv(importData, config) -> None:
 
-    import sqlite3
-
     agent_id = build_agent_id_string(config.agent_index_value)
 
     query = f"""
@@ -349,10 +347,7 @@ def write_hip_event_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    try:
-        write_sql_query_to_csv(importData, config, query, "hip_event")
-    except sqlite3.OperationalError:
-        pass
+    write_sql_query_to_csv(importData, config, query, "hip_event")
 
 
 def write_memory_allocation_csv(importData, config) -> None:

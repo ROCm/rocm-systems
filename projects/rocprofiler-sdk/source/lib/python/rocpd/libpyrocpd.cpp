@@ -602,8 +602,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto counters = rocpd::sql_generator<rocpd::types::counter>{
                             conn, select_guid_nid_pid("counters_collection")};
 
-                        auto hip_events = rocpd::sql_generator<rocpd::types::hip_events>{
-                            conn, select_guid_nid_pid("hip_events")};
+                        // Schemas < 3.0.4 lack the hip_events table/view entirely, so allow
+                        // generator to be empty if the query for the view fails
+                        auto hip_events =
+                            rocpd::sql_generator<rocpd::types::hip_events, rocpd::optional_view>{
+                                conn, select_guid_nid_pid("hip_events")};
 
                         auto regions = rocpd::sql_generator<rocpd::types::region>{
                             conn, select_guid_nid_pid("regions"), region_order_by};
