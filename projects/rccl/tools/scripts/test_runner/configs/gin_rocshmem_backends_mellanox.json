@@ -140,7 +140,10 @@
           "name": "AlltoallHybrid_Reference", "description": "GIN hybrid (LSA + GIN) alltoall reference (2 ranks/node)", "test_filter": "GinMPIDeviceTests.AlltoallHybrid_Reference",
           "num_ranks": 4, "num_gpus": 2
         },
-        { "name": "Alltoall_SdmaInternal",    "description": "GIN-SDMA alltoall via ncclAlltoAll (SDMA only)",       "test_filter": "GinMPIDeviceTests.Alltoall_SdmaInternal" },
+        {
+          "name": "Alltoall_SdmaInternal", "description": "GIN-SDMA alltoall via ncclAlltoAll (SDMA only, 8 ranks)", "test_filter": "GinMPIDeviceTests.Alltoall_SdmaInternal",
+          "num_ranks": 8, "num_gpus": 8
+        },
         { "name": "MultiContext_AllFourRoute","description": "GIN multi-context, all four routes",                    "test_filter": "GinMPIDeviceTests.MultiContext_AllFourRoute" },
         {
           "name": "MultiContext_NonPowerOf2", "description": "GIN multi-context with non-power-of-2 context count (NCONNECTIONS=3, NCONTEXTS=3)", "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",

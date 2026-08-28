@@ -163,7 +163,8 @@ std::string sdmaInternalA2AEnvSkipReason() {
   return "";
 }
 
-// Comm-side preconditions from ncclAllToAllGinSdmaEligible; skip rather than fail.
+// Comm-side subset of ncclAllToAllGinSdmaEligible in gin_alltoall_sdma.cu, which is
+// the source of truth. Skipping keeps an ineligible setup from failing opaquely.
 std::string sdmaInternalA2ACommSkipReason(ncclComm_t comm) {
   if (comm->nNodes != 1)
     return "GIN-SDMA alltoall is scaleup-only (requires nNodes=1)";
@@ -3297,8 +3298,12 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // Same sizes as Alltoall_PureReference so the two are directly comparable.
-  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+  // Per-peer bytes select the kernel inside ncclAllToAllGinSdma: below
+  // NCCL_GIN_A2A_SDMA_MIN_BYTES (default 8 MiB) it runs ncclGinA2AKernel<false>,
+  // at or above it runs ncclGinA2AKernel<true>.
+  const std::vector<size_t> counts = {
+      1, 1024, size_t{1} << 16,            // 4 B / 4 KiB / 256 KiB per peer -> LSA
+      (size_t{8} << 20) / sizeof(float)};  // 8 MiB per peer -> SDMA engine
 
   // No ncclDevCommCreate here: the path lazily builds its own private devComm.
   const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
@@ -3349,7 +3354,8 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
         ncclAlltoAll(dSend, dRecv, count, ncclFloat, comm, stream));
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-    // Set by ncclGinA2AInitOnce, so a silent fallback fails here instead of passing.
+    // Set by ncclGinA2AInitOnce and sticky for the comm's lifetime: this catches a
+    // fallback on the first dispatch, but cannot tell the LSA and SDMA tiers apart.
     ASSERT_MPI_TRUE(comm->ginA2AState.initialized);
 
     MPI_Barrier(MPI_COMM_WORLD);
