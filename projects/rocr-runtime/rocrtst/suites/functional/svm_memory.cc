@@ -1050,13 +1050,20 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
   hsa_signal_t completion = {0};
   ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &completion));
 
-  // prefetch every range to the gpu agent to make pages resident before discarding
+  // store non-zero data in the region before prefetch to GPU
+  static const int kPattern = 1;
+  for (uint32_t i = 0; i < kNumRegions; i++) {
+    int* data = static_cast<int*>(ptrs[i]);
+    for (size_t j = 0; j < sizes[i] / sizeof(int); j++) {
+      data[j] = kPattern;
+    }
+  }
+
   for (uint32_t i = 0; i < kNumRegions; i++) {
     hsa_signal_store_relaxed(completion, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptrs[i], sizes[i], agent, 0, nullptr, completion));
     while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {
-    }
+                                     HSA_WAIT_STATE_ACTIVE)) {}
   }
 
   // verify that all the ranges are gpu resident after prefetch 
@@ -1080,8 +1087,8 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
       ptrs.data(), sizes.data(), kNumRegions, dst_agents.data(), kNumRegions, kNumDepSignals,
       dep_signals, completion));
 
-  /* The operation must not run until every dependency signal has reached 0, so the completion
-  signal is still pending and the ranges keep their pre-discard residency. */
+  /* The operation must only run after every dep signal has reached 0, so 
+  the completion signal should still be pending */
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   ASSERT_EQ(hsa_signal_load_scacquire(completion), 1);
 
@@ -1103,7 +1110,6 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
     ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
     ASSERT_EQ(attr.value, agent.handle) << "region " << i << " was not prefetched to the destination GPU";
 
-    // Discard leaves the preferred location untouched
     attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
     attr.value = 0;
     ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
@@ -1116,8 +1122,7 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
     ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
   }
 
-  /* Contents were discarded, so the ranges must read back as freshly zeroed pages. Done last
-  because touching them from the CPU migrates the pages away from the GPU. */
+  // Contents were discarded, so the ranges must read back as zeroed pages
   for (uint32_t i = 0; i < kNumRegions; i++) {
     int* data = static_cast<int*>(ptrs[i]);
     for (size_t j = 0; j < sizes[i] / sizeof(int); j++) {

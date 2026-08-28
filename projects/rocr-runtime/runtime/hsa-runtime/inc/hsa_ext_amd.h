@@ -4297,7 +4297,7 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
  *                            Must not be NULL.
  * @param[in] sizes           Array of @p count range sizes in bytes. Must not be NULL.
  * @param[in] count           Number of ranges. Must not be 0.
- * @param[in] dst_agents      Array of @p num_dst_agents unique destination GPU agents.
+ * @param[in] dst_agents      Array of @p num_dst_agents destination GPU agents.
  *                            Must not be NULL. All entries must be valid GPU agents.
  * @param[in] num_dst_agents  Number of entries in @p dst_agents. Must not be 0.
  * @param[in] num_dep_signals Number of dependency signals. Can be 0.
@@ -4309,9 +4309,8 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
  * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime not initialized.
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT An entry in @p dst_agents is not a valid
  *         GPU agent.
- * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs, @p sizes, @p dst_agents, or
- *         @p dst_agent_idxs is NULL; @p count or @p num_dst_agents is 0; a
- *         dst_agent_idx is out of range; @p dep_signals and @p num_dep_signals are
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs, @p sizes, @p dst_agents
+ *         is NULL; @p count or @p num_dst_agents is 0; @p dep_signals and @p num_dep_signals are
  *         inconsistent; or a pointer was not allocated with hsa_amd_vmem_address_reserve.
  * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED XNACK is not enabled on this system.
  */
