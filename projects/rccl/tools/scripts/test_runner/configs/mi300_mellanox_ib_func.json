@@ -2905,6 +2905,18 @@
           }
         }
       ]
+    },
+    "multisegment_cast_rma_multinode": {
+      "extends": "multisegment_transport_multinode",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_CAST_RMA_All_MultiNode",
+          "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2938,6 +2950,11 @@
     {
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
       "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CAST RMA (Multi-Node)",
+      "config": "multisegment_cast_rma_multinode",
       "enabled": true
     },
     {
