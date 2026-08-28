@@ -128,13 +128,6 @@ class TestGpuThermal(unittest.TestCase):
 
     # integration
 
-    def test_get_gpu_fan_rpms(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_fan_rpms=amdsmi.amdsmi_get_gpu_fan_rpms, index=0
-        )
-        return
-
     def test_get_temp_metric(self):
         self.common.print_func_name("")
 

@@ -54,6 +54,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
   - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
 
+- **Added per-API Python test coverage under `tests/python/integration/`**.
+  - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
+  - A coverage guard (`tests/python/integration/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
+
+- **Reorganized the Python test tree into unit, integration and functional tiers**.
+  - `tests/python/unit/` is now hardware-free: the per-API suites that drive a live device moved to `tests/python/integration/`.
+  - Added `tests/python/run_tests.py`, which takes `--unit`, `--integration`, `--functional` and `--cli` and runs any combination in one report; naming no tier runs them all.
+  - `integration_tests.py` now discovers `integration/` rather than `functional/`, and the new `functional_tests.py` discovers `functional/`.
+
+- **The per-API suites require a live device**.
+  - Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.
+  - Positive getter coverage moved from `tests/python/functional/` into `tests/python/integration/`; 88 duplicated functional getter tests were removed. Any CI filter naming those test IDs needs updating.
+
 ### Optimized
 
 ### Resolved Issues

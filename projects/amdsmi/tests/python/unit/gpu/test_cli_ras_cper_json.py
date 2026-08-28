@@ -29,16 +29,13 @@ import tempfile
 import types
 import unittest
 
+from common.common import REPO_ROOT, ModuleIsolationMixin
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-# tests/python/unit/gpu -> repo root is four levels up.
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-_CLI_DIR = os.path.join(_REPO_ROOT, "amdsmi_cli")
-_RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py")
+_CLI_DIR = os.path.join(REPO_ROOT, "amdsmi_cli") if REPO_ROOT else ""
+_RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py") if _CLI_DIR else ""
 
-# Modules imported (directly or transitively) when the source CLI loads against
-# the faked ``amdsmi`` package. They are snapshotted and cleared around the suite
-# so a real/installed copy loaded by a sibling test is never shadowed.
+# Modules imported directly or transitively when the source CLI loads against
+# the faked ``amdsmi`` package.
 _CLI_MODULES = (
     "amdsmi",
     "amdsmi.amdsmi_interface",
@@ -177,20 +174,17 @@ def _build_ras_args(handles, **overrides):
     return argparse.Namespace(**defaults)
 
 
-class TestCliRasCperJson(unittest.TestCase):
+class TestCliRasCperJson(ModuleIsolationMixin, unittest.TestCase):
+    ISOLATED_MODULES = _CLI_MODULES
+    ISOLATED_PATH = _CLI_DIR
+
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(_RAS_SRC):
-            raise unittest.SkipTest(f"amd-smi CLI ras.py not found at {_RAS_SRC}")
-
-        # Clear the CLI modules so the fake amdsmi wins the import race, keeping a
-        # snapshot to restore afterwards.
-        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
-        for name in _CLI_MODULES:
-            sys.modules.pop(name, None)
-        cls._path_added = _CLI_DIR not in sys.path
-        if cls._path_added:
-            sys.path.insert(0, _CLI_DIR)
+        if not _RAS_SRC or not os.path.isfile(_RAS_SRC):
+            raise unittest.SkipTest("amd-smi CLI ras.py not found in the source tree")
+        super().setUpClass()
+        # Drop the cached CLI modules so the fake amdsmi wins the import race.
+        cls.clear_isolated_modules()
 
         cls.interface = _install_fake_amdsmi()
         import amdsmi_helpers
@@ -199,16 +193,6 @@ class TestCliRasCperJson(unittest.TestCase):
         cls.helpers_cls = amdsmi_helpers.AMDSMIHelpers
         cls.logger_cls = amdsmi_logger.AMDSMILogger
         cls.ras_module = _load_ras_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "_path_added", False) and _CLI_DIR in sys.path:
-            sys.path.remove(_CLI_DIR)
-        for name, mod in getattr(cls, "_saved_modules", {}).items():
-            if mod is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = mod
 
     def setUp(self):
         self._handles = [_FakeHandle(10), _FakeHandle(20)]
