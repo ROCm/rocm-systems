@@ -1,10 +1,28 @@
 # Kernel replay overhead benchmark configuration.
 #
-# Kernel replay collects N counter groups from a single application run by re-executing each
-# dispatch N times, snapshotting and restoring the agent's tracked device memory around each pass.
-# The alternative it replaces -- application replay -- runs the whole application N times, once per
-# group. Which one is cheaper is entirely a property of the workload, and this configuration is
-# built to measure where the crossover is rather than to assert a number.
+# There are three ways to collect N counter groups, and they do not collect the same thing:
+#
+#   application replay  run the whole application N times, once per group. Every dispatch ends up
+#                       with every group, at the cost of N application runs. This is the thing
+#                       kernel replay is meant to replace.
+#   multiplexed         run the application once and rotate the group every few dispatches, which
+#                       is what rocprofv3 does with several --pmc flags and no replay. Cheap,
+#                       because it does not collect more than one group's worth of counters, and
+#                       no dispatch carries every group.
+#   kernel replay       run the application once and re-execute each dispatch N times,
+#                       snapshotting and restoring the agent's tracked device memory around each
+#                       pass. Every dispatch ends up with every group, from one run.
+#
+# Only application replay and kernel replay produce the same data, so only those two are a
+# like-for-like comparison; multiplexed collection is measured as the floor. Which of the two is
+# cheaper is entirely a property of the workload, and this configuration is built to measure where
+# the crossover is rather than to assert a number.
+#
+# A benchmark job is one rocprofv3 invocation, so application replay cannot be written down as a
+# job: it is N runs whose costs add up. The single-group job below stands in for one of those runs,
+# and the benchmark_replay_* views multiply it by the group count to project what the full
+# application replay would have cost. scripts/replay_perf.py measures it directly instead, for when
+# the projection is not good enough.
 #
 # The cost model the jobs are laid out against is:
 #
@@ -21,14 +39,15 @@
 #
 # Run with:
 #   rocprofv3-benchmark.py -i kernel-replay.yaml
-#   rocprofv3-benchmark.py -i kernel-replay.yaml --filter-rocprofv3 replay_4_groups app_replay
+#   rocprofv3-benchmark.py -i kernel-replay.yaml --filter-rocprofv3 replay_4_groups counters_only
 #
 # See docs/conceptual/kernel_replay/kernel_replay_performance.md for what the numbers mean.
 
 defaults:
   rocprofv3:
-    # The comparison that matters. Both collect the same four counter groups; replay_4_groups does
-    # it in one application run, app_replay in four. Filter to just these two for the headline
+    # The comparison that matters. replay_4_groups collects four groups on every dispatch in one
+    # application run; counters_only below collects one group in one run and is what an application
+    # replay of the same four groups would repeat four times. Filter to those two for the headline
     # number.
     replay_4_groups:
       [
@@ -42,7 +61,10 @@ defaults:
         --pmc,
         SQ_BUSY_CYCLES,
       ]
-    app_replay:
+    # The same four groups without replay, which rotates them across dispatches instead of
+    # collecting them all everywhere. Not comparable to replay_4_groups on data collected, only on
+    # what the group machinery costs when nothing is replayed.
+    multiplex_4_groups:
       [--pmc, SQ_WAVES, --pmc, GRBM_COUNT, --pmc, SQ_INSTS_VALU, --pmc, SQ_BUSY_CYCLES]
 
     # Pass-count sweep at fixed footprint and dispatch count. Wall time should grow roughly
@@ -71,8 +93,12 @@ defaults:
         SQ_INSTS_SMEM,
       ]
 
-    # Counter collection without replay, as the floor: whatever this costs is attributable to
-    # counter collection rather than to the replay machinery.
+    # One counter group, no replay. Two jobs in one: the floor, so that whatever the replay
+    # configurations cost above it is attributable to the replay machinery rather than to counter
+    # collection, and the unit of application replay, since collecting G groups that way is this
+    # run repeated G times. The benchmark_replay_* views look for exactly this configuration when
+    # projecting what an application replay would have cost, so it needs to stay in any filtered
+    # run that is meant to produce a comparison.
     counters_only: [--pmc, SQ_WAVES]
 
   benchmark:
@@ -141,6 +167,40 @@ jobs:
   - name: replay-dispatch-count-high
     group: [kernel-replay, dispatch-sweep]
     command: [transpose, 1, 2000, 100, 2048, 2048]
+
+  # ---------------------------------------------------------------------------
+  # Dispatches-per-range axis: same dispatch count, footprint and pass count, but the application
+  # synchronizes after every nth dispatch instead of at a fixed cadence.
+  #
+  # transpose's third argument is how many dispatches it enqueues between stream synchronizations,
+  # which is the length of an uninterrupted run of dispatches. Kernel replay drains the agent per
+  # replayed dispatch, so an application that already synchronizes constantly has less to lose from
+  # that drain than one that keeps a deep queue in flight, and this sweep is what separates the two.
+  #
+  # It is also the axis range replay will be measured on. Range replay snapshots once per range
+  # rather than once per dispatch, which turns the cost model from
+  #
+  #   dispatches x footprint x passes    into    ranges x footprint x passes
+  #
+  # so the saving is proportional to how many dispatches fall inside a range. Recording the axis now
+  # means the kernel replay numbers it will be compared against already exist, measured on the same
+  # workloads, rather than having to be regenerated later against a moved baseline.
+  # ---------------------------------------------------------------------------
+  - name: replay-sync-every-dispatch
+    group: [kernel-replay, range-length-sweep]
+    command: [transpose, 1, 500, 1, 2048, 2048]
+
+  - name: replay-sync-every-10-dispatches
+    group: [kernel-replay, range-length-sweep]
+    command: [transpose, 1, 500, 10, 2048, 2048]
+
+  - name: replay-sync-every-100-dispatches
+    group: [kernel-replay, range-length-sweep]
+    command: [transpose, 1, 500, 100, 2048, 2048]
+
+  - name: replay-sync-once
+    group: [kernel-replay, range-length-sweep]
+    command: [transpose, 1, 500, 500, 2048, 2048]
 
   # ---------------------------------------------------------------------------
   # Application shapes.
