@@ -81,20 +81,32 @@ def build_summary(rows):
         else 0.0
     )
 
+    # Keyed by mangled name (unique per symbol) rather than demangled text,
+    # which can collide across distinct symbols (duplicate static/anonymous-
+    # namespace functions across TUs, compiler clones like ".cold"/
+    # ".constprop.N") and would otherwise silently merge unrelated
+    # callers/callees. caller_label/callee_label carry the demangled text
+    # for display only.
     caller_to_callees = defaultdict(set)
     callee_to_callers = defaultdict(set)
+    caller_label = {}
+    callee_label = {}
     for r in rows:
         if r["name"] in PASSED_KINDS and r["callee_mangled"]:
-            caller_to_callees[r["caller_demangled"]].add(r["callee_mangled"])
-            callee_to_callers[r["callee_demangled"]].add(r["caller_mangled"])
+            caller_mangled = r["caller_mangled"]
+            callee_mangled = r["callee_mangled"]
+            caller_to_callees[caller_mangled].add(callee_mangled)
+            callee_to_callers[callee_mangled].add(caller_mangled)
+            caller_label.setdefault(caller_mangled, r["caller_demangled"])
+            callee_label.setdefault(callee_mangled, r["callee_demangled"])
 
     top_callers = sorted(
-        ((name, len(callees)) for name, callees in caller_to_callees.items()),
+        ((caller_label[name], len(callees)) for name, callees in caller_to_callees.items()),
         key=lambda t: t[1],
         reverse=True,
     )
     top_callees = sorted(
-        ((name, len(callers)) for name, callers in callee_to_callers.items()),
+        ((callee_label[name], len(callers)) for name, callers in callee_to_callers.items()),
         key=lambda t: t[1],
         reverse=True,
     )
