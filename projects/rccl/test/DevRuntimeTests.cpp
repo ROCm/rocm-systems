@@ -458,6 +458,37 @@ TEST_F(DevrFinalizeTest, DrainsEveryRemainingWindow) {
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
+// Branch: the proxy-only drain. Non-sym windows are not backed by the
+// symmetric VMM machinery, so finalize unwinds them through
+// windowDeregisterNonSym instead of symWindowDestroy. Deferred until that
+// function had tests of its own.
+TEST_F(DevrFinalizeTest, ProxyOnly_DrainsNonSymWindows) {
+  comm->symmetricSupport = 0;
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &out), ncclSuccess);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+
+  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// The drain must make progress even when the deregister fails: it only removes
+// the entry on success, so finalize drops it regardless to avoid spinning.
+TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillEmptiesWindowList) {
+  comm->symmetricSupport = 0;
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &out), ncclSuccess);
+  ScopedHook poolFree(g_shadowPoolFree,
+                      [](ncclShadowPool*, void*, hipStream_t) { return ncclSystemError; });
+
+  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
 // AICOMRCCL-835: a Device-API consumer can create a symmetric-window resource
 // (leaving an ncclDevrMemory on memHead) without a matching destroy. Finalize
 // must drain those before freeing the flat VA reservation, or every per-rank
