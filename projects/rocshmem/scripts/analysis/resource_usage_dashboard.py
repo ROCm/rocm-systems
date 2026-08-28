@@ -17,13 +17,13 @@ My-AMD-tips-and-tricks/Posts/2026-07-15-rocSHMEM-resource-chart.html).
 Usage:
     python3 scripts/analysis/resource_usage_dashboard.py \\
         --baseline-csv res-abc123.csv --baseline-commit abc123 \\
-        --out dashboard.html --top 20
+        --out dashboard.html
 
     python3 scripts/analysis/resource_usage_dashboard.py \\
         --baseline-csv res-abc123.csv --baseline-commit abc123 \\
         --branch-csv   res-def456.csv --branch-commit def456 \\
         --diff-csv res_diff_VGPRs.csv \\
-        --out dashboard.html --top 20
+        --out dashboard.html
 """
 
 import argparse
@@ -190,7 +190,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   }}
   .commit-toggle button.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
   .diff-summary {{ color: var(--ink-secondary); font-size: 13px; margin-bottom: 10px; }}
-  svg text {{ fill: var(--ink-secondary); font-size: 10px; }}
 </style>
 </head>
 <body>
@@ -203,13 +202,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <section class="commit-section">
     {commit_toggle}
     <div id="commitStats"></div>
-    <div class="chart-section">
-      <h2>Top kernels by resource</h2>
-      <div class="controls">
-        <select id="metricPicker"></select>
-      </div>
-      <div id="chartContainer"></div>
-    </div>
     <div class="table-section">
       <h2>All kernels</h2>
       <div class="controls">
@@ -229,9 +221,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 const KERNELS_BY_COMMIT = {kernels_by_commit_json};
 const STATS_HTML_BY_COMMIT = {stats_html_by_commit_json};
 const METRICS = {metrics_json};
-const TOP_N = {top_n};
 const OCC_COL = "{occ_col}";
-const COLOR_GOOD = "{color_good}", COLOR_BAD = "{color_bad}", COLOR_NEUTRAL = "{color_neutral}";
+const COLOR_GOOD = "{color_good}", COLOR_BAD = "{color_bad}", COLOR_NEUTRAL = "#3a3f44";
 const DIFF_ROWS = {diff_rows_json};
 
 function toNum(v) {{ const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }}
@@ -251,7 +242,6 @@ function setActiveCommit(commit) {{
   }});
   document.getElementById("commitStats").innerHTML = STATS_HTML_BY_COMMIT[commit];
   renderTable();
-  drawChart(document.getElementById("metricPicker").value);
 }}
 
 document.querySelectorAll(".commit-toggle button").forEach(b => {{
@@ -303,53 +293,8 @@ function buildHeader() {{
 
 document.getElementById("searchBox").addEventListener("input", renderTable);
 
-// --- SVG bar chart for the selected metric (active commit only) ----------
-const ns = "http://www.w3.org/2000/svg";
-function el(tag, attrs) {{
-  const e = document.createElementNS(ns, tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]);
-  return e;
-}}
-
-function drawChart(metricKey) {{
-  const container = document.getElementById("chartContainer");
-  container.textContent = "";
-  const kernels = KERNELS_BY_COMMIT[activeCommit];
-  const ranked = [...kernels].sort((a, b) => toNum(b[metricKey]) - toNum(a[metricKey])).slice(0, TOP_N);
-  if (!ranked.length) return;
-  const marginL = 220, marginR = 50, rowH = 20, W = 760, plotW = W - marginL - marginR;
-  const H = ranked.length * rowH + 20;
-  const xmax = Math.max(...ranked.map(k => toNum(k[metricKey])), 1);
-  const svg = el("svg", {{ viewBox: `0 0 ${{W}} ${{H}}`, width: "100%", height: H }});
-  ranked.forEach((k, i) => {{
-    const v = toNum(k[metricKey]);
-    const barW = (v / xmax) * plotW;
-    const y = i * rowH;
-    svg.appendChild(el("rect", {{ x: marginL, y: y + 3, width: Math.max(barW, 1), height: rowH - 6, fill: COLOR_NEUTRAL }}));
-    const label = el("text", {{ x: marginL - 8, y: y + rowH / 2 + 4, "text-anchor": "end" }});
-    label.textContent = k.demangled_name.length > 32 ? k.demangled_name.slice(0, 31) + "\\u2026" : k.demangled_name;
-    svg.appendChild(label);
-    const val = el("text", {{ x: marginL + barW + 6, y: y + rowH / 2 + 4 }});
-    val.textContent = v;
-    svg.appendChild(val);
-  }});
-  container.appendChild(svg);
-}}
-
-function buildMetricPicker() {{
-  const picker = document.getElementById("metricPicker");
-  for (const m of METRICS) {{
-    const opt = document.createElement("option");
-    opt.value = m.key; opt.textContent = m.label;
-    picker.appendChild(opt);
-  }}
-  picker.addEventListener("change", () => drawChart(picker.value));
-}}
-
 buildHeader();
-buildMetricPicker();
 setActiveCommit(activeCommit);
-drawChart(METRICS[0].key);
 
 // --- comparison table (baseline vs branch, all kernels, no top-N cap) ----
 if (DIFF_ROWS.length) {{
@@ -530,7 +475,12 @@ def main():
     )
     ap.add_argument("--out", required=True, type=Path, help="output HTML path")
     ap.add_argument(
-        "--top", type=int, default=20, help="rows shown in the per-commit chart"
+        "--top",
+        type=int,
+        default=20,
+        help="unused (kept for compatibility with existing callers) -- the per-commit "
+        "chart this used to size was removed since the sortable/scrollable 'All "
+        "kernels' table already covers top-by-any-metric",
     )
     args = ap.parse_args()
 
