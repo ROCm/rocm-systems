@@ -9,6 +9,9 @@ graph:
   Unit_hipGraphAddEmptyNode_BarrierFunc:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphAddEmptyNode_IndependentLeafNode:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraph_ConcurrentCreate_GraphIDRace:
     <<: *level_2
     tags: [node]

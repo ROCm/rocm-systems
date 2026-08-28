@@ -14,6 +14,8 @@ Testcase Scenarios :
     add another empty node with dependencies on the 3 kernel nodes and
     add 3 independent memcpy_d2h nodes with dependencies on previous empty
     node. Execute the graph and validate the results.
+ 4) Launch a graph in which an independent empty node is the sole node of a
+    leaf segment and verify the launch completes.
 */
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -225,5 +227,36 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
                            false);
   HipTest::freeArrays<int>(inputVec_d3, outputVec_d3, nullptr, inputVec_h3, outputVec_h3, nullptr,
                            false);
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * An empty node emits no packets, so when it is the only node of a leaf segment
+ * there is nothing to carry that segment's completion signal. The event nodes
+ * split the graph into more than one segment, which is what enables the leaf
+ * synchronization that waits on those signals.
+ */
+HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_IndependentLeafNode) {
+  hipGraph_t graph{};
+  hipStream_t stream{};
+  hipEvent_t event{};
+  hipGraphExec_t graphExec{nullptr};
+  hipGraphNode_t emptyNode{}, eventRecordNode{}, eventWaitNode{};
+
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipEventCreate(&event));
+
+  HIP_CHECK(hipGraphAddEventRecordNode(&eventRecordNode, graph, nullptr, 0, event));
+  HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, graph, nullptr, 0, event));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
+
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphDestroy(graph));
 }
