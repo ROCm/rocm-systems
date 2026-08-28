@@ -415,15 +415,17 @@ TEST_F(HipFileDeviceTest, inactive_gpu_reports_zeros)
     EXPECT_DOUBLE_EQ(out.read_bandwidth, 0.0);
 }
 
-TEST_F(HipFileDeviceTest, one_query_per_timestamp_across_devices)
+TEST_F(HipFileDeviceTest, both_devices_forward_the_same_timestamp)
 {
     device_t gpu1{ m_backend, 1 };
 
     sample(TS_1);
     gpu1.get_metrics(m_enabled, TS_1);
 
-    // The devices share a backend; memoization there is what keeps an interval to one
-    // hipFile call. The device layer must not defeat it by querying out of band.
+    // This mock records every get_stats; it does not memoize. One hipFileGetStatsL3
+    // per interval is the real backend's job (snapshot_is_memoized_per_timestamp).
+    // What the device layer must not do is query with a private clock: that would
+    // miss the backend memo and issue a second L3 call for the same sample tick.
     ASSERT_EQ(m_backend->queried_timestamps.size(), 2U);
     EXPECT_EQ(m_backend->queried_timestamps[0], TS_1);
     EXPECT_EQ(m_backend->queried_timestamps[1], TS_1);

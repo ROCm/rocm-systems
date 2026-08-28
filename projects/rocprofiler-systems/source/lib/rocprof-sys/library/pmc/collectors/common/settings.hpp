@@ -214,10 +214,18 @@ struct settings_policy
                     std::string{ env_vars::AMD_SMI_METRICS });
                 auto value_str = setting.has_value() ? setting.value() : "all";
                 return parse_enabled_metrics(value_str);
+            } catch(const std::exception& ex)
+            {
+                LOG_ERROR("Failed to apply {}: {}. Using default AMD SMI metrics "
+                          "(busy, temp, power, mem_usage).",
+                          env_vars::AMD_SMI_METRICS, ex.what());
             } catch(...)
             {
-                return gpu::enabled_metrics{};
+                LOG_ERROR("Failed to apply {}: unknown exception. Using default AMD SMI "
+                          "metrics (busy, temp, power, mem_usage).",
+                          env_vars::AMD_SMI_METRICS);
             }
+            return parse_enabled_metrics("busy, temp, power, mem_usage");
         }();
         return _enabled_metrics;
     }
@@ -264,12 +272,19 @@ struct settings_policy
             result.mode  = nic::device_selection_mode::SPECIFIC;
             result.names = parse_name_list(filter_str);
             return result;
+        } catch(const std::exception& ex)
+        {
+            LOG_ERROR("Failed to apply {}: {}. Disabling NIC sampling only.",
+                      env_vars::SAMPLING_AINICS, ex.what());
         } catch(...)
         {
-            nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
-            return result;
+            LOG_ERROR("Failed to apply {}: unknown exception. Disabling NIC sampling "
+                      "only.",
+                      env_vars::SAMPLING_AINICS);
         }
+        nic::nic_device_filter result;
+        result.mode = nic::device_selection_mode::NONE;
+        return result;
     }
 
     /**

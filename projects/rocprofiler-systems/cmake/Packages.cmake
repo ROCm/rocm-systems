@@ -383,8 +383,8 @@ else()
     find_package(
         hipfile
         ${rocprofiler_systems_FIND_QUIETLY}
-        HINTS ${ROCMVersion_DIR} ${ROCM_PATH}
-        PATHS ${ROCMVersion_DIR} ${ROCM_PATH}
+        HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+        PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
     )
     set(_rocprofsys_hipfile_usable FALSE)
     if(

@@ -119,7 +119,7 @@ def hipfile_fallback_env(hipfile_telemetry_env: dict[str, str]) -> dict[str, str
     down which path an operation took, since the fastpath additionally requires xfs or
     ext4 with ordered journaling plus O_DIRECT.
     """
-    return {**hipfile_telemetry_env, "HIPFILE_FORCE_COMPAT_MODE": "1"}
+    return {**hipfile_telemetry_env, "HIPFILE_FORCE_COMPAT_MODE": "true"}
 
 
 @pytest.fixture
@@ -203,35 +203,31 @@ class TestHipFileTelemetry(RocprofsysTest):
 
     @pytest.mark.timeout(180)
     @pytest.mark.usefixtures("require_hipfile_collector")
-    @pytest.mark.parametrize(
-        "mode",
-        [pytest.param("sys_run", marks=pytest.mark.rocpd("hipfile_telemetry_env"))],
-    )
-    def test_telemetry(self, mode, hipfile_telemetry_env, hipfile_telemetry_rules):
+    @pytest.mark.rocpd("hipfile_telemetry_env")
+    def test_telemetry(self, hipfile_telemetry_env, hipfile_telemetry_rules):
         """Run hipfile-io and validate hipFile counters in ROCPD + Perfetto."""
         workload_file = self.test_output_dir / "hipfile-io.bin"
         result = self.run_test(
-            mode,
+            "sys_run",
             "hipfile-io",
             env=hipfile_telemetry_env,
             run_args=[str(workload_file), "0", "5"],
         )
         self.assert_regex(result)
 
-        if mode == "sys_run":
-            self.assert_rocpd(result, rules_files=hipfile_telemetry_rules)
-            self.assert_perfetto(
-                result,
-                counter_names=[
-                    "GPU [0] Storage Read Bytes (S)",
-                    "GPU [0] Storage Write Bytes (S)",
-                    "GPU [0] Storage Read Ops (S)",
-                    "GPU [0] Storage Write Ops (S)",
-                    "GPU [0] Storage Read Bandwidth (S)",
-                    "GPU [0] Storage Write Bandwidth (S)",
-                ],
-                subtest_name="Perfetto hipFile counter validation",
-            )
+        self.assert_rocpd(result, rules_files=hipfile_telemetry_rules)
+        self.assert_perfetto(
+            result,
+            counter_names=[
+                "GPU [0] Storage Read Bytes (S)",
+                "GPU [0] Storage Write Bytes (S)",
+                "GPU [0] Storage Read Ops (S)",
+                "GPU [0] Storage Write Ops (S)",
+                "GPU [0] Storage Read Bandwidth (S)",
+                "GPU [0] Storage Write Bandwidth (S)",
+            ],
+            subtest_name="Perfetto hipFile counter validation",
+        )
 
     @pytest.mark.timeout(180)
     @pytest.mark.usefixtures("require_hipfile_collector")
