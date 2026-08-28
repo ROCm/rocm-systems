@@ -108,6 +108,24 @@ do_build() {
   cmake --build "$BUILD_DIR" -j"$JOBS"
 }
 
+get_test_binaries() {
+  find "$BUILD_DIR" -maxdepth 1 -type f -executable | sort
+}
+
+# Map a binary name to its JUnit XML path. rccl-HostUnitTests keeps host_tests.xml
+# for backward compatibility (it is the only report CI uploads)
+xml_for_binary() {
+  local name="$1"
+  if [ "$name" = "rccl-HostUnitTests" ]; then
+    echo "$XML_FILE"
+    return
+  fi
+  # rccl-UnitTestsMicroInit-uncached -> host_tests_micro_init_uncached.xml, etc.
+  local slug
+  slug="$(echo "$name" | sed -e 's/^rccl-UnitTests//' -e 's/\([A-Z]\)/_\L\1/g' -e 's/^_//' -e 's/-/_/g')"
+  echo "$SCRIPT_DIR/host_tests_${slug}.xml"
+}
+
 do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
 
@@ -134,32 +152,24 @@ do_host_tests() {
     stamp=(cat)
   fi
 
-  # Every host binary the build produces. Each writes its own JUnit XML
-  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
-  # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
-  local -a binaries=(
-    "rccl-HostUnitTests:$XML_FILE"
-    "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
-    "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
-    "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
-  )
+  local -a binaries
+  mapfile -t binaries < <(get_test_binaries)
+  if [ "${#binaries[@]}" -eq 0 ]; then
+    echo "ERROR: no host-test binaries found in $BUILD_DIR -- run the build phase first" | tee -a "$LOG_FILE"
+    return 1
+  fi
 
   : > "$LOG_FILE"   # truncate; each binary appends below
-  local rc=0 entry name xml
-  for entry in "${binaries[@]}"; do
-    name="${entry%%:*}"
-    xml="${entry#*:}"
-    if [ ! -x "$BUILD_DIR/$name" ]; then
-      echo "ERROR: expected binary not built: $BUILD_DIR/$name" | tee -a "$LOG_FILE"
-      rc=1
-      continue
-    fi
+  local rc=0 exe name xml
+  for exe in "${binaries[@]}"; do
+    name="$(basename "$exe")"
+    xml="$(xml_for_binary "$name")"
     echo "----- $name -----" | tee -a "$LOG_FILE"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
     # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
     # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
     # HOST_TEST_SHUFFLE to run in declaration order while bisecting.
-    "$BUILD_DIR/$name" \
+    "$exe" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
       ${HOST_TEST_SHUFFLE_ARGS[@]+"${HOST_TEST_SHUFFLE_ARGS[@]}"} \
@@ -205,7 +215,7 @@ do_coverage() {
   echo "==> Coverage  (out: $COVERAGE_DIR)"
 
   local test_bins
-  mapfile -t test_bins < <(find "$BUILD_DIR" -maxdepth 1 -type f -executable)
+  mapfile -t test_bins < <(get_test_binaries)
   if [ "${#test_bins[@]}" -eq 0 ]; then
     echo "error: no test binaries found in $BUILD_DIR -- run the build phase first" >&2
     exit 1
