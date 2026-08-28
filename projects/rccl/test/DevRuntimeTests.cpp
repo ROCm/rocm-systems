@@ -4126,6 +4126,96 @@ TEST_F(CommWindowDeregisterImplTest, NonSymmetricUnknownWindow_PropagatesError) 
 
 
 // ---------------------------------------------------------------------------
+// deepCopyDevCommRequirements takes a private copy of a caller's requirements,
+// including both linked lists, so the caller's structures can go away. Its
+// counterpart freeDevCommRequirements releases the whole thing.
+
+class DeepCopyDevCommRequirementsTest : public ::testing::Test {
+protected:
+  ncclDevCommRequirements src = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  ncclDevCommRequirements* dst = nullptr;
+  ncclDevResourceRequirements res1{}, res2{};
+  ncclTeamRequirements team1{}, team2{};
+
+  void TearDown() override {
+    freeDevCommRequirements(dst);
+    dst = nullptr;
+    g_callocCallIndex = 0;
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// The scalar body is copied, and the copy is a distinct object.
+TEST_F(DeepCopyDevCommRequirementsTest, CopiesScalarFieldsIntoNewObject) {
+  src.ginSignalCount = 7;
+  src.barrierCount = 3;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ASSERT_NE(dst, nullptr);
+  EXPECT_NE(dst, &src);
+  EXPECT_EQ(dst->ginSignalCount, 7);
+  EXPECT_EQ(dst->barrierCount, 3);
+}
+
+// The resource list is duplicated node by node, not aliased -- the copy must
+// survive the caller's nodes being reused or freed.
+TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesResourceListNodes) {
+  res1.bufferSize = 128;
+  res2.bufferSize = 256;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ASSERT_NE(dst->resourceRequirementsList, nullptr);
+  EXPECT_NE(dst->resourceRequirementsList, &res1);  // a copy, not the caller's node
+  EXPECT_EQ(dst->resourceRequirementsList->bufferSize, 128u);
+  ASSERT_NE(dst->resourceRequirementsList->next, nullptr);
+  EXPECT_EQ(dst->resourceRequirementsList->next->bufferSize, 256u);
+  EXPECT_EQ(dst->resourceRequirementsList->next->next, nullptr);  // list terminated
+}
+
+// The team list likewise.
+TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesTeamListNodes) {
+  team1.multimem = true;
+  team2.multimem = false;
+  team1.next = &team2;
+  src.teamRequirementsList = &team1;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ASSERT_NE(dst->teamRequirementsList, nullptr);
+  EXPECT_NE(dst->teamRequirementsList, &team1);
+  EXPECT_TRUE(dst->teamRequirementsList->multimem);
+  ASSERT_NE(dst->teamRequirementsList->next, nullptr);
+  EXPECT_FALSE(dst->teamRequirementsList->next->multimem);
+}
+
+// Empty lists stay empty rather than being left pointing at the source's.
+TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst->resourceRequirementsList, nullptr);
+  EXPECT_EQ(dst->teamRequirementsList, nullptr);
+}
+
+// Branch: an allocation part-way through the copy releases what was built and
+// reports nothing back, rather than handing over a half-copied structure.
+TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+  g_callocFailAt = g_callocCallIndex + 2;  // the top-level object and one node succeed
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+}
+
+// freeDevCommRequirements tolerates null, so callers can release
+// unconditionally on a failure path.
+TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
+  freeDevCommRequirements(nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
