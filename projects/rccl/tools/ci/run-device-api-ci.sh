@@ -10,6 +10,8 @@
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
+# After the JSON matrix, runs pytest test/test_AllToAllDevtime.py (GIN AllToAll
+# in-kernel device-timing smoke: modes -B 1, -B 2, -B 2 -H 1).
 #
 # Test matrix lives in lib/device-api-tests.json; RCCL_CI_DEBUG=1 adds its
 # debug_env to every run.
@@ -168,3 +170,50 @@ if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
 fi
 
 echo "All device-api benchmark runs succeeded."
+
+# GIN AllToAll in-kernel device-timing smoke (wall_clock64 / *TimedKernel).
+# Requires ENABLE_DEVICE_API=ON rccl-tests build (alltoall_perf with -B flags).
+run_devtime_smoke() {
+  local pytest_dir="${RCCL_TESTS_DIR}/test"
+  local perf_bin="${RCCL_TESTS_DIR}/${PERF_DIR}/alltoall_perf"
+  if [[ ! -x "${perf_bin}" ]]; then
+    echo "WARN: skip devtime smoke: ${perf_bin} not found"
+    return 0
+  fi
+  if [[ ! -f "${pytest_dir}/test_AllToAllDevtime.py" ]]; then
+    echo "WARN: skip devtime smoke: ${pytest_dir}/test_AllToAllDevtime.py not found"
+    return 0
+  fi
+
+  # Reuse the CI python venv when present; otherwise ensure pytest is importable.
+  # shellcheck source=/dev/null
+  [[ -f "${script_dir}/lib/ensure-python-yaml.sh" ]] && source "${script_dir}/lib/ensure-python-yaml.sh"
+  if ! python3 -c 'import pytest' 2>/dev/null; then
+    echo "==> devtime smoke: pip installing pytest"
+    python3 -m pip install --quiet --disable-pip-version-check pytest
+  fi
+
+  echo "=== devtime-smoke: pytest test_AllToAllDevtime.py (GIN -D 3, -g 1) ==="
+  set +e
+  RCCL_TESTS_GIN_SDMA_DEVTIME=1 \
+  RCCL_TESTS_A2A_EXE="${perf_bin}" \
+  RCCL_TESTS_A2A_NP="${NP}" \
+  RCCL_TESTS_A2A_GIN_TYPE="${RCCL_TESTS_A2A_GIN_TYPE:-2}" \
+  RCCL_TESTS_A2A_TIMEOUT_S="${RCCL_TESTS_A2A_TIMEOUT_S:-300}" \
+    python3 -m pytest "${pytest_dir}/test_AllToAllDevtime.py" -v -p no:cacheprovider
+  local rc=$?
+  set -e
+  if [[ ${rc} -ne 0 ]]; then
+    FAILED_RUNS+=("devtime-smoke:pytest (rc=${rc})")
+  fi
+}
+
+run_devtime_smoke
+
+if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
+  echo "=== FAILED RUNS (${#FAILED_RUNS[@]}) ==="
+  printf '  %s\n' "${FAILED_RUNS[@]}"
+  exit 1
+fi
+
+echo "All device-api benchmark and devtime smoke runs succeeded."
