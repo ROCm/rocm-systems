@@ -80,6 +80,16 @@ namespace {
 constexpr uint32_t kMoiNonemptyScalarSpillWaveCount = 9u;
 constexpr uint32_t kMoiNonemptyScalarSpillThreadCount = 576u;
 
+[[nodiscard]] inline uint32_t moi_nonempty_scalar_spill_active_wave_count() {
+  const char *mode = std::getenv("RJ_CONSAN_MODE");
+  // Two conflicting native waves are sufficient to exercise Inline Shadow's
+  // scalar-spill path. Sampled retains nine waves so at least one pair must
+  // collide in its eight identity banks.
+  return mode != nullptr && std::strcmp(mode, "inline-shadow") == 0
+             ? 2u
+             : kMoiNonemptyScalarSpillWaveCount;
+}
+
 __global__ __launch_bounds__(64) void moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation(
     uint32_t *out) {
   __shared__ uint32_t lds[1];
@@ -102,14 +112,14 @@ __global__ __launch_bounds__(64) void moi_zero_exec_scalar_spill_correct_kernel_
 
 __global__
 __launch_bounds__(kMoiNonemptyScalarSpillThreadCount) void moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation(
-    uint32_t *out) {
+    uint32_t *out, uint32_t active_wave_count) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
-  // Select lane zero from the first nine native waves. Using a hard-coded
-  // wave64 mask accidentally selected waves zero and two on RDNA, allowing
-  // the simulator to recycle the same resident-wave identity between them and
-  // erasing the intended cross-wave conflict.
-  if (tid % warpSize == 0u && tid / warpSize < kMoiNonemptyScalarSpillWaveCount) {
+  // Select lane zero from the requested prefix of native waves. Using a
+  // hard-coded wave64 mask accidentally selected waves zero and two on RDNA,
+  // allowing the simulator to recycle the same resident-wave identity between
+  // them and erasing the intended cross-wave conflict.
+  if (tid % warpSize == 0u && tid / warpSize < active_wave_count) {
     const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
     const uint32_t value = 0x1cc00000u | tid;
     uint32_t checksum = 0;

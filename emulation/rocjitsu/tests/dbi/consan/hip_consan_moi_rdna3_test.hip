@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <string_view>
@@ -133,12 +135,13 @@ TEST(ConSanMoiRdna3Test, ZeroExecScalarSpillCorrectPreservesLiveScalars) {
 }
 
 TEST(ConSanMoiRdna3Test, NonemptyScalarSpillIncorrectReportsRace) {
+  const uint32_t active_wave_count = moi_nonempty_scalar_spill_active_wave_count();
   uint32_t *out_device = nullptr;
   HIP_ASSERT(hipMalloc(&out_device, kMoiNonemptyScalarSpillWaveCount * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(out_device, 0, kMoiNonemptyScalarSpillWaveCount * sizeof(uint32_t)));
 
   moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation<<<
-      1, kMoiNonemptyScalarSpillThreadCount>>>(out_device);
+      1, kMoiNonemptyScalarSpillThreadCount>>>(out_device, active_wave_count);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -147,7 +150,7 @@ TEST(ConSanMoiRdna3Test, NonemptyScalarSpillIncorrectReportsRace) {
   HIP_ASSERT(hipFree(out_device));
   constexpr uint32_t expected = 0x2468ace0u;
   for (uint32_t wave = 0u; wave < kMoiNonemptyScalarSpillWaveCount; ++wave)
-    EXPECT_EQ(out[wave], expected) << "wave=" << wave;
+    EXPECT_EQ(out[wave], wave < active_wave_count ? expected : 0u) << "wave=" << wave;
 }
 
 } // namespace
