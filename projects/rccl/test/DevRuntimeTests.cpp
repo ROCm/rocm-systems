@@ -1142,6 +1142,130 @@ TEST_F(SymUnbindTeamMemoryTest, NvlsDeviceMemory_ReturnsSuccess) {
 
 
 // ---------------------------------------------------------------------------
+// symTeamObtain looks up a team by (rank, nRanks, stride) and creates one if
+// the list has no match, pushing it onto devrState.teamHead.
+//
+// Its multimem half is behind `#if CUDART_VERSION >= 12010`, which no HIP build
+// defines, so only the nvlsSupport check survives there. The supported-but-
+// compiled-out case is deliberately untested: it returns ncclSuccess without
+// writing *outTeam, and a test would lock that in as expected. See
+// ~/rccl-dev-runtime-findings.md.
+
+class SymTeamObtainTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 4;
+    comm->devrState.bigSize = 1u << 20;
+  }
+
+  // Teams are malloc'd by the unit under test and linked onto teamHead.
+  void TearDown() override {
+    ncclDevrTeam* t = comm->devrState.teamHead;
+    while (t != nullptr) {
+      ncclDevrTeam* next = t->next;
+      free(t);
+      t = next;
+    }
+    comm->devrState.teamHead = nullptr;
+    ResetDevRuntimeFakes();
+  }
+
+  static ncclTeam MakeTeam(int nRanks, int rank, int stride) {
+    ncclTeam team{};
+    team.nRanks = nRanks;
+    team.rank = rank;
+    team.stride = stride;
+    return team;
+  }
+};
+
+// Branch: an empty list, so a team is created and linked. worldRankList is the
+// team's members in world terms, derived from our own rank and the stride.
+TEST_F(SymTeamObtainTest, EmptyList_CreatesAndLinksTeam) {
+  ncclTeam team = MakeTeam(/*nRanks=*/3, /*rank=*/1, /*stride=*/2);
+  ncclDevrTeam* out = nullptr;
+
+  ASSERT_EQ(symTeamObtain(comm, team, /*multimem=*/false, &out), ncclSuccess);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(comm->devrState.teamHead, out);
+  EXPECT_EQ(out->mcBasePtr, nullptr);
+  // comm->rank + (i - team.rank) * stride, for i in 0..2 with rank 4.
+  EXPECT_EQ(out->worldRankList[0], 2);
+  EXPECT_EQ(out->worldRankList[1], 4);
+  EXPECT_EQ(out->worldRankList[2], 6);
+}
+
+// Branch: a team with the same shape is already present, so it is returned as
+// is and nothing is pushed onto the list.
+TEST_F(SymTeamObtainTest, MatchingTeam_ReturnsExistingWithoutCreating) {
+  ncclTeam team = MakeTeam(2, 0, 1);
+  ncclDevrTeam* first = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, team, false, &first), ncclSuccess);
+
+  ncclDevrTeam* second = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, team, false, &second), ncclSuccess);
+  EXPECT_EQ(second, first);
+  EXPECT_EQ(comm->devrState.teamHead, first);
+  EXPECT_EQ(first->next, nullptr);  // still one entry
+}
+
+// Branch: the list walk. A team differing in any of the three fields is not a
+// match, so the walk continues and a new team is pushed in front.
+TEST_F(SymTeamObtainTest, NonMatchingTeam_WalksListThenCreates) {
+  ncclDevrTeam* existing = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), false, &existing), ncclSuccess);
+
+  ncclDevrTeam* created = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 4), false, &created), ncclSuccess);  // different stride
+  EXPECT_NE(created, existing);
+  EXPECT_EQ(comm->devrState.teamHead, created);
+  EXPECT_EQ(created->next, existing);
+}
+
+// Branch: multimem is already satisfied on the matched team, so it is returned
+// without entering the multicast setup at all.
+TEST_F(SymTeamObtainTest, MultimemAlreadyBound_ReturnsExisting) {
+  ncclTeam team = MakeTeam(2, 0, 1);
+  ncclDevrTeam* first = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, team, false, &first), ncclSuccess);
+  first->mcBasePtr = reinterpret_cast<void*>(0x1000);  // pretend multicast is bound
+
+  ncclDevrTeam* second = nullptr;
+  EXPECT_EQ(symTeamObtain(comm, team, /*multimem=*/true, &second), ncclSuccess);
+  EXPECT_EQ(second, first);
+}
+
+// Branch: multimem asked for on a system without NVLS is rejected outright.
+TEST_F(SymTeamObtainTest, MultimemWithoutNvls_ReturnsInvalidArgument) {
+  comm->nvlsSupport = 0;
+  ncclDevrTeam* out = nullptr;
+
+  EXPECT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), /*multimem=*/true, &out), ncclInvalidArgument);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);  // the new team was freed, not linked
+}
+
+// Branch: outTeam is optional -- callers that only want the team created can
+// pass null.
+TEST_F(SymTeamObtainTest, NullOutTeam_StillCreatesAndLinks) {
+  EXPECT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), false, nullptr), ncclSuccess);
+  EXPECT_NE(comm->devrState.teamHead, nullptr);
+}
+
+// Boundary: a single-rank team is just ourselves.
+TEST_F(SymTeamObtainTest, SingleRankTeam_ListsSelfOnly) {
+  ncclDevrTeam* out = nullptr;
+  ASSERT_EQ(symTeamObtain(comm, MakeTeam(1, 0, 1), false, &out), ncclSuccess);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(out->worldRankList[0], comm->rank);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
