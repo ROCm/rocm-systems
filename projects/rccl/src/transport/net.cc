@@ -711,11 +711,6 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
   }
 
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) send->conn.buffs[p] = NCCL_NET_MAP_GET_POINTER(map, gpu, buffs[p]);
-  int simpleBank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[NCCL_PROTO_SIMPLE]);
-  if (simpleBank == NCCL_NET_MAP_DEVMEM || simpleBank == NCCL_NET_MAP_SHARED_DEVMEM)
-    send->conn.flags |= NCCL_TDM_ELIGIBLE;
-  else
-    send->conn.flags &= ~NCCL_TDM_ELIGIBLE;
 
   if (send->proxyConn.sameProcess) {
     if (send->proxyConn.connection->netDeviceHandle) {
@@ -793,11 +788,6 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
   }
 
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) recv->conn.buffs[p] = NCCL_NET_MAP_GET_POINTER(map, gpu, buffs[p]);
-  int simpleBank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[NCCL_PROTO_SIMPLE]);
-  if (simpleBank == NCCL_NET_MAP_DEVMEM || simpleBank == NCCL_NET_MAP_SHARED_DEVMEM)
-    recv->conn.flags |= NCCL_TDM_ELIGIBLE;
-  else
-    recv->conn.flags &= ~NCCL_TDM_ELIGIBLE;
 
   if (recv->proxyConn.sameProcess) {
     if (recv->proxyConn.connection->netDeviceHandle) {

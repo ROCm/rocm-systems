@@ -1235,6 +1235,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
   }
 
+#ifdef ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
   // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
   {
@@ -1246,7 +1247,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
       comm->buffSizes[NCCL_PROTO_SIMPLE] = (int)aligned;
     }
   }
-
+#endif
   if (comm->nNodes > 1) {
     rcclSetP2pNetChunkSize(comm, comm->p2pChunkSize);
     comm->p2pChunkSize = (comm->p2pChunkSize > RCCL_VALUE_INVALID) ? comm->p2pChunkSize : ncclParamP2pNetChunkSize();

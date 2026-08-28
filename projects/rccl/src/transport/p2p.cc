@@ -657,7 +657,6 @@ static ncclResult_t p2pSendConnect(struct ncclComm* comm, struct ncclConnect* co
     send->conn.ptrExchange = &resources->sendDevMem->ptrExchange;
     send->conn.redOpArgExchange = resources->sendDevMem->redOpArgExchange;
   }
-  send->conn.flags |= NCCL_TDM_ELIGIBLE;
   // We must assign the proxyConn's proxyProgress property for proper checking at enqueue-time
   send->proxyConn.proxyProgress = p2pTransport.send.proxyProgress;
   return ncclSuccess;
@@ -702,7 +701,6 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
       buff += comm->buffSizes[p];
     }
   }
-  recv->conn.flags |= NCCL_TDM_ELIGIBLE;
   return ncclSuccess;
 }
 
