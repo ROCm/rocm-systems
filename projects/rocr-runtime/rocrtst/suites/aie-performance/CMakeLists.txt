@@ -59,6 +59,28 @@ if(NOT XCLBINUTIL)
   message(FATAL_ERROR "xclbinutil not found")
 endif()
 
+# aiebu-asm (AIE binary utilities, shipped alongside XRT) assembles the
+# control code embedded in the full ELF.
+find_program(AIEBU_ASM aiebu-asm
+  HINTS "${XRT_LIB_DIR}/../bin" "/opt/xilinx/aiebu/bin"
+)
+if(NOT AIEBU_ASM)
+  message(FATAL_ERROR "aiebu-asm not found")
+endif()
+
+# aiecc drives aiebu-asm with the 'aie2_config' target; older aiebu releases
+# only know it as 'config' and silently exit without producing an ELF.
+execute_process(
+  COMMAND "${AIEBU_ASM}" --help
+  OUTPUT_VARIABLE AIEBU_ASM_HELP
+  ERROR_VARIABLE AIEBU_ASM_HELP
+)
+if(NOT AIEBU_ASM_HELP MATCHES "aie2_config")
+  message(WARNING "aiebu-asm at ${AIEBU_ASM} does not support the 'aie2_config' target. "
+                  "The full-ELF kernel will not be generated and "
+                  "vector-scalar-add-xrt-elf will fail at run time. Update XRT/aiebu.")
+endif()
+
 # Python (for kernel build pipeline)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -84,6 +106,24 @@ if(NOT NPU_TARGET)
 else()
   message(STATUS "NPU target: ${NPU_TARGET}")
 endif()
+
+# ---------------------------------------------------------------------------
+# Peano (llvm-aie) detection
+#
+# aiecc compiles the AIE cores with Peano, which ships as the llvm-aie wheel
+# installed alongside mlir-aie in the IRON environment.
+# ---------------------------------------------------------------------------
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" -c
+          "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'llvm-aie'))"
+  OUTPUT_VARIABLE PEANO_INSTALL_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT EXISTS "${PEANO_INSTALL_DIR}")
+  message(FATAL_ERROR "Could not find Peano (llvm-aie) at '${PEANO_INSTALL_DIR}'. "
+                      "Set up the IRON environment with iron_env_setup.sh first.")
+endif()
+message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
 
 # ---------------------------------------------------------------------------
 # Kernel artifact build
@@ -112,12 +152,10 @@ add_custom_command(
   OUTPUT "${FINAL_XCLBIN}" "${INSTS_BIN}" "${DESIGN_PDI}"
   COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:$ENV{PATH}"
           aiecc
-          --aie-generate-xclbin
-          --aie-generate-npu-insts
-          --aie-generate-pdi
-          --no-compile-host
-          --no-xchesscc
-          --no-xbridge
+          --peano=${PEANO_INSTALL_DIR}
+          --get-xclbin
+          --get-npu-insts
+          --get-pdi
           --xclbin-name=final.xclbin
           --npu-insts-name=insts.bin
           --pdi-name=design.pdi
@@ -133,16 +171,16 @@ add_custom_target(aie_kernel_artifacts
 )
 
 # Step 3: MLIR -> full ELF (standalone, contains PDI + instructions)
+# aiecc needs aiebu-asm on PATH to assemble the embedded control code.
+get_filename_component(AIEBU_ASM_DIR "${AIEBU_ASM}" DIRECTORY)
 set(FULL_ELF "${KERNEL_BUILD_DIR}/aie.elf")
 add_custom_command(
   OUTPUT "${FULL_ELF}"
-  COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:$ENV{PATH}"
+  COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:${AIEBU_ASM_DIR}:$ENV{PATH}"
           aiecc
-          --generate-full-elf
+          --peano=${PEANO_INSTALL_DIR}
+          --get-full-elf
           --full-elf-name=aie.elf
-          --no-compile-host
-          --no-xchesscc
-          --no-xbridge
           "${AIE_MLIR}"
   WORKING_DIRECTORY "${KERNEL_BUILD_DIR}"
   DEPENDS "${AIE_MLIR}"
