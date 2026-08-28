@@ -17,6 +17,7 @@
 
 // Pure helpers under test (no ibverbs / RCCL deps).
 #include "../src/transport/net_ib/multiseg.h"
+#include "../src/transport/net_ib/rma_multiseg.h"
 
 namespace {
 
@@ -67,6 +68,65 @@ TEST(NetIbMultiSeg, ConnectCapabilitiesPreserveDeviceName) {
     EXPECT_STREQ(devName, "bnxt_re0");
     EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
               NCCL_IB_CAP_MULTISEG);
+}
+
+TEST(NetIbMultiSeg, RmaSliceIsCappedAtVerbsLengthLimit) {
+    const size_t over4GiB = static_cast<size_t>(UINT32_MAX) + 4096;
+    EXPECT_EQ(ncclRmaSegmentSliceBytes(over4GiB, over4GiB, over4GiB),
+              static_cast<size_t>(UINT32_MAX));
+    EXPECT_EQ(ncclRmaSegmentSliceBytes(over4GiB, 1024, over4GiB), 1024u);
+}
+
+TEST(NetIbMultiSeg, RmaFixedChainRejectsMoreThanMaximumSlices) {
+    size_t remaining = static_cast<size_t>(UINT32_MAX) * NCCL_RMA_MAX_DATA_WRS + 1;
+    int slices = 0;
+    while (remaining > 0) {
+        const size_t chunk = ncclRmaSegmentSliceBytes(remaining, remaining, remaining);
+        remaining -= chunk;
+        slices++;
+    }
+    EXPECT_EQ(slices, NCCL_RMA_MAX_DATA_WRS + 1);
+    EXPECT_GT(slices, NCCL_RMA_MAX_DATA_WRS);
+}
+
+TEST(NetIbMultiSeg, RmaCompletionIsOnlyOnFinalWorkRequest) {
+    for (int nWrs : {1, NCCL_RMA_MAX_FLUSH_WRS, NCCL_RMA_MAX_DATA_WRS}) {
+        int signaled = 0;
+        for (int i = 0; i < nWrs; i++) signaled += ncclRmaWrIsSignaled(i, nWrs);
+        EXPECT_EQ(signaled, 1) << "nWrs=" << nWrs;
+        EXPECT_TRUE(ncclRmaWrIsSignaled(nWrs - 1, nWrs));
+    }
+    EXPECT_FALSE(ncclRmaWrIsSignaled(0, 0));
+}
+
+TEST(NetIbMultiSeg, RmaQueueCreditsBoundSegmentedChains) {
+    constexpr int requests = 256;
+    constexpr int sendDepth = 2 * requests + NCCL_RMA_MAX_SIGNAL_WRS - 2;
+    constexpr int flushDepth = requests + NCCL_RMA_MAX_FLUSH_WRS - 1;
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * requests, 0, sendDepth));
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * (requests - 1), NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(2 * requests, NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(requests - 1, NCCL_RMA_MAX_FLUSH_WRS, flushDepth));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(requests, NCCL_RMA_MAX_FLUSH_WRS, flushDepth));
+}
+
+TEST(NetIbMultiSeg, RmaSignalMustBeAlignedAndInsideOneSegment) {
+    constexpr size_t segmentEnd = 2u * 1024 * 1024;
+    EXPECT_TRUE(ncclRmaSignalOffsetValid(0, segmentEnd));
+    EXPECT_TRUE(ncclRmaSignalOffsetValid(segmentEnd - sizeof(uint64_t), segmentEnd));
+    EXPECT_FALSE(ncclRmaSignalOffsetValid(4, segmentEnd));
+    EXPECT_FALSE(ncclRmaSignalOffsetValid(segmentEnd - 4, segmentEnd));
+}
+
+TEST(NetIbMultiSeg, RmaLayoutComparisonIncludesTerminalSize) {
+    const size_t reference[] = {0, 4 * kSeg, 6 * kSeg};
+    const size_t same[] = {0, 4 * kSeg, 6 * kSeg};
+    const size_t differentBoundary[] = {0, 2 * kSeg, 6 * kSeg};
+    const size_t differentTotal[] = {0, 4 * kSeg, 7 * kSeg};
+    EXPECT_TRUE(ncclRmaLayoutsMatch(2, reference, 2, same));
+    EXPECT_FALSE(ncclRmaLayoutsMatch(2, reference, 2, differentBoundary));
+    EXPECT_FALSE(ncclRmaLayoutsMatch(2, reference, 2, differentTotal));
+    EXPECT_FALSE(ncclRmaLayoutsMatch(2, reference, 1, same));
 }
 
 // === Segment selection and uniformity helpers ===============================
