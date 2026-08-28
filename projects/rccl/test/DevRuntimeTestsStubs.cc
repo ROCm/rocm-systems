@@ -521,10 +521,16 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+static hipError_t DefaultMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
   if (psize) *psize = 0;
   return hipSuccess;
+}
+std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> g_hipMemGetAddressRange =
+    DefaultMemGetAddressRange;
+
+HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+  return g_hipMemGetAddressRange(pbase, psize, dptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -605,6 +611,7 @@ void ResetDevRuntimeFakes() {
   g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
   g_hipIpcOpenMemHandle                     = DefaultIpcOpenMemHandle;
   g_hipIpcCloseMemHandle                    = DefaultIpcCloseMemHandle;
+  g_hipMemGetAddressRange                   = DefaultMemGetAddressRange;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }

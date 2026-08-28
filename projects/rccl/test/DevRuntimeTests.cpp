@@ -2711,6 +2711,134 @@ TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
 
 
 // ---------------------------------------------------------------------------
+// windowRegisterNonSym registers a window that is not backed by the symmetric
+// VMM machinery. Three stages, the first two conditional:
+//
+//   1. intra-node IPC mapping   when lsaSize > 1
+//   2. inter-node RMA MR        when hostRmaSupport and the team is not the comm
+//   3. the device-side handle, always
+//
+// This suite covers stage 3 and the local case where neither stage 1 nor 2
+// applies; the IPC and RMA stages follow below.
+
+class WindowRegisterNonSymTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+  std::vector<ncclPeerInfo> peers;
+  void* const kUserPtr = reinterpret_cast<void*>(0x100000);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 1;  // local: no IPC stage
+    lsaRankList.assign({0});
+    devr->lsaRankList = lsaRankList.data();
+
+    peers.assign(4, ncclPeerInfo{});
+    comm->peerInfo = peers.data();
+  }
+
+  void TearDown() override {
+    ncclDevrState* devr = &comm->devrState;
+    for (int i = 0; i < devr->winSortedCount; i++) {
+      ncclDevrWindow* w = devr->winSorted[i].win;
+      free(w->ipcPeerPtrs);
+      free(w->ipcPeerPtrsAllocBase);
+      free(w);
+    }
+    free(devr->winSorted);
+    devr->winSorted = nullptr;
+    devr->winSortedCount = devr->winSortedCapacity = 0;
+    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    ResetDevRuntimeFakes();
+  }
+
+  ncclResult_t Register(ncclWindow_t* out, size_t size = 4096) {
+    return windowRegisterNonSym(comm, kUserPtr, size, /*winFlags=*/0, /*localRegHandle=*/nullptr, out);
+  }
+};
+
+// The local case: a single-rank team with no host RMA skips both optional
+// stages and still produces a usable window.
+TEST_F(WindowRegisterNonSymTest, LocalOnly_RegistersWithoutIpcOrRma) {
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook rma(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_NE(out, nullptr);
+  EXPECT_EQ(ipcGet.calls, 0);
+  EXPECT_EQ(rma.calls, 0);
+
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_EQ(devr->winSortedCount, 1);
+  ncclDevrWindow* win = devr->winSorted[0].win;
+  EXPECT_EQ(win->userPtr, kUserPtr);
+  EXPECT_EQ(win->size, 4096u);
+  EXPECT_EQ(win->memory, nullptr);  // non-sym windows have no backing ncclDevrMemory
+  EXPECT_EQ(win->ipcPeerCount, 0);
+}
+
+// Stage 3 fills the device-side header, which is how the kernel finds its way
+// back to the host window.
+TEST_F(WindowRegisterNonSymTest, PopulatesDeviceHeader) {
+  comm->rank = 5;
+  comm->devrState.lsaSelf = 0;
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  // dev == host under the shadow-pool fake, so the header is readable directly.
+  auto* header = reinterpret_cast<ncclWindow_vidmem*>(out);
+  EXPECT_EQ(header->worldRank, 5);
+  EXPECT_EQ(header->lsaRank, 0);
+  EXPECT_EQ(header->winHost, static_cast<void*>(comm->devrState.winSorted[0].win));
+}
+
+// Windows are kept in address order regardless of registration order.
+TEST_F(WindowRegisterNonSymTest, InsertsIntoSortedListByAddress) {
+  ncclWindow_t a = nullptr, b = nullptr;
+  ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x300000), 4096, 0, nullptr, &a), ncclSuccess);
+  ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &b), ncclSuccess);
+
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_EQ(devr->winSortedCount, 2);
+  EXPECT_EQ(devr->winSorted[0].userAddr, 0x100000u);
+  EXPECT_EQ(devr->winSorted[1].userAddr, 0x300000u);
+}
+
+// Branch: the shadow-pool allocation fails, so nothing is published and the
+// caller's out-pointer is cleared rather than left dangling.
+TEST_F(WindowRegisterNonSymTest, ShadowAllocFails_ClearsOutputAndPublishesNothing) {
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: the stream needed for stage 3 cannot be created.
+TEST_F(WindowRegisterNonSymTest, StreamCreateFails_ClearsOutput) {
+  ScopedHook create(g_hipStreamCreateWithFlags,
+                    [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

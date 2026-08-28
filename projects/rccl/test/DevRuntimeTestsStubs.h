@@ -51,6 +51,7 @@ extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsy
 extern std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_hipIpcGetMemHandle;
 extern std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_hipIpcOpenMemHandle;
 extern std::function<hipError_t(void*)> g_hipIpcCloseMemHandle;
+extern std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> g_hipMemGetAddressRange;
 
 extern std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
