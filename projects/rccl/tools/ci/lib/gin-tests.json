@@ -39,6 +39,13 @@
       "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
     },
     {
+      "name": "rccl-gin-rocshmem-sdma-bcast-d3",
+      "kind": "rccl-tests",
+      "bin": "broadcast_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=5"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    },
+    {
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
