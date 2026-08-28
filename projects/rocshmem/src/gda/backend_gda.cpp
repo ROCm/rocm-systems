@@ -140,17 +140,20 @@ void GDABackend::init() {
   setup_team_world();
   rte_barrier();
 
-  setup_ipc();
-
-  /*
-   * setup_team_shared() must follow setup_ipc() because it uses
-   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
-   */
-  setup_team_shared();
-
   setup_ibv();
   setup_heap_memory_rkey();
   setup_gpu_qps();
+
+  /*
+   * setup_ipc() exchanges IPC handles and creates SDMA queues for
+   * node-local peers. Skip when mixed IPC is disabled since GDA will
+   * use the NIC for all traffic.
+   * setup_team_shared() must follow setup_ipc() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  if (!envvar::disable_mixed_ipc)
+    setup_ipc();
+  setup_team_shared();
 
   /*
    * Allocate the symmetric-registration table before contexts are created so
@@ -185,7 +188,8 @@ GDABackend::~GDABackend() {
 
   cleanup_wrk_sync_buffer();
 
-  cleanup_ipc();
+  if (!envvar::disable_mixed_ipc)
+    cleanup_ipc();
 
   cleanup_gpu_qps();
   cleanup_heap_memory_rkey();
