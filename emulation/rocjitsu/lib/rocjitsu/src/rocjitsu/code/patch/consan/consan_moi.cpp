@@ -652,6 +652,8 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

@@ -979,8 +979,11 @@
                             std::string(stage));
     }
   } failure{errors};
-  const bool literal_dispatch_id = consan_arch_uses_literal_dispatch_identity(arch) &&
-                                   !moi_has_runtime_hardware_dispatch_id(options);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const bool literal_dispatch_id =
+      target != nullptr &&
+      target->dispatch_identity == ConSanDispatchIdentitySource::CodeObjectLiteral &&
+      !moi_has_runtime_hardware_dispatch_id(options);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       (!moi_has_runtime_hardware_dispatch_id(options) && !literal_dispatch_id) ||
       !options.moi_report_buffer_address)
@@ -2409,12 +2412,15 @@
     std::optional<uint32_t> private_dispatch_id_offset, uint16_t workgroup_shadow_compact_token,
     uint16_t scratch_count, bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
     std::vector<std::string> &errors, uint32_t *guest_instruction_word_count = nullptr) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  if (!options.moi_exec_save_sgpr || (!moi_has_runtime_hardware_dispatch_id(options) &&
-                                      !consan_arch_uses_literal_dispatch_identity(arch))) {
+  if (!options.moi_exec_save_sgpr ||
+      (!moi_has_runtime_hardware_dispatch_id(options) &&
+       (target == nullptr ||
+        target->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
@@ -3236,7 +3242,6 @@
       return std::nullopt;
     }
   }
-  const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no target profile");
     return std::nullopt;
