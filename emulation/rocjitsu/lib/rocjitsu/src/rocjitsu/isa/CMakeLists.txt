@@ -54,7 +54,10 @@ function(rj_add_split_amdgpu_isa_library arch)
     # so they are the ones that need the compiler to stop assuming a rounding
     # mode across the ScopedFenv. See RJ_STRICT_FP_ROUNDING_OPTIONS in the
     # top-level CMakeLists.txt. The _model sources never see either header.
-    target_compile_options(${_target}_exec PRIVATE ${RJ_STRICT_FP_ROUNDING_OPTIONS})
+    target_compile_options(
+        ${_target}_exec
+        PRIVATE ${RJ_STRICT_FP_ROUNDING_OPTIONS}
+    )
 
     add_library(${_target} INTERFACE)
     target_sources(
