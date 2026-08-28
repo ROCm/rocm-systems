@@ -406,6 +406,105 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
     assert set(tcc_ctrs) == {"TCC_HIT[0]", "TCC_HIT[1]", "TCC_HIT[2]"}
 
 
+def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket(perfmon_config):
+    """Accumulator buckets should accept other counters during metric-aware pass."""
+    soc = _make_soc(perfmon_config)
+    soc._profiling_metric_keys = {("9999", 9999, 0)}
+    counters = {"SQ_LEVEL_WAVES_ACCUM", "GRBM_SPI_BUSY", "GRBM_GUI_ACTIVE"}
+
+    yaml_text = """
+avg: MAX(GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+"""
+    with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=("9999.9999.0",)):
+        with patch.object(
+            soc,
+            "_iter_arch_analysis_yaml_metrics",
+            return_value=iter([
+                ("9999", 9999, 0, "WGM Utilization", yaml_text),
+            ]),
+        ):
+            files, _, accu_count = soc._allocate_perfmon_counter_files(counters)
+
+    assert accu_count == 1
+    accum_files = [f for f in files if f.name.endswith("_ACCUM")]
+    assert len(accum_files) == 1
+    packed = set(flat_counters_in_perfmon_file(accum_files[0]))
+    assert {"SQ_LEVEL_WAVES_ACCUM", "GRBM_SPI_BUSY", "GRBM_GUI_ACTIVE"}.issubset(packed)
+
+
+def test_gfx1250_cp_utilization_metric_id_keeps_ratio_partners_together(tmp_path: Path):
+    """Regression for PR #9324 review: 17.1.1 partners must share one bucket."""
+    from utils.mi_gpu_spec import mi_gpu_specs
+
+    arch = "gfx1250"
+    config_root = tmp_path / arch
+    config_root.mkdir()
+    metric_yaml = """
+avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+max: 100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+"""
+    metric_body = "\n".join(
+        "          " + line if line.strip() else line
+        for line in metric_yaml.strip().splitlines()
+    )
+    (config_root / "1700_grbm.yaml").write_text(
+        f"""\
+Panel Config:
+  id: 1700
+  data source:
+  - metric_table:
+      id: 1701
+      metric:
+        GPU Active Cycles:
+          avg: AVG(GRBM_GUI_ACTIVE_sum)
+        CP Utilization:
+{metric_body}
+""",
+        encoding="utf-8",
+    )
+
+    args = SimpleNamespace(
+        config_dir=tmp_path,
+        filter_blocks=["17.1.1"],
+        membw_analysis=False,
+        roof_only=False,
+        set_selected=None,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(arch),
+        l2_banks=4,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(arch)
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(arch))
+
+    counters, _ = soc.detect_counters()
+    assert {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}.issubset(counters)
+
+    with patch.object(
+        soc,
+        "_same_bucket_priority_metric_ids",
+        return_value=("17.1.1",),
+    ):
+        files, _, _ = soc._allocate_perfmon_counter_files(counters)
+
+    counter_to_bucket: dict[str, str] = {}
+    for counter_file in files:
+        label = counter_file.name.replace(".txt", "")
+        for ctr in flat_counters_in_perfmon_file(counter_file):
+            counter_to_bucket[ctr] = label
+
+    assert (
+        counter_to_bucket["GRBM_CP_BUSY_sum"]
+        == counter_to_bucket["GRBM_GUI_ACTIVE_sum"]
+    )
+
+
 # =============================================================================
 # G. _expand_tcc_template_counters
 # =============================================================================

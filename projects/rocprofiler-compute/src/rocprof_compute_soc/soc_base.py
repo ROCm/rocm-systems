@@ -40,6 +40,7 @@ from utils.utils_common import (
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
+    extract_counters_for_metric_grouping,
 )
 from vendored import yaml
 
@@ -130,6 +131,8 @@ class OmniSoC_Base:
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
         self.__compatible_profilers: list[str] = []  # Store SoC compatible profilers
+        # When set, metric-aware coalescing only packs metrics selected for profiling.
+        self._profiling_metric_keys: Optional[set[tuple[str, Any, int]]] = None
         self.populate_mspec()
 
     def __hash__(self) -> int:
@@ -288,6 +291,32 @@ class OmniSoC_Base:
 
         return gpu_model
 
+    def _register_profiling_metric_keys(
+        self,
+        file_id: str,
+        panel_id: Any,
+        metric_id: Optional[int],
+        panel_dict: dict[Any, dict[str, Any]],
+    ) -> None:
+        """Record metric_table rows selected by the current --block filter."""
+        if self._profiling_metric_keys is None:
+            return
+        if panel_id is None:
+            for table_id, table in panel_dict.items():
+                metrics = table.get("metric", {})
+                if isinstance(metrics, dict):
+                    for idx in range(len(metrics)):
+                        self._profiling_metric_keys.add((file_id, table_id, idx))
+            return
+        metrics = panel_dict[panel_id].get("metric", {})
+        if not isinstance(metrics, dict):
+            return
+        if metric_id is None:
+            for idx in range(len(metrics)):
+                self._profiling_metric_keys.add((file_id, panel_id, idx))
+            return
+        self._profiling_metric_keys.add((file_id, panel_id, metric_id))
+
     def _append_analysis_yaml_for_filter_token(
         self,
         raw_token: str,
@@ -316,15 +345,16 @@ class OmniSoC_Base:
 
         with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
-        if panel_id is None:
-            texts.append(yaml.dump(file_config, sort_keys=False))
-            return
-
         panel_dict = {
             section["metric_table"]["id"]: section["metric_table"]
             for section in file_config["Panel Config"]["data source"]
             if "metric_table" in section
         }
+        if panel_id is None:
+            self._register_profiling_metric_keys(file_id, None, None, panel_dict)
+            texts.append(yaml.dump(file_config, sort_keys=False))
+            return
+
         if panel_id not in panel_dict:
             console_warning(
                 f"Skipping {block_id}: metric table {panel_id} not found in "
@@ -332,6 +362,9 @@ class OmniSoC_Base:
             )
             return
         if metric_id is None:
+            self._register_profiling_metric_keys(
+                file_id, panel_id, None, panel_dict
+            )
             texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
             return
 
@@ -345,6 +378,7 @@ class OmniSoC_Base:
                 f"panel id {panel_id}"
             )
             return
+        self._register_profiling_metric_keys(file_id, panel_id, metric_id, panel_dict)
         texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
 
     def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
@@ -401,7 +435,12 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
+            if self._profiling_metric_keys is not None:
+                if (stem_id, panel_id, metric_idx) not in self._profiling_metric_keys:
+                    continue
+            hw = extract_counters_for_metric_grouping(
+                metric_yaml, self._mspec.gpu_series
+            )
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -422,8 +461,6 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if bucket.name.endswith("_ACCUM"):
-                    continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
                     files[bucket_idx] = trial
@@ -479,6 +516,7 @@ class OmniSoC_Base:
             filter_blocks = ["4"]
 
         texts: list[str] = []
+        self._profiling_metric_keys = set() if filter_blocks else None
         if not filter_blocks:
             # Do not profile block 30 unless explicitly requested
             exclude_file_ids: set[str] = set()

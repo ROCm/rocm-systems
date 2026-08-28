@@ -64,3 +64,25 @@ class TestExtractCountersAndVariables:
         # ammolite__cu_per_gpu is a sys var, not a built-in var
         _, vars_ = extract_counters_and_variables("ammolite__cu_per_gpu", "MI200")
         assert "cu_per_gpu" not in vars_
+
+
+class TestExtractCountersForMetricGrouping:
+    """Grouping must not pull global SUPPORTED_DENOM counters into every metric."""
+
+    def test_cp_utilization_uses_formula_counters_only(self):
+        from utils.utils_counter_defs import (
+            extract_counters_and_variables,
+            extract_counters_for_metric_grouping,
+        )
+
+        text = """
+avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+max: 100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+"""
+        series = "GFX1250_SERIES"
+        profile_hw, _ = extract_counters_and_variables(text, series)
+        group_hw = extract_counters_for_metric_grouping(text, series)
+        assert group_hw == {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
+        assert "GRBM_GUI_ACTIVE" in profile_hw
+        assert "SQ_WAVES" in profile_hw

@@ -127,6 +127,28 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
+def _resolve_builtin_var_counters(
+    variables: set[str], gpu_series: str
+) -> tuple[set[str], set[str]]:
+    """Expand ``$built_in`` references transitively; return (hw, builtin_vars)."""
+    build_in_vars = get_build_in_vars(gpu_series)
+    hw: set[str] = set()
+    builtin_vars: set[str] = set()
+    seen: set[str] = set()
+    pending = set(variables)
+    while pending - seen:
+        new_vars: set[str] = set()
+        for var in pending - seen:
+            seen.add(var)
+            if var in build_in_vars:
+                builtin_vars.add(var)
+                hw_v, var_v = parse_counters_text(build_in_vars[var])
+                hw.update(hw_v)
+                new_vars.update(var_v)
+        pending.update(new_vars)
+    return hw, builtin_vars
+
+
 def extract_counters_and_variables(
     text: str, gpu_series: str
 ) -> tuple[set[str], set[str]]:
@@ -141,21 +163,25 @@ def extract_counters_and_variables(
         hw.update(hw_d)
         variables.update(var_d)
 
-    build_in_vars = get_build_in_vars(gpu_series)
-    builtin_vars: set[str] = set()
-    seen: set[str] = set()
-    while variables - seen:
-        new_vars: set[str] = set()
-        for var in variables - seen:
-            seen.add(var)
-            if var in build_in_vars:
-                builtin_vars.add(var)
-                hw_v, var_v = parse_counters_text(build_in_vars[var])
-                hw.update(hw_v)
-                new_vars.update(var_v)
-        variables.update(new_vars)
-
+    hw_builtin, builtin_vars = _resolve_builtin_var_counters(variables, gpu_series)
+    hw.update(hw_builtin)
     return hw, builtin_vars
+
+
+def extract_counters_for_metric_grouping(
+    text: str, gpu_series: str
+) -> set[str]:
+    """Counters used to co-locate ratio partners for one metric formula.
+
+    Like :func:`extract_counters_and_variables`, but does **not** inject every
+    ``SUPPORTED_DENOM`` counter. Global normalization denominators belong to
+    profiling collection, not perfmon bucket grouping for a single metric.
+    """
+    hw, variables = parse_counters_text(text)
+    variables.update(AMMOLITE_VAR_RE.findall(text))
+    hw_builtin, _ = _resolve_builtin_var_counters(variables, gpu_series)
+    hw.update(hw_builtin)
+    return hw
 
 
 def counter_to_block(counter: str) -> str:
