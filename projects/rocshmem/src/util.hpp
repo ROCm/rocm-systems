@@ -441,12 +441,10 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
 // REMAINDER COPY (< 16 Bytes Fast Path)
 // ==============================================================================
 // dst/src must be genuine global addresses; see copy_bulk. Scalar p()/g() use
-// memcpy_lane_scalar instead, which never takes the address of the local
-// value/return.
+// memcpy_lane_scalar instead, which only uses AsmAccess (global_*) on the
+// remote pointer; local scalars are handled via regular loads/stores.
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst,
-                                               uint8_t* src,
-                                               int remainder) {
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
   if (remainder == 0) return;
 
   if (remainder & 1) {
@@ -490,59 +488,32 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 // (global_*) and must be a genuine global address (IPC peer / RDMA-mapped
 // remote of the symmetric heap), same requirement as copy_bulk/copy_remainder
 // above. 
-template <MemcpyKind Kind> 
-__device__ __forceinline__ void memcpy_lane_scalar(void* dst, void* src, size_t size) {
+template <int N, MemcpyKind Kind>
+__device__ __forceinline__ void memcpy_lane_scalar_sized(void* dst, void* src) {
   constexpr CachePolicy LP =
     is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
     is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  using Acc = AsmAccess<N, LP, SP>;
 
+  if constexpr (is_put(Kind)) {
+    typename Acc::type tmp;
+    __builtin_memcpy(&tmp, src, sizeof(tmp));
+    Acc::store(dst, tmp);
+  } else {
+    typename Acc::type tmp = Acc::load(src);
+    __builtin_memcpy(dst, &tmp, sizeof(tmp));
+  }
+}
+
+template <MemcpyKind Kind>
+__device__ __forceinline__ void memcpy_lane_scalar(void* dst, void* src, size_t size) {
   switch (size) {
-  case 1: {
-    using Acc = AsmAccess<1, LP, SP>;
-    if constexpr (is_put(Kind)) {
-      Acc::store(dst, *static_cast<typename Acc::type*>(src));
-    } else {
-      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
-    }
-    break;
-  }
-  case 2: {
-    using Acc = AsmAccess<2, LP, SP>;
-    if constexpr (is_put(Kind)) {
-      Acc::store(dst, *static_cast<typename Acc::type*>(src));
-    } else {
-      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
-    }
-    break;
-  }
-  case 4: {
-    using Acc = AsmAccess<4, LP, SP>;
-    if constexpr (is_put(Kind)) {
-      Acc::store(dst, *static_cast<typename Acc::type*>(src));
-    } else {
-      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
-    }
-    break;
-  }
-  case 8: {
-    using Acc = AsmAccess<8, LP, SP>;
-    if constexpr (is_put(Kind)) {
-      Acc::store(dst, *static_cast<typename Acc::type*>(src));
-    } else {
-      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
-    }
-    break;
-  }
-  case 16: {
-    using Acc = AsmAccess<16, LP, SP>;
-    if constexpr (is_put(Kind)) {
-      Acc::store(dst, *static_cast<typename Acc::type*>(src));
-    } else {
-      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
-    }
-    break;
-  }
+  case  1: memcpy_lane_scalar_sized<1, Kind>(dst, src);  break;
+  case  2: memcpy_lane_scalar_sized<2, Kind>(dst, src);  break;
+  case  4: memcpy_lane_scalar_sized<4, Kind>(dst, src);  break;
+  case  8: memcpy_lane_scalar_sized<8, Kind>(dst, src);  break;
+  case 16: memcpy_lane_scalar_sized<16, Kind>(dst, src); break;
   default:
     LOGD_ERROR_ABORT("memcpy_lane_scalar backs scalar p()/g() and only supports "
                      "rocSHMEM's <=16-byte scalar RMA types (size=%zd)", size);
@@ -563,7 +534,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int ChunkSize = 16;
   constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
-  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int n_chunks  = static_cast<int>(size / ChunkSize);
