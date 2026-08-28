@@ -54,6 +54,8 @@ TEAM_BROADCAST_DEF_GEN(unsigned short, ushort)
 TEAM_BROADCAST_DEF_GEN(unsigned int, uint)
 TEAM_BROADCAST_DEF_GEN(unsigned long, ulong)
 TEAM_BROADCAST_DEF_GEN(unsigned long long, ulonglong)
+TEAM_BROADCAST_DEF_GEN(__half, half)
+TEAM_BROADCAST_DEF_GEN(__hip_bfloat16, bfloat16)
 
 rocshmem_team_t team_bcast_world_dup;
 
@@ -184,6 +186,11 @@ void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
         source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id);
         dest_buf[idx] = static_cast<T1>('a' + wg_id);
       }
+      else if constexpr (std::is_same<T1, __half>::value ||
+                         std::is_same<T1, __hip_bfloat16>::value) {
+        source_buf[idx] = static_cast<T1>(3.14f + n_pes + wg_id);
+        dest_buf[idx] = static_cast<T1>(3.14f + wg_id);
+      }
       else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id);
         dest_buf[idx] = static_cast<T1>(3.14 + wg_id);
@@ -213,6 +220,10 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
                     std::is_same<T1, unsigned char>::value) {
         expected = static_cast<T1>('a' + wg_id + n_pes);
       }
+      else if constexpr (std::is_same<T1, __half>::value ||
+                         std::is_same<T1, __hip_bfloat16>::value) {
+        expected = static_cast<T1>(3.14f + wg_id + n_pes);
+      }
       else if constexpr (std::is_floating_point<T1>::value) {
         expected = static_cast<T1>(3.14 + wg_id + n_pes);
       }
@@ -221,8 +232,14 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
       }
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at idx " << idx << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-        << ", Expected " << expected << std::endl;
+        if constexpr (std::is_same<T1, __half>::value ||
+                      std::is_same<T1, __hip_bfloat16>::value) {
+          std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+          << ", Expected " << static_cast<float>(expected) << std::endl;
+        } else {
+          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+          << ", Expected " << expected << std::endl;
+        }
         exit(-1);
       }
     }
