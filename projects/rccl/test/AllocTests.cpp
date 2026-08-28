@@ -4,11 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include <alloc.h>
-#include <gtest/gtest.h>
-#include <rccl/rccl.h>
+#include "alloc.h"
+
 #include <unordered_map>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <rccl/rccl.h>
 
 #include "TestBed.hpp"
 #include "common/ErrCode.hpp"
@@ -462,7 +464,7 @@ TEST(Alloc, SideStreamKeySeparatesPriorities)
 // ---------------------------------------------------------------------------
 
 // A cuMem allocation issued inside an active scope reuses the pooled stream
-// (leaves it intact, not churned), returns zeroed memory, and the stream is
+// (synchronizes it after zeroing), returns zeroed memory, and the stream is
 // still destroyed on scope exit so nothing lingers into the collective phase.
 TEST(Alloc, CuMemAllocReusesPooledSideStream)
 {
@@ -471,13 +473,14 @@ TEST(Alloc, CuMemAllocReusesPooledSideStream)
         []()
         {
             ASSERT_EQ(hipSetDevice(0), hipSuccess);
-            if(!ncclCuMemEnable())
+            if(!ncclIsCuMemSupported())
             {
-                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+                GTEST_SKIP() << "cuMem/VMM not supported in this environment";
             }
 
-            constexpr int    dev  = 0;
-            constexpr size_t size = 8192;
+            constexpr int    dev         = 0;
+            constexpr size_t size        = 8192;
+            constexpr size_t scratchSize = 64 * 1024 * 1024;
 
             hipStream_t pooled = nullptr;
             {
@@ -485,10 +488,20 @@ TEST(Alloc, CuMemAllocReusesPooledSideStream)
                 ASSERT_EQ(getSideStream(&pooled), ncclSuccess);
                 ASSERT_NE(pooled, nullptr) << "Scope must pool a side stream";
 
+                void* scratch = nullptr;
+                ASSERT_EQ(hipMalloc(&scratch, scratchSize), hipSuccess);
+
                 for(int allocIdx = 0; allocIdx < 2; ++allocIdx)
                 {
+                    // Park a large memset on the pooled stream without syncing.
+                    // The old private-stream fallback leaves this work pending;
+                    // the pooled-stream path must drain it via cudaStreamSynchronize.
+                    ASSERT_EQ(hipMemsetAsync(scratch, 0xFF, scratchSize, pooled), hipSuccess);
+                    EXPECT_EQ(hipStreamQuery(pooled), hipErrorNotReady)
+                        << "Pooled stream must have pending work before cuMem alloc";
+
                     // Real VMM allocation while the scope is held: the internal zero
-                    // must run on the pooled stream, leaving the pool untouched.
+                    // must run on (and synchronize) the pooled stream.
                     // handlep is optional; pass nullptr so no CU* handle type is named.
                     void* ptr = nullptr;
                     ASSERT_EQ(
@@ -497,11 +510,9 @@ TEST(Alloc, CuMemAllocReusesPooledSideStream)
                     );
                     ASSERT_NE(ptr, nullptr);
 
-                    hipStream_t afterAlloc = nullptr;
-                    ASSERT_EQ(getSideStream(&afterAlloc), ncclSuccess);
-                    EXPECT_EQ(afterAlloc, pooled)
+                    EXPECT_EQ(hipStreamQuery(pooled), hipSuccess)
                         << "cuMem alloc " << allocIdx
-                        << " must reuse (not churn/replace) the pooled side stream";
+                        << " must synchronize the pooled side stream";
 
                     // Buffer must come back zeroed (calloc semantics preserved even
                     // though the redundant caller-side memset was removed).
@@ -514,6 +525,8 @@ TEST(Alloc, CuMemAllocReusesPooledSideStream)
 
                     ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
                 }
+
+                ASSERT_EQ(hipFree(scratch), hipSuccess);
             }
 
             // Scope exited: the pooled stream must be destroyed, HW queue freed.
@@ -535,9 +548,9 @@ TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
         []()
         {
             ASSERT_EQ(hipSetDevice(0), hipSuccess);
-            if(!ncclCuMemEnable())
+            if(!ncclIsCuMemSupported())
             {
-                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+                GTEST_SKIP() << "cuMem/VMM not supported in this environment";
             }
 
             constexpr size_t size = 8192;
