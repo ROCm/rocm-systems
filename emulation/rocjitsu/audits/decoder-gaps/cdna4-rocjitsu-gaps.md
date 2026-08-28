@@ -2,7 +2,27 @@
 
 Architecture: CDNA4
 
+Audit snapshot: CDNA4 manual `workspace_docs/amdgpu-isa-manuals/cdna4/README.md`,
+CDNA4 XML `shared/machine-readable-isa/isa/amdgpu_isa_cdna4.xml`, and rocjitsu
+source at `0e5333219682f52daf40713a4e6096fe2c78fc32` (rebased on
+`origin/develop` `f226accd066d23a22339d10d103e4e0647d99f03`). The 2026-08-28
+refresh was performed in manual subsection order before reconciling stable IDs.
+
+Refresh note: the following prior IDs are resolved in the audited snapshot and
+are no longer active gaps: `CDNA4-RJ-014`, `CDNA4-RJ-015`, `CDNA4-RJ-016`,
+`CDNA4-RJ-018`, `CDNA4-RJ-027`, `CDNA4-RJ-120`, `CDNA4-RJ-121`,
+`CDNA4-RJ-123`, and `CDNA4-RJ-125`. Exact current evidence is recorded in
+**Resolved since the previous audit** below. Their older finding bodies remain
+only in Git history; the resolution ledger preserves the stable-ID mapping.
+
 ## Gaps
+
+Active findings after refresh: 117 (`P0`: 4, `P1`: 14, `P2`: 39, `P3`: 38,
+`P4`: 22).
+
+Previously reported gaps now verified as non-gaps because of fixes in the
+audited snapshot: 9. Historical findings reviewed: 126 (117 active + 9 now
+non-gaps).
 
 Ordered for triage: incorrect legal-code semantics and execution behavior rank first, weighted by path frequency; state/runtime gaps and missing execution support follow; decoder/legality, metadata/fidelity, permissiveness, and test-only findings are later. Finding IDs remain stable.
 
@@ -15,41 +35,6 @@ ISA contract: CDNA4 sections 3.6.1, 3.6.2, 3.6.4, 6.2.3, and 8.4 define register
 Current rocjitsu: `Wavefront::{sgpr_alloc,vgpr_alloc}` retain allocation counts, but `resolve_src_scalar*` and `resolve_dst_write*` add ordinary scalar selectors directly to `sgpr_alloc().base`, and `Operand::{read_lane_exec,write_lane_exec,read_lane64_exec,write_lane64_exec}` similarly add resolved vector offsets directly to `vgpr_alloc().base`; none compare the logical register span with the allocation count. The SIMD/chunk accessors follow the same direct-base pattern. Generated vector-memory bodies populate `VectorMemState::dst_reg_base`, and `vector_complete` and DS dual-return completion write each destination VGPR without an allocation-span preflight. Ordinary ALU helpers likewise write destinations independently rather than applying an instruction-wide nullification plan.
 
 Impact and triage: out-of-range operands can access a neighboring physical allocation instead of SGPR0/VGPR0 or no-write behavior. Scalar destination failure is not separated from SCC/EXEC side effects, and wide, multi-destination, memory-load, and returning-atomic results can be partially written rather than wholly nullified. Centralize allocation-aware source resolution and destination-span planning before execution or memory issue, while preserving architecturally independent SCC/EXEC updates.
-
-### CDNA4-RJ-027: CDNA4 SMEM address calculation misses selector and alignment rules
-
-Manual evidence:
-
-- Section 8.2.1.1 gives scalar/global `S_LOAD`, `S_STORE`, and
-  `S_DCACHE_DISCARD` addressing as `SBASE` plus an instruction offset plus M0,
-  an SGPR offset, or zero, depending on `IMM` and `SOE`, in the cited manual passage.
-- The same section says scratch SMEM uses the selected scalar offset multiplied
-  by 64, all address components are byte quantities whose two low bits are
-  ignored or forced to zero, and `S_DCACHE_DISCARD` ignores six low bits in the cited manual passage.
-
-Rocjitsu evidence:
-
-- Generated CDNA4 SMEM disassembly/operand shaping uses `make_smem_offset()`;
-  when `SOFFSET_EN=0` and `IMM=0`, it returns an immediate zero instead of the
-  `OFFSET[6:0]` SGPR/M0 selector in the implementation. Codegen emits that helper from
-  the code generator.
-- The shared scalar-memory execution helper, used by non-scratch CDNA4 SMEM,
-  only adds `SOFFSET` when `SOFFSET_EN` is set and only adds `OFFSET` when
-  `IMM` is set in the implementation.
-- CDNA4 now routes `S_SCRATCH_LOAD_*` and `S_SCRATCH_STORE_*` through a
-  scratch-specific helper that applies the manual's 64-byte scaling for
-  `SOFFSET_EN` offsets in the implementation, but that helper still ignores the `IMM=0, SOE=0` `OFFSET[6:0]`
-  selector, reads `SOFFSET` selector value 124 as `sgpr_base + 124` rather than
-  `wf.m0()`, and does not mask the two low address bits.
-- `Operand::register_ref()` maps `OPR_SMEM_OFFSET` selector values only when
-  they are ordinary SGPRs, so special offset selectors such as M0 also disappear
-  from def-use metadata in the implementation.
-
-Impact:
-
-Legal CDNA4 SMEM encodings using the non-SOE offset selector, M0, unaligned
-byte addresses, or special offset selectors will disassemble, analyze, or
-execute against the wrong address or an incomplete dependency set in rocjitsu.
 
 ### CDNA4-RJ-028: `S_BUFFER_*` SMEM ignores buffer resource descriptor and bounds semantics
 
@@ -138,14 +123,6 @@ CDNA4 LDS accesses can address outside the wave/workgroup allocation and still
 hit another modeled LDS region if they remain inside the CU backing. Residency,
 OOB behavior, and timing-sensitive bank-conflict behavior can differ from the
 manual.
-
-### CDNA4-RJ-125: No-return DS atomics write old LDS data to an encoded `VDST`
-
-CDNA4 distinguishes `_RTN` atomics, which return the pre-operation value, from
-no-return forms. Rocjitsu's no-return DS atomic transactions still enter the
-load-response path and carry the raw encoded `VDST`, so completion can overwrite
-that VGPR with the old LDS value. This is an unintended architectural register
-write on an otherwise legal no-return atomic.
 
 ## P1 — High-priority correctness
 
@@ -257,31 +234,6 @@ Impact:
 
 rocjitsu produces the right max value for equal inputs but the wrong SCC value,
 and current tests protect that behavior.
-
-### CDNA4-RJ-120: `V_BCNT_U32_B32` ignores `SRC1`
-
-Manual/XML evidence:
-
-- `V_BCNT_U32_B32` initializes the result with `S1.u32` and adds the set-bit
-  count from `S0` in the cited manual passage.
-- XML records `SRC1` as an input operand for opcode 651 in the machine-readable ISA XML.
-
-Rocjitsu evidence:
-
-- The generated CDNA4 class retains `src1`, but its executor delegates directly
-  to the shared helper in the implementation.
-- `execute_v_bcnt_u32_b32_vop3` writes only
-  `std::popcount(read_lane(inst.src0, lane))` in the implementation.
-- Codegen classifies `V_BCNT_U32` as a unary operation in the code generator and maps it to `std::popcount(s)` in
-  the code generator; the
-  SIMD generator has the same scalar body in the code generator.
-- The adjacent SIMD correctness table treats `v_bcnt_u32_b32` as unary popcount
-  in the relevant tests.
-
-Impact:
-
-Any `V_BCNT_U32_B32` case with nonzero `SRC1` produces a result that is too
-small by the base addend.
 
 ### CDNA4-RJ-093: FP min/max helpers do not model NaN, signed-zero, or IEEE/MODE tie rules
 
@@ -677,14 +629,6 @@ Packed LDS F16/BF16 atomics are type-incorrect: rocjitsu interprets the 32-bit
 word as scalar F32 instead of two packed 16-bit lanes and cannot model the
 manual's FP-mode requirements.
 
-### CDNA4-RJ-123: `DS_READ_B64_TR_B16` uses the wrong CDNA4 wave64 lane permutation
-
-CDNA4 ISA section 11.4 defines `DS_READ_B64_TR_B16` as a 16-bit matrix transpose that reads 64 bits per lane into two VGPRs; its layout groups K=0-3 with K=8-11 on one pass (and K=4-7 with K=12-15 on the other) while each destination lane holds four consecutive M or N values. The machine-readable ISA record independently identifies opcode 227 as a per-lane 64-bit read and 64-bit VGPR/AccVGPR result. For raw halfwords `src[lane][halfword]`, the required wave64 mapping is `dst[l][n] = src[(l & ~0xF) + ((l >> 2) & 3) + 4*n][l & 3]` for destination halfword `n=0..3`; the permutation operates independently in lane groups 0-15, 16-31, 32-47, and 48-63.
-
-Current `DsReadB64TrB16Ds::execute_impl` sets `num_elems=2` and selects the generic `TransposeKind::TR_B16`; `transpose_response` therefore calls `transpose_b16`. That helper derives `group_size` from the four halfwords read per lane and implements `dst[l][n] = src[(l & ~3) + n][l & 3]`, transposing adjacent four-lane groups instead of the required stride-four sources in a 16-lane group. For example, destination lane 0 currently receives halfword 0 from source lanes 0,1,2,3, but must receive halfword 0 from source lanes 0,4,8,12.
-
-The wrong cross-lane permutation corrupts the matrix operand even when EXEC, LDS address alignment, and destination alignment are all legal. This is an execution-semantics defect, distinct from RJ-050's missing precondition validation and RJ-051's missing layout-focused tests; the existing ACC-routing coverage can pass while the loaded values are assigned to the wrong lanes.
-
 ### CDNA4-RJ-132: `DS_CONDXCHG32_RTN_B64` executes as ordinary compare-swap
 
 CDNA4 defines two independent 32-bit conditional exchanges: each half writes
@@ -848,27 +792,6 @@ manual says unsupported counts should behave as shift zero. Kernels that rely
 on the hardware fallback value can get different 64-bit results in both scalar
 fallback and SIMD dispatch.
 
-### CDNA4-RJ-121: `V_READLANE_B32` and `V_WRITELANE_B32` use unmasked lane selectors
-
-Manual/XML evidence:
-
-- `V_READLANE_B32` and `V_WRITELANE_B32` select lanes with `S1.u32[5:0]` in the cited manual passage.
-- XML records the second source as `OPR_SSRC_LANESEL` for opcodes 649 and 650
-  in the machine-readable ISA XML.
-
-Rocjitsu evidence:
-
-- Generated CDNA4 executors read the scalar lane selector and pass it unmasked
-  to `read_lane`/`write_lane` in the implementation.
-- The operand and register-access paths forward the raw lane value into VGPR
-  access; the VGPR regions assert that the lane is below wave size in the implementation.
-- Nearby shared-infra tests use only small selectors such as lanes 2 and 31 in the relevant tests.
-
-Impact:
-
-High-bit lane selectors can assert, access the wrong lane path, or fail instead
-of aliasing to the low six bits as the manual specifies.
-
 ### CDNA4-RJ-126: The F64 inline `1/(2*pi)` constant is one ULP high
 
 The CDNA4 handbook and XML specify the 64-bit selector value as
@@ -909,48 +832,7 @@ F32 subnormal inputs and results follow host floating-point behavior regardless
 of the shader MODE denormal settings the manual says should affect F32
 conversion.
 
-### CDNA4-RJ-015: Block-scale byte selectors are ignored
-
-Manual evidence:
-
-- The load-scale prefix uses `{OP_SEL_HI[0], OP_SEL[0]}` for matrix A scale and
-  `{OP_SEL_HI[1], OP_SEL[1]}` for matrix B scale, selecting one of the four
-  source bytes, in the cited manual passage.
-
-Rocjitsu evidence:
-
-- The 16x16 scale path extracts only the raw scale source encodings from the
-  prefix and passes scale register bases to the shared helper in the implementation.
-- The 32x32 scale path does the same in the implementation.
-- `exec_f32_scaled_mixed` accepts only `scale_a_base` and `scale_b_base`, then
-  reads the low byte of those VGPR values in the implementation. It has no selector arguments and does not inspect the VOP3PX2 prefix
-  `OP_SEL`/`OP_SEL_HI` bits.
-
-Impact:
-
-Scale encodings selecting byte 1, 2, or 3 are emulated as byte 0.
-
-### CDNA4-RJ-016: Inline-constant scale sources are not modeled for block-scale MFMA
-
-Manual evidence:
-
-- Block-scale MFMA scale values can be VGPRs or inline constants, using only
-  the exponent portion, in the cited manual passage.
-
-Rocjitsu evidence:
-
-- The scaled execution paths derive `sa_base` and `sb_base` by passing the raw
-  9-bit prefix source encodings to `amdgpu::src_base` in the implementation.
-- `src_base` is an MFMA VGPR/AccVGPR base resolver; it maps encodings to
-  VGPR-bank offsets and has no inline-constant decoding path in the implementation.
-- The shared scaled helper then reads VGPR state for the scale values in the implementation.
-
-Impact:
-
-An inline-constant scale encoding is treated as a VGPR/AccVGPR base rather than
-as a constant E8M0 exponent source.
-
-### CDNA4-RJ-017: F8F6F4 MFMA C modifiers are ignored
+### CDNA4-RJ-017: Unscaled F8F6F4 MFMA C modifiers are ignored
 
 Manual evidence:
 
@@ -963,8 +845,10 @@ Rocjitsu evidence:
 - The generated constructors expose only `vdst`, `src0`, `src1`, and `src2`
   operands for the non-scale F8F6F4 MFMA classes in the implementation.
 - Their execution paths read `SRC2` or a constant accumulator and dispatch to
-  `exec_f32_mixed` / `exec_f32_scaled_mixed` without inspecting `inst_.neg` or
-  `inst_.neg_hi` and without passing a C modifier in the implementation.
+  `exec_f32_mixed` without inspecting `inst_.neg` or `inst_.neg_hi` and without
+  passing a C modifier in `generated/cdna4/vop3p_exec.cpp`. The scaled
+  VOP3PX2 path now extracts the C modifier and passes it to
+  `exec_f32_scaled_mixed`; it is not part of this remaining gap.
 - `exec_f32_mixed` seeds the accumulator directly from `SRC2` or `const_acc`
   and has no `c_modifier` parameter in the implementation.
 - The shared WMMA F32 path has an explicit `apply_wmma_c_modifier` pattern in the implementation and applies it in `exec_wmma_f32_mixed`,
@@ -1826,34 +1710,6 @@ An encoding with explicit `SDST=VCC` can update VCC during execution, but
 liveness, def-use, and probe-clobber analysis built from `RegisterRef` metadata
 can miss the explicit VCC clobber.
 
-### CDNA4-RJ-014: `V_MFMA_SCALE_*_F8F6F4` decodes as non-scale MFMA operands
-
-Manual/XML evidence:
-
-- The CDNA4 manual lists
-  `V_MFMA_SCALE_F32_16X16X128_F8F6F4` and
-  `V_MFMA_SCALE_F32_32X32X64_F8F6F4` as distinct four-dword scale MFMA
-  instructions in the cited manual passage.
-- The XML entries expose `SCALE_SRC0` and `SCALE_SRC1` as explicit operands for
-  those opcodes in the machine-readable ISA XML.
-
-Rocjitsu evidence:
-
-- The generated CDNA4 decoder recognizes the four-word VOP3PX2 scale form, but
-  returns the non-scale `VMfmaF3216x16x128F8f6f4Vop3pMfma` or
-  `VMfmaF3232x32x64F8f6f4Vop3pMfma` class with `opcode + 2` in the implementation.
-- The code generator emits the same special-case mapping in the code generator.
-- The generated classes only store `vdst`, `src0`, `src1`, `src2`, and
-  `raw_words_` in the implementation.
-- Constructors use the non-scale mnemonics and publish only three source
-  operands in the implementation.
-
-Impact:
-
-Execution can still consult raw prefix words, but instruction metadata,
-disassembly, operand iteration, and tooling do not see the scale mnemonic or
-explicit `SCALE_SRC0`/`SCALE_SRC1` dependencies.
-
 ### CDNA4-RJ-108: `V_ACCVGPR_READ/WRITE` do not set the ACCVGPR instruction flag
 
 Manual/XML evidence:
@@ -2342,10 +2198,6 @@ The current tests cover useful finite plumbing and helper behavior, but would
 not catch the MODE-denorm, scale-source legality, wide-VGPR alignment, E8M0
 `0xff`, or multi-pass stochastic edge cases recorded above.
 
-### CDNA4-RJ-018: F8F6F4 MFMA tests cover decode but not direct execution semantics
-
-Current tests exercise standalone suffix decode, source-width selection, and consumption of the VOP3PX2 scale prefix. They still do not execute decoded F8F6F4 instructions end to end across C modifiers, scale byte selectors, inline scale constants, dependency metadata, and illegal matrix formats.
-
 ### CDNA4-RJ-038: Vector-buffer tests miss descriptor and format edge cases
 
 Rocjitsu evidence:
@@ -2425,6 +2277,33 @@ The current tests can catch basic decode, ordinary waiting, and a simple
 barrier release, but they would not fail for most of the Chapter 4 semantic
 gaps above.
 
+## Resolved since the previous audit
+
+- `CDNA4-RJ-027` is fixed for the selector/alignment behavior it originally
+  reported. `generated/cdna4/smem.cpp:17` now preserves the non-SOE
+  `OFFSET[6:0]` selector, and `shared/addr_calc_scalar.h:44` resolves M0,
+  applies scratch x64 scaling, and clears the required dword low bits. The
+  remaining `S_DCACHE_DISCARD` cache-line behavior is already tracked by
+  `CDNA4-RJ-031`.
+- `CDNA4-RJ-125` is fixed: no-return DS atomics set `is_load = false` beginning
+  at `generated/cdna4/ds_exec.cpp:35`, preventing a return write to encoded
+  `VDST`.
+- `CDNA4-RJ-120` is fixed: the shared `V_BCNT_U32_B32` executors add `SRC1` to
+  the popcount at `generated/shared/execute_shared.h:3603` and `:3611`.
+- `CDNA4-RJ-121` is fixed: scalar selected-lane reads and writes mask by the
+  dispatched wave size in `vm/amdgpu/register_access.h:870` and `:931`.
+- `CDNA4-RJ-123` is fixed: `shared/ds_transpose.h:197` implements the CDNA4
+  4-by-16 halfword permutation, with an exact layout regression beginning at
+  `tests/amdgpu_vm_test.cpp:4068`.
+- `CDNA4-RJ-014`, `CDNA4-RJ-015`, and `CDNA4-RJ-016` are fixed together by
+  explicit scaled VOP3PX2 classes and operands in `generated/cdna4/vop3p.h:1037`
+  and `generated/cdna4/vop3p.cpp:4240`; execution extracts independent scale
+  byte selectors and inline scale sources in `generated/cdna4/vop3p_exec.cpp:1372`
+  and `shared/mma_exec.h:3311`.
+- `CDNA4-RJ-018` is fixed by direct decode, legality, selector, layout,
+  reference, rounding, inline-scale, and C-modifier tests in
+  `tests/instruction_execution_harness_test.cpp:1624` through `:2255`.
+
 ## No-Gap Notes
 
 - CDNA4 Chapter 1-2 dispatch, 64-lane wavefront, initial `EXEC`, and packed
@@ -2436,8 +2315,9 @@ gaps above.
 - The CDNA4 VOP3P opcode inventory is generated for all 104 Chapter 12.10
   detailed opcode headings, with decode-table entries for the checked DOT,
   packed, ACCVGPR, and MFMA families. The only additional XML VOP3P-family
-  entries are the two scaled `ENC_VOP3PX2` forms already covered by
-  `CDNA4-RJ-014` through `CDNA4-RJ-018`.
+  entries are the two scaled `ENC_VOP3PX2` forms. Those forms now have explicit
+  classes, operand metadata, execution, and direct tests; the remaining
+  unscaled C-modifier issue is `CDNA4-RJ-017`.
 - Generated CDNA4 VOP3A/VOP3B class inventory matches the XML decode split for
   this slice: 500 `ENC_VOP3` classes and 10 `VOP3_SDST_ENC` classes. The gaps
   above are semantic/runtime and metadata gaps, not missing decoder entries.
@@ -2445,9 +2325,9 @@ gaps above.
   encoding tests for the manual/XML opcodes 640-653 and 655-659; opcode 654 is
   absent from both sources. For this slice, `V_MBCNT_*` adds `SRC1`, 64-bit
   shift helpers mask counts with `&63`, and `V_BFM_B32` masks width/offset with
-  `&31`. The new gaps are limited to `V_BCNT_U32_B32`'s missing base addend and
-  readlane/writelane lane-selector masking; the `V_TRIG_PREOP_F64` hard stub is
-  already covered by `CDNA4-RJ-110`.
+  `&31`. `V_BCNT_U32_B32` now adds `SRC1`, and readlane/writelane now mask the
+  lane selector; the remaining `V_TRIG_PREOP_F64` hard stub is already covered
+  by `CDNA4-RJ-110`.
 - CDNA4 Chapter 12.11 definitions 660-673 have generated constructors and
   encoding tests for the manual/XML opcodes 660-666 and 668-673; opcode 667 is
   absent from both sources. The F32 normalized converts, packed integer

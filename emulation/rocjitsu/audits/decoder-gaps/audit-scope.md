@@ -40,6 +40,21 @@ Status terms:
 | CDNA4 | Chapter 11. Data Share Operations | Complete | Audited all Chapter 11 sections 11.1 through 11.4 for LDS geometry/allocation/clamping, dataflow and buffer-to-LDS context, indexed load/store and atomic address rules, READ2/WRITE2 duplicate-offset behavior, ADDTID, swizzle/permute lane behavior, floating LDS atomics, append/consume, GDS field wording, MFMA transpose-load constraints, and the corresponding DS instruction-definition inventory. |
 | CDNA4 | Chapter 12. Instructions | Complete | Audited all Chapter 12 sections 12.1-12.16: SOP2, SOPK, SOP1, SOPC, SOPP/send-message, SMEM, VOP2, VOP1, VOPC, VOP3P, VOP3A/VOP3B, LDS/DS, MUBUF, MTBUF, FLAT/Scratch/Global, and DPP/SDWA instruction limitations. Coverage includes FP8/BF8/small-format conversion definitions, scaled conversion definitions, VOP3P packed/DOT/MIX/MFMA/SMFMAC rows, VOP3A/VOP3B native ranges and promoted aliases, scalar/control definitions, memory instruction inventories, modifier/literal/OPSEL legality, atomic/float edge prose, and adjacent rocjitsu runtime/test gap records. |
 | CDNA4 | Chapter 13. Microcode Formats | Complete | Audited all Chapter 13 sections 13.1 through 13.6: SOP1/SOP2/SOPK/SOPC/SOPP, SMEM, VOP2/VOP1/VOPC, VOP3A/VOP3B, VOP3P/VOP3P-MAI, SDWA/SDWAB/DPP, DS, MUBUF/MTBUF, and FLAT/GLOBAL/SCRATCH field maps and opcode tables. Recorded XML-only ATC probe drift, generic `SBASE` field-description conflict, VOP3P encoding-width manual drift, F64 VOP1 DPP leakage, and SDWAB `SD` destination prose drift. |
+| CDNA5 | Chapter 1. Introduction | Complete | Forward-audited architecture terminology and hardware overview against the public guide, current XML, target/profile source, and architecture tests. |
+| CDNA5 | Chapter 2. Shader Concepts | Complete | Forward-audited dispatch, work-group/cluster, memory-ordering, and padding semantics against current dispatch and cluster support. |
+| CDNA5 | Chapter 3. Wave State | Complete | Forward-audited PC/EXEC, SGPR/VGPR/LDS, state-register, trap/time, launch-state, OOR, compact-register, and NULL behavior. |
+| CDNA5 | Chapter 4. Shader Instruction Set | Complete | Forward-audited common fields, literals/selectors, cache controls, and volatile-memory behavior against current generated CDNA5 source. |
+| CDNA5 | Chapter 5. Program Flow Control | Complete | Forward-audited control, clause, message, branch, barrier, counter, and scheduling semantics against current barrier/wait code and tests. |
+| CDNA5 | Chapter 6. Scalar ALU Operations | Complete | Forward-audited SALU formats, operands, SCC, arithmetic, state access, and aperture queries against generated execution and tests. |
+| CDNA5 | Chapter 7. Vector ALU Operations | Complete | Forward-audited VALU, conversion, packed math, VOPD/VOPD3, DPP, pseudo-scalar, VGPR-indexing, and WMMA semantics. |
+| CDNA5 | Chapter 8. Scalar Memory Operations | Complete | Forward-audited SMEM encoding/addressing, buffer descriptors, narrow loads, dependencies, bounds, and prefetch. |
+| CDNA5 | Chapter 9. Vector Memory Buffer Instructions | Complete | Forward-audited VBUFFER data/address/descriptor, range/OOB, D16, atomic, and alignment behavior. |
+| CDNA5 | Chapter 10. Global, Scratch and Flat Address Space Operations | Complete | Forward-audited address modes, errors, prefetch, block/multicast/async/transpose, monitor, and tensor DMA. |
+| CDNA5 | Chapter 11. Local Data Share Operations | Complete | Forward-audited indexed/atomic LDS, permute, transpose, async, and barrier-arrive behavior. |
+| CDNA5 | Chapter 12. Float Memory Atomics | Complete | Forward-audited rounding, denormal, NaN/signed-zero, packed F16/BF16, and return behavior. |
+| CDNA5 | Chapter 13. Error Correction Codes (ECC) | Complete | Forward-audited D16/ECC behavior against the current SRAM-ECC model and tests. |
+| CDNA5 | Chapter 14. Microcode Formats | Complete | Forward-audited scalar, vector, DPP, DS, memory, tensor, and flat/global/scratch formats after source relocation. |
+| CDNA5 | Chapter 15. Instructions | Complete | Forward-audited every instruction-family subsection with exact manual/XML inventories and grouped current-code/test semantic checks. |
 | RDNA3 | Chapter 1. Introduction | Audited statically | Audited document scope, terminology, host/command-processor/memory-controller overview, WGP/CU/SIMD/LDS/GDS/VMEM terms, LDS/GDS/cache hierarchy, FP-exception interrupt capability, and relaxed memory/acknowledgment prose against XML and rocjitsu architecture-model surfaces. |
 | RDNA3 | Chapter 2. Shader Concepts | Audited statically | Audited shader execution roles, wave32/wave64 issue model, compute/graphics shader launch concepts, workgroup sharing/barrier and CU/WGP mode constraints, WGP-mode LDSDIR exclusions, and shader-padding/prefetch-distance behavior against XML and rocjitsu architecture-model/dispatch surfaces. |
 | RDNA3 | Chapter 3. Wave State | Audited statically | Audited sections 3.1-3.5.5 for wave-state inventory, PC alignment/control transfer/debug wording, `EXEC`/`VCC` wave32 low-half behavior, `EXEC==0` skip/issue/counter rules, SGPR/VCC allocation and dependency behavior, SGPR alignment, scalar region-crossing, TTMP privilege, scalar out-of-range rules, VGPR allocation/deallocation, VGPR out-of-range consequences, `V_MOVREL*`/`V_SWAPREL`, VOPD source exception behavior, memory-operation source/destination range, nullification, PRT/DMASK, alignment-mode, formatted-buffer alignment, atomic MEMVIOL behavior, LDS allocation/placement/alignment/OOR behavior, STATUS/MODE field semantics, M0/NULL/SCC/VCC/VCCZ scalar-condition behavior, FLAT_SCRATCH launch/access/alignment behavior, hardware internal register field semantics, trap/exception/TRAPSTS behavior, TIME/REALTIME counters, initial `EXEC`/`FLAT_SCRATCH` launch state, SGPR launch initialization, VGPR launch initialization, and PS LDS launch initialization against XML state/memory operands and rocjitsu wavefront/control-flow/runtime paths. |
@@ -101,6 +116,11 @@ reconciled.
 
 ## CDNA4
 
+The 2026-08-28 refresh walked all 181 numbered handbook subsections in manual
+order before reconciling historical IDs. The forward coverage ledger records
+the handbook-to-XML check and the corresponding current generated,
+handwritten, and test surfaces for every subsection.
+
 | Chapter | Status |
 | --- | --- |
 | Chapter 1. Introduction | Complete through architecture overview and terminology slice: dispatch/workgroup/wavefront/work-item, 64-lane wavefront model, SALU/VALU roles, literal/microcode terms, host/command processor/memory-controller overview, FP-exception/interrupt prose, and latency-hiding overview |
@@ -116,6 +136,32 @@ reconciled.
 | Chapter 11. Data Share Operations | Complete through all Chapter 11 sections 11.1-11.4: LDS geometry/allocation/clamping, dataflow and buffer-to-LDS context, indexed load/store and atomic address rules, READ2/WRITE2 duplicate-offset behavior, ADDTID, swizzle/permute lane behavior, floating LDS atomics, append/consume, GDS field wording, MFMA transpose-load constraints, and the corresponding DS instruction-definition inventory |
 | Chapter 12. Instructions | Complete through all Chapter 12 sections 12.1-12.16: SOP2, SOPK, SOP1, SOPC, SOPP/send-message, SMEM, VOP2, VOP1, VOPC, VOP3P, VOP3A/VOP3B, LDS/DS, MUBUF, MTBUF, FLAT/Scratch/Global, and DPP/SDWA instruction limitations. Coverage includes FP8/BF8/small-format conversion definitions, scaled conversion definitions, VOP3P packed/DOT/MIX/MFMA/SMFMAC rows, VOP3A/VOP3B native ranges and promoted aliases, scalar/control definitions, memory instruction inventories, modifier/literal/OPSEL legality, atomic/float edge prose, and adjacent rocjitsu runtime/test gap records |
 | Chapter 13. Microcode Formats | Complete through all Chapter 13 sections 13.1-13.6: SOP1/SOP2/SOPK/SOPC/SOPP, SMEM, VOP2/VOP1/VOPC, VOP3A/VOP3B, VOP3P/VOP3P-MAI, SDWA/SDWAB/DPP, DS, MUBUF/MTBUF, and FLAT/GLOBAL/SCRATCH field maps and opcode tables, including XML-only ATC probe drift, generic `SBASE` field-description conflict, VOP3P encoding-width manual drift, F64 VOP1 DPP leakage, and SDWAB `SD` destination prose drift |
+
+## CDNA5
+
+The 2026-08-28 refresh walked all 261 numbered public-guide subsections in
+manual order before reconciling historical IDs. The forward ledger records
+exact manual ranges and fresh XML, current-code, and test evidence, including
+the generated-source rename and intervening wave-ABI, barrier, OOB, ECC,
+matrix, transpose, and atomic changes.
+
+| Chapter | Status |
+| --- | --- |
+| Chapter 1. Introduction | Complete through architecture/product terminology and hardware overview |
+| Chapter 2. Shader Concepts | Complete through dispatch, work-group/cluster, ordering, and padding semantics |
+| Chapter 3. Wave State | Complete through PC/EXEC, GPR/LDS, state-register, trap/time, launch, OOR, and compact-register semantics |
+| Chapter 4. Shader Instruction Set | Complete through common fields, literals/selectors, cache controls, and volatile-memory behavior |
+| Chapter 5. Program Flow Control | Complete through control, clauses, messages, branches, barriers, dependency counters, and scheduling |
+| Chapter 6. Scalar ALU Operations | Complete through formats, operands, SCC, arithmetic, state access, and aperture queries |
+| Chapter 7. Vector ALU Operations | Complete through VALU, conversions, packed math, VOPD/VOPD3, DPP, pseudo-scalar, VGPR indexing, and WMMA |
+| Chapter 8. Scalar Memory Operations | Complete through SMEM encoding/addressing, descriptors, narrow loads, dependencies, bounds, and prefetch |
+| Chapter 9. Vector Memory Buffer Instructions | Complete through VBUFFER data/address/descriptor, range/OOB, D16, atomic, and alignment behavior |
+| Chapter 10. Global, Scratch and Flat Address Space Operations | Complete through address modes, errors, prefetch, block/multicast/async/transpose, monitor, and tensor DMA |
+| Chapter 11. Local Data Share Operations | Complete through indexed/atomic LDS, permute, transpose, async, and barrier-arrive behavior |
+| Chapter 12. Float Memory Atomics | Complete through rounding, denormal, NaN/signed-zero, packed F16/BF16, and return behavior |
+| Chapter 13. Error Correction Codes (ECC) | Complete through D16/ECC behavior and current SRAM-ECC implementation |
+| Chapter 14. Microcode Formats | Complete through scalar, vector, DPP, DS, memory, tensor, and flat/global/scratch formats |
+| Chapter 15. Instructions | Complete through all instruction-family subsections with exact manual/XML inventories and grouped semantic checks |
 
 ## RDNA3
 
@@ -139,6 +185,12 @@ reconciled.
 | Chapter 16. Instructions | Audited statically through all Chapter 16 sections 16.1-16.20: SOP2/SOPK/SOP1/SOPC/SOPP scalar/control definitions, SMEM definitions, VOP2/VOP1/VOPC definitions, VOP3P packed/DOT/MIX/WMMA definitions, VOPD definitions, VOP3/VOP3SD definitions, VINTERP definitions, LDSDIR and LDS/GDS definitions, MUBUF/MTBUF definitions, MIMG definitions, EXPORT definitions, and FLAT/SCRATCH/GLOBAL definitions |
 
 ## RDNA4
+
+The 2026-08-28 refresh walked all 266 numbered handbook subsections in manual
+order before reconciling historical IDs. The forward coverage ledger records
+exact handbook line ranges and the corresponding XML, current generated,
+handwritten, and test evidence; Chapter 16 additionally uses encoding-aware
+instruction inventories and grouped semantic-family verification.
 
 | Chapter | Status |
 | --- | --- |

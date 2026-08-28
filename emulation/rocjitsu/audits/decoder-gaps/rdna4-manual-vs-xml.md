@@ -2,7 +2,22 @@
 
 Architecture: RDNA4 / gfx12
 
+Audit snapshot: RDNA4 manual `workspace_docs/amdgpu-isa-manuals/rdna4/README.md`
+and XML `shared/machine-readable-isa/isa/amdgpu_isa_rdna4.xml`, refreshed on
+2026-08-28. The forward, manual-order pass covered all 266 numbered manual
+subsections; no numbered subsection was skipped.
+
+Refresh result: all 165 stable manual-vs-XML IDs remain applicable. No prior
+ID became a non-gap in this refresh because these findings describe information
+missing from, contradictory in, or unresolved between the manual and XML rather
+than Rocjitsu implementation gaps.
+
 ## Gaps
+
+Active findings after refresh: 165. Previously reported manual-vs-XML gaps now
+verified as non-gaps because of source corrections: 0. Historical findings
+reviewed: 165. The condensed disposition partition remains 136 confirmed gaps
+and 29 non-confirmed dispositions.
 
 ### RDNA4-XML-001: `FP16_OVFL` mode state is absent from XML
 

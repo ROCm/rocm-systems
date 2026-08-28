@@ -2,7 +2,22 @@
 
 Architecture: CDNA4
 
+Audit snapshot: CDNA4 manual `workspace_docs/amdgpu-isa-manuals/cdna4/README.md`
+and XML `shared/machine-readable-isa/isa/amdgpu_isa_cdna4.xml`, refreshed on
+2026-08-28. The forward, manual-order pass covered all 181 numbered manual
+subsections; no numbered subsection was skipped.
+
+Refresh result: all 92 stable manual-vs-XML IDs remain applicable. Current
+Rocjitsu fixes do not resolve these IDs because they describe information
+missing from or contradictory in the XML itself. Chapter 12's forward inventory
+reconfirmed the exact opcode-set deltas (`XML-058` through `XML-060` and
+`XML-068`) and the promoted-alias drift (`XML-069`); all other instruction
+families reconcile after encoding-condition/alternate-encoding normalization.
+
 ## Gaps
+
+Active findings after refresh: 92. The condensed disposition partition remains
+76 confirmed gaps and 16 non-confirmed dispositions.
 
 ### CDNA4-XML-001: Small-float numeric semantics are prose-only
 
