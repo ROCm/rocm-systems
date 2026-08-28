@@ -3254,7 +3254,7 @@ TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
             0u);
 }
 
-TEST(HsaHooksUnitTest, MoiReportTrustEvaluationOwnsDynamicCompleteness) {
+TEST(HsaHooksUnitTest, ConSanMoiReportTrustEvaluationOwnsDynamicCompleteness) {
   rocjitsu::consan_hook::AutoMoiReportSummary summary;
   const auto missing =
       rocjitsu::consan_hook::evaluate_auto_moi_report_trust(summary, /*require_records=*/true);

@@ -741,6 +741,14 @@ function(rj_add_consan_device_conformance_cases)
                 # default 60 seconds under full simulator contention.
                 set(_workload_timeout 120)
             elseif(
+                _mode_value STREQUAL "supercollider"
+                AND _device_TARGET STREQUAL "gfx1250"
+                AND _workload_name STREQUAL "D16HighBytePublication"
+            )
+                # This is sub-second in isolation but can exceed the default
+                # under the full -j16 simulator gate's gfx1250 contention.
+                set(_workload_timeout 120)
+            elseif(
                 _mode_value STREQUAL "record-replay"
                 AND (
                     _workload_name STREQUAL
