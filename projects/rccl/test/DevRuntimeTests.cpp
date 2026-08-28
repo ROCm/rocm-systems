@@ -47,6 +47,7 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 
 #include "host/ScopedHook.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fcntl.h>
 #include <functional>
@@ -1779,11 +1780,14 @@ protected:
                            /*winFlags=*/0, &obtained, hasSysmem);
   }
 
-  // Publish per-rank info back through the all-gather, as peers would.
+  // Publish per-rank info back through the all-gather, as peers would. The
+  // buffer is sized by comm->nRanks, so clamp: a table longer than the comm
+  // overflows it and corrupts the heap for whatever runs next.
   std::function<ncclResult_t(void*, void*, int)> GatherReporting(std::vector<SegmentInfo> perRank) {
-    return [perRank](void*, void* buf, int) {
+    return [this, perRank](void*, void* buf, int) {
       auto* info = static_cast<SegmentInfo*>(buf);
-      for (size_t r = 0; r < perRank.size(); r++) info[r] = perRank[r];
+      const int n = std::min(static_cast<int>(perRank.size()), comm->nRanks);
+      for (int r = 0; r < n; r++) info[r] = perRank[r];
       return ncclSuccess;
     };
   }
