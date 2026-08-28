@@ -562,6 +562,26 @@ if(BUILD_TESTS)
     set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
   endif()
 
+  # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_broadcast_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # LSA<->GIN threshold + LL-cap resolution, tier-selection predicates (LL / LSA /
+  # flat / scatter+allgather / ring), scatter/ring chunk math and signal-count
+  # sizing that broadcast.cu relies on. Skip the target if the rccl-tests checkout
+  # is absent so a standalone rccl build still configures. Runs under `ctest -L unit`.
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_broadcast_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaBroadcastPolicy gin/gin_sdma_broadcast_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_broadcast_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaBroadcastPolicy COMMAND rccl-UnitTestsGinSdmaBroadcastPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES LABELS "unit")
+  endif()
+
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
