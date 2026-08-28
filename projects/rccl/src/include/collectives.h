@@ -713,6 +713,7 @@ public:
   }
 };
 
+// When sharedConns is set, AllGather reuses PatRSAlgorithm's peer directions, so its data blocks are indexed rank-s.
 template <typename T>
 class PatAGAlgorithm {
   size_t offset;
@@ -722,6 +723,7 @@ class PatAGAlgorithm {
   int nelem;
   int rank;
   int nranks;
+  int sharedConns;
   int nrPow2;
   int postFreq;
   int lastA;
@@ -806,8 +808,9 @@ class PatAGAlgorithm {
 
 public:
   __device__ __host__ PatAGAlgorithm(int stepSize, int stepDepth, int maxParallelFactor, size_t offset, size_t end,
-                                     size_t count, int chunkCount, int rank, int nranks)
-    : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks) {
+                                     size_t count, int chunkCount, int rank, int nranks, int sharedConns)
+    : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks),
+      sharedConns(sharedConns) {
     parallelFactor = maxParallelFactor;
     aggDelta = nrPow2 = (1 << log2Up(nranks));
 
@@ -844,7 +847,8 @@ public:
     } else if (phase == 0) {
       int s = a * aggDelta + as;
       if (s >= nranks) skip = 1;
-      int recvDataRank = (rank + s) % nranks;
+      // C++ % truncates toward zero, so (rank - s + nranks) % nranks is still negative when s > rank + nranks.
+      int recvDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + s) % nranks;
       ps->outIx = recvDataRank * count + offset;
       ps->sendDim = -1;
       ps->recvDim = 0;
@@ -859,7 +863,7 @@ public:
       if (s >= nranks) skip = 1;
       ps->sendDim = firstBitSet(s, nrPow2);
       s -= (1 << ps->sendDim);
-      int sendDataRank = (rank + nranks + s) % nranks;
+      int sendDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + nranks + s) % nranks;
       ps->outIx = sendDataRank * count + offset;
       ps->recvDim = s ? firstBitSet(s, nrPow2) : -1;
       ps->sendOffset = ps->recvOffset = (a % postFreq) * nelem;
@@ -895,7 +899,7 @@ public:
       s -= (1 << ps->sendDim);
       ps->sendOffset = (a % postFreq) * nelem;
       ps->stepOffset = a / postFreq;
-      int sendDataRank = (rank + nranks + s) % nranks;
+      int sendDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + nranks + s) % nranks;
       ps->outIx = sendDataRank * count + offset;
       ps->recvDim = s ? firstBitSet(s, nrPow2) : -1;
       if (ps->recvDim == -1) {
