@@ -193,10 +193,10 @@ operations and its superseded product branches must be deleted immediately.
 ### Stage 10 quantitative and deletion ledger
 
 The tables above remain the reproducible Stage 0 snapshot. At the final Stage
-10 code checkpoint, the same production scope contains 83 files, 95,512
-physical lines, 91,081 nonblank lines, and 84,055 comment-excluded code lines.
-The implementation is 653 code lines larger than the typed Stage 0 snapshot
-and 5,494 code lines smaller than the 89,549-line deletion-phase start. The net
+10 code checkpoint, the same production scope contains 83 files, 95,493
+physical lines, 91,064 nonblank lines, and 84,041 comment-excluded code lines.
+The implementation is 639 code lines larger than the typed Stage 0 snapshot
+and 5,508 code lines smaller than the 89,549-line deletion-phase start. The net
 growth since Stage 0 is the cost of durable typed contracts and explicit
 cross-target coverage; the plan did not trade independent validation or
 flavor semantics for a line-count target.
@@ -222,6 +222,7 @@ The final deletion audit records:
 | Report trust reconstruction in HSA teardown | Deleted; pure `AutoMoiReportTrustEvaluation` owns the decision |
 | Deprecated environment spellings | Retained deliberately at the user-facing hook boundary with warnings and direct tests |
 | String synchronization names | Retained as stable diagnostics and fault-selection identity; typed `SemanticSiteId` remains authoritative for target-neutral graph joins |
+| Physical-site coverage bulk update | Deleted with its adapter-only test; SuperCollider publishes through retained plan-local `ConSanProbeIntentId` values |
 | `MoiOptions` internal attempt context | Retained as the private composition of the sole caller-input aggregate and sole operating point; it is not a public or competing semantic contract |
 | Native-byte and mutation revalidation | Retained deliberately because emitted bytes, ELF/ABI bounds, and behavioral mutation cannot be proved by plan construction alone |
 

@@ -53,11 +53,11 @@ Current continuation ledger:
 | 7 | Complete | `b269bcd6d3` | 4,667 nonphysical + 635 physical gfx1201 = 5,302 |
 | 8 | Complete | `f77aa9a4fa` | 4,667 nonphysical + 635 physical gfx1201 = 5,302 |
 | 9 | Complete | `01666fbafd` | 4,668 nonphysical + 635 physical gfx1201 = 5,303 |
-| 10 | Complete | Code/test checkpoint `a12265d0db`; exit evidence in this documentation revision | 4,668 nonphysical in 258.38 seconds + 635 physical gfx1201 in 108.85 seconds = 5,303 |
+| 10 | Complete | Code/test checkpoint `cdb93dbad5`; exit evidence in this documentation revision | 4,667 nonphysical in 263.13 seconds + 635 physical gfx1201 in 108.07 seconds = 5,302 |
 
 Stage 10's implementation commits begin at `4ca48b33f7` and include the typed
 evidence-only sizing cutover, profile-driven validation, and final audit seam
-closure through `a12265d0db`. No temporary old/new comparison switch remains.
+closure through `cdb93dbad5`. No temporary old/new comparison switch remains.
 
 ## Historical source-host handoff (superseded)
 

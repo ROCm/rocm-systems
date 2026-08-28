@@ -7271,6 +7271,8 @@ architecture values are confined to decoder and instruction-builder calls.
 Synchronization construction and validation use typed `SemanticSiteId` joins;
 stable event names remain only for diagnostics, mutation selection, and an
 adjacent consistency check against the typed graph.
+Coverage outcomes likewise publish through plan-local `ConSanProbeIntentId`
+values; the physical-site bulk-update compatibility adapter is deleted.
 
 The Stage 12 questions now have implementation answers. Environment settings
 are classified by typed request/debug/mutation/runtime contracts, with tested
@@ -7284,17 +7286,17 @@ contract. DBI remains host-only and Record/Replay-first, while translated-code
 instrumentation and the on-device engines are explicitly later work.
 
 At the final Stage 10 code checkpoint the production scope contains 83 files,
-95,512 physical lines, 91,081 nonblank lines, and 84,055 comment-excluded code
+95,493 physical lines, 91,064 nonblank lines, and 84,041 comment-excluded code
 lines.
-That is 653 code lines above the typed Stage 0 snapshot, reflecting the durable
-contracts and tests added during this plan, but 5,494 code lines below the
+That is 639 code lines above the typed Stage 0 snapshot, reflecting the durable
+contracts and tests added during this plan, but 5,508 code lines below the
 89,549-line deletion-phase start. Direct target-vocabulary lines fell from
 1,358 in 39 files to 1,153 in 36 files, while every surviving policy-facing
 target decision is profile-owned. All 27 former mutable `ConSanOptions`
 planning fields remain deleted.
 
-The final checked-in Stage 10 gate passed 5,303/5,303 tests. Its `-j16`
-nonphysical tier passed 4,668/4,668 in 258.38 seconds, including all 2,908
+The final checked-in Stage 10 gate passed 5,302/5,302 tests. Its `-j16`
+nonphysical tier passed 4,667/4,667 in 263.13 seconds, including all 2,908
 five-target RocJitsu device rows. The physical gfx1201 tier then passed
-635/635 in 108.85 seconds, serialized at `-j1`. The exact code checkpoint is
-`a12265d0db`.
+635/635 in 108.07 seconds, serialized at `-j1`. The exact code checkpoint is
+`cdb93dbad5`.

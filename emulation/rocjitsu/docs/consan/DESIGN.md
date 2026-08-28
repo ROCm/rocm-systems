@@ -936,6 +936,11 @@ validation join events through typed `SemanticSiteId` values. Stable string
 names remain only as adjacent consistency checks and as the deliberate
 diagnostic and fault-mutation selection interface.
 
+Lowering publishes coverage only through plan-local `ConSanProbeIntentId`
+values. The former physical-site bulk-update adapter is deleted; even
+coalesced SuperCollider rejection paths retain and update each authoritative
+intent identity.
+
 Final validation consumes the published inventory, observation plan, coverage
 ledger, operating point, resource plans, patch metadata, and immutable target
 profile. It independently checks ELF structure, exact emitted bytes, branch
