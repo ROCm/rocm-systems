@@ -188,8 +188,8 @@ execute_pass_phase_enter(const range_plan_t&     plan,
     // for this range's replay loop from its PASS PHASE_ENTER callback. Legal only while armed, so
     // the arm window brackets the tool callback and is closed by a scope guard (a throwing tool
     // callback must not leave the toggles armed).
-    pass_data.replay_local_start_context_cb = &kernel_replay::replay_local_start_context;
-    pass_data.replay_local_stop_context_cb  = &kernel_replay::replay_local_stop_context;
+    pass_data.replay_local_start_context_cb = &kernel_replay::replay_local_enable_context;
+    pass_data.replay_local_stop_context_cb  = &kernel_replay::replay_local_disable_context;
 
     {
         kernel_replay::set_toggles_armed(true);
