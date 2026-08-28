@@ -143,8 +143,13 @@ function(add_rocshmem_targets)
 
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
-                ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_cmake_opts} "
+                ${CMAKE_COMMAND} -E make_directory "${ROCSHMEM_INSTALL_DIR}/build"
+                && ${CMAKE_COMMAND} -E chdir "${ROCSHMEM_INSTALL_DIR}/build" ${CMAKE_COMMAND} -E env
+                   "PATH=${ROCM_PATH}/bin:$ENV{PATH}"
+                   "ROCM_PATH=${ROCM_PATH}"
+                   "HIP_PATH=${ROCM_PATH}"
+                   bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ${ROCSHMEM_SOURCE_DIR}/scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=${ROCM_PATH}/bin/amdclang -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/amdclang++ -DCMAKE_PREFIX_PATH=${ROCM_PATH} -DROCM_PATH=${ROCM_PATH} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_cmake_opts} "
+            BUILD_BYPRODUCTS    "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
             INSTALL_COMMAND ""
         )
 

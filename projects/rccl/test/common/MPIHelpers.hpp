@@ -22,13 +22,16 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <mpi.h>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 /**
  * @namespace MPIHelpers
@@ -36,6 +39,62 @@
  */
 namespace MPIHelpers
 {
+
+// Collective predicates used by capability-gated MPI tests. Keeping these in
+// the common infrastructure prevents tests from open-coding MPI_Allreduce with
+// inconsistent MIN/MAX conventions.
+inline bool allRanksTrue(bool localValue, MPI_Comm comm = MPI_COMM_WORLD)
+{
+    int value = localValue ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_INT, MPI_MIN, comm);
+    return value != 0;
+}
+
+inline bool anyRankTrue(bool localValue, MPI_Comm comm = MPI_COMM_WORLD)
+{
+    int value = localValue ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_INT, MPI_MAX, comm);
+    return value != 0;
+}
+
+// Find a rank on another node with the requested shared-memory local rank.
+// Returns -1 when the topology has no such peer.
+inline int findRemotePeerForLocalRank(int wantedLocalRank,
+                                      MPI_Comm worldComm = MPI_COMM_WORLD)
+{
+    int worldSize = 0;
+    MPI_Comm_size(worldComm, &worldSize);
+
+    char localName[MPI_MAX_PROCESSOR_NAME] = {};
+    int nameLength = 0;
+    MPI_Get_processor_name(localName, &nameLength);
+
+    MPI_Comm localComm = MPI_COMM_NULL;
+    if (MPI_Comm_split_type(worldComm, MPI_COMM_TYPE_SHARED, 0,
+                            MPI_INFO_NULL, &localComm) != MPI_SUCCESS)
+        return -1;
+    int localRank = -1;
+    MPI_Comm_rank(localComm, &localRank);
+    MPI_Comm_free(&localComm);
+
+    std::vector<char> allNames(
+        static_cast<size_t>(worldSize) * MPI_MAX_PROCESSOR_NAME, 0);
+    std::vector<int> allLocalRanks(static_cast<size_t>(worldSize), -1);
+    MPI_Allgather(localName, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
+                  allNames.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, worldComm);
+    MPI_Allgather(&localRank, 1, MPI_INT, allLocalRanks.data(), 1, MPI_INT,
+                  worldComm);
+
+    for (int rank = 0; rank < worldSize; ++rank)
+    {
+        const char* rankName =
+            allNames.data() + static_cast<size_t>(rank) * MPI_MAX_PROCESSOR_NAME;
+        if (std::strcmp(rankName, localName) != 0 &&
+            allLocalRanks[static_cast<size_t>(rank)] == wantedLocalRank)
+            return rank;
+    }
+    return -1;
+}
 
 // Returns the MPI world rank as a string for diagnostic messages.
 // Probes OpenMPI, MPICH/PMIx, and SLURM env vars in order; returns "?" if none set.
