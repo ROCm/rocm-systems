@@ -30,14 +30,14 @@
 #include <rocprofiler-sdk/version.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <memory>
-#include <optional>
+#include <filesystem>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
