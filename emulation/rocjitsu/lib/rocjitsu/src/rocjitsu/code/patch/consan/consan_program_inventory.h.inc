@@ -165,8 +165,8 @@ struct SynchronizationInventoryView {
   }
 
   /// Resolve one decoded event name to its sole published record. Event names
-  /// are the compatibility identity carried by synchronization sequences;
-  /// newer policy should prefer the typed `SemanticSiteId` overload above.
+  /// are the stable diagnostic and mutation-selection identity; target-neutral
+  /// graph policy uses the typed `SemanticSiteId` overload above.
   [[nodiscard]] const ConSanSyncEvent *find_event(std::string_view identity) const {
     const auto event = std::ranges::find(sync_events, identity, &ConSanSyncEvent::identity);
     return event == sync_events.end() ? nullptr : &*event;
@@ -445,10 +445,11 @@ private:
 ///
 /// The builder is the only mutable owner during decode/provenance/ownership
 /// analysis. `view()` may publish a const facade while construction continues
-/// so legacy consumers can read containers, but the builder must not escape
-/// the transform. Once it is destroyed, every surviving inventory reference
-/// is immutable. Decoder output is staged only in the builder-owned access
-/// collection with immediate container attribution. `publish_decoded_accesses`
+/// so staged analyzers can read completed containers, but the builder must not
+/// escape the transform. Once it is destroyed, every surviving inventory
+/// reference is immutable. Decoder output is staged only in the builder-owned
+/// access collection with immediate container attribution.
+/// `publish_decoded_accesses`
 /// completes stable identity, ranges, and limitations in place before the
 /// immutable inventory becomes a stage output.
 class ProgramInventoryBuilder {

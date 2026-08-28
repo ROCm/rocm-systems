@@ -116,9 +116,9 @@ void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result,
       site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected, std::move(detail));
 }
 
-/// Project final current-lowerer results into the production ledger. Patch
-/// kinds remain a temporary compatibility input; policy applicability has
-/// already been fixed by `ConSanObservationPlan` and is never inferred here.
+/// Project final native-lowering results into the production ledger. Patch
+/// kinds identify the realized mechanism; policy applicability has already
+/// been fixed by `ConSanObservationPlan` and is never inferred here.
 void finalize_sc_access_coverage_ledger(ConSanTransformArtifacts &result) {
   const auto is_access_patch = [](ConSanPatchKind kind) {
     switch (kind) {

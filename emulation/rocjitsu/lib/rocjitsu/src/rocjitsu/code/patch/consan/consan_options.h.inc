@@ -724,7 +724,7 @@ struct TransformPolicy {
   }
 };
 
-/// Complete caller-owned input to the compatibility ConSan transformer.
+/// Complete caller-owned input to the internal native ConSan lowerer.
 ///
 /// The inherited request, debug-override, mutation, runtime-fact, binding, and
 /// transform-policy subobjects are the sole representations of input state.

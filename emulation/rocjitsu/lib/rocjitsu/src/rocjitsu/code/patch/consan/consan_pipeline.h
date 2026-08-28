@@ -320,9 +320,9 @@ transform_consan(std::span<const uint8_t> code_object_bytes, const ConSanRequest
                  const BoundRuntimeResources &resources);
 
 /// Run validation-only mutation/perturbation composition through a distinct
-/// entry point. The legacy adapter currently owns the internal staged-image
-/// mechanics; the returned result still obeys the same static pipeline
-/// contract as an ordinary transform.
+/// entry point. The internal native lowerer owns staged-image mechanics; the
+/// returned result obeys the same static pipeline contract as an ordinary
+/// transform.
 [[nodiscard]] TransformResult transform_consan_with_mutation(
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
