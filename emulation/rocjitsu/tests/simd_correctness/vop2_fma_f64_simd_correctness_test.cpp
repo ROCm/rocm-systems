@@ -125,33 +125,38 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
 }
 
 TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarGuard guard;
   const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
-  const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
-  EXPECT_EQ(simd.output, scalar.output);
-  EXPECT_EQ(simd.output[0], 0x3e10000000000000ULL);
+  EXPECT_EQ(scalar.output[0], 0x3e10000000000000ULL);
+  if constexpr (util::has_stdx_simd_64bit_lanes) {
+    const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
+    EXPECT_EQ(simd.output, scalar.output);
+  }
 }
 
 TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarGuard guard;
   constexpr uint64_t kExec = 0xa5a5f0f012348001ULL;
   const RunResult scalar = run_fmac(true, kExec, /*mode=*/3u << 6);
-  const RunResult simd = run_fmac(false, kExec, /*mode=*/3u << 6);
-  EXPECT_EQ(simd.output, scalar.output);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     if ((kExec & (uint64_t{1} << lane)) == 0) {
-      EXPECT_EQ(simd.output[lane], simd.accumulator[lane]) << "inactive lane " << lane;
+      EXPECT_EQ(scalar.output[lane], scalar.accumulator[lane]) << "scalar, inactive lane " << lane;
+    }
+  }
+  if constexpr (util::has_stdx_simd_64bit_lanes) {
+    const RunResult simd = run_fmac(false, kExec, /*mode=*/3u << 6);
+    EXPECT_EQ(simd.output, scalar.output);
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+      if ((kExec & (uint64_t{1} << lane)) == 0) {
+        EXPECT_EQ(simd.output[lane], simd.accumulator[lane]) << "simd, inactive lane " << lane;
+      }
     }
   }
 }
 
 TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
+  if constexpr (!util::has_stdx_simd_64bit_lanes)
+    GTEST_SKIP() << "64-bit-lane SIMD path unavailable; both runs would be the scalar one";
   ForceScalarGuard guard;
   for (uint32_t round = 0; round < 4; ++round) {
     for (uint32_t denorm = 0; denorm < 4; ++denorm) {
@@ -164,8 +169,8 @@ TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExactly) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
+  if constexpr (!util::has_stdx_simd_64bit_lanes)
+    GTEST_SKIP() << "64-bit-lane SIMD path unavailable; both runs would be the scalar one";
   ForceScalarGuard guard;
 
   constexpr uint64_t kPositiveZero = 0x0000'0000'0000'0000ULL;

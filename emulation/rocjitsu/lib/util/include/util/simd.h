@@ -47,12 +47,13 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
-/// Compile-time switch for the 64-bit-lane SIMD paths specifically. The
-/// `ROCJITSU_TRY_SIMD_*_F64` probes in simd_glue.h expand to nothing when
-/// `UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS` is set, so execution falls through to
-/// the scalar implementation even though `has_stdx_simd` is true. A test that
-/// gates only on `has_stdx_simd` would then run the scalar path twice and
-/// report the second run as SIMD coverage; gate on this instead.
+/// Compile-time switch for the SIMD paths that need 64-bit lanes, and the
+/// 64-bit masks that go with them. `has_stdx_simd` only reports that the header
+/// is available; where `UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS` is set those paths
+/// are compiled out and execution falls through to the scalar implementation
+/// even though `has_stdx_simd` is true. Selecting or asserting on a 64-bit
+/// vector path therefore has to gate on this and not on `has_stdx_simd`, which
+/// would silently exercise the scalar implementation instead.
 inline constexpr bool has_stdx_simd_64bit_lanes =
     has_stdx_simd && UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS == 0;
 
