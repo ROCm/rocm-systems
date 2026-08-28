@@ -19,20 +19,8 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
                                                  ConSanTransformArtifacts &result) {
   ConSanObservationProduct observation = assemble_consan_observation_product(
-      result.program_inventory,
-      {
-          .engine = ConSanCapabilityEngine::SuperCollider,
-          .native_lds_enabled = options.probe_lds_check_trap,
-          .group_flat_enabled = options.probe_flat_check_trap,
-          .flat_provenance_mode = options.flat_provenance_mode,
-          .barrier_tracking_enabled = true,
-          .include_atomic_fence_policy = false,
-          .atomic_fence_tracking_enabled = false,
-          // A test-only selection filter must not shrink the physical coverage
-          // denominator. Current lowerers may still use it to choose work.
-          .container_filter = {},
-          .reserved_for_synchronization = {},
-      });
+      result.program_inventory, static_cast<const ConSanRequest &>(options),
+      static_cast<const ConSanDebugOverrides &>(options));
   const bool valid = observation.valid();
   result.observation_plan = std::move(observation.plan);
   result.coverage_ledger = std::move(observation.initial_coverage);

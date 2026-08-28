@@ -863,6 +863,51 @@ TEST(ConSanObservationPolicy, OneAuthorityAssemblesPlanAndInitialLedgerForEveryE
   }
 }
 
+TEST(ConSanObservationPolicy, TypedRequestAssemblyMatchesTheExplicitPolicyContractForEveryEngine) {
+  const ProgramInventory inventory = one_native_access_inventory();
+  for (const ConSanCapabilityEngine engine : kConSanCapabilityEngines) {
+    const bool supercollider = engine == ConSanCapabilityEngine::SuperCollider;
+    ConSanRequest request;
+    request.flavor = supercollider ? ConSanFlavor::SuperCollider : ConSanFlavor::Moi;
+    request.probe_lds_check_trap = true;
+    request.probe_flat_check_trap = true;
+    request.moi_track_barriers = true;
+    request.moi_track_atomics = true;
+    switch (engine) {
+    case ConSanCapabilityEngine::SuperCollider:
+      break;
+    case ConSanCapabilityEngine::RecordReplay:
+      request.moi_engine = ConSanMoiEngine::RecordReplay;
+      break;
+    case ConSanCapabilityEngine::Sampled:
+      request.moi_engine = ConSanMoiEngine::Sampled;
+      break;
+    case ConSanCapabilityEngine::InlineShadow:
+      request.moi_engine = ConSanMoiEngine::InlineShadow;
+      break;
+    case ConSanCapabilityEngine::Count:
+      FAIL() << "sentinel engine is not iterable";
+      continue;
+    }
+
+    const ConSanObservationProduct typed =
+        assemble_consan_observation_product(inventory, request, ConSanDebugOverrides{});
+    const ConSanObservationProduct explicit_product = assemble_consan_observation_product(
+        inventory, {.engine = engine,
+                    .native_lds_enabled = true,
+                    .group_flat_enabled = true,
+                    .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
+                    .barrier_tracking_enabled = true,
+                    .include_atomic_fence_policy = !supercollider,
+                    .atomic_fence_tracking_enabled = !supercollider,
+                    .container_filter = {},
+                    .reserved_for_synchronization = {}});
+    SCOPED_TRACE(consan_capability_engine_name(engine));
+    ASSERT_TRUE(typed.valid());
+    EXPECT_EQ(typed, explicit_product);
+  }
+}
+
 TEST(ConSanObservationPolicy, ConflictingAliasesFailInTheAssembledProduct) {
   AccessInventoryInput input;
   ConSanFunctionInfo first;

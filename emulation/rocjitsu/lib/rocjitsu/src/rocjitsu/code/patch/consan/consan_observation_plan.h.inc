@@ -1307,3 +1307,11 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
 [[nodiscard]] ConSanObservationProduct
 assemble_consan_observation_product(const ProgramInventory &inventory,
                                     const ConSanObservationPolicyRequest &request);
+
+/// Translate the complete typed caller request into the one observation
+/// policy request and assemble its validated product. This is the sole
+/// production authority for engine-specific domain selection, diagnostic
+/// filtering, and ordinary-memory synchronization reservations.
+[[nodiscard]] ConSanObservationProduct
+assemble_consan_observation_product(const ProgramInventory &inventory, const ConSanRequest &request,
+                                    const ConSanDebugOverrides &debug);

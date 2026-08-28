@@ -243,54 +243,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
   return words;
 }
 
-using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
-
-[[nodiscard]] std::set<OrderedOrdinarySyncSiteKey>
-ordered_ordinary_sync_site_keys(const ConSanTransformArtifacts &result) {
-  std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
-  events.reserve(result.program_inventory.sync().sync_events.size());
-  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events)
-    events.emplace(event.identity, &event);
-
-  std::set<OrderedOrdinarySyncSiteKey> keys;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
-        (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
-         sequence.memory_role != ConSanSyncMemoryRole::Release) ||
-        !consan_sync_confidence_meets(sequence.confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        !consan_sync_confidence_meets(sequence.memory_role_confidence,
-                                      ConSanSemanticConfidence::Conservative)) {
-      continue;
-    }
-    const ConSanSyncEvent *communication = nullptr;
-    for (const std::string &identity : sequence.member_event_identities) {
-      const auto found = events.find(identity);
-      if (found == events.end() || found->second->kind != ConSanSyncEventKind::OrdinaryMemory)
-        continue;
-      if (communication != nullptr) {
-        communication = nullptr;
-        break;
-      }
-      communication = found->second;
-    }
-    if (communication != nullptr && communication->container_name == sequence.container_name &&
-        communication->in_kernel == sequence.in_kernel) {
-      keys.emplace(communication->in_kernel, communication->container_name,
-                   communication->text_offset);
-    }
-  }
-  return keys;
-}
-
-[[nodiscard]] bool
-is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
-                              std::string_view container_name, bool in_kernel,
-                              uint64_t text_offset) {
-  return ordered_sync_sites.contains(
-      OrderedOrdinarySyncSiteKey{in_kernel, std::string(container_name), text_offset});
-}
-
 /// Construct temporary lowering state from one admitted normalized access.
 /// The exact inventory record remains the candidate's base; construction only
 /// selects its unambiguous execution-owner descriptor.
@@ -347,38 +299,11 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
 /// coverage ledger. Current access lowerers consume the admitted candidate
 /// projection; policy decisions and final coverage retain the complete typed
 /// account of excluded and admitted sites.
-[[nodiscard]] bool initialize_moi_access_observation_plan(
-    const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const MoiOptions &options,
-    const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
-    ConSanTransformArtifacts &result) {
-  std::vector<PhysicalSiteId> synchronization_sites;
-  for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
-    const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
-    if (is_ordered_ordinary_sync_site(ordered_sync_sites, access.container.name, in_kernel,
-                                      access.physical_id.original_text_offset) &&
-        std::ranges::find(synchronization_sites, access.physical_id) ==
-            synchronization_sites.end()) {
-      synchronization_sites.push_back(access.physical_id);
-    }
-  }
-
-  const auto engine = consan_capability_engine(ConSanFlavor::Moi, options.moi_engine);
-  if (!engine) {
-    result.errors.emplace_back("ConSan MOI access policy received an invalid engine");
-    return false;
-  }
+[[nodiscard]] bool initialize_moi_access_observation_plan(const MoiOptions &options,
+                                                          ConSanTransformArtifacts &result) {
   ConSanObservationProduct observation = assemble_consan_observation_product(
-      inventory, {
-                     .engine = *engine,
-                     .native_lds_enabled = true,
-                     .group_flat_enabled = true,
-                     .flat_provenance_mode = mode,
-                     .barrier_tracking_enabled = options.moi_track_barriers,
-                     .include_atomic_fence_policy = true,
-                     .atomic_fence_tracking_enabled = options.moi_track_atomics,
-                     .container_filter = options.test_kernel_name_filter,
-                     .reserved_for_synchronization = synchronization_sites,
-                 });
+      result.program_inventory, static_cast<const ConSanRequest &>(options),
+      static_cast<const ConSanDebugOverrides &>(options));
   const bool valid = observation.valid();
   result.observation_plan = std::move(observation.plan);
   result.coverage_ledger = std::move(observation.initial_coverage);

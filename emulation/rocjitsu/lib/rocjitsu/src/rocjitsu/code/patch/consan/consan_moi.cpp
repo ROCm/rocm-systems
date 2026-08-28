@@ -718,11 +718,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
   }
   if (!result.errors.empty())
     return result;
-  const std::set<OrderedOrdinarySyncSiteKey> ordered_sync_sites =
-      ordered_ordinary_sync_site_keys(result);
-  const bool observation_valid = initialize_moi_access_observation_plan(
-      result.program_inventory, effective_options.flat_provenance_mode, effective_options,
-      ordered_sync_sites, result);
+  const bool observation_valid = initialize_moi_access_observation_plan(effective_options, result);
   if (execution != nullptr)
     execution->note_observation_plan();
   if (!observation_valid) {

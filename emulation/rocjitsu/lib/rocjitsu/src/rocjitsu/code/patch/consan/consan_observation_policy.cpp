@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu {
@@ -88,6 +89,53 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
   }
 }
 
+[[nodiscard]] std::vector<PhysicalSiteId>
+ordinary_synchronization_reservations(const ProgramInventory &inventory) {
+  std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
+  events.reserve(inventory.sync().sync_events.size());
+  for (const ConSanSyncEvent &event : inventory.sync().sync_events)
+    events.emplace(event.identity, &event);
+
+  std::vector<PhysicalSiteId> reservations;
+  for (const ConSanSyncSequence &sequence : inventory.sync().sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
+         sequence.memory_role != ConSanSyncMemoryRole::Release) ||
+        !consan_sync_confidence_meets(sequence.confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                      ConSanSemanticConfidence::Conservative)) {
+      continue;
+    }
+    const ConSanSyncEvent *communication = nullptr;
+    for (const std::string &identity : sequence.member_event_identities) {
+      const auto found = events.find(identity);
+      if (found == events.end() || found->second->kind != ConSanSyncEventKind::OrdinaryMemory)
+        continue;
+      if (communication != nullptr) {
+        communication = nullptr;
+        break;
+      }
+      communication = found->second;
+    }
+    if (communication == nullptr || communication->container_name != sequence.container_name ||
+        communication->in_kernel != sequence.in_kernel) {
+      continue;
+    }
+    for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
+      const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
+      if (in_kernel != communication->in_kernel ||
+          access.container.name != communication->container_name ||
+          access.physical_id.original_text_offset != communication->text_offset ||
+          std::ranges::find(reservations, access.physical_id) != reservations.end()) {
+        continue;
+      }
+      reservations.push_back(access.physical_id);
+    }
+  }
+  return reservations;
+}
+
 } // namespace
 
 ConSanObservationProduct
@@ -145,6 +193,39 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
     }
   }
   return product;
+}
+
+ConSanObservationProduct assemble_consan_observation_product(const ProgramInventory &inventory,
+                                                             const ConSanRequest &request,
+                                                             const ConSanDebugOverrides &debug) {
+  const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
+  const std::optional<ConSanCapabilityEngine> engine =
+      consan_capability_engine(flavor, request.moi_engine);
+  if (!engine) {
+    ConSanObservationProduct product;
+    product.diagnostics.emplace_back("ConSan observation policy received an invalid engine");
+    return product;
+  }
+
+  const bool moi = flavor == ConSanFlavor::Moi;
+  const std::vector<PhysicalSiteId> synchronization_reservations =
+      moi ? ordinary_synchronization_reservations(inventory) : std::vector<PhysicalSiteId>{};
+  return assemble_consan_observation_product(
+      inventory, {
+                     .engine = *engine,
+                     .native_lds_enabled = moi || request.probe_lds_check_trap,
+                     .group_flat_enabled = moi || request.probe_flat_check_trap,
+                     .flat_provenance_mode = request.flat_provenance_mode,
+                     .barrier_tracking_enabled = moi ? request.moi_track_barriers : true,
+                     .include_atomic_fence_policy = moi,
+                     .atomic_fence_tracking_enabled = moi && request.moi_track_atomics,
+                     // SuperCollider's diagnostic selection filter must not shrink its
+                     // physical coverage denominator. MOI's candidate filter remains an
+                     // explicit diagnostic-only policy input during this migration.
+                     .container_filter =
+                         moi ? std::string_view(debug.test_kernel_name_filter) : std::string_view{},
+                     .reserved_for_synchronization = synchronization_reservations,
+                 });
 }
 
 } // namespace rocjitsu
