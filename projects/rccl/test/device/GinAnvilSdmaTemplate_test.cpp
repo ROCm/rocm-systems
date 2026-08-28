@@ -15,6 +15,11 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
+// Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
+// Override must precede gin_anvil_sdma.h so the templates expand our counter.
+__device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
+#undef NCCL_GIN_THREADFENCE_SYSTEM
+#define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 #endif
 
@@ -68,6 +73,17 @@ static void uploadHarness(DeviceBuffer<TemplateHarness>* d_h, TemplateHarness* h
   d_h->upload(*host);
 }
 
+static void resetThreadfenceCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubThreadfenceCount), &z, sizeof(z)));
+}
+
+static unsigned long long readThreadfenceCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubThreadfenceCount), sizeof(c)));
+  return c;
+}
+
 // H1: non-leader thread returns immediately.
 __global__ void kernelPutLeaderOnly(TemplateHarness* h, int* executed) {
   ncclGinCtx ginCtx{};
@@ -98,7 +114,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_NonLeaderThreadNoOp) {
   EXPECT_EQ(d_executed.download(), 1);
 }
 
-// H2: thread-scope fence when given > required.
+// H2: system fence when required==system && given<required (HIP scope ordering).
 __global__ void kernelPutScopeFence(TemplateHarness* h) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
@@ -121,8 +137,10 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadScopeFence) {
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  resetThreadfenceCount();
   kernelPutScopeFence<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 // H3: SDMA path (threshold 0) with stub put + markSdmaDirty.
