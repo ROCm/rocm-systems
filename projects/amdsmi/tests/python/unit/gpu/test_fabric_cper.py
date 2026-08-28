@@ -9,34 +9,61 @@ Mocks the ctypes layer to verify parameter handling, exception raising, and data
 """
 
 import ctypes
-import struct
-import unittest
-from unittest.mock import MagicMock, patch
-import sys
+import importlib
 import os
+import struct
+import sys
+import types
+import unittest
+from unittest.mock import patch
 
-# Add py-interface to Python path
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 _PY_INTERFACE = os.path.join(_REPO_ROOT, "py-interface")
-sys.path.insert(0, _PY_INTERFACE)
-
-try:
-    from amdsmi import amdsmi_interface
-    from amdsmi import amdsmi_exception
-    from amdsmi import amdsmi_wrapper
-except ImportError:
-    # Skip tests if imports fail
-    amdsmi_interface = None
-    amdsmi_exception = None
-    amdsmi_wrapper = None
 
 
-class FakeProcessorHandle:
-    """Mock processor handle"""
+# Synthetic package name for the in-tree sources. The ``py-interface`` directory
+# is not a valid identifier, and its ``__init__.py`` pulls in the build-generated
+# ``_version`` module, so the submodules are imported directly under this name.
+# It is deliberately not ``amdsmi``: shadowing that would break sibling suites.
+_PKG = "amdsmi_source_under_test"
 
-    def __init__(self, value=0x1234):
-        self.value = value
+
+def _load_source_interface():
+    if _PKG not in sys.modules:
+        pkg = types.ModuleType(_PKG)
+        pkg.__path__ = [_PY_INTERFACE]
+        sys.modules[_PKG] = pkg
+    try:
+        return (
+            importlib.import_module(f"{_PKG}.amdsmi_interface"),
+            importlib.import_module(f"{_PKG}.amdsmi_exception"),
+            importlib.import_module(f"{_PKG}.amdsmi_wrapper"),
+            importlib.import_module(f"{_PKG}.amdsmi_interface_utils"),
+        )
+    except Exception:
+        for name in [n for n in list(sys.modules) if n == _PKG or n.startswith(_PKG + ".")]:
+            del sys.modules[name]
+        return None, None, None, None
+
+
+amdsmi_interface, amdsmi_exception, amdsmi_wrapper, amdsmi_interface_utils = (
+    _load_source_interface()
+)
+
+
+def _patch_fabric_symbol():
+    """Patch the C entry point the interface resolves through the wrapper module.
+
+    ``create=True`` because the symbol is only bound when the loaded
+    libamd_smi.so exports it, which is not the case in a source-only checkout.
+    """
+    return patch.object(amdsmi_wrapper, "amdsmi_get_fabric_cper_entries", create=True)
+
+
+def _set_out(ref, value):
+    """Assign through a ``ctypes.byref()`` out-parameter as the C library would."""
+    ref._obj.value = value
 
 
 @unittest.skipIf(amdsmi_interface is None, "amdsmi_interface not available")
@@ -45,14 +72,14 @@ class TestFabricCperInterface(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
-        self.processor_handle = FakeProcessorHandle()
+        self.processor_handle = amdsmi_wrapper.amdsmi_processor_handle(0x1234)
 
     def test_invalid_handle_type(self):
         """Test exception on invalid processor_handle type"""
         with self.assertRaises(amdsmi_exception.AmdSmiParameterException):
             amdsmi_interface.amdsmi_get_fabric_cper_entries("not_a_handle", 0xFFFF)
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
+    @_patch_fabric_symbol()
     def test_not_supported_error(self, mock_fabric_cper):
         """Test NOT_SUPPORTED error handling (UALoE unavailable)"""
         # Mock C function returning NOT_SUPPORTED
@@ -67,15 +94,15 @@ class TestFabricCperInterface(unittest.TestCase):
             context.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
         )
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
+    @_patch_fabric_symbol()
     def test_success_no_entries(self, mock_fabric_cper):
         """Test successful call with no entries returned"""
 
         # Mock C function returning SUCCESS with 0 entries
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
-            entry_count[0] = 0  # No entries
-            buf_size[0] = 0
-            cursor[0] = 0  # No more data
+            _set_out(entry_count, 0)  # No entries
+            _set_out(buf_size, 0)
+            _set_out(cursor, 0)  # No more data
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
@@ -89,7 +116,7 @@ class TestFabricCperInterface(unittest.TestCase):
         self.assertEqual(new_cursor, 0)
         self.assertEqual(len(cper_data), 0)
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
+    @_patch_fabric_symbol()
     def test_success_with_entries(self, mock_fabric_cper):
         """Test successful call with fabric CPER entries"""
 
@@ -105,21 +132,21 @@ class TestFabricCperInterface(unittest.TestCase):
             struct.pack_into("<I", cper_header, 6, 0xFFFFFFFF)
             # section_count: 1
             struct.pack_into("<H", cper_header, 10, 1)
-            # error_severity: AMDSMI_CPER_SEV_FATAL (3)
-            struct.pack_into("<I", cper_header, 12, 3)
+            # error_severity: AMDSMI_CPER_SEV_FATAL (1)
+            struct.pack_into("<I", cper_header, 12, 1)
             # valid_bits: timestamp valid (bit 0)
             struct.pack_into("<I", cper_header, 16, 0x01)
             # record_length: 128 (header only, no payload)
             struct.pack_into("<I", cper_header, 20, 128)
-            # Timestamp: BCD encoded 2026-08-24 12:00:00
-            cper_header[24] = 0x00  # seconds
-            cper_header[25] = 0x00  # minutes
-            cper_header[26] = 0x12  # hours (12 in BCD)
-            cper_header[27] = 0x01  # flag
-            cper_header[28] = 0x24  # day (24 in BCD)
-            cper_header[29] = 0x08  # month (08 in BCD)
-            cper_header[30] = 0x26  # year (26 in BCD)
-            cper_header[31] = 0x20  # century (20 in BCD)
+            # Timestamp: 2026-08-24 12:00:00
+            cper_header[24] = 0  # seconds
+            cper_header[25] = 0  # minutes
+            cper_header[26] = 12  # hours
+            cper_header[27] = 1  # flag
+            cper_header[28] = 24  # day
+            cper_header[29] = 8  # month
+            cper_header[30] = 26  # year
+            cper_header[31] = 20  # century
             # platform_id, partition_id: all zeros
             # record_id: 0
             # flags: 0
@@ -134,9 +161,9 @@ class TestFabricCperInterface(unittest.TestCase):
             # Set header pointer
             hdrs[0] = ctypes.cast(buf, ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
 
-            entry_count[0] = 1
-            buf_size[0] = 128
-            cursor[0] = 0  # No more data
+            _set_out(entry_count, 1)
+            _set_out(buf_size, 128)
+            _set_out(cursor, 0)  # No more data
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
@@ -153,22 +180,22 @@ class TestFabricCperInterface(unittest.TestCase):
         entry = entries[0]
         self.assertEqual(entry["error_severity"], "fatal")
         self.assertIn("notify_type", entry)
-        self.assertEqual(entry["timestamp"], "2026/08/24 18:00:00")  # Adjusted for BCD decoding
+        self.assertEqual(entry["timestamp"], "2026/08/24 12:00:00")
         self.assertEqual(entry["signature"], b"CPER")
         self.assertEqual(entry["revision"], 0x0100)
         self.assertEqual(entry["signature_end"], "0xffffffff")
         self.assertEqual(entry["sec_cnt"], 1)
         self.assertEqual(entry["record_length"], 128)
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
+    @_patch_fabric_symbol()
     def test_more_data_pagination(self, mock_fabric_cper):
         """Test MORE_DATA status and cursor pagination"""
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor_ref):
             # Return MORE_DATA with cursor = 100
-            entry_count[0] = 0
-            buf_size[0] = 0
-            cursor_ref[0] = 100
+            _set_out(entry_count, 0)
+            _set_out(buf_size, 0)
+            _set_out(cursor_ref, 100)
             return amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA
 
         mock_fabric_cper.side_effect = mock_impl
@@ -180,14 +207,14 @@ class TestFabricCperInterface(unittest.TestCase):
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA)
         self.assertEqual(new_cursor, 100)
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
+    @_patch_fabric_symbol()
     def test_custom_buffer_size(self, mock_fabric_cper):
         """Test custom buffer_size parameter"""
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
-            entry_count[0] = 0
-            buf_size[0] = 0
-            cursor[0] = 0
+            _set_out(entry_count, 0)
+            _set_out(buf_size, 0)
+            _set_out(cursor, 0)
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
@@ -200,46 +227,45 @@ class TestFabricCperInterface(unittest.TestCase):
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
 
-    @patch("amdsmi.amdsmi_wrapper.amdsmi_get_fabric_cper_entries")
-    def test_ifoe_guid_all_zeros(self, mock_fabric_cper):
-        """Test that fabric CPER has all-zeros IFoE GUID placeholder"""
+    @_patch_fabric_symbol()
+    def test_fabric_entries_are_marked_as_fabric(self, mock_fabric_cper):
+        """Fabric entries carry an explicit source marker, not a sniffable GUID string"""
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
-            # Create a minimal CPER with all-zeros notify_type
             cper_header = bytearray(128)
             cper_header[0:4] = b"CPER"
             struct.pack_into("<H", cper_header, 4, 0x0100)
             struct.pack_into("<I", cper_header, 6, 0xFFFFFFFF)
             struct.pack_into("<H", cper_header, 10, 1)
-            struct.pack_into("<I", cper_header, 12, 3)  # FATAL
+            struct.pack_into("<I", cper_header, 12, 1)  # FATAL
             struct.pack_into("<I", cper_header, 20, 128)
-            # notify_type at offset 72, 16 bytes, all zeros
-            cper_header[72:88] = bytes(16)  # All zeros (IFoE GUID placeholder)
+            # notify_type: IFoE placeholder GUID (all zeros)
+            cper_header[72:88] = bytes(16)
             cper_header[96:100] = b"IFoE"
 
             ctypes.memmove(buf, bytes(cper_header), 128)
             hdrs[0] = ctypes.cast(buf, ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
 
-            entry_count[0] = 1
-            buf_size[0] = 128
-            cursor[0] = 0
+            _set_out(entry_count, 1)
+            _set_out(buf_size, 128)
+            _set_out(cursor, 0)
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
+        entries, _new_cursor, _cper_data, _status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
         )
 
         self.assertEqual(len(entries), 1)
-        notify_type = entries[0]["notify_type"]
+        self.assertEqual(entries[0]["source"], "fabric")
 
-        # Verify notify_type is formatted as hex string and is all zeros
-        # Format is typically "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
-        self.assertIsInstance(notify_type, str)
-        # Check if all hex digits are zeros
-        hex_digits = notify_type.replace(":", "").replace(" ", "")
-        self.assertTrue(all(c == "0" for c in hex_digits), "IFoE GUID should be all zeros")
+        # The IFoE placeholder GUID maps to no known notify type, so the string
+        # form is unusable for classification - hence the source marker above.
+        self.assertEqual(
+            entries[0]["notify_type"], amdsmi_interface_utils._notifyTypeToString(bytes(16))
+        )
+        self.assertEqual(entries[0]["notify_type"], "Unknown")
 
 
 if __name__ == "__main__":

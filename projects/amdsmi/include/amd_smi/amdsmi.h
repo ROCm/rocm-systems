@@ -6241,7 +6241,8 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
  *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
  *                 returned entry. Caller allocates the array.
  *
- *  @param[out] entry_count [in] maximum number of entries the cper_hdrs array can hold.
+ *  @param[out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
+ *              must be in [1, 4096].
  *              [out] number of CPER entries returned.
  *
  *  @param[in,out] cursor [in] cursor from previous call (0 = start).
@@ -6250,7 +6251,7 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success with no more data,
  *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if UALoE not available,
- *          ::AMDSMI_STATUS_INVAL if null pointer arguments,
+ *          ::AMDSMI_STATUS_INVAL if null pointer or out-of-range entry_count arguments,
  *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small for one entry,
  *          non-zero on other failures
  */
