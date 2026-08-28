@@ -32,6 +32,7 @@
 
 #include <initializer_list>
 #include <memory>
+#include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,117 @@ TEST_F(DevrIsOneLsaTeamTest, LsaSizeEqualsNRanks_ReturnsTrue) {
 TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
   comm->devrState.lsaSize = 4;
   EXPECT_FALSE(ncclDevrIsOneLsaTeam(comm));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrInitOnce sizes the symmetric VA space and builds the LSA rank list.
+// After the shared prologue it splits on comm->symmetricSupport: the symmetric
+// path queries the allocation granularity and sizes bigSize from WIN_STRIDE or
+// the largest peer's memory, the proxy-only path rebuilds the rank list from
+// the node-local team instead.
+//
+// bigSize doubles as the "already initialised" marker, so it must stay 0 for
+// the body to run at all.
+
+class DevrInitOnceTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<ncclPeerInfo> peers;
+  std::vector<int> rankToNode;
+  std::vector<int> localRankToRank;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nRanks = 2;
+    comm->rank = 0;
+    comm->cudaDev = 0;
+    comm->localRanks = 2;
+    comm->localRank = 0;
+
+    rankToNode.assign({0, 0});
+    comm->rankToNode = rankToNode.data();
+
+    localRankToRank.assign({0, 1});
+    comm->localRankToRank = localRankToRank.data();
+
+    peers.assign(comm->nRanks, ncclPeerInfo{});
+    peers[0].totalGlobalMem = 1u << 20;
+    peers[1].totalGlobalMem = 4u << 20;
+    comm->peerInfo = peers.data();
+  }
+
+  void TearDown() override {
+    free(comm->devrState.lsaRankList);
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: bigSize != 0 means a previous call already ran, so this one is a
+// no-op. lsaSize stays as set rather than being recomputed from the topology.
+TEST_F(DevrInitOnceTest, AlreadyInitialised_ReturnsWithoutTouchingState) {
+  comm->devrState.bigSize = 1 << 20;
+  comm->devrState.lsaSize = 99;
+
+  EXPECT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.lsaSize, 99);
+  EXPECT_EQ(comm->devrState.lsaRankList, nullptr);
+}
+
+// Branch: symmetric path with WIN_STRIDE unset (-1). bigSize comes from the
+// largest peer's memory, rounded up to a 4GB multiple.
+TEST_F(DevrInitOnceTest, SymmetricDefaultStride_SizesFromLargestPeer) {
+  comm->symmetricSupport = 1;
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.granularity, 4096u);
+  EXPECT_EQ(comm->devrState.bigSize, size_t(1) << 32);  // 4MB aligned up to 4GB
+  EXPECT_EQ(comm->devrState.lsaSize, 2);
+  EXPECT_EQ(comm->devrState.nLsaTeams, 1);
+}
+
+// Branch: WIN_STRIDE set positive, so -bigSize > 1 and the peer-scan is skipped
+// -- the configured stride is used instead of the largest peer's memory.
+TEST_F(DevrInitOnceTest, SymmetricExplicitStride_UsesConfiguredValue) {
+  comm->symmetricSupport = 1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "WIN_STRIDE" ? (int64_t(1) << 33) : deftVal;
+  });
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.bigSize, size_t(1) << 33);  // already 4GB-aligned
+}
+
+// Branch: the granularity query fails, so CUCHECKGOTO unwinds via
+// fail_lsaRankList and the error propagates.
+TEST_F(DevrInitOnceTest, GranularityQueryFails_ReturnsError) {
+  comm->symmetricSupport = 1;
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           return hipErrorInvalidValue;
+                         });
+
+  EXPECT_NE(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(granularity.calls, 1);
+  comm->devrState.lsaRankList = nullptr;  // freed on the failure path already
+}
+
+// Branch: proxy-only. bigSize is just an initialised marker, and the LSA team
+// is rebuilt from the node-local ranks rather than the gcd-derived team.
+TEST_F(DevrInitOnceTest, ProxyOnly_RebuildsTeamFromLocalRanks) {
+  comm->symmetricSupport = 0;
+  comm->localRanks = 2;
+  comm->localRank = 1;
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.bigSize, 1u);
+  EXPECT_EQ(comm->devrState.lsaSize, comm->localRanks);
+  EXPECT_EQ(comm->devrState.lsaSelf, comm->localRank);
+  ASSERT_NE(comm->devrState.lsaRankList, nullptr);
+  EXPECT_EQ(comm->devrState.lsaRankList[0], 0);
+  EXPECT_EQ(comm->devrState.lsaRankList[1], 1);
 }
 
 
