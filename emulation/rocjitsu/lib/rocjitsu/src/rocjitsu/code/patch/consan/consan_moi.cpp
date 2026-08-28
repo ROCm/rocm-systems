@@ -237,7 +237,8 @@ bool consan_detail::append_restore_moi_scc_from_route_key(
     return false;
   words.push_back(build_sopc_encoding(target.arch, bit_test_opcode, request.encoded_sgpr,
                                       scalar_positive_inline_u32(0)));
-  words.push_back(*normalize);
+  if (request.normalize_encoded_sgpr)
+    words.push_back(*normalize);
   return true;
 }
 

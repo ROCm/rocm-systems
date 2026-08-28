@@ -47,6 +47,170 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
   return true;
 }
 
+/// Apply the descriptor growth shared by every appended MOI access engine.
+///
+/// VGPR, SGPR, and private-memory requirements come from the common access
+/// plan. InlineShadow may additionally supply an LDS requirement for its
+/// workgroup-local shadow; replay-style engines pass no LDS requirement.
+[[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> bytes,
+    const MoiOptions &options, const MoiDescriptorVgprRequirements &descriptor_requirements,
+    const MoiDescriptorSgprRequirements &scalar_requirements,
+    const MoiDescriptorPrivateRequirements &private_requirements,
+    const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
+    ConSanTransformArtifacts &result) {
+  return apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
+                                       arch, result.errors) &&
+         apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
+                                             private_requirements, result.errors) &&
+         apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                            result.errors) &&
+         (lds_requirements == nullptr ||
+          apply_lds_descriptor_requirements(patcher, result, code_object, *lds_requirements,
+                                            options, arch, result.errors));
+}
+
+/// Initialize one appended MOI access image and materialize its shared direct
+/// relay reservoirs.
+///
+/// This is byte-placement mechanics only: the caller has already selected the
+/// engine's evidence and patch plans. The body prefix is filled with target
+/// NOPs so every subsequently planned offset remains stable.
+[[nodiscard]] bool initialize_moi_appended_access_text(
+    CodeObjectPatcher &patcher, bool use_indirect_appended, uint64_t indirect_body_begin,
+    const BranchOnlyDirectRelayReservoirSet &direct_reservoirs, std::string_view probe_name,
+    rj_code_arch_t arch, std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
+    ConSanTransformArtifacts &result) {
+  const std::span<const uint8_t> old_text = patcher.text_bytes();
+  if (old_text.empty()) {
+    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) + " found no .text section");
+    return false;
+  }
+  new_text.assign(old_text.begin(), old_text.end());
+  if (use_indirect_appended) {
+    while (new_text.size() < indirect_body_begin)
+      append_word_bytes(new_text, build_s_nop(0, arch));
+  }
+  for (const BranchOnlyDirectRelayReservoir &reservoir : direct_reservoirs.reservoirs) {
+    std::string relay_error;
+    if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, patches,
+                                                      &relay_error)) {
+      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) + " " + relay_error);
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Group planned access patches by the dense dispatcher selected during
+/// placement. The map preserves dispatcher order so generated bodies retain
+/// the offsets proved by planning.
+template <typename PlannedPatch>
+[[nodiscard]] std::map<uint64_t, std::vector<const PlannedPatch *>>
+group_moi_dense_access_patches(const std::vector<PlannedPatch> &planned_patches) {
+  std::map<uint64_t, std::vector<const PlannedPatch *>> groups;
+  for (const PlannedPatch &planned_patch : planned_patches) {
+    if (planned_patch.dense_call_anchor)
+      groups[*planned_patch.dense_dispatcher_offset].push_back(&planned_patch);
+  }
+  return groups;
+}
+
+/// Emit the shared dense access-dispatcher mechanics for one MOI engine.
+///
+/// `eligible` retains the few engine-specific ABI preconditions that are not
+/// implied by the common patch plan. It observes the representative patch and
+/// its owner-bound options but does not perform placement or native emission.
+template <typename PlannedPatch, typename Eligible>
+[[nodiscard]] bool emit_moi_dense_access_groups(
+    const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups,
+    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, const MoiOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, uint64_t access_slot_words,
+    bool collapse_spill_router_for_explicit_key, std::string_view probe_name, rj_code_arch_t arch,
+    std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
+    std::vector<std::string> &errors, Eligible eligible) {
+  for (const auto &[dispatcher_offset, group] : groups) {
+    if (group.empty() || !group.front()->entry_island_offset)
+      continue;
+    MoiOptions group_options = options;
+    if (!apply_moi_transient_sgpr_assignment(
+            group_options, operating_point,
+            group.front()->resources.owner_descriptor_file_offsets) ||
+        !eligible(*group.front(), group_options)) {
+      continue;
+    }
+    if (!emit_moi_dense_access_group(std::span<const PlannedPatch *const>(group), dispatcher_offset,
+                                     dense_entry_hosts, group_options, arch, access_slot_words,
+                                     collapse_spill_router_for_explicit_key, probe_name, new_text,
+                                     patches, errors)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Emit the relocated entry-host bodies shared by dense MOI access routers.
+///
+/// Every engine restores the displaced host prefix and returns through the
+/// same owner-bound indirect-jump ABI. `eligible` retains any stronger flavor
+/// precondition, while `finalize_host_words` adds only a genuinely different
+/// suffix or fixed-size check before the common byte publication. InlineShadow
+/// keeps SCC in the indirect-jump assignment itself; the other engines use the
+/// shared special-state assignment. `use_indirect_jump_scc_save` states that
+/// remaining semantic distinction without duplicating the emission loop.
+template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
+[[nodiscard]] bool emit_moi_dense_entry_hosts(
+    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts,
+    const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups, const MoiOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, uint32_t indirect_island_words,
+    bool pad_to_planned_offset, bool use_indirect_jump_scc_save, std::string_view probe_name,
+    std::string_view lost_assignment_error, std::string_view return_error, rj_code_arch_t arch,
+    std::vector<uint8_t> &new_text, std::vector<std::string> &errors, Eligible eligible,
+    FinalizeHostWords finalize_host_words) {
+  for (const auto &[dispatcher, host] : dense_entry_hosts) {
+    if (pad_to_planned_offset) {
+      while (new_text.size() < host.body_offset)
+        append_word_bytes(new_text, build_s_nop(0u, arch));
+    }
+    if (new_text.size() != host.body_offset) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " emitted a stale dense entry-host mapping");
+      return false;
+    }
+    const auto group = groups.find(dispatcher);
+    if (group == groups.end()) {
+      const size_t reserved_words = host.displaced_words.size() + indirect_island_words;
+      for (size_t word = 0; word < reserved_words; ++word)
+        append_word_bytes(new_text, build_s_nop(0, arch));
+      continue;
+    }
+    const PlannedPatch &representative = *group->second.front();
+    MoiOptions group_options = options;
+    if (!apply_moi_transient_sgpr_assignment(
+            group_options, operating_point,
+            representative.resources.owner_descriptor_file_offsets) ||
+        !eligible(representative, group_options)) {
+      errors.emplace_back(std::string(lost_assignment_error));
+      return false;
+    }
+    const auto jump_sgprs = moi_indirect_jump_sgprs(group_options);
+    const auto special_state = moi_special_state_sgprs(group_options);
+    std::vector<uint32_t> host_words = host.displaced_words;
+    if (!jump_sgprs || (!use_indirect_jump_scc_save && !special_state) ||
+        !append_moi_scc_preserving_indirect_jump(
+            host_words, host.body_offset,
+            host.host_offset + host.displaced_words.size() * sizeof(uint32_t), jump_sgprs->pc_sgpr,
+            use_indirect_jump_scc_save ? jump_sgprs->scc_save_sgpr : special_state->scc_save_sgpr,
+            /*capture_scc=*/true, arch) ||
+        !finalize_host_words(host, host_words)) {
+      errors.emplace_back(std::string(return_error));
+      return false;
+    }
+    append_words_bytes(new_text, host_words);
+  }
+  return true;
+}
+
 template <typename PlannedPatch>
 [[nodiscard]] bool
 write_moi_appended_anchor(std::vector<uint8_t> &text, const PlannedPatch &planned_patch,

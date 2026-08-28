@@ -3,7 +3,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
     return;
-  if (!consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI inline atomic patch does not support this architecture");
     return;
@@ -319,7 +320,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   // reach of both the pristine-end island bank and every appended body.  A
   // liveness-proven relocated host supplies one shared in-kernel island.  Its
   // scalar key identifies the normal host path or one of the atomic bodies.
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
+  if (target->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+      target->encoding_family == ConSanEncodingFamily::Gfx9Cdna4) {
     std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0; index < planned_candidates.size(); ++index) {
       const PlannedInlineAtomic &planned = planned_candidates[index];
@@ -587,31 +589,40 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           dispatcher_words.push_back(
               build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
         }
-        const uint16_t bitcmp_opcode =
-            arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
-        const uint32_t restore_tagged_scc =
-            build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0));
-        const auto append_target = [&](uint16_t route, uint64_t target) {
+        std::optional<uint32_t> restore_tagged_scc;
+        if (key_encodes_scc) {
+          std::vector<uint32_t> restore_words;
+          if (!consan_detail::append_restore_moi_scc_from_route_key(
+                  restore_words, {.encoded_sgpr = key_sgpr, .normalize_encoded_sgpr = false},
+                  *target) ||
+              restore_words.size() != 1u) {
+            result.errors.emplace_back(
+                "ConSan MOI inline atomic dense router could not restore tagged SCC");
+            return;
+          }
+          restore_tagged_scc = restore_words.front();
+        }
+        const auto append_target = [&](uint16_t route, uint64_t destination) {
           const auto compare = instrumentation::build_s_cmp_eq_u32(
               key_encodes_scc ? jump_pc_sgpr : key_sgpr, scalar_positive_inline_u32(route), arch);
           if (!compare)
             return false;
           dispatcher_words.push_back(*compare);
           std::vector<uint32_t> matched_words;
-          if (key_encodes_scc)
-            matched_words.push_back(restore_tagged_scc);
+          if (restore_tagged_scc)
+            matched_words.push_back(*restore_tagged_scc);
           const uint64_t matched_offset =
               dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
           const uint64_t branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
-          const auto direct = compute_sopp_branch_simm16(branch_offset, target);
+          const auto direct = compute_sopp_branch_simm16(branch_offset, destination);
           if (direct) {
             matched_words.push_back(build_s_branch(*direct, arch));
-          } else if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
-                                                              jump_pc_sgpr, saved_scc_sgpr,
-                                                              /*capture_scc=*/false, arch)) {
+          } else if (!append_moi_scc_preserving_indirect_jump(
+                         matched_words, matched_offset, destination, jump_pc_sgpr, saved_scc_sgpr,
+                         /*capture_scc=*/false, arch)) {
             return false;
-          } else if (key_encodes_scc) {
-            matched_words[matched_words.size() - 2u] = restore_tagged_scc;
+          } else if (restore_tagged_scc) {
+            matched_words[matched_words.size() - 2u] = *restore_tagged_scc;
           }
           const auto skip = instrumentation::build_s_cbranch_scc0(
               static_cast<int16_t>(matched_words.size()), arch);

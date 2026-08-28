@@ -3626,6 +3626,108 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   bool branch_only_scalar_spill = false;
 };
 
+/// Resolved entry-island geometry for one access body placed outside its
+/// original instruction range.
+///
+/// All MOI access engines use the same three-step search: try the engine's
+/// pre-reserved island, try a reachable pristine NOP island, and finally
+/// relocate a single-entry instruction prefix at the access anchor. This
+/// value records which choice succeeded and owns any guest tail displaced by
+/// the third choice. Flavor policy still decides whether an appended body is
+/// wanted and whether a particular relocated prefix is semantically safe.
+struct MoiAccessEntryIslandPlan {
+  /// Text offset of the selected entry island. An absent value represents an
+  /// access that needs no indirect entry because it remains inline.
+  std::optional<uint64_t> offset;
+
+  /// Number of instruction words reserved for the island at `offset`.
+  uint64_t word_count = 0u;
+
+  /// Total original access-prefix size replaced by the entry branch.
+  uint32_t original_size = 0u;
+
+  /// Guest instructions following the admitted access when the island
+  /// replaces a longer, single-entry prefix at the original anchor.
+  std::vector<uint32_t> displaced_tail_words;
+
+  /// Whether the island itself occupies the original access anchor.
+  bool at_anchor = false;
+
+  /// Whether planning selected the engine's pre-reserved island rather than
+  /// a pristine local island or a relocated anchor prefix.
+  bool uses_preferred_island = false;
+};
+
+[[nodiscard]] bool moi_entry_window_is_single_entry(const BlockOffsetIndex &block_index,
+                                                    uint64_t text_offset, uint64_t byte_count);
+
+/// Plan the shared indirect-entry transaction used by MOI access engines.
+///
+/// The caller supplies its pre-reserved island and a predicate that protects
+/// flavor-specific semantic ranges from anchor-prefix relocation. Returning
+/// no value means none of the three shared placement choices is available;
+/// diagnostics from failed instruction relocation are appended to `errors`.
+template <typename RelocationAllowed>
+[[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
+    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
+    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
+    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
+    const BlockOffsetIndex &block_index, Decoder *decoder, rj_code_arch_t arch,
+    std::vector<std::string> &errors, RelocationAllowed &&relocation_allowed) {
+  if (candidate.size() < sizeof(uint32_t))
+    return std::nullopt;
+  MoiAccessEntryIslandPlan plan{
+      .offset = preferred_offset,
+      .word_count = preferred_island_words,
+      .original_size = candidate.size(),
+      .displaced_tail_words = {},
+      .at_anchor = false,
+      .uses_preferred_island = true,
+  };
+  if (!use_preferred_without_direct_branch &&
+      !compute_sopp_branch_simm16(candidate.anchor(), preferred_offset)) {
+    plan.offset = local_islands
+                      ? local_islands->claim_reachable(candidate.anchor(), required_island_words)
+                      : std::nullopt;
+    plan.word_count = required_island_words;
+    plan.uses_preferred_island = false;
+  }
+  if (plan.offset)
+    return plan;
+  if (original_text.empty())
+    return std::nullopt;
+
+  std::vector<uint32_t> displaced_words;
+  while (displaced_words.size() < required_island_words) {
+    auto decoded = decode_relocatable_entry_instruction(
+        original_text, candidate.anchor() + displaced_words.size() * sizeof(uint32_t), arch, errors,
+        decoder);
+    if (!decoded) {
+      displaced_words.clear();
+      break;
+    }
+    displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
+  }
+  const uint64_t displaced_size = displaced_words.size() * sizeof(uint32_t);
+  const uint64_t displaced_end = candidate.anchor() + displaced_size;
+  if (displaced_words.size() < required_island_words ||
+      displaced_size > std::numeric_limits<uint32_t>::max() ||
+      !moi_entry_window_is_single_entry(block_index, candidate.anchor(), displaced_size) ||
+      !relocation_allowed(candidate.anchor() + candidate.size(), displaced_end)) {
+    return std::nullopt;
+  }
+  const size_t candidate_words = candidate.size() / sizeof(uint32_t);
+  if (candidate_words > displaced_words.size())
+    return std::nullopt;
+  plan.offset = candidate.anchor();
+  plan.word_count = required_island_words;
+  plan.original_size = static_cast<uint32_t>(displaced_size);
+  plan.displaced_tail_words.assign(displaced_words.begin() + candidate_words,
+                                   displaced_words.end());
+  plan.at_anchor = true;
+  return plan;
+}
+
 /// An at-anchor entry island replaces a multi-instruction owner-local window.
 /// Every original control-flow edge into that window must therefore enter at
 /// its first instruction. Staying within the anchor's original basic block is

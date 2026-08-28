@@ -160,6 +160,35 @@ TEST(ConSanMoi, EncodedRouteSccRestoreIsConfinedToQualifiedTargetProfiles) {
   }
 }
 
+TEST(ConSanMoi, EncodedRouteSccRestoreCanPreserveTheRouteKey) {
+  constexpr consan_detail::MoiEncodedSccRestoreRequest request{
+      .encoded_sgpr = 20u,
+      .normalize_encoded_sgpr = false,
+  };
+  EXPECT_EQ(request, (consan_detail::MoiEncodedSccRestoreRequest{
+                         .encoded_sgpr = request.encoded_sgpr,
+                         .normalize_encoded_sgpr = request.normalize_encoded_sgpr,
+                     }));
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    std::vector<uint32_t> words;
+    const bool gfx9_cdna = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+                           target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+    EXPECT_EQ(consan_detail::append_restore_moi_scc_from_route_key(words, request, target),
+              gfx9_cdna);
+    if (!gfx9_cdna) {
+      EXPECT_TRUE(words.empty());
+      continue;
+    }
+    const uint16_t opcode = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3
+                                ? cdna3::kSBitcmp1B32Sopc
+                                : cdna4::kSBitcmp1B32Sopc;
+    EXPECT_EQ(words,
+              (std::vector<uint32_t>{build_sopc_encoding(target.arch, opcode, request.encoded_sgpr,
+                                                         scalar_positive_inline_u32(0))}));
+  }
+}
+
 TEST(ConSanMoi, EncodedRouteSccRestoreRejectsInvalidRegisterTransactionally) {
   const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(target, nullptr);

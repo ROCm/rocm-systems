@@ -1112,7 +1112,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       target_profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
       target_profile->code_transport == ConSanCodeTransportModel::DirectCodeObject;
   const bool has_stranded_barrier =
-      (consan_uses_gfx9_cdna_encoding(arch) || direct_gfx12_transport) &&
+      (target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+       target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4 ||
+       direct_gfx12_transport) &&
       std::ranges::any_of(std::views::iota(size_t{0}, selected.size()), [&](size_t index) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         const uint64_t reserved_island =
@@ -1233,13 +1235,15 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
       // S_CALL_B64 routes retain the call-return-derived entry key when their
       // scalar assignment is spill backed.
-      const bool use_clone_local_routes = consan_arch_has_s_call_i64(arch);
+      const bool use_clone_local_routes =
+          target_profile->direct_call_form == ConSanDirectCallForm::SCallI64;
       const bool derive_key_at_entry = spill_backed_router && !use_clone_local_routes;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (consan_arch_has_s_call_i64(arch))
+        if (target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (consan_arch_has_s_call_b64(arch) && !consan_uses_gfx11_encoding(arch))
+        if (target_profile->direct_call_form == ConSanDirectCallForm::SCallB64 &&
+            target_profile->encoding_family != ConSanEncodingFamily::Gfx11)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -2166,7 +2170,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   // body. CDNA atomic instructions have enough anchor space for a scalar
   // call, so share the same liveness-proven, call-return-keyed relay model as
   // far barriers instead of silently dropping the causal edge.
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
+  if (target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+      target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4) {
     std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0u; index < selected.size(); ++index) {
       const Planned &planned = selected[index];
