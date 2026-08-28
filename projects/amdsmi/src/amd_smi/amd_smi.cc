@@ -1,25 +1,5 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
 
 #include <fcntl.h>
 #include <sys/utsname.h>
@@ -321,6 +301,9 @@ amdsmi_status_t amdsmi_shut_down() {
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
+  if (status_string == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   switch (status) {
     case AMDSMI_STATUS_SUCCESS:
       *status_string = "AMDSMI_STATUS_SUCCESS: Call succeeded.";
@@ -7755,6 +7738,9 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
 }
 
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char** status_string) {
+  if (status_string == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   for (const auto& iter : amd::smi::esmi_status_map) {
     const amdsmi_status_t _status = status;
     if (static_cast<int>(iter.first) == static_cast<int>(_status)) {

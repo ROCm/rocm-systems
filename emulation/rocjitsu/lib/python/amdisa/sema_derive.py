@@ -2786,6 +2786,11 @@ class _Gl1Inv(_DcacheInv):
     pass
 
 
+@_register('icache_inv')
+class _IcacheInv(_DcacheInv):
+    pass
+
+
 @_register('gl1_wbinv')
 class _Gl1Wbinv(_DcacheInv):
     pass

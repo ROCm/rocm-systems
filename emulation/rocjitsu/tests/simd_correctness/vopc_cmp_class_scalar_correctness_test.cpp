@@ -16,6 +16,7 @@
 /// either direction is caught. f64 patterns all have a nonzero high word, so a
 /// low-word-only read or f32-precision classify fails the +normal/-normal rows.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -83,7 +84,7 @@ struct Fixture {
     cu->write_vgpr(vb + 2, 0, mask);
     uint32_t enc = vopc_encode(op, /*src0=*/256, /*vsrc1=*/2);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;

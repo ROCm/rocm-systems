@@ -117,7 +117,8 @@ def collect_cases(tiers, catch_dir=CATCH_DIR):
             rel = os.path.relpath(path, catch_dir)
             segs = rel.split(os.sep)
             domain = segs[1] if len(segs) > 2 else "(root)"
-            text = open(path, encoding="utf-8", errors="replace").read()
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
             lines = text.splitlines()
             for idx, line in enumerate(lines):
                 if _line_starts_case(line) is None:
@@ -256,7 +257,8 @@ def main(argv=None):
             sys.stderr.write("error: {} does not exist; run gen_test_plan.py to "
                              "create it.\n".format(args.out))
             return 1
-        current = open(args.out, encoding="utf-8").read()
+        with open(args.out, encoding="utf-8") as handle:
+            current = handle.read()
         if current != rendered:
             sys.stderr.write(
                 "error: {} is out of date. Regenerate it with:\n"
