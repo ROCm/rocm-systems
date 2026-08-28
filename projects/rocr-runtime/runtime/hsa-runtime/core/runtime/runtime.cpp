@@ -2182,6 +2182,31 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 }
 
 void Runtime::AsyncEventsPool::clear() {
+  // The same lock alloc() and free() take. Without it this walks and releases
+  // block_list_, and empties free_list_, while another thread is still handing
+  // items out of them: ConcurrentAsyncEvents::Clear() runs on the async-event
+  // monitor thread, and application threads can be inside
+  // hsa_amd_signal_async_handler() -> PushBack() -> alloc() at the same moment.
+  // Not recursive, so this cannot self-deadlock: neither caller (the destructor,
+  // and ConcurrentAsyncEvents::Clear()) holds the lock.
+  //
+  // What this lock does not cover is an item alloc() already returned. That
+  // caller releases the lock before it runs item->init() and enqueues, so a
+  // clear() landing in between frees the block out from under that write. No
+  // lock here can close that window: the item outlives the critical section it
+  // came from. What closes it is the API contract. Both callers run only from
+  // teardown, reached from Runtime::Unload() under bootstrap_lock(), and the
+  // HSA specification leaves it undefined to call into the runtime concurrently
+  // with the hsa_shut_down() releasing the last reference, so in a conforming
+  // program no PushBack() is in flight by the time either runs. The runtime
+  // does not enforce that, though: IS_OPEN() reads ref_count_ once and holds
+  // nothing for the rest of the call, so a thread can pass it and then be
+  // descheduled while another tears the runtime down. Holding the lock here is
+  // what keeps that program from corrupting the pool's vectors outright, a far
+  // likelier and less debuggable failure than the item-lifetime window it
+  // leaves; it is not a substitute for callers quiescing before shutdown.
+  std::lock_guard<HybridMutex> lock(lock_);
+
   ifdebug {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;

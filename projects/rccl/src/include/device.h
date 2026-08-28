@@ -631,6 +631,7 @@ struct ncclKernelComm {
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
   int tdmSimpleMinBytes; // RCCL: smallest slice worth handing to the mover
 #endif
+  int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 

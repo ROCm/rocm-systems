@@ -30,6 +30,7 @@
 #include "lib/common/utility.hpp"
 
 #include "lib/rocprofiler-sdk-rocpd/details/format.hpp"
+#include "lib/rocprofiler-sdk-rocpd/details/operators.hpp"
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
 #include <rocprofiler-sdk-rocpd/sql.h>
@@ -52,18 +53,6 @@
 #include <cstddef>
 #include <initializer_list>
 #include <unordered_map>
-
-bool
-operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
-{
-    return std::tie(lhs.major, lhs.minor, lhs.patch) == std::tie(rhs.major, rhs.minor, rhs.patch);
-}
-
-bool
-operator<(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
-{
-    return std::tie(lhs.major, lhs.minor, lhs.patch) < std::tie(rhs.major, rhs.minor, rhs.patch);
-}
 
 namespace rocpd
 {

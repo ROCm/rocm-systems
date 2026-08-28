@@ -1981,7 +1981,6 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  simm32.apply_fieldless_caps(true, false, false);
 }
 
 namespace detail {
@@ -2018,7 +2017,6 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  simm32.apply_fieldless_caps(true, false, false);
 }
 
 namespace detail {
@@ -2066,7 +2064,7 @@ DecodeResult decodeSFmacF32Sop2(const MachineInst *opcode, const DecodeErrorEmit
 SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
     : Sop2("s_cvt_pk_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCvtPkRtzF16F32Sop2)),
-      sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
   dst_operands_[0] = &sdst;
@@ -2094,12 +2092,6 @@ DecodeResult decodeSCvtPkRtzF16F32Sop2(const MachineInst *opcode,
   return std::make_unique<SCvtPkRtzF16F32Sop2>(opcode);
 }
 } // namespace detail
-
-void SCvtPkRtzF16F32Sop2::implicit_uses(RegisterSet &uses) const {
-  Sop2::implicit_uses(uses);
-  if (auto r = sdst.to_register_ref())
-    uses.expand(*r);
-}
 
 SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
     : Sop2("s_add_f16", reinterpret_cast<const OpEncoding *>(inst),
