@@ -110,8 +110,8 @@ static void runAlternatingStreamAllReduces(int nGpus, int nIterations)
 
     // Back-to-back ungrouped launches, alternating stream every iteration, with
     // NO synchronize in between. Ungrouped keeps planner->numStreams == 1
-    // (fast path); the flip forces the lastStream != launchStream doneEvent
-    // edge on every launch from iteration 1 onward.
+    // (fast path); the flip forces the lastStreamTag != ncclStreamTag(launchStream)
+    // doneEvent edge on every launch from iteration 1 onward.
     for(int iter = 0; iter < nIterations; ++iter)
     {
         for(int i = 0; i < nGpus; ++i)
@@ -156,7 +156,7 @@ static void runAlternatingStreamAllReduces(int nGpus, int nIterations)
     // Guards destroy streams, buffers, and comms on scope exit.
 }
 
-// Ungrouped alternating-stream AllReduces — tests the lastStream != launchStream doneEvent edge.
+// Ungrouped alternating-stream AllReduces — tests the doneEvent edge taken on every lastStreamTag change.
 TEST_F(DoneEventOrdering, FastPathStreamAlternation)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -237,8 +237,8 @@ TEST_F(DoneEventOrdering, PostReinitStreamAlternation)
                 const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
 
                 // Simulate checkpoint/restore: init → work → destroy → reinit → work.
-                // Two reinit cycles to exercise that lastStreamValid resets correctly
-                // on each ncclCommInitAll and the doneEvent edge fires on first flip.
+                // Two reinit cycles to exercise that lastStreamTag resets to 0 on each
+                // ncclCommInitAll and the doneEvent edge fires on first flip.
                 for(int cycle = 0; cycle < 2; ++cycle)
                 {
                     std::vector<ncclComm_t> comms(nGpus, nullptr);
@@ -259,7 +259,7 @@ TEST_F(DoneEventOrdering, PostReinitStreamAlternation)
                         HIP_CHECK(RCCLTestHelpers::zeroInitializeBuffer<float>(
                             recvbuf[i], kElemCount));
 
-                    // Two alternating-stream launches: iter=0 → streamA (sets lastStream),
+                    // Two alternating-stream launches: iter=0 → streamA (sets lastStreamTag),
                     // iter=1 → streamB (fires the doneEvent edge — the critical path).
                     for(int iter = 0; iter < 2; ++iter)
                     {
@@ -513,7 +513,7 @@ TEST_F(DoneEventOrdering, GroupedPathBaseline)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
-// First AllReduce on hipStreamDefault, second on a named stream — tests lastStreamValid nullptr handling.
+// First AllReduce on hipStreamDefault, second on a named stream — tests the default-stream tag (1) vs no-launch sentinel (0).
 TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -574,7 +574,7 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
 
                 const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
 
-                // Launch 1: default stream (nullptr) — sets lastStream=nullptr, lastStreamValid=true.
+                // Launch 1: default stream (nullptr) — sets lastStreamTag = ncclStreamTag(nullptr) == 1.
                 for(int i = 0; i < nGpus; ++i)
                 {
                     ncclResult_t res = ncclAllReduce(
@@ -585,8 +585,8 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
                         << ncclGetErrorString(res);
                 }
 
-                // Launch 2: named stream — ncclLaunchPrepare must detect lastStream(nullptr) != namedStream
-                // and fire hipEventRecord(doneEvent, nullptr) + hipStreamWaitEvent(namedStream).
+                // Launch 2: named stream — ncclLaunchPrepare detects tag 1 != ncclStreamTag(namedStream) and waits
+                // on doneEvent, which ncclLaunchKernel already recorded on the default stream during launch 1.
                 for(int i = 0; i < nGpus; ++i)
                 {
                     ncclResult_t res = ncclAllReduce(
@@ -623,7 +623,7 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
-// kIterations same-stream AllReduces then a single stream switch — tests lazy doneEvent record on stream change.
+// kIterations same-stream AllReduces then a single stream switch — tests the wait-on-doneEvent edge at the change.
 TEST_F(DoneEventOrdering, SameStreamThenSwitch)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
