@@ -414,7 +414,7 @@ avg: MIN(100, 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum))
 avg: 100 * SUM(MIN(TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
 ```
 
-Reproduction example (occupancy workload, multi-pass analyze): raw avg **103.23%** → capped **100.00%** with either formula when total > 100%. When uncapped avg is already ≤ 100% but individual rows violate `a ≤ b`, aggregate cap preserves the uncapped value; per-row MIN does not (§3.1 Problem F).
+Reproduction example (test case occupancy workload, multi-pass analyze): raw avg **103.23%** → capped **100.00%** with either formula when total > 100%. When uncapped avg is already ≤ 100% but individual rows violate `a ≤ b`, aggregate cap preserves the uncapped value; per-row MIN does not (§3.1 Problem F).
 
 **Note:** Min/max for the same metric use `BOUND_RATIO` (after validation) — different column semantics (§3.1 Problem B).
 

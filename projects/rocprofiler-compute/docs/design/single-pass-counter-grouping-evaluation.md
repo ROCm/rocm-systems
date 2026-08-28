@@ -18,7 +18,7 @@
 | Greedy allocator | `soc_base.py` → `_allocate_perfmon_counter_files` | Automatic |
 | Grouping policy | `profiling_counter_grouping_policy.yaml` → `same_bucket_priority_metric_ids` | Maintainer config |
 | Metric-aware coalesce | `soc_base.py` → `_metric_aware_coalesce_pass` | Tier-0 metrics packed first |
-| Reduced scope | `--block`, `--set` | User selects fewer panels |
+| Reduced scope | `--block` (panel or **metric id**), `--set` | User selects fewer panels/metrics |
 
 **Shipped state for gfx942:** `same_bucket_priority_metric_ids: {}` (empty). gfx115x and gfx1250 have non-empty policies.
 
@@ -63,8 +63,11 @@ Simulated with `tools/counter_grouping_inspector.py` (§7) against shipped gfx94
 | Blocks 5+6 (CPC/SPI) | **5** | 0 | 39 |
 | Block 15 (TA/TD data-return) | **8** | 0 | 28 |
 | Blocks 5+6+15+17 (all cap-affected panels) | **8** | 0 | 97 |
+| Metric id `6.1.2` (Workgroup Manager Utilization only) | **1** | 0 | 3 |
+| Metric ids `5.1.0`, `15.4.0`, `17.2.1` (each alone) | **1** | 0 | 3–4 |
+| Metric ids `6.1.2` + `5.1.0` + `15.4.0` (combined) | **1** | 0 | 6 |
 
-**Validation recipe cost:** `--block 17` reduces passes from **13** to **8** (~38% fewer re-runs vs full panel) while keeping L2/HBM counters.
+**Validation recipe cost:** Panel `--block 17` reduces passes from **13** to **8** (~38% fewer re-runs vs full panel) and co-locates HBM partners. **Metric-id `--block`** (e.g. `6.1.2`) co-locates a single ratio metric in **1 pass** — preferred for §3.5 hardware validation on **rocprof-compute 3.8.0+**.
 
 ### 4.2 Grouping policy typically increases passes
 
@@ -77,7 +80,9 @@ On gfx942 full panel, adding `same_bucket_priority_metric_ids` **increases** pas
 | `17.2.1` | **19** | **+6** | 1 bucket (`0`) | **1 bucket** (`0`) |
 | All cap metrics (`17.2.1`, `6.1.2`, `5.1.0`, `15.4.0`) | **19** | **+6** | 1 bucket (`0`) | **1 bucket** (`0`) |
 
-Reproduce: temporarily edit `profiling_counter_grouping_policy.yaml` (gfx942 section), run `python3 tools/counter_grouping_inspector.py --arch gfx942`, restore file. **Hardware confirmation pending** — see [hardware runbook](../reports/aiprofcomp78-hardware-validation-runbook.md).
+**Flat cost:** Adding **any one** priority metric alone also yields **19 passes** (+6) — not cumulative per metric. Inspector re-run Aug 2026.
+
+Reproduce: temporarily edit `profiling_counter_grouping_policy.yaml` (gfx942 section), run `python3 tools/counter_grouping_inspector.py --arch gfx942`, restore file. **Hardware:** empty policy **13 passes confirmed** on darkstar; policy **+6 passes** requires **rocprof-compute 3.10+** (ignored on bundled 3.8.0 — perfmon byte-identical) — see [hardware runbook](../reports/aiprofcomp78-hardware-validation-runbook.md).
 
 Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. gfx1250 is a documented exception where priority metrics can steer packing **without** increasing pass count — behavior is **arch- and counter-set-specific**.
 
@@ -131,7 +136,7 @@ Multi-bucket metrics row: `Workgroup Manager Utilization` → **2 buckets** (`SQ
 
 **With `6.1.2` priority** (inspector with edited policy YAML): partners co-locate in bucket `0`; full panel **13 → 19 passes** (+6).
 
-**Takeaway:** Empty gfx942 policy leaves Workgroup Manager Utilization partners in different passes → merged max **739.6%** on mat_exp. Priority metric `6.1.2` co-locates partners in the inspector at **+6 passes**. **`--block 5,6`** lowers pass count to **5** but **does not** co-locate `GRBM_SPI_BUSY` / `GRBM_GUI_ACTIVE` without policy — use `6.1.2` priority or a single-pass re-profile to confirm.
+**Takeaway:** Empty gfx942 policy leaves Workgroup Manager Utilization partners in different passes → merged max **739.6%** on mat_exp. Priority metric `6.1.2` co-locates partners in the inspector at **+6 passes** on full panel. **Hardware validation (darkstar):** metric-id **`--block 6.1.2`** co-locates in **1 pass**, **0/208** `a > b`, max **100.0%** on mat_exp (**rocprof-compute 3.8.0**). Panel `--block 6` still splits partners (structural check only).
 
 ---
 
@@ -140,20 +145,22 @@ Multi-bucket metrics row: `Workgroup Manager Utilization` → **2 buckets** (`SQ
 | Question | Answer |
 |----------|--------|
 | Is grouping the most accurate fix? | **Yes**, when counters truly share a pass on the same dispatch |
+| Root cause of §3.1 bound violations (validated workloads)? | **Multi-pass stitching** — violations disappear under co-located collection |
 | Does empty gfx942 policy cause splitting? | **Yes** — partners land in different accum passes under default packing |
 | Does adding policy increase passes? | **Yes** on gfx942 full panel — inspector **+6 passes** (13 → 19) for any tested priority entry |
 | Does `--block 17` help HBM validation? | **Yes** — partners already co-locate; **8 passes** vs **13** full panel |
+| Does metric-id `--block` co-locate without policy? | **Yes** — **1 pass** per metric (`6.1.2`, `5.1.0`, `15.4.0`, `17.2.1`); hardware-validated on 3.8.0 |
 | Does policy help block-only HBM? | **No extra benefit** in simulation (already co-located) |
-| Can policy fix Workgroup Manager Utilization on full panel? | **Simulated co-location** with `6.1.2`, same pass-count penalty |
+| Can policy fix all cap metrics on full panel? | **Simulated co-location** with all four ids; **+6 passes** flat (requires **rocprof-compute 3.10+** on hardware) |
 
 ---
 
 ## 6. Recommendations
 
-1. **Validation (Rule 3):** Use `--block` subsets (e.g. 17, 5+6, 15) before full-panel caps — lower pass count than full panel, partners often co-locate without policy changes.
-2. **Grouping policy for gfx942:** Do **not** assume zero cost. Any PR adding `same_bucket_priority_metric_ids` must report **inspector pass count** before/after (§7) plus one hardware profile run.
-3. **Full-panel production:** Grouping policy is a **trade-off** — better ratio accuracy vs longer profile time. Consider user `--set` presets instead of default full-panel policy for all users.
-4. **Analyze-time caps:** Remain appropriate when users run default multi-pass full panel and pass-count increase is unacceptable.
+1. **Validation (Rule 3):** Prefer **metric-id `--block`** (e.g. `6.1.2`, `5.1.0`, `15.4.0`) or `--set aiprofcomp78_bounds` for co-located single-pass checks on **rocprof-compute 3.8.0+**. Use panel `--block 17` for HBM (8 passes). Panel `--block 5/6/15` confirms allocator splits but does not co-locate partners.
+2. **Grouping policy for gfx942:** Do **not** assume zero cost. Any PR adding `same_bucket_priority_metric_ids` must report **inspector pass count** before/after (§7) and confirm on **rocprof-compute 3.10+** hardware (+6 passes, 13 → 19, flat for one or all four cap metrics).
+3. **Full-panel production:** Grouping policy is a **trade-off** — better ratio accuracy vs **+46%** profile time. Users who need specific metrics can use metric-id `--block` or `--set` presets without full-panel policy.
+4. **Analyze-time caps:** Remain appropriate when users run default multi-pass full panel and the +6-pass policy cost is unacceptable.
 
 ---
 
@@ -167,8 +174,10 @@ From `projects/rocprofiler-compute/`:
 # Full panel — pass count in Summary; split metrics listed at end
 python3 tools/counter_grouping_inspector.py --arch gfx942
 
-# Scoped profiles (--block accepts panel/metric IDs from analyze)
+# Scoped profiles (--block accepts panel or metric IDs from analyze)
 python3 tools/counter_grouping_inspector.py --arch gfx942 --block 17
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 6.1.2
+python3 tools/counter_grouping_inspector.py --arch gfx942 --block 5.1.0 15.4.0
 python3 tools/counter_grouping_inspector.py --arch gfx942 --block 5 6
 python3 tools/counter_grouping_inspector.py --arch gfx942 --block 5 6 15 17
 
@@ -219,20 +228,32 @@ Smoke test: `python3 tools/test_counter_grouping_inspector_manual.py`
 
 ## 8. Hardware validation (Conductor + CPX)
 
-| Follow-up | Inspector (offline) | Hardware (pending) |
-|-----------|--------------------|--------------------|
-| **1. Policy pass count + wall time** | **Done** — `{}` → 13 passes; priority entries → **19** (+6) | Profile full panel on MI300X CPX with/without policy YAML; compare `perfmon/` file count + wall time |
-| **2. Block 17 single-pass HBM** | **Done** — `--block 17` → **8 passes**, HBM partners co-located | Re-profile mat_exp + occupancy with `--block 17` in CPX; compare raw `a/b` to merged full-panel data |
+**Executed 2026-08-27** on `hpe-darkstar-ccs-aus-e12-03` (MI300X gfx942, Conductor pool `MI300X-AIG-SW-ML-LIBRARIES`). ROCm **7.15** + bundled **rocprof-compute 3.8.0**; `HIP_VISIBLE_DEVICES=9` (CPX card). Artifacts: `~/Downloads/aiprofcomp78-darkstar-data/`.
 
-**Booked Conductor target:** `hpe-darkstar-ccs-aus-e12-03` (MI300X gfx942, pool `MI300X-AIG-SW-ML-LIBRARIES`). Reservation **`06a90967-5dce-7ed0-8000-95ffbeeefaa0`**, 4 h from 2026-08-27 21:00 CDT. Set **CPX** on the SUT before profiling.
+| Follow-up | Inspector (offline) | Hardware (darkstar) |
+|-----------|--------------------|---------------------|
+| **1. Policy pass count + wall time** | `{}` → **13**; priority entries → **19** (+6) | Empty → **13 passes / 108 s** ✓. Policy patched → **13 passes / 104 s** — **no perfmon change** on 3.8.0 (policy allocator is 3.10+) |
+| **2. Block 17 single-pass HBM** | `--block 17` → **8 passes**, partners co-located | **8 passes / 85 s** ✓. HBM in `pmc_perf_2.yaml`. Raw `a > b`: **0/8** dispatches (vs **25%** occupancy full-panel merged baseline) |
+| **3. Block 5 CPF (split partners)** | `--block 5` → **5 passes**, busy/idle in buckets **0** / **1** | **5 passes / ~50 s** ✓. `CPF_CPF_STAT_BUSY` in `pmc_perf_0.yaml`, `CPF_CPF_STAT_IDLE` in `pmc_perf_1.yaml`. Stitched CPF Util: **0/8** `> 100%` on test case occupancy |
+| **4. rocflop HBM + WGM** | `--block 17` HBM; **`--block 6.1.2`** WGM | HBM **0/7** co-located (`--block 17`); WGM **0/7**, max **100%** (`--block 6.1.2`, **1 pass**) |
+| **5. mat_exp HBM + WGM** | `--block 17` HBM; **`--block 6.1.2`** WGM on streams_sync `mat_exp` | HBM **0/208**; WGM **0/208**, max **100%** (vs **739.6%** merged) |
+| **6. mat_exp CPF + Data-Return (panel)** | `--block 5` / `--block 15` (split layout) | Structural only — partners in different passes |
+| **7. Metric-id co-location (§3.5 validated)** | `--block 6.1.2`, `5.1.0`, `15.4.0` (or `--set aiprofcomp78_bounds`) | **1 pass** each; all cap metrics **0** bad rows; Data-Return max **0.04%** (vs **345.38%** merged) |
 
-**Alternates** (Conductor deployable, `rocprof-compute` team): `splinter-odcdh4-wbc1-c`, `dell300x-ccs-aus-f03-19` in `MI300X-AIG-SW-Shared-Pool`.
+**Follow-up 2 detail (test case occupancy, per-dispatch `100 × DRAM / RDREQ`):**
 
-Step-by-step commands: [aiprofcomp78-hardware-validation-runbook.md](../reports/aiprofcomp78-hardware-validation-runbook.md).
+| Source | Dispatches | `a > b` | Max |
+|--------|------------|---------|-----|
+| occupancy_cpx full panel (merged, `aiprofcomp78-cpx-data`) | 8 | 2 (**25%**) | 103.9% |
+| mat_exp CPX full panel (merged) | 208 | 15 (**7.2%**) | 188.2% |
+| darkstar `--block 17` occupancy (pass 2, single-pass) | 8 | **0 (0%)** | **100.0%** |
+
+Step-by-step commands and environment notes: [aiprofcomp78-hardware-validation-runbook.md](../reports/aiprofcomp78-hardware-validation-runbook.md).
 
 ---
 
 ## 9. Open follow-ups
 
-1. **Execute** hardware validation runbook on `ctr-cx71-mi300x-01` (4 h CPX reservation).
+1. **Policy pass count on rocprof-compute 3.10+:** Re-run follow-up 1 on hardware to confirm inspector **13 → 19** (+6 passes, ~+46% wall time) when policy YAML is applied.
 2. **Investigate** whether pass count increase can be mitigated (allocator tuning vs selective priority metrics only).
+3. **Ship gfx942 grouping policy?** Single-pass validation is **complete** via metric-id `--block` on 3.8.0; policy remains optional for default full-panel users who accept **+6 passes**.

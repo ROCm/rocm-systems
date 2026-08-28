@@ -27,7 +27,7 @@ If partners are in **different perfmon passes** but merged into one row, violati
 
 | Workload | Kernels (approx) | Perfmon passes | Partition |
 |----------|------------------|----------------|-----------|
-| occupancy_cpx | occupancy sample | 13 | CPX (`cu_per_gpu=38`) |
+| occupancy_cpx | occupancy sample (`./sample/occupancy`) | 13 | CPX (`cu_per_gpu=38`) |
 | mat_exp | GEMM-heavy | 13 | CPX |
 | rocflop | rocBLAS flop test | 13 | CPX |
 
@@ -66,7 +66,7 @@ Computed from `pmc_perf.csv` (stitched multi-pass table):
 | rocflop | HBM Read | 7 | 0 | 0% | 100.0% | 99.70% |
 | rocflop | Workgroup Manager Utilization | 7 | 1 | 14.3% | 100.5% | 100.08% |
 
-**occupancy** HBM avg inflation (103.23%) matches `SUM(a)/SUM(b)` on merged data with a minority of bad rows.
+**Test case occupancy** HBM avg inflation (103.23%) matches `SUM(a)/SUM(b)` on merged data with a minority of bad rows.
 
 ---
 
