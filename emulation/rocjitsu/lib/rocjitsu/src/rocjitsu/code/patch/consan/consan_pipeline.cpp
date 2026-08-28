@@ -392,6 +392,155 @@ void TransformResult::discard_replacement(std::string warning) {
       ConSanPipelineStageStatus::Unsupported;
 }
 
+bool ConSanDeferredBinding::well_formed() const {
+  const bool injected_executor = strategy_ == ResumeStrategy::InvokeExecutor;
+  if ((!injected_executor && !inventory_result_.well_formed()) ||
+      (injected_executor && !inventory_result_.code_object.valid()) ||
+      validate_consan_configuration(request_, transform_policy_, runtime_policy_, debug_,
+                                    inventory_mutation_,
+                                    BoundRuntimeResources{}) != ConSanContractIssue::None ||
+      validate_runtime_capabilities(capabilities_) != ConSanContractIssue::None) {
+    return false;
+  }
+  const MutationRequest expected_inventory_mutation =
+      requested_mutation_.has_fault_mutation() && !requested_mutation_.fault_dry_run
+          ? without_consan_fault_mutations(requested_mutation_)
+          : requested_mutation_;
+  if (inventory_mutation_ != expected_inventory_mutation ||
+      (!injected_executor &&
+       inventory_result_.code_object != inventory_result_.program_inventory.code_object_id()) ||
+      !inventory_result_.evidence_intent_plan || !inventory_result_.evidence_requirements ||
+      !evidence_is_complete(*inventory_result_.evidence_requirements) ||
+      !evidence_requires_binding(*inventory_result_.evidence_requirements)) {
+    return false;
+  }
+  const ConSanPipelineStageState *binding =
+      inventory_result_.stage(ConSanPipelineStage::RuntimeBinding);
+  if (binding == nullptr || binding->status != ConSanPipelineStageStatus::Deferred ||
+      binding->contract_issue != ConSanContractIssue::None) {
+    return false;
+  }
+  const auto engine = request_.flavor
+                          ? consan_capability_engine(*request_.flavor, request_.moi_engine)
+                          : std::nullopt;
+  if (!engine || inventory_result_.observation_plan.engine != *engine)
+    return false;
+  switch (strategy_) {
+  case ResumeStrategy::RelowerFromInput:
+    return request_.flavor == ConSanFlavor::SuperCollider &&
+           !inventory_result_.moi_retry_inventory_available_ && executor_ == nullptr;
+  case ResumeStrategy::RetryMoiInventory:
+    return request_.flavor == ConSanFlavor::Moi &&
+           inventory_result_.moi_retry_inventory_available_ && executor_ == nullptr;
+  case ResumeStrategy::InvokeExecutor:
+    return (request_.flavor == ConSanFlavor::Moi ||
+            request_.flavor == ConSanFlavor::SuperCollider) &&
+           executor_ != nullptr;
+  }
+  return false;
+}
+
+ConSanAutomaticTransformPreparation prepare_consan_automatic_transform(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, ConSanTransformExecutor executor) {
+  const MutationRequest inventory_mutation =
+      mutation.has_fault_mutation() && !mutation.fault_dry_run
+          ? without_consan_fault_mutations(mutation)
+          : mutation;
+  const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
+  const ConSanDeferredBinding::ResumeStrategy strategy =
+      executor != nullptr           ? ConSanDeferredBinding::ResumeStrategy::InvokeExecutor
+      : flavor == ConSanFlavor::Moi ? ConSanDeferredBinding::ResumeStrategy::RetryMoiInventory
+                                    : ConSanDeferredBinding::ResumeStrategy::RelowerFromInput;
+  TransformResult inventory =
+      executor != nullptr
+          ? executor(code_object_bytes, request, transform_policy, runtime_policy, debug,
+                     inventory_mutation, capabilities, BoundRuntimeResources{})
+      : flavor == ConSanFlavor::Moi
+          ? transform_consan_pristine_moi_inventory(code_object_bytes, request, transform_policy,
+                                                    runtime_policy, debug, inventory_mutation,
+                                                    capabilities)
+          : (inventory_mutation.has_mutation()
+                 ? transform_consan_with_mutation(code_object_bytes, request, transform_policy,
+                                                  runtime_policy, debug, inventory_mutation,
+                                                  capabilities, BoundRuntimeResources{})
+                 : transform_consan(code_object_bytes, request, transform_policy, runtime_policy,
+                                    debug, capabilities, BoundRuntimeResources{}));
+  const ConSanPipelineStageState *binding = inventory.stage(ConSanPipelineStage::RuntimeBinding);
+  const bool inventory_acceptable =
+      executor != nullptr ? inventory.code_object.valid() : inventory.well_formed();
+  if (!inventory_acceptable || binding == nullptr ||
+      binding->status != ConSanPipelineStageStatus::Deferred || !inventory.evidence_requirements ||
+      !evidence_requires_binding(*inventory.evidence_requirements)) {
+    if (inventory_acceptable && inventory_mutation != mutation &&
+        inventory.outcome != ConSanTransformOutcome::Invalid &&
+        inventory.outcome != ConSanTransformOutcome::Unsupported) {
+      return executor != nullptr
+                 ? executor(code_object_bytes, request, transform_policy, runtime_policy, debug,
+                            mutation, capabilities, BoundRuntimeResources{})
+             : mutation.has_mutation()
+                 ? transform_consan_with_mutation(code_object_bytes, request, transform_policy,
+                                                  runtime_policy, debug, mutation, capabilities,
+                                                  BoundRuntimeResources{})
+                 : transform_consan(code_object_bytes, request, transform_policy, runtime_policy,
+                                    debug, capabilities, BoundRuntimeResources{});
+    }
+    return inventory;
+  }
+  return ConSanDeferredBinding(request, transform_policy, runtime_policy, debug, mutation,
+                               inventory_mutation, capabilities, strategy, executor,
+                               std::move(inventory));
+}
+
+TransformResult resume_consan_automatic_transform(std::span<const uint8_t> code_object_bytes,
+                                                  const BoundRuntimeResources &resources,
+                                                  ConSanDeferredBinding deferred) {
+  const auto invalid_resume = [&](std::string error) {
+    ConSanTransformArtifacts invalid;
+    invalid.outcome = ConSanTransformOutcome::Invalid;
+    invalid.errors.push_back(std::move(error));
+    return TransformResult::publish_optional(code_object_bytes, deferred.request_,
+                                             deferred.transform_policy_, deferred.runtime_policy_,
+                                             deferred.debug_, deferred.requested_mutation_,
+                                             deferred.capabilities_, resources, std::move(invalid));
+  };
+  if (!deferred.well_formed())
+    return invalid_resume("ConSan automatic resume received an invalid deferred-binding value");
+  if (deferred.code_object() != make_consan_code_object_id(code_object_bytes))
+    return invalid_resume("ConSan automatic resume does not match the prepared input image");
+
+  switch (deferred.strategy_) {
+  case ConSanDeferredBinding::ResumeStrategy::RetryMoiInventory:
+    return retry_transform_consan_pristine_moi_inventory(
+        code_object_bytes, deferred.request_, deferred.transform_policy_, deferred.runtime_policy_,
+        deferred.debug_, deferred.requested_mutation_, deferred.capabilities_, resources,
+        std::move(deferred.inventory_result_));
+  case ConSanDeferredBinding::ResumeStrategy::RelowerFromInput:
+    return deferred.requested_mutation_.has_mutation()
+               ? transform_consan_with_mutation(
+                     code_object_bytes, deferred.request_, deferred.transform_policy_,
+                     deferred.runtime_policy_, deferred.debug_, deferred.requested_mutation_,
+                     deferred.capabilities_, resources)
+               : transform_consan(code_object_bytes, deferred.request_, deferred.transform_policy_,
+                                  deferred.runtime_policy_, deferred.debug_, deferred.capabilities_,
+                                  resources);
+  case ConSanDeferredBinding::ResumeStrategy::InvokeExecutor:
+    return deferred.executor_(code_object_bytes, deferred.request_, deferred.transform_policy_,
+                              deferred.runtime_policy_, deferred.debug_,
+                              deferred.requested_mutation_, deferred.capabilities_, resources);
+  }
+  return invalid_resume("ConSan automatic resume has an invalid library strategy");
+}
+
+TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding deferred,
+                                                  std::string warning) {
+  TransformResult result = std::move(deferred.inventory_result_);
+  result.discard_replacement(std::move(warning));
+  return result;
+}
+
 TransformResult transform_consan_pristine_moi_inventory(std::span<const uint8_t> code_object_bytes,
                                                         const ConSanRequest &request,
                                                         const TransformPolicy &transform_policy,

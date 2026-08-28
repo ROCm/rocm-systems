@@ -894,6 +894,116 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.debug_report().fault_plans.size(), direct.debug_report().fault_plans.size());
 }
 
+TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedResume) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  const TransformPolicy transform_policy;
+  const RuntimePolicy runtime_policy = enabled_runtime_policy();
+  const ConSanDebugOverrides debug;
+  const MutationRequest mutation;
+  const RuntimeCapabilities capabilities = complete_runtime_capabilities();
+
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities);
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  ConSanDeferredBinding &deferred = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(deferred.well_formed());
+  EXPECT_EQ(deferred.code_object(), make_consan_code_object_id(bytes));
+  EXPECT_EQ(deferred.requested_mutation(), mutation);
+  EXPECT_EQ(deferred.inventory_mutation(), mutation);
+  EXPECT_EQ(deferred.program_inventory().code_object_id(), deferred.code_object());
+  EXPECT_TRUE(deferred.observation_plan().valid());
+  ASSERT_TRUE(deferred.evidence_intent_plan());
+  ASSERT_TRUE(deferred.evidence_requirements());
+  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::RuntimeBinding)].status,
+            ConSanPipelineStageStatus::Deferred);
+
+  const auto &requirements =
+      std::get<ConSanRecordReplayEvidenceRequirements>(*deferred.evidence_requirements());
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
+  resources.moi_report_layout = requirements.abi_plan.complete_layout();
+  const TransformResult resumed = resume_consan_automatic_transform(
+      bytes, resources, std::move(std::get<ConSanDeferredBinding>(preparation)));
+  const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
+                                                  debug, capabilities, resources);
+  ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
+  EXPECT_EQ(resumed.outcome, direct.outcome);
+  EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
+  EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
+  EXPECT_EQ(resumed.runtime_static_mapping, direct.runtime_static_mapping);
+  EXPECT_EQ(resumed.replacement, direct.replacement);
+}
+
+TEST(ConSanPipeline, AutomaticBindingTokenStatesPristineAndRequestedMutationProvenance) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  MutationRequest mutation;
+  mutation.fault_lds_wrong_address = true;
+  mutation.fault_lds_address_vgpr = 4u;
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, mutation, complete_runtime_capabilities());
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  const ConSanDeferredBinding &deferred = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(deferred.well_formed());
+  EXPECT_EQ(deferred.requested_mutation(), mutation);
+  EXPECT_EQ(deferred.inventory_mutation(), without_consan_fault_mutations(mutation));
+  EXPECT_FALSE(deferred.inventory_mutation().has_fault_mutation());
+}
+
+TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  const ConSanRequest request = supercollider_request();
+  const RuntimeCapabilities capabilities = complete_runtime_capabilities();
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
+      MutationRequest{}, capabilities);
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  ConSanDeferredBinding &deferred = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(deferred.well_formed());
+  ASSERT_TRUE(deferred.evidence_requirements());
+  EXPECT_TRUE(std::holds_alternative<ConSanSuperColliderEvidenceRequirements>(
+      *deferred.evidence_requirements()));
+
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.report_buffer_address = 0x123456780000ull;
+  const TransformResult resumed = resume_consan_automatic_transform(
+      bytes, resources, std::move(std::get<ConSanDeferredBinding>(preparation)));
+  const TransformResult direct =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, capabilities, resources);
+  ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
+  EXPECT_EQ(resumed.outcome, direct.outcome);
+  EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
+  EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
+  EXPECT_EQ(resumed.replacement, direct.replacement);
+}
+
+TEST(ConSanPipeline, AutomaticResumeRejectsDifferentInputIdentity) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
+      complete_runtime_capabilities());
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  std::vector<uint8_t> different = bytes;
+  different.back() ^= 1u;
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = 128u * 1024u * 1024u;
+  const TransformResult rejected = resume_consan_automatic_transform(
+      different, resources, std::move(std::get<ConSanDeferredBinding>(preparation)));
+  EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(rejected.replacement.empty());
+  EXPECT_TRUE(std::ranges::any_of(rejected.errors, [](const std::string &error) {
+    return error.find("prepared input image") != std::string::npos;
+  }));
+}
+
 TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutPristineProvenance) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);

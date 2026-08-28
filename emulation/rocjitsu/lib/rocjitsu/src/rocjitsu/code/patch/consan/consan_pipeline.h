@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace rocjitsu {
@@ -223,6 +224,8 @@ struct ConSanTransformDebugReport {
   std::span<const ConSanPatchInfo> patches;
 };
 
+class ConSanDeferredBinding;
+
 /// Static output of one typed ConSan transformation attempt.
 ///
 /// This type separates caller-facing stage state, immutable semantic artifacts,
@@ -297,6 +300,7 @@ public:
 
 private:
   friend struct TransformResultTestAccess;
+  friend class ConSanDeferredBinding;
   friend TransformResult
   transform_consan_pristine_moi_inventory(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
@@ -315,6 +319,10 @@ private:
                                  const TransformPolicy &, const RuntimePolicy &,
                                  const ConSanDebugOverrides &, const MutationRequest &,
                                  const RuntimeCapabilities &, const BoundRuntimeResources &);
+  friend TransformResult resume_consan_automatic_transform(std::span<const uint8_t>,
+                                                           const BoundRuntimeResources &,
+                                                           ConSanDeferredBinding);
+  friend TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding, std::string);
 
   [[nodiscard]] static TransformResult
   publish_optional(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
@@ -351,6 +359,120 @@ private:
   /// inventory result.
   bool moi_retry_inventory_available_ = false;
 };
+
+/// Optional injected transform executor used by test/runtime adapters while
+/// the library retains automatic preparation and resume ownership.
+using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
+                                                    const TransformPolicy &, const RuntimePolicy &,
+                                                    const ConSanDebugOverrides &,
+                                                    const MutationRequest &,
+                                                    const RuntimeCapabilities &,
+                                                    const BoundRuntimeResources &);
+
+/// Immutable pre-binding product for one automatic ConSan transform.
+///
+/// The value owns the exact input identity, final and inventory mutation
+/// provenance, assembled observation/evidence products, executed stage
+/// records, and any private inventory retained by the library's selected
+/// resume strategy. A runtime may inspect the address-free contract to size
+/// and allocate resources, but it cannot select or access retry artifacts.
+class ConSanDeferredBinding {
+public:
+  ConSanDeferredBinding(const ConSanDeferredBinding &) = delete;
+  ConSanDeferredBinding &operator=(const ConSanDeferredBinding &) = delete;
+  ConSanDeferredBinding(ConSanDeferredBinding &&) noexcept = default;
+  ConSanDeferredBinding &operator=(ConSanDeferredBinding &&) noexcept = default;
+
+  [[nodiscard]] const ConSanCodeObjectId &code_object() const {
+    return inventory_result_.code_object;
+  }
+  [[nodiscard]] const MutationRequest &requested_mutation() const { return requested_mutation_; }
+  [[nodiscard]] const MutationRequest &inventory_mutation() const { return inventory_mutation_; }
+  [[nodiscard]] const ProgramInventory &program_inventory() const {
+    return inventory_result_.program_inventory;
+  }
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+    return inventory_result_.observation_plan;
+  }
+  [[nodiscard]] const std::optional<ConSanEvidenceIntentPlan> &evidence_intent_plan() const {
+    return inventory_result_.evidence_intent_plan;
+  }
+  [[nodiscard]] const std::optional<ConSanEvidenceRequirements> &evidence_requirements() const {
+    return inventory_result_.evidence_requirements;
+  }
+  [[nodiscard]] const std::array<ConSanPipelineStageState, kConSanPipelineStages.size()> &
+  stages() const {
+    return inventory_result_.stages;
+  }
+
+  /// Verify identity, mutation provenance, address-free evidence, executed
+  /// stage state, and the library-owned resume strategy.
+  [[nodiscard]] bool well_formed() const;
+
+private:
+  enum class ResumeStrategy : uint8_t {
+    RelowerFromInput,
+    RetryMoiInventory,
+    InvokeExecutor,
+  };
+
+  friend std::variant<TransformResult, ConSanDeferredBinding>
+  prepare_consan_automatic_transform(std::span<const uint8_t>, const ConSanRequest &,
+                                     const TransformPolicy &, const RuntimePolicy &,
+                                     const ConSanDebugOverrides &, const MutationRequest &,
+                                     const RuntimeCapabilities &, ConSanTransformExecutor);
+  friend TransformResult resume_consan_automatic_transform(std::span<const uint8_t>,
+                                                           const BoundRuntimeResources &,
+                                                           ConSanDeferredBinding);
+  friend TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding, std::string);
+
+  ConSanDeferredBinding(ConSanRequest request, TransformPolicy transform_policy,
+                        RuntimePolicy runtime_policy, ConSanDebugOverrides debug,
+                        MutationRequest requested_mutation, MutationRequest inventory_mutation,
+                        RuntimeCapabilities capabilities, ResumeStrategy strategy,
+                        ConSanTransformExecutor executor, TransformResult inventory_result)
+      : request_(std::move(request)), transform_policy_(std::move(transform_policy)),
+        runtime_policy_(std::move(runtime_policy)), debug_(std::move(debug)),
+        requested_mutation_(std::move(requested_mutation)),
+        inventory_mutation_(std::move(inventory_mutation)), capabilities_(std::move(capabilities)),
+        strategy_(strategy), executor_(executor), inventory_result_(std::move(inventory_result)) {}
+
+  ConSanRequest request_;
+  TransformPolicy transform_policy_;
+  RuntimePolicy runtime_policy_;
+  ConSanDebugOverrides debug_;
+  MutationRequest requested_mutation_;
+  MutationRequest inventory_mutation_;
+  RuntimeCapabilities capabilities_;
+  ResumeStrategy strategy_ = ResumeStrategy::RelowerFromInput;
+  ConSanTransformExecutor executor_ = nullptr;
+  TransformResult inventory_result_;
+};
+
+/// Result of beginning an automatic-binding transform. A completed/failed
+/// result needs no allocation; a deferred value publishes the exact
+/// address-free contract that `resume_consan_automatic_transform` consumes.
+using ConSanAutomaticTransformPreparation = std::variant<TransformResult, ConSanDeferredBinding>;
+
+/// Execute a transform through evidence planning, returning a typed deferred
+/// binding value exactly when runtime-owned allocation is required.
+[[nodiscard]] ConSanAutomaticTransformPreparation prepare_consan_automatic_transform(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, ConSanTransformExecutor executor = nullptr);
+
+/// Bind runtime-owned resources and execute the resume strategy selected by
+/// the library. The caller cannot substitute inventory or retry mechanics.
+[[nodiscard]] TransformResult
+resume_consan_automatic_transform(std::span<const uint8_t> code_object_bytes,
+                                  const BoundRuntimeResources &resources,
+                                  ConSanDeferredBinding deferred);
+
+/// End a deferred transaction after runtime allocation fails, publishing the
+/// same coherent non-installable result shape as other binding failures.
+[[nodiscard]] TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding deferred,
+                                                                std::string warning);
 
 /// Run the non-installable MOI inventory pass before runtime resources exist.
 [[nodiscard]] TransformResult transform_consan_pristine_moi_inventory(
