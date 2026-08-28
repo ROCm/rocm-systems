@@ -249,12 +249,6 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     comm->ceColl.ceSyncWin = NULL;
   }
 
-  // Free the UC barrier flag-value device buffer
-  if (comm->ceColl.ceSeqNumDev != NULL) {
-    NCCLCHECKGOTO(ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager), ret, fail);
-    comm->ceColl.ceSeqNumDev = NULL;
-  }
-
   // Clean up CE AllReduce staging buffer
   if (comm->ceColl.ceARTmpBuf != NULL) {
     if (comm->ceColl.ceARTmpWin && comm->ceColl.ceARTmpWin->vidmem) {
@@ -272,7 +266,6 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     comm->ceColl.signalBuffer = NULL;
     comm->ceColl.signalWin = NULL;
   }
-
 
   // Free the UC barrier flag-value device buffer
   if (comm->ceColl.ceSeqNumDev != NULL) {
@@ -372,29 +365,38 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
 
-  // Source pointer is either the constant graph sync value or the sequence number
-  void* srcPtr = capturing ? (void*)&GRAPH_SYNC_VALUE : (void*)&currentSeq;
   // Wait value is either the constant graph sync value or the sequence number
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
 
   // Use multi-cast address as destination pointer
   void* mcDstPtr;
-  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
   NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, comm->ceColl.ceSyncWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
 
+  // Store the updated sequence number in the device buffer.
+  if (!capturing) {
+    CUCHECKGOTO(cuStreamWriteValue32(stream, (CUdeviceptr)comm->ceColl.ceSeqNumDev, currentSeq,
+                                    CU_STREAM_WRITE_VALUE_DEFAULT),
+              ret, fail);
+  }
+
   // Write our own ready/complete flag to the multi-cast address
-  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, srcPtr, sizeof(uint32_t), cudaMemcpyHostToDevice, stream), ret, fail);
+  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, comm->ceColl.ceSeqNumDev + capturing, sizeof(uint32_t),
+                              cudaMemcpyDeviceToDevice, stream),
+              ret, fail);
 
   // Add local wait operations for every other rank
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
@@ -403,12 +405,11 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
     (*opIdx)++;
   }
 
-exit:
+  exit:
   return ret;
-fail:
+  fail:
   goto exit;
 }
-
 // Capture: issue peer writes as a separate stream batch so the captured graph
 // orders write → wait → reset (reset is a second batch in ncclMemOpSync). Fusing
 // write+wait+reset in one HIP batch can hang on replay.
