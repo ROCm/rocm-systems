@@ -47,7 +47,7 @@ namespace {
 
 static amdsmi_bdf_t make_bdf(const rocdxg_smi_bdf_info_t& src) {
   amdsmi_bdf_t bdf = {};
-  bdf.bdf.domain_number = src.domain_number & 0xffffffffffffULL;
+  bdf.bdf.domain_number = src.domain_number;
   bdf.bdf.bus_number = src.bus_number & 0xffU;
   bdf.bdf.device_number = src.device_number & 0x1fU;
   bdf.bdf.function_number = src.function_number & 0x7U;

@@ -25,7 +25,6 @@
 
 #ifdef ENABLE_WSL_BACKEND
 
-#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
