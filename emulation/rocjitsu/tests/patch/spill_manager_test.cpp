@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
@@ -109,7 +110,9 @@ enum class IntegOpcode : uint32_t {
 
 class IntegDecoder : public Decoder {
 public:
-  Instruction *decode(const rj_code_binary_inst_t *inst) override {
+  std::size_t max_instruction_words() const override { return 1; }
+
+  DecodeResult decode(const rj_code_binary_inst_t *inst, const DecodeErrorEmitter &) override {
     auto op = static_cast<IntegOpcode>(*inst);
     switch (op) {
     case IntegOpcode::Def_Vgpr0_Sgpr4:
@@ -533,7 +536,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   };
   TestCodeObject co(std::move(words));
   IntegDecoder decoder;
-  auto blocks = BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  auto blocks = build_valid_blocks(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_FALSE(blocks.empty());
 
   // Pick the probe-site instruction by mnemonic match.

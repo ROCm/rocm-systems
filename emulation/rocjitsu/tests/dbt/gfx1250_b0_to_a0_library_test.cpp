@@ -6,9 +6,9 @@
 
 #include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "support/gfx1250_test_code_object.h"
 
 #include <gtest/gtest.h>
@@ -117,10 +117,10 @@ TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
 // synthetic diagnostic straight through the reporting seam. Add a fixture here
 // if a gfx1250 mnemonic is ever classified fail-closed ahead of its rule.
 TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
-  rocjitsu::gfx1250::Vop3VopDpp16MachineInst dpp{};
+  rocjitsu::cdna5::Vop3VopDpp16MachineInst dpp{};
   dpp.vdst = 30;
   dpp.clamp = 1;
-  dpp.op = rocjitsu::gfx1250::kVCvtPkFp8F32Vop3;
+  dpp.op = rocjitsu::cdna5::kVCvtPkFp8F32Vop3;
   dpp.encoding = 0x35;
   dpp.src0 = 250;
   dpp.src1 = 256 + 2;
@@ -161,7 +161,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
 // exercised by FansOutRequiredWorkAsCallbackViews.
 TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   constexpr auto conversion =
-      rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
+      rocjitsu::cdna5::build_sop1(rocjitsu::cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
@@ -201,6 +201,7 @@ TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
       .severity = rocjitsu::DiagnosticSeverity::Error,
       .kind = rocjitsu::DiagnosticKind::ExpandMissing,
       .guest_offset = 8,
+      .output_offset = std::nullopt,
       .mnemonic = "v_test",
       .message = "primary diagnostic",
       .required_work = {"first required step", "second required step"},
@@ -233,7 +234,7 @@ TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
 // callback on the success path too.
 TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslation) {
   constexpr auto deferred =
-      rocjitsu::gfx1250::build_sopp(rocjitsu::gfx1250::kSMonitorSleepSopp, {.simm16 = 1});
+      rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSMonitorSleepSopp, {.simm16 = 1});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 3> text = {deferred[0], deferred[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
