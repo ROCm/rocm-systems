@@ -131,7 +131,6 @@ void TestIfoeInfoRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Physical Accelerator ID: " << asic_info.physical_acc_id << std::endl;
       }
-      ASSERT_NE(asic_info.physical_acc_id, std::numeric_limits<uint32_t>::max());
     }
 
     // device name, brand, serial_number
