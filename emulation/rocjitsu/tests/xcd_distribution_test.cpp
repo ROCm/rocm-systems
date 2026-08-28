@@ -877,7 +877,7 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   std::mutex requests_mutex;
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     fx.soc->xcd(xi)->command_processor()->set_scratch_backing_allocator(
-        [&](uint32_t, uint64_t gpu_va, size_t size) -> bool {
+        [&](uint32_t, uint64_t gpu_va, size_t size, bool) -> bool {
           {
             std::lock_guard<std::mutex> lock(requests_mutex);
             requests.push_back({gpu_va, size});

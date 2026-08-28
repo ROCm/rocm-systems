@@ -13,14 +13,10 @@
 ///
 /// What that reaches, and what it does not: the scratch *addressing* contract is
 /// covered here, because a wave's slot is indexed by its grid-wide workgroup id
-/// and the high-rank peers run the top of the grid. The driver's on-demand
-/// scratch-backing allocator is not, and cannot be from a local-mode test:
-/// opening a process turns GpuMemory passthrough on, so a wave's scratch address
-/// always resolves and the command processor never asks the driver to back it.
-/// That allocator -- and the existing-allocation check that keeps eight XCDs of
-/// one grid from each mapping the same pool -- is a daemon-mode path, where the
-/// guest's addresses are not the daemon's and passthrough stays off. Covering it
-/// needs a daemon-mode regression, not this fixture.
+/// and the high-rank peers run the top of the grid. This fixture deliberately
+/// programs USERPTR scratch with SET_SCRATCH_BACKING_VA, so it does not exercise
+/// the driver's no-SET fallback allocator. The local ScratchBackingGrowth test
+/// covers fallback pool stability and growth through the process page table.
 
 #include "test_paths.h"
 

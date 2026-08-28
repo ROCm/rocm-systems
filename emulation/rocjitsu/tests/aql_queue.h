@@ -46,6 +46,7 @@ public:
   /// @param read_ptr_addr Address of the read pointer.
   /// @param write_ptr_addr Address of the write pointer.
   /// @param doorbell_addr Address of the doorbell.
+  /// @param process_id VM process that owns the queue and its ring pointers.
   /// @param xcd_fanout Spread each dispatch over every XCD, as the KFD create-queue
   /// ioctl now does for compute queues on a multi-XCD part. Off by default so a test
   /// that binds a queue to one command processor keeps its CUs to itself.
@@ -78,6 +79,7 @@ public:
     cp_->register_queue(std::move(hw));
   }
 
+  /// @brief Compatibility overload for the older positional xcd_fanout signature.
   AqlQueue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint64_t ring_addr,
            uint32_t ring_size, uint64_t read_ptr_addr, uint64_t write_ptr_addr,
            uint64_t doorbell_addr, bool xcd_fanout, uint32_t queue_id = 1)

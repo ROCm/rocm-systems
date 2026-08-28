@@ -85,6 +85,11 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
       return false;
     break;
   }
+  case AMDKFD_IOC_GET_DMABUF_INFO: {
+    const auto *args = static_cast<const kfd_ioctl_get_dmabuf_info_args *>(buffer);
+    inline_size = args->metadata_ptr != 0 ? static_cast<size_t>(args->metadata_size) : 0;
+    break;
+  }
   case AMDKFD_IOC_DBG_TRAP: {
     // Every op the client reserves an inline tail for has to appear here, or
     // the exact-length test below rejects a well-formed request and the
@@ -148,11 +153,11 @@ bool send_with_fd_exact(int socket, const void *data, size_t size, int fd) {
 /// @details DBG_TRAP ENABLE sends three: the debugger's notifier, and the
 /// authorization the daemon needs to reach the debuggee's address space --
 /// /proc/<pid>/mem, plus the /proc/<pid> directory that pins the identity that
-/// fd belongs to. Every other request sends at most the notifier. Ownership is
-/// RAII, so descriptors the VM declines to adopt are released with the request
-/// rather than leaked for the life of the connection.
+/// fd belongs to. DMABUF ioctls send their dmabuf in the first slot. Ownership
+/// is RAII, so descriptors the VM declines to adopt are released with the
+/// request rather than leaked for the life of the connection.
 struct ReceivedFds {
-  util::UniqueHandle notifier;
+  util::UniqueHandle request_handle;
   util::UniqueHandle target_mem;
   util::UniqueHandle target_proc;
 };
@@ -165,7 +170,7 @@ bool receive_header_with_fds(int socket, RpcHeader *header, ReceivedFds *fds) {
     header_bytes = rpc_recv_msg(socket, header, sizeof(*header), received_fds, &received_fd_count);
   } while (header_bytes < 0 && errno == EINTR);
   if (received_fd_count > 0)
-    fds->notifier.reset(received_fds[0]);
+    fds->request_handle.reset(received_fds[0]);
   if (received_fd_count > 1)
     fds->target_mem.reset(received_fds[1]);
   if (received_fd_count > 2)
@@ -273,7 +278,7 @@ private:
   }
 
   RequestDisposition handle_handshake(const RpcHeader &header, const ReceivedFds &input_fds) {
-    if (process_id_ != 0 || header.payload_bytes != 0 || input_fds.notifier)
+    if (process_id_ != 0 || header.payload_bytes != 0 || input_fds.request_handle)
       return RequestDisposition::Disconnect;
 
     if (rj_vm_device_open(daemon_->vm, client_pid_, &process_id_) != ROCJITSU_STATUS_SUCCESS) {
@@ -322,7 +327,7 @@ private:
   }
 
   RequestDisposition handle_close(const RpcHeader &header, const ReceivedFds &input_fds) {
-    if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.notifier)
+    if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.request_handle)
       return RequestDisposition::Disconnect;
 
     close_device();
@@ -334,7 +339,8 @@ private:
   }
 
   RequestDisposition handle_mmap(const RpcHeader &header, const ReceivedFds &input_fds) {
-    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) || input_fds.notifier) {
+    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) ||
+        input_fds.request_handle) {
       return RequestDisposition::Disconnect;
     }
     RpcMmapRequest request{};
@@ -374,7 +380,7 @@ private:
 
   RequestDisposition handle_munmap(const RpcHeader &header, const ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMunmapRequest) ||
-        input_fds.notifier) {
+        input_fds.request_handle) {
       return RequestDisposition::Disconnect;
     }
     RpcMunmapRequest request{};
@@ -411,7 +417,7 @@ private:
     command.buf = arguments;
     command.buf_size = request->args_bytes;
     command.shared_handle = -1;
-    command.in_handle = input_fds.notifier.get();
+    command.in_handle = input_fds.request_handle.get();
     command.in_mem_handle = input_fds.target_mem.get();
     // Borrowed, not adopted: the driver dups it if the session needs to keep it
     // (rj_vm.cpp passes it by value), so this side always closes its own copy.
@@ -421,7 +427,7 @@ private:
     // The VM clears each handle it took ownership of; drop ours to match, so
     // RAII does not close a descriptor the debug session now owns.
     if (command.in_handle < 0)
-      static_cast<void>(input_fds.notifier.release());
+      static_cast<void>(input_fds.request_handle.release());
     if (command.in_mem_handle < 0)
       static_cast<void>(input_fds.target_mem.release());
     if (command.buf_size > available_arguments)
@@ -442,6 +448,8 @@ private:
       }
       sent = send_with_fd_exact(client_fd_, response_buffer.data(), response_buffer.size(),
                                 command.shared_handle);
+      if (command.cmd == AMDKFD_IOC_EXPORT_DMABUF)
+        ::close(command.shared_handle);
     } else {
       sent = rpc_send_exact(client_fd_, &response, sizeof(response)) &&
              (command.buf_size == 0 || rpc_send_exact(client_fd_, command.buf, command.buf_size));

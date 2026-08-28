@@ -426,15 +426,43 @@ ROCm application
 | `GET_VERSION` | `get_version_ioctl` | Returns KFD_IOCTL_MAJOR/MINOR_VERSION |
 | `GET_PROCESS_APERTURES_NEW` | `get_process_apertures_ioctl` | Returns `gpu_apertures(ordinal)` — LDS/scratch shifted by `kApertureStride` per GPU, with per-instance `gpu_id` |
 | `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
-| `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |
-| `FREE_MEMORY_OF_GPU` | `free_memory_ioctl` | Frees host memory, removes VA mapping |
-| `MAP_MEMORY_TO_GPU` / `UNMAP` | map/unmap ioctls | No-op (host pointers serve as GPU VAs) |
+| `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory; caller-provided GPU VAs must be in the reported GPUVM aperture and must not overlap live allocations, and driver-selected GPU VAs search forward from the cursor to the next free aligned range |
+| `FREE_MEMORY_OF_GPU` | `free_memory_ioctl` | Releases allocation ownership and removes only the freed allocation's VA mapping |
+| `MAP_MEMORY_TO_GPU` / `UNMAP` | map/unmap ioctls | Publishes/removes PTEs for the allocation's tracked backing; caller-owned USERPTR VMAs are never unmapped by the driver |
+| `IMPORT_DMABUF` / `IPC_IMPORT_HANDLE` | import ioctls | Publish imported backing after a nonzero requested GPU VA range is proven in-aperture and non-overlapping; zero-VA DMABUF imports are handle-only for graphics/GEM paths; IPC imports can also allocate the next free driver-selected VA |
 | `CREATE_QUEUE` | `create_queue_ioctl` | Registers an AQL ring with the CP; deferred until doorbell page is mapped |
 | `DESTROY_QUEUE` | `destroy_queue_ioctl` | Unregisters the ring from the CP |
 | `CREATE_EVENT` | `create_event_ioctl` | Allocates a slot in the memfd-backed signal page |
 | `DESTROY_EVENT` | `destroy_event_ioctl` | Removes event slot; wakes any WAIT_EVENTS callers |
 | `SET_EVENT` | `set_event_ioctl` | Marks slot non-zero with `memory_order_release`; notifies waiters |
 | `WAIT_EVENTS` | `wait_events_ioctl` | Waits up to 100ms then returns; simulates `wake_up_interruptible` |
+
+Scratch has two address domains. `GET_PROCESS_APERTURES_NEW` reports the
+logical LDS/scratch apertures used for shader private-address and debugger
+semantics. `SET_SCRATCH_BACKING_VA`, however, programs the physical backing
+GPUVA that libhsakmt allocated from the GPUVM/SVM domain. rocjitsu validates
+that backing in GPUVM, not in the logical scratch aperture. If a dispatch needs
+scratch before the runtime programs backing, the simulator uses a per-GPU
+fallback reserve near the top of GPUVM. The backing pool lives outside the
+user-visible KFD allocation handle table, and the reserved windows are excluded
+from ordinary explicit/imported and driver-selected allocations. Fallback
+dispatches require the simulator-owned scratch pool for that GPU; ordinary host
+PTEs at the same address do not satisfy scratch backing. Growth preserves
+internal backing identity, maps only newly exposed tail pages, and checks exact
+byte-range host backing rather than PTE presence alone. The legacy scratch path
+sizes through the highest logical workgroup slot including `workgroup_id_offset`;
+CDNA5 sizes to the complete physical XCC/SE/scoreboard scratch capacity required
+by the device model.
+
+USERPTR allocations keep the caller's CPU VA distinct from the GPU VA:
+`mmap_offset` names the CPU VMA to share, while `va_addr` names the GPUVM
+address. Local mode maps GPU PTEs directly to the caller VMA and leaves the VMA
+owned by the caller on free. Daemon mode first stages the CPU contents into a
+memfd and only then replaces the caller VMA with shared backing; if staging or
+replacement fails, the daemon allocation is freed and the original ioctl result
+is not reported as success. IPC export rejects USERPTR allocations and any
+non-USERPTR allocation without shareable memfd backing instead of creating a
+snapshot that would sever the CPU/GPU alias.
 
 ### Signal event page
 

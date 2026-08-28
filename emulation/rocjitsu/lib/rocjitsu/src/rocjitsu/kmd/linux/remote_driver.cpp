@@ -11,11 +11,14 @@
 #include "util/unique_handle.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <linux/mman.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
@@ -28,6 +31,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -42,6 +46,7 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+  case AMDKFD_IOC_GET_DMABUF_INFO:
   case AMDKFD_IOC_DBG_TRAP:
     return true;
   case AMDKFD_IOC_SVM:
@@ -220,6 +225,66 @@ uint32_t clamp_snapshot_entries(uint32_t count, uint32_t entry_size, size_t arg_
   return static_cast<uint32_t>(std::min<size_t>(count, max_entries));
 }
 
+bool self_range_readable(uint64_t start, size_t size) {
+  if (size == 0 || start > std::numeric_limits<uint64_t>::max() - size)
+    return false;
+  const uint64_t limit = start + size;
+
+  FILE *maps = std::fopen("/proc/self/maps", "r");
+  if (maps == nullptr)
+    return false;
+
+  bool readable = false;
+  uint64_t cursor = start;
+  char line[512];
+  while (std::fgets(line, sizeof(line), maps) != nullptr) {
+    unsigned long long map_start = 0;
+    unsigned long long map_limit = 0;
+    char perms[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s", &map_start, &map_limit, perms) != 3)
+      continue;
+    if (map_limit <= cursor)
+      continue;
+    if (map_start > cursor)
+      break;
+    if (perms[0] != 'r')
+      break;
+
+    if (map_limit >= limit) {
+      readable = true;
+      break;
+    }
+    cursor = map_limit;
+  }
+
+  std::fclose(maps);
+  return readable;
+}
+
+int copy_from_self_userptr(void *dst, const void *src, size_t size) {
+  iovec local{dst, size};
+  iovec remote{const_cast<void *>(src), size};
+  const ssize_t copied = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+  if (copied == static_cast<ssize_t>(size))
+    return 0;
+  if (copied >= 0)
+    return -EFAULT;
+
+  const int copy_errno = errno;
+  if (copy_errno != EPERM)
+    return -copy_errno;
+
+  // Some sandboxed test environments deny process_vm_readv(self) with EPERM.
+  // The pointer is still in this process, so fall back to a normal copy after
+  // checking /proc/self/maps so PROT_NONE or unmapped userptrs still fail like
+  // a kernel copy_from_user() rather than crashing or silently succeeding.
+  const uint64_t src_addr = reinterpret_cast<uint64_t>(src);
+  if (!self_range_readable(src_addr, size))
+    return -EFAULT;
+  std::memcpy(dst, src, size);
+  return 0;
+}
+
 } // namespace
 
 RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
@@ -281,6 +346,50 @@ int RemoteDriver::poison_stream() {
   if (sock_ >= 0)
     syscall(SYS_shutdown, sock_, SHUT_RDWR);
   return -EPROTO;
+}
+
+int RemoteDriver::rollback_remote_allocation(uint64_t handle) {
+  if (handle == 0)
+    return 0;
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = handle;
+
+  constexpr size_t prefix = sizeof(RpcHeader) + sizeof(RpcIoctlRequest);
+  std::array<uint8_t, prefix + sizeof(free_args)> buffer{};
+  auto *hdr = reinterpret_cast<RpcHeader *>(buffer.data());
+  hdr->opcode = RPC_IOCTL;
+  hdr->request_id = next_id_++;
+  hdr->payload_bytes = sizeof(RpcIoctlRequest) + sizeof(free_args);
+
+  auto *request = reinterpret_cast<RpcIoctlRequest *>(buffer.data() + sizeof(RpcHeader));
+  request->ioctl_cmd = AMDKFD_IOC_FREE_MEMORY_OF_GPU;
+  request->args_bytes = sizeof(free_args);
+  std::memcpy(buffer.data() + prefix, &free_args, sizeof(free_args));
+
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, buffer.data(), buffer.size(), &sent)) {
+    if (sent > 0)
+      return poison_stream();
+    return transport_errno();
+  }
+
+  RpcHeader response{};
+  int received_fds[1] = {-1};
+  size_t num_fds = 1;
+  const ssize_t bytes = rpc_recv_msg(sock_, &response, sizeof(response), received_fds, &num_fds);
+  if (num_fds > 0 && received_fds[0] >= 0)
+    syscall(SYS_close, received_fds[0]);
+  if (bytes <= 0 || static_cast<size_t>(bytes) != sizeof(response))
+    return poison_stream();
+  if (response.payload_bytes > kMaxPayloadBytes)
+    return poison_stream();
+  if (response.payload_bytes > 0) {
+    std::vector<uint8_t> payload(response.payload_bytes);
+    if (!rpc_recv_exact(sock_, payload.data(), payload.size()))
+      return poison_stream();
+  }
+  return response.result;
 }
 
 int RemoteDriver::open() {
@@ -539,6 +648,25 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (!validate_ioctl_arg_size(request, arg, arg_size))
     return -EINVAL;
 
+  kfd_ioctl_alloc_memory_of_gpu_args original_alloc_args{};
+  const bool saved_alloc_args =
+      canonical_ioctl_request(request) == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU &&
+      arg_size >= sizeof(original_alloc_args);
+  if (saved_alloc_args)
+    original_alloc_args = *static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+
+  uint32_t saved_dmabuf_fd = KFD_INVALID_FD;
+  uint64_t saved_dmabuf_metadata_ptr = 0;
+  uint32_t saved_dmabuf_metadata_size = 0;
+  if (canonical_ioctl_request(request) == AMDKFD_IOC_IMPORT_DMABUF) {
+    saved_dmabuf_fd = static_cast<kfd_ioctl_import_dmabuf_args *>(arg)->dmabuf_fd;
+  } else if (canonical_ioctl_request(request) == AMDKFD_IOC_GET_DMABUF_INFO) {
+    auto *info = static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg);
+    saved_dmabuf_fd = info->dmabuf_fd;
+    saved_dmabuf_metadata_ptr = info->metadata_ptr;
+    saved_dmabuf_metadata_size = info->metadata_size;
+  }
+
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
   // before copying inline response data back.
@@ -667,6 +795,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       buf.resize(buf.size() + aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures));
       break;
     }
+    case AMDKFD_IOC_GET_DMABUF_INFO: {
+      auto *info_args = reinterpret_cast<kfd_ioctl_get_dmabuf_info_args *>(args_base);
+      const size_t inline_size =
+          info_args->metadata_ptr != 0 ? static_cast<size_t>(info_args->metadata_size) : 0;
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far >= kMaxPayloadBytes || inline_size > kMaxPayloadBytes - payload_so_far)
+        return -E2BIG;
+      buf.resize(buf.size() + inline_size);
+      break;
+    }
     case AMDKFD_IOC_DBG_TRAP: {
       auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(args_base);
       size_t inline_size = 0;
@@ -756,12 +894,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   ireq->ioctl_cmd = static_cast<uint32_t>(request);
   ireq->args_bytes = static_cast<uint32_t>(buf.size() - prefix);
 
-  // For DBG_TRAP ENABLE, hand the debugger's notifier pipe write-end to the
-  // daemon as an SCM_RIGHTS fd. The daemon substitutes it into the ioctl's
-  // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
-  // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
-  // casts to -1 and is not sent.
-  int send_fds[3] = {-1, -1, -1};
+  // For ioctls whose fd arguments are process-local integers, hand the actual
+  // object to the daemon over SCM_RIGHTS. The daemon substitutes the received fd
+  // before dispatching so client fd numbers are never trusted in daemon space.
+  int send_fds[kRpcMaxFds] = {-1, -1, -1, -1};
   size_t num_send_fds = 0;
   // Owned only for the duration of the send: SCM_RIGHTS installs the daemon's
   // own copies, so ours are released on every path out of here, including the
@@ -796,6 +932,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       send_fds[num_send_fds++] = target_mem_fd.get();
       send_fds[num_send_fds++] = target_proc_fd.get();
     }
+  } else if (request == AMDKFD_IOC_IMPORT_DMABUF || request == AMDKFD_IOC_GET_DMABUF_INFO) {
+    const int dmabuf_fd =
+        request == AMDKFD_IOC_IMPORT_DMABUF
+            ? static_cast<int>(static_cast<kfd_ioctl_import_dmabuf_args *>(arg)->dmabuf_fd)
+            : static_cast<int>(static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg)->dmabuf_fd);
+    if (::fcntl(dmabuf_fd, F_GETFD) < 0)
+      return transport_errno();
+    send_fds[num_send_fds++] = dmabuf_fd;
   }
   // A send that fails without putting a byte on the wire is recoverable: the
   // daemon never saw a frame, so the stream is still aligned and the caller just
@@ -827,10 +971,28 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
-  int received_fds[1] = {-1};
-  size_t num_fds = 1;
+  std::array<int, kRpcMaxFds> received_fds{};
+  received_fds.fill(-1);
+  size_t num_fds = received_fds.size();
   auto bytes =
-      rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+      rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds.data(), &num_fds);
+
+  auto close_received_fds = [&] {
+    for (size_t i = 0; i < num_fds; ++i) {
+      if (received_fds[i] >= 0) {
+        syscall(SYS_close, received_fds[i]);
+        received_fds[i] = -1;
+      }
+    }
+  };
+
+  auto take_received_fd = [&](size_t index) {
+    int fd = received_fds[index];
+    received_fds[index] = -1;
+    return fd;
+  };
+
+  auto has_exactly_one_received_fd = [&] { return num_fds == 1 && received_fds[0] >= 0; };
 
   // Every reply byte we decline to read leaves the stream misaligned: the next
   // call would parse its header out of this one's remains, silently returning a
@@ -839,8 +1001,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // in on the doomed reply is dropped here — nothing downstream runs to adopt
   // it.
   auto poison_reply = [&] {
-    if (num_fds > 0 && received_fds[0] >= 0)
-      syscall(SYS_close, received_fds[0]);
+    close_received_fds();
     return poison_stream();
   };
 
@@ -885,6 +1046,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
         static_cast<kfd_ioctl_get_process_apertures_new_args *>(arg)
             ->kfd_process_device_apertures_ptr = saved_apertures_ptr;
+        break;
+      case AMDKFD_IOC_GET_DMABUF_INFO:
+        static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg)->metadata_ptr =
+            saved_dmabuf_metadata_ptr;
+        static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg)->dmabuf_fd = saved_dmabuf_fd;
         break;
       case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
       case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
@@ -943,6 +1109,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         break;
       }
     }
+    if (request == AMDKFD_IOC_IMPORT_DMABUF)
+      static_cast<kfd_ioctl_import_dmabuf_args *>(arg)->dmabuf_fd = saved_dmabuf_fd;
 
     if (has_embedded_pointers(request) && resp->payload_bytes > arg_size) {
       size_t extra = resp->payload_bytes - arg_size;
@@ -959,6 +1127,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             reinterpret_cast<void *>(aperture_args->kfd_process_device_apertures_ptr),
             payload.data() + arg_size,
             std::min(aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures), extra));
+        break;
+      }
+      case AMDKFD_IOC_GET_DMABUF_INFO: {
+        if (resp->result == 0 && saved_dmabuf_metadata_ptr != 0 && saved_dmabuf_metadata_size > 0) {
+          std::memcpy(reinterpret_cast<void *>(saved_dmabuf_metadata_ptr),
+                      payload.data() + arg_size,
+                      std::min(static_cast<size_t>(saved_dmabuf_metadata_size), extra));
+        }
         break;
       }
       case AMDKFD_IOC_DBG_TRAP: {
@@ -1074,67 +1250,94 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       alloc_ranges_.push_back({va_addr, size, memfd});
   };
 
-  auto promote_userptr = [&](uint64_t va_addr, uint64_t size, int memfd) {
-    auto *va = reinterpret_cast<void *>(va_addr);
+  auto rollback_failed_allocation = [&](kfd_ioctl_alloc_memory_of_gpu_args *alloc_args,
+                                        int primary_error, int received_fd) -> int {
+    if (received_fd >= 0)
+      syscall(SYS_close, received_fd);
+    const int rollback_result = rollback_remote_allocation(alloc_args->handle);
+    if (saved_alloc_args)
+      *alloc_args = original_alloc_args;
+    if (rollback_result != 0)
+      return rollback_result == -EPROTO ? rollback_result : poison_stream();
+    if (primary_error == -EPROTO)
+      return poison_stream();
+    return primary_error;
+  };
+
+  auto promote_userptr = [&](uint64_t cpu_va, uint64_t size, int memfd) -> int {
+    if (size == 0 || size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+        size > static_cast<uint64_t>(std::numeric_limits<ssize_t>::max()))
+      return -EINVAL;
+    auto *va = reinterpret_cast<void *>(cpu_va);
     auto length = static_cast<size_t>(size);
 
-    [[maybe_unused]] auto ft_rc = ftruncate(memfd, static_cast<off_t>(length));
-    fallocate(memfd, 0, 0, static_cast<off_t>(length));
+    if (ftruncate(memfd, static_cast<off_t>(length)) != 0)
+      return -errno;
+    if (fallocate(memfd, 0, 0, static_cast<off_t>(length)) != 0)
+      return -errno;
 
-    constexpr size_t page_size = 4096;
-    size_t num_pages = (length + page_size - 1) / page_size;
-    std::vector<uint8_t> resident(num_pages);
-    auto mc_rc = syscall(SYS_mincore, va, length, resident.data());
+    auto *temp = static_cast<uint8_t *>(
+        safe_mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0));
+    if (temp == MAP_FAILED)
+      return -errno;
 
-    auto *temp =
-        static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, memfd, 0));
-    if (temp != MAP_FAILED) {
-      if (mc_rc == 0) {
-        auto *src = static_cast<uint8_t *>(va);
-        for (size_t i = 0; i < num_pages; ++i) {
-          if (resident[i] & 1) {
-            size_t off = i * page_size;
-            size_t n = std::min(page_size, length - off);
-            std::memcpy(temp + off, src + off, n);
-          }
-        }
-      }
+    const int copy_result = copy_from_self_userptr(temp, va, length);
+    if (copy_result != 0) {
       syscall(SYS_munmap, temp, length);
+      return copy_result;
     }
+    if (syscall(SYS_munmap, temp, length) != 0)
+      return -errno;
 
     auto *mapped = safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, memfd, 0);
-    if (mapped != MAP_FAILED)
-      syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+    if (mapped == MAP_FAILED)
+      return -errno;
+    return 0;
   };
 
   // Store memfd received from ALLOC_MEMORY for use in the subsequent mmap().
   // Also register the address range for anonymous MAP_FIXED interception.
   if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && resp->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0) {
-      register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size,
-                          received_fds[0]);
-
-      if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
+    if (!has_exactly_one_received_fd()) {
+      close_received_fds();
+      return rollback_failed_allocation(alloc_args, -EPROTO, -1);
     }
+    const int allocation_fd = take_received_fd(0);
+    if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      const int promotion_result =
+          promote_userptr(alloc_args->mmap_offset, alloc_args->size, allocation_fd);
+      if (promotion_result != 0) {
+        return rollback_failed_allocation(alloc_args, promotion_result, allocation_fd);
+      }
+    }
+    register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size, allocation_fd);
   }
 
   if (request == AMDKFD_IOC_IPC_IMPORT_HANDLE && resp->result == 0) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0) {
+    if (has_exactly_one_received_fd()) {
+      const int import_fd = take_received_fd(0);
       uint64_t size = 0;
       struct stat st {};
-      if (fstat(received_fds[0], &st) == 0)
+      if (fstat(import_fd, &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
-      register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
+      register_allocation(import_args->handle, import_args->va_addr, size, import_fd);
+    } else {
+      close_received_fds();
+      const int rollback_result = rollback_remote_allocation(import_args->handle);
+      return rollback_result == -EPROTO ? rollback_result : poison_stream();
     }
   }
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0)
-      export_args->dmabuf_fd = received_fds[0];
+    if (has_exactly_one_received_fd()) {
+      export_args->dmabuf_fd = take_received_fd(0);
+    } else {
+      close_received_fds();
+      return poison_stream();
+    }
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {
@@ -1148,6 +1351,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
+  close_received_fds();
   return resp->result;
 }
 

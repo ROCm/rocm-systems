@@ -261,7 +261,7 @@ TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
 // kernel is complete once every listed CU reports idle. Waves that need their final
 // register state inspected should capture it via HaltSnapshotPlugin, which snapshots
 // at halt regardless of where this loop stops.
-void step_until_halted(simdojo::SimulationEngine &engine,
+bool step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
                        uint32_t max_steps = 10000) {
   auto any_active = [&]() {
@@ -275,8 +275,9 @@ void step_until_halted(simdojo::SimulationEngine &engine,
     if (any_active())
       saw_work = true;
     else if (saw_work)
-      break;
+      return true;
   }
+  return saw_work && !any_active();
 }
 
 TEST(LdsAllocationTest, ZeroLdsDispatchKeepsCuBackingUnmaterialized) {
@@ -404,12 +405,12 @@ TEST(AqlQueueTest, DefaultProcessKeepsQueueStateInSparseMemoryWithPassthrough) {
 TEST(CommandProcessorScratchBackingTest, ExplicitPteControlsAllocatorWithPassthrough) {
   constexpr uint32_t kVmid = 44;
   constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
-  constexpr uint32_t kPrivateSegmentSize = 4;
+  constexpr uint32_t kPrivateSegmentSize = 65;
   constexpr size_t kRawScratchSize = kPrivateSegmentSize * 64;
   constexpr size_t kExpectedScratchSize = ((kRawScratchSize + 1023) / 1024) * 1024;
 
   KfdProcess proc(kVmid);
-  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> scratch_backing{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize * 2> scratch_backing{};
   alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> ring{};
   alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> kernel{};
   alignas(uint64_t) uint64_t read_ptr = 0;
@@ -420,13 +421,18 @@ TEST(CommandProcessorScratchBackingTest, ExplicitPteControlsAllocatorWithPassthr
   f.mem()->register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
 
   size_t allocator_calls = 0;
-  f.cp()->set_scratch_backing_allocator([&](uint32_t process_id, uint64_t gpu_va, size_t size) {
-    EXPECT_EQ(process_id, kVmid);
-    EXPECT_EQ(gpu_va, kScratchPool);
-    EXPECT_EQ(size, kExpectedScratchSize);
-    ++allocator_calls;
-    return true;
-  });
+  f.cp()->set_scratch_backing_allocator(
+      [&](uint32_t process_id, uint64_t gpu_va, size_t size, bool requires_owned_pool) {
+        EXPECT_EQ(process_id, kVmid);
+        EXPECT_EQ(gpu_va, kScratchPool);
+        EXPECT_EQ(size, kExpectedScratchSize);
+        EXPECT_FALSE(requires_owned_pool);
+        if (size > scratch_backing.size())
+          return false;
+        proc.map_pages(gpu_va, scratch_backing.data(), size);
+        ++allocator_calls;
+        return true;
+      });
 
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t descriptor{};
@@ -452,15 +458,231 @@ TEST(CommandProcessorScratchBackingTest, ExplicitPteControlsAllocatorWithPassthr
     pkt.private_segment_size = kPrivateSegmentSize;
     pkt.kernel_object = kernel_object;
     queue.submit(pkt);
-    step_until_halted(*f.engine, {f.cu()});
+    return step_until_halted(*f.engine, {f.cu()});
   };
 
-  dispatch();
+  ASSERT_TRUE(dispatch());
   EXPECT_EQ(allocator_calls, 1u);
 
-  proc.map_pages(kScratchPool, scratch_backing.data(), scratch_backing.size());
-  dispatch();
+  proc.unmap_pages(kScratchPool, kExpectedScratchSize);
+  proc.map_pages(kScratchPool + 2048, scratch_backing.data() + 2048, 2048);
+  proc.map_pages(kScratchPool + KfdProcess::kPageSize,
+                 scratch_backing.data() + KfdProcess::kPageSize,
+                 kExpectedScratchSize - KfdProcess::kPageSize);
+  ASSERT_TRUE(f.mem()->is_range_mapped(kScratchPool, kExpectedScratchSize, kVmid));
+  ASSERT_FALSE(f.mem()->is_range_host_backed(kScratchPool, kExpectedScratchSize, kVmid));
+  ASSERT_TRUE(dispatch());
+  EXPECT_EQ(allocator_calls, 2u);
+
+  proc.unmap_pages(kScratchPool, kExpectedScratchSize);
+  proc.map_pages(kScratchPool, scratch_backing.data(), KfdProcess::kPageSize);
+  ASSERT_TRUE(dispatch());
+  EXPECT_EQ(allocator_calls, 3u);
+
+  proc.unmap_pages(kScratchPool, kExpectedScratchSize);
+  proc.map_pages(kScratchPool, scratch_backing.data(), kExpectedScratchSize);
+  ASSERT_TRUE(dispatch());
+  EXPECT_EQ(allocator_calls, 3u);
+}
+
+TEST(CommandProcessorScratchBackingTest, FallbackResolverRequiresOwnedPoolEvenWhenRawPteExists) {
+  constexpr uint32_t kVmid = 47;
+  constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
+  constexpr uint32_t kPrivateSegmentSize = 64;
+  constexpr size_t kExpectedScratchSize = KfdProcess::kPageSize;
+
+  KfdProcess proc(kVmid);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> stray_backing{};
+  std::shared_ptr<KfdProcess::BackingStore> owned_backing =
+      std::make_shared<KfdProcess::BackingStore>();
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> ring{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> kernel{};
+  alignas(uint64_t) uint64_t read_ptr = 0;
+  alignas(uint64_t) uint64_t write_ptr = 0;
+  alignas(uint64_t) uint64_t doorbell = 0;
+  VmFixture f;
+  f.mem()->set_passthrough(true);
+  f.mem()->register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+  proc.map_pages(kScratchPool, stray_backing.data(), kExpectedScratchSize);
+  ASSERT_EQ(f.mem()->resolve_host_ptr(kScratchPool, kVmid), stray_backing.data());
+
+  bool owns_pool = false;
+  size_t allocator_calls = 0;
+  f.cp()->set_scratch_backing_resolver([](uint32_t) -> amdgpu::CommandProcessor::ScratchBacking {
+    return {.gpu_va = kScratchPool, .requires_owned_pool = true};
+  });
+  f.cp()->set_scratch_backing_verifier([&](uint32_t process_id, uint64_t gpu_va, size_t size) {
+    EXPECT_EQ(process_id, kVmid);
+    if (!owns_pool)
+      return false;
+    return gpu_va >= kScratchPool && (gpu_va - kScratchPool) <= owned_backing->size() &&
+           size <= owned_backing->size() - (gpu_va - kScratchPool);
+  });
+  f.cp()->set_scratch_backing_allocator(
+      [&](uint32_t process_id, uint64_t gpu_va, size_t size, bool requires_owned_pool) {
+        EXPECT_EQ(process_id, kVmid);
+        EXPECT_EQ(gpu_va, kScratchPool);
+        EXPECT_EQ(size, kExpectedScratchSize);
+        EXPECT_TRUE(requires_owned_pool);
+        if (!owned_backing->resize(size))
+          return false;
+        proc.map_backing_pages(gpu_va, owned_backing, 0, size);
+        owns_pool = true;
+        ++allocator_calls;
+        return true;
+      });
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  std::memcpy(kernel.data(), &descriptor, sizeof(descriptor));
+  std::memcpy(kernel.data() + sizeof(descriptor), &SOPP_S_ENDPGM, sizeof(SOPP_S_ENDPGM));
+
+  test::AqlQueue queue(f.mem(), f.cp(), reinterpret_cast<uint64_t>(ring.data()), ring.size(),
+                       reinterpret_cast<uint64_t>(&read_ptr),
+                       reinterpret_cast<uint64_t>(&write_ptr),
+                       reinterpret_cast<uint64_t>(&doorbell), kVmid);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 64;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 64;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.private_segment_size = kPrivateSegmentSize;
+  pkt.kernel_object = reinterpret_cast<uint64_t>(kernel.data());
+  queue.submit(pkt);
+  EXPECT_TRUE(step_until_halted(*f.engine, {f.cu()}));
+
   EXPECT_EQ(allocator_calls, 1u);
+  EXPECT_TRUE(owns_pool);
+  EXPECT_EQ(f.mem()->resolve_host_ptr(kScratchPool, kVmid), nullptr);
+  EXPECT_TRUE(f.mem()->is_range_host_backed(kScratchPool, kExpectedScratchSize, kVmid));
+}
+
+TEST(CommandProcessorScratchBackingTest, FallbackBackingCoversWorkgroupOffset) {
+  constexpr uint32_t kVmid = 46;
+  constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
+  constexpr uint32_t kWorkgroupOffset = 3;
+  constexpr uint32_t kPrivateSegmentSize = 65;
+  constexpr size_t kRawScratchSize = kPrivateSegmentSize * 64;
+  constexpr size_t kExpectedWaveSize = ((kRawScratchSize + 1023) / 1024) * 1024;
+  constexpr size_t kExpectedScratchSize = (kWorkgroupOffset + 1) * kExpectedWaveSize;
+
+  KfdProcess proc(kVmid);
+  std::vector<uint8_t> scratch_backing(kExpectedScratchSize);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> ring{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> kernel{};
+  alignas(uint64_t) uint64_t read_ptr = 0;
+  alignas(uint64_t) uint64_t write_ptr = 0;
+  alignas(uint64_t) uint64_t doorbell = 0;
+  VmFixture f;
+  f.mem()->set_passthrough(true);
+  f.mem()->register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+  f.cp()->set_workgroup_id_offset(kWorkgroupOffset);
+
+  size_t allocator_calls = 0;
+  f.cp()->set_scratch_backing_allocator(
+      [&](uint32_t process_id, uint64_t gpu_va, size_t size, bool requires_owned_pool) {
+        EXPECT_EQ(process_id, kVmid);
+        EXPECT_EQ(gpu_va, kScratchPool);
+        EXPECT_EQ(size, kExpectedScratchSize);
+        EXPECT_FALSE(requires_owned_pool);
+        if (size > scratch_backing.size())
+          return false;
+        proc.map_pages(gpu_va, scratch_backing.data(), size);
+        ++allocator_calls;
+        return true;
+      });
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  std::memcpy(kernel.data(), &descriptor, sizeof(descriptor));
+  std::memcpy(kernel.data() + sizeof(descriptor), &SOPP_S_ENDPGM, sizeof(SOPP_S_ENDPGM));
+
+  test::AqlQueue queue(f.mem(), f.cp(), reinterpret_cast<uint64_t>(ring.data()), ring.size(),
+                       reinterpret_cast<uint64_t>(&read_ptr),
+                       reinterpret_cast<uint64_t>(&write_ptr),
+                       reinterpret_cast<uint64_t>(&doorbell), kVmid);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 64;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 64;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.private_segment_size = kPrivateSegmentSize;
+  pkt.kernel_object = reinterpret_cast<uint64_t>(kernel.data());
+  queue.submit(pkt);
+  step_until_halted(*f.engine, {f.cu()});
+
+  EXPECT_EQ(allocator_calls, 1u);
+  EXPECT_TRUE(f.mem()->is_range_mapped(kScratchPool + kWorkgroupOffset * kExpectedWaveSize,
+                                       kExpectedWaveSize, kVmid));
+}
+
+TEST(CommandProcessorScratchBackingTest, AllocatorFailureFailsDispatchSetup) {
+  constexpr uint32_t kVmid = 45;
+  constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
+  constexpr uint32_t kPrivateSegmentSize = 65;
+  constexpr size_t kRawScratchSize = kPrivateSegmentSize * 64;
+  constexpr size_t kExpectedScratchSize = ((kRawScratchSize + 1023) / 1024) * 1024;
+
+  KfdProcess proc(kVmid);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> ring{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> kernel{};
+  alignas(uint64_t) uint64_t read_ptr = 0;
+  alignas(uint64_t) uint64_t write_ptr = 0;
+  alignas(uint64_t) uint64_t doorbell = 0;
+  VmFixture f;
+  f.mem()->set_passthrough(true);
+  f.mem()->register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+
+  size_t allocator_calls = 0;
+  f.cp()->set_scratch_backing_allocator(
+      [&](uint32_t process_id, uint64_t gpu_va, size_t size, bool requires_owned_pool) {
+        EXPECT_EQ(process_id, kVmid);
+        EXPECT_EQ(gpu_va, kScratchPool);
+        EXPECT_EQ(size, kExpectedScratchSize);
+        EXPECT_FALSE(requires_owned_pool);
+        ++allocator_calls;
+        return false;
+      });
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  std::memcpy(kernel.data(), &descriptor, sizeof(descriptor));
+  std::memcpy(kernel.data() + sizeof(descriptor), &SOPP_S_ENDPGM, sizeof(SOPP_S_ENDPGM));
+  uint64_t kernel_object = reinterpret_cast<uint64_t>(kernel.data());
+  test::AqlQueue queue(f.mem(), f.cp(), reinterpret_cast<uint64_t>(ring.data()), ring.size(),
+                       reinterpret_cast<uint64_t>(&read_ptr),
+                       reinterpret_cast<uint64_t>(&write_ptr),
+                       reinterpret_cast<uint64_t>(&doorbell), kVmid);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 64;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 64;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.private_segment_size = kPrivateSegmentSize;
+  pkt.kernel_object = kernel_object;
+  queue.submit(pkt);
+
+  EXPECT_THROW((void)step_until_halted(*f.engine, {f.cu()}), std::runtime_error);
+  EXPECT_EQ(allocator_calls, 1u);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
 }
 
 std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
@@ -932,6 +1154,9 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
             allocation.data() + kAllocationSize - 1);
   EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid, 2), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize, kPid), nullptr);
+  EXPECT_TRUE(memory.is_range_mapped(kBaseVa, KfdProcess::kPageSize, kPid));
+  EXPECT_TRUE(memory.is_range_host_backed(kBaseVa, kAllocationSize, kPid));
+  EXPECT_FALSE(memory.is_range_host_backed(kBaseVa, KfdProcess::kPageSize, kPid));
   EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize - 1, kPid),
             std::make_pair(reinterpret_cast<uint64_t>(allocation.data()),
                            static_cast<uint64_t>(kAllocationSize)));
@@ -991,6 +1216,108 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
   memory.write_block(kBaseVa, std::span<const uint8_t>(replacement), kPid);
   EXPECT_TRUE(std::all_of(allocation.begin(), allocation.end(),
                           [](uint8_t value) { return value == 0xa5; }));
+}
+
+TEST(GpuMemoryTest, IndirectBackingExtentsResizeWithoutRawPointerEscape) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x50000000;
+  constexpr uint64_t kSecondPageVa = kBaseVa + KfdProcess::kPageSize;
+  constexpr uint32_t kSentinel = 0x51A7CAFEu;
+  constexpr uint32_t kTailSentinel = 0xFEED1250u;
+
+  KfdProcess process(kPid);
+  std::shared_ptr<KfdProcess::BackingStore> backing =
+      std::make_shared<KfdProcess::BackingStore>(KfdProcess::kPageSize);
+  process.map_backing_pages(kBaseVa, backing, 0, KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_TRUE(memory.is_range_mapped(kBaseVa, KfdProcess::kPageSize, kPid));
+  EXPECT_TRUE(memory.is_range_host_backed(kBaseVa, KfdProcess::kPageSize, kPid));
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid), nullptr);
+  EXPECT_EQ(memory.find_host_range(kBaseVa, kPid), (std::pair<uint64_t, uint64_t>{0, 0}));
+
+  memory.write32(kBaseVa, kSentinel, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa, kPid), kSentinel);
+
+  constexpr uint64_t kAtomicVa = kBaseVa + 8;
+  memory.write64(kAtomicVa, 7, kPid);
+  uint64_t loaded = 0;
+  EXPECT_TRUE(memory.try_read_u64_atomic(kAtomicVa, &loaded, kPid));
+  EXPECT_EQ(loaded, 7u);
+  memory.atomic_rmw(
+      kAtomicVa, sizeof(uint64_t),
+      [](uint8_t *storage) {
+        uint64_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read64(kAtomicVa, kPid), 8u);
+
+  ASSERT_TRUE(backing->resize(KfdProcess::kPageSize * 2));
+  process.map_backing_pages(kSecondPageVa, backing, KfdProcess::kPageSize, KfdProcess::kPageSize);
+
+  EXPECT_TRUE(memory.is_range_host_backed(kBaseVa, KfdProcess::kPageSize * 2, kPid));
+  EXPECT_EQ(memory.resolve_host_ptr(kSecondPageVa, kPid), nullptr);
+  EXPECT_EQ(memory.read32(kBaseVa, kPid), kSentinel);
+  EXPECT_EQ(memory.read32(kSecondPageVa, kPid), 0u);
+  memory.write32(kSecondPageVa + 16, kTailSentinel, kPid);
+  EXPECT_EQ(memory.read32(kSecondPageVa + 16, kPid), kTailSentinel);
+}
+
+TEST(GpuMemoryTest, BackingStoreResizeWaitsForScopedAccess) {
+  std::shared_ptr<KfdProcess::BackingStore> backing =
+      std::make_shared<KfdProcess::BackingStore>(KfdProcess::kPageSize);
+  std::atomic<bool> span_entered{false};
+  std::atomic<bool> release_span{false};
+  std::atomic<bool> resize_contended{false};
+  std::atomic<bool> resize_done{false};
+  std::atomic<bool> resize_ok{false};
+  KfdProcess::BackingStore::ResizeContentionHook resize_contention_hook = [&] {
+    resize_contended.store(true, std::memory_order_release);
+  };
+  backing->set_resize_contention_hook_for_testing(&resize_contention_hook);
+
+  std::jthread holder([&] {
+    (void)backing->with_span(0, sizeof(uint32_t), [&](uint8_t *storage) {
+      uint32_t value = 0xA17ECAFEu;
+      std::memcpy(storage, &value, sizeof(value));
+      span_entered.store(true, std::memory_order_release);
+      while (!release_span.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    });
+  });
+  while (!span_entered.load(std::memory_order_acquire))
+    std::this_thread::yield();
+
+  std::jthread grower([&] {
+    resize_ok.store(backing->resize(KfdProcess::kPageSize * 2), std::memory_order_release);
+    resize_done.store(true, std::memory_order_release);
+  });
+  const std::chrono::steady_clock::time_point wait_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < wait_deadline &&
+         !resize_contended.load(std::memory_order_acquire) &&
+         !resize_done.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(resize_contended.load(std::memory_order_acquire));
+  EXPECT_FALSE(resize_done.load(std::memory_order_acquire));
+
+  release_span.store(true, std::memory_order_release);
+  holder.join();
+  grower.join();
+  backing->set_resize_contention_hook_for_testing(nullptr);
+  EXPECT_TRUE(resize_done.load(std::memory_order_acquire));
+  EXPECT_TRUE(resize_ok.load(std::memory_order_acquire));
+  uint32_t preserved = 0;
+  ASSERT_TRUE(backing->with_span(0, sizeof(preserved), [&](uint8_t *storage) {
+    std::memcpy(&preserved, storage, sizeof(preserved));
+  }));
+  EXPECT_EQ(preserved, 0xA17ECAFEu);
 }
 
 TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {
