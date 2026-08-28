@@ -7,6 +7,10 @@
 # automatically selects host-asan for pull_request events (faster, host-only)
 # and full asan for workflow_dispatch (comprehensive device-side instrumentation).
 #
+# The presubmit is scoped to a runtime-only build (compiler-runtime and
+# runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
+# run automatically on every pull request. See ROCm/TheRock#7202.
+#
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
@@ -60,8 +64,24 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "asan"
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      # Only gfx94X has both a host-asan build variant and an ASAN sandbox test
+      # runner, so a pull_request trigger resolves to gfx94X regardless.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || 'test:hip-tests,test:rocrtst' }}
+      # Runtime-only build: everything outside these two stages, math-libs
+      # included, is dropped from the build graph.
+      build_stages: "compiler-runtime,runtime-tests"
+      # Run on every PR with no ci:asan / ci:host-asan label, and allocate an
+      # ASAN sandbox test runner on the pull_request trigger.
+      asan_presubmit: true
+      # PR test:* labels must not widen the pinned test scope.
+      lock_test_labels: true
+      # Post-processing that a partial build cannot satisfy.
+      validate_artifact_structure: false
+      build_native_linux: false
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
