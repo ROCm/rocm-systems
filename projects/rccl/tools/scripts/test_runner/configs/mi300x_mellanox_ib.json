@@ -406,6 +406,19 @@
         }
       ]
     },
+    "multisegment_cast_rma_multinode": {
+      "extends": "multisegment_transport_multinode",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_CAST_RMA_All_MultiNode",
+          "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
+          "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        }
+      ]
+    },
     "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -5365,6 +5378,24 @@
       "name": "MaxP2pPeers MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclConfig_t::maxP2pPeers and NCCL_P2P_MAX_PEERS: resolution across ranks, cap, rejection, and the per-peer channel divisor",
       "config": "maxp2ppeers_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Host Boundary Math",
+      "description": "Host-only segment selection and split arithmetic",
+      "config": "multisegment_host_boundary_math",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
+      "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CAST RMA (Multi-Node)",
+      "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
+      "config": "multisegment_cast_rma_multinode",
       "enabled": true
     },
     {

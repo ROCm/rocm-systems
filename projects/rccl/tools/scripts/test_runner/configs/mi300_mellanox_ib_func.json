@@ -3692,6 +3692,18 @@
           "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
         }
       ]
+    },
+    "multisegment_cast_rma_multinode": {
+      "extends": "multisegment_transport_multinode",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_CAST_RMA_All_MultiNode",
+          "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -3729,6 +3741,11 @@
       "name": "Multi-Segment - NET Proxy Intra-Node Peer (Multi-Node)",
       "description": "NetProxyPartialFinalSegment at 4 ranks across 2 nodes, so every rank also has an intra-node peer",
       "config": "multisegment_netproxy_intranode_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CAST RMA (Multi-Node)",
+      "config": "multisegment_cast_rma_multinode",
       "enabled": true
     },
     {

@@ -134,6 +134,14 @@ static inline void ncclRmaWrCreditsRecord(struct ncclRmaWrCredits* c, uint64_t i
   *wrs = (uint8_t)nWrs;
 }
 
+static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets, int rhsSegments,
+                                      const size_t* rhsOffsets) {
+  if (lhsSegments != rhsSegments || lhsSegments < 1 || lhsSegments > NCCL_RMA_MAX_SEGMENTS) return 0;
+  for (int s = 0; s <= lhsSegments; s++)
+    if (lhsOffsets[s] != rhsOffsets[s]) return 0;
+  return 1;
+}
+
 // True when ibv_post_send accepted a prefix that did not include the signaled last WR.
 static inline int ncclRmaPrefixPostLostSignaledTail(int posted, int nWr) {
   return posted > 0 && posted < nWr;
