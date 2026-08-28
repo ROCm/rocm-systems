@@ -152,7 +152,7 @@ struct ConSanMutationOutcome {
 
 /// Semantic and lowering artifacts owned by one static ConSan transformation.
 ///
-/// The compatibility lowerer builds this value incrementally, but ownership
+/// The internal native lowerer builds this value incrementally, but ownership
 /// crosses into `TransformResult` as one subobject after lowering finishes.
 /// Keeping these artifacts together prevents the production pipeline from
 /// redeclaring and individually projecting inventory, policy, coverage,

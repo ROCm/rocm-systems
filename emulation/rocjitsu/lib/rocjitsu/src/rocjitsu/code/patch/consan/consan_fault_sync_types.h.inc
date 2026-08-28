@@ -329,8 +329,9 @@ struct ConSanSyncSequence {
   /// the memory operations that it covers.
   std::optional<uint64_t> scalar_clause_text_offset;
   /// Stable identities of the original synchronization events in semantic
-  /// order. These typed members are authoritative for joins; the adjacent
-  /// string identities remain a temporary diagnostics/lowering adapter.
+  /// order. These typed members are authoritative for target-neutral graph
+  /// joins. The adjacent strings are the stable diagnostic and mutation-
+  /// selection names exposed by the existing fault-control surface.
   std::vector<SemanticSiteId> member_semantic_ids;
   std::vector<std::string> member_event_identities;
   uint32_t width_bits = 0;
@@ -474,8 +475,8 @@ struct ConSanBarrierLifecycleGroup {
   uint64_t end_text_offset = 0;
   /// Stable original-program identities of every event in lifecycle order.
   std::vector<SemanticSiteId> member_semantic_ids;
-  /// Temporary string projection retained for current fault and lowerer
-  /// consumers until their typed-identity cutover.
+  /// Stable diagnostic and mutation-selection names for the lifecycle
+  /// members. Target-neutral graph joins use `member_semantic_ids`.
   std::vector<std::string> member_event_identities;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;

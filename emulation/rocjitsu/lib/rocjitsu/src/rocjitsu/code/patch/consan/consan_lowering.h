@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_lowering.h
-/// @brief Typed output boundary for ConSan's remaining compatibility lowerer.
+/// @brief Typed output boundary for ConSan's internal native lowerer.
 
 #pragma once
 

@@ -22,8 +22,8 @@ namespace rocjitsu {
 /// Names the ordered contracts crossed by one production ConSan transform.
 ///
 /// The order is the dependency order visible to callers, not a claim that the
-/// compatibility lowerer has already been physically split into one function
-/// per value. The compatibility lowerer temporarily produces the inventory and
+/// internal native lowerer has already been physically split into one function
+/// per value. The lowerer produces the inventory and
 /// observation artifacts that the pipeline publishes at their logical
 /// boundaries. Every pipeline result records every stage exactly once;
 /// a stage that does not apply or awaits runtime binding still has an explicit

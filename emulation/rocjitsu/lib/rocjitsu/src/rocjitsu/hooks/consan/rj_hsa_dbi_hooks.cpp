@@ -2952,7 +2952,7 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
 
 std::shared_ptr<const std::vector<uint8_t>>
 snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 || size == 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max() ||
       offset > static_cast<size_t>(file_stat.st_size) ||
@@ -2982,7 +2982,7 @@ snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
 }
 
 std::shared_ptr<const std::vector<uint8_t>> snapshot_code_object_file(hsa_file_t file) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max())
     return {};
@@ -3688,7 +3688,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->fault_load_occurrence) {
       rocjitsu::MutationRequest probe_mutation = mutation_request;
       rocjitsu::BoundRuntimeResources probe_resources = runtime_resources;
-      // Keep the configured flavor so compatibility lowering performs dry-run
+      // Keep the configured flavor so internal lowering performs dry-run
       // planning; flavor=None intentionally skips every ConSan planning step.
       // The probe result is discarded, so retaining the flavor cannot install
       // instrumentation but does let the exact fault resolver identify this

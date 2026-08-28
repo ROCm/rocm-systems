@@ -859,17 +859,17 @@ struct ConSanMoiOperatingPoint {
   bool operator==(const ConSanMoiOperatingPoint &) const = default;
 };
 
-/// Transitional aggregate used only by MOI planning and legacy emitters.
+/// Internal attempt context used only by MOI planning and native emitters.
 ///
 /// It combines immutable caller input with one independently copyable operating
-/// point. Keeping the types separate makes every remaining broad emitter
-/// dependency visible and prevents non-MOI code from acquiring placement
-/// output. Stage 3 removes this aggregate from emitters in favor of the input,
-/// accepted operating point, and narrow per-patch plans.
+/// point. Keeping the base contracts separate makes broad internal mechanism
+/// dependencies visible and prevents non-MOI code from acquiring placement
+/// output. Public orchestration and report planning never consume this type;
+/// narrow per-patch plans own the decisions that cross semantic boundaries.
 struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   MoiOptions() = default;
   /// Start a fresh MOI attempt from caller input. The implicit conversion is
-  /// intentional at the compatibility boundary: production callers carry no
+  /// intentional at the internal lowering boundary: production callers carry no
   /// resolved state, while focused mechanism tests may pass this derived type
   /// directly to preserve an explicitly seeded downstream state.
   MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {

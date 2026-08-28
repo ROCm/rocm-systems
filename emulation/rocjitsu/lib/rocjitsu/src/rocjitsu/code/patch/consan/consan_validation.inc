@@ -3657,7 +3657,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     if (event == result.program_inventory.sync().sync_events.end())
       return false;
     const ConSanSyncSequence *sequence =
-        result.program_inventory.sync().find_unique_sequence_containing(event->identity);
+        result.program_inventory.sync().find_unique_sequence_containing(event->semantic_id);
     return sequence != nullptr &&
            (sequence->memory_role == ConSanSyncMemoryRole::Release ||
             sequence->memory_role == ConSanSyncMemoryRole::AcquireRelease ||
