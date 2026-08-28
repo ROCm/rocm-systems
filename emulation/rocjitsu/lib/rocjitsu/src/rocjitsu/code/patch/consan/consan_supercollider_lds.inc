@@ -23,7 +23,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   const bool has_plannable_supported_site =
       std::ranges::any_of(admitted_sites, [&](const auto &entry) {
         const std::vector<uint64_t> owners =
-            sc_execution_owner_descriptor_file_offsets(*entry.second);
+            entry.second->execution_and_container_owner_descriptor_file_offsets();
         return !owners.empty() && std::ranges::all_of(owners, [&](uint64_t owner) {
           const ConSanKernelInfo *kernel =
               result.program_inventory.find_kernel_by_descriptor(owner);
@@ -776,7 +776,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   };
   for (const auto &[file_offset, site] : admitted_sites) {
     (void)file_offset;
-    add_site_context(*site, sc_execution_owner_descriptor_file_offsets(*site));
+    add_site_context(*site, site->execution_and_container_owner_descriptor_file_offsets());
   }
 
   // Coverage is a physical decoded-site inventory, not an inventory of sites
@@ -1669,7 +1669,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       std::vector<const ScReservoirOwnerContext *> dense_owner_contexts;
       std::unordered_set<uint64_t> dense_owner_descriptors;
       for (const LdsCheckTrapCandidate &candidate : seed_group.candidates) {
-        for (uint64_t owner : sc_execution_owner_descriptor_file_offsets(*candidate.site)) {
+        for (uint64_t owner :
+             candidate.site->execution_and_container_owner_descriptor_file_offsets()) {
           if (!dense_owner_descriptors.insert(owner).second)
             continue;
           const auto context = std::ranges::find(reservoir_owner_contexts, owner,
@@ -3374,7 +3375,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           static_cast<uint16_t>(
               std::max(plan->second.saved_frame_base_sgpr, plan->second.saved_scc_sgpr) + 1u));
     }
-    planned.info.owner_descriptor_file_offsets = sc_execution_owner_descriptor_file_offsets(site);
+    planned.info.owner_descriptor_file_offsets =
+        site.execution_and_container_owner_descriptor_file_offsets();
     if (spill != selected_spills.sequences.end()) {
       planned.info.spilled_vgpr_count = spill->second.vgpr_count;
       planned.info.required_private_segment_size = spill->second.total_private_bytes;

@@ -123,6 +123,21 @@ struct ConSanAccessInventorySite {
   /// reasons.
   [[nodiscard]] bool complete() const { return exclusions.empty() && !ranges.empty(); }
 
+  /// Return the canonical descriptors that can own execution of this access,
+  /// including its containing kernel when symbol-range ownership did not
+  /// already publish that descriptor. Shared helper bodies can name several
+  /// execution owners; callers that mutate descriptor state must update the
+  /// complete returned set.
+  [[nodiscard]] std::vector<uint64_t>
+  execution_and_container_owner_descriptor_file_offsets() const {
+    std::vector<uint64_t> owners = execution_owner_descriptor_file_offsets;
+    if (container.kernel_descriptor_file_offset)
+      owners.push_back(*container.kernel_descriptor_file_offset);
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+    return owners;
+  }
+
   bool operator==(const ConSanAccessInventorySite &) const = default;
 };
 

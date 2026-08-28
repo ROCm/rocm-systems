@@ -16,16 +16,6 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
   return offsets;
 }
 
-[[nodiscard]] std::vector<uint64_t>
-sc_execution_owner_descriptor_file_offsets(const ConSanAccessInventorySite &access) {
-  std::vector<uint64_t> owners = access.execution_owner_descriptor_file_offsets;
-  if (access.container.kernel_descriptor_file_offset)
-    owners.push_back(*access.container.kernel_descriptor_file_offset);
-  std::ranges::sort(owners);
-  owners.erase(std::ranges::unique(owners).begin(), owners.end());
-  return owners;
-}
-
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
                                                  ConSanTransformArtifacts &result) {
   const ConSanAccessPolicyRequest request{

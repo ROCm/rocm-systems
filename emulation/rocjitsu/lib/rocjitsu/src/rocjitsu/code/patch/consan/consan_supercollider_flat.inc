@@ -663,7 +663,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     const ConSanAccessInventorySite &site = *access;
     const Instruction *site_inst = find_instruction_at_text_offset(
         KernelBlockScope(block_ptrs), site.physical_id.original_text_offset);
-    std::vector<uint64_t> owners = sc_execution_owner_descriptor_file_offsets(site);
+    std::vector<uint64_t> owners = site.execution_and_container_owner_descriptor_file_offsets();
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (plan.site_kind == ConSanResourceSiteKind::Access &&
           plan.text_offset == site.physical_id.original_text_offset) {
