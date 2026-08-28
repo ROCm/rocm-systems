@@ -209,9 +209,6 @@ namespace RcclUnitTesting
         // ncclCommInitAll across all GPUs and fails intermittently.
       }
       
-      // Ensure child-side pipe descriptors remain open across execl()
-      fcntl(childList[childId]->childReadFd, F_SETFD, 0);
-      fcntl(childList[childId]->childWriteFd, F_SETFD, 0);
 
       // Map this config's children onto distinct pool workers by representative device.
       bool mappable = true;
@@ -248,27 +245,55 @@ namespace RcclUnitTesting
         childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
         if (childList[childId]->InitPipes() != TEST_SUCCESS)
         {
-          TEST_ERROR("Unable to create pipes to child process");
+          TEST_ERROR("Unable to create pipes to child process %d", childId);
           return;
         }
+
+        // Ensure child-side pipe descriptors remain open across execl()
+        fcntl(childList[childId]->childReadFd, F_SETFD, 0);
+        fcntl(childList[childId]->childWriteFd, F_SETFD, 0);
 
         pid_t pid = fork();
         if (pid == 0)
         {
           // Child process enters execution loop
-          childList[childId]->StartExecutionLoop();
-          return;
+          close(childList[childId]->parentWriteFd);
+          close(childList[childId]->parentReadFd);
+
+          // String arguments for execl
+          std::string sChildId      = std::to_string(childId);
+          std::string sChildReadFd  = std::to_string(childList[childId]->childReadFd);
+          std::string sChildWriteFd = std::to_string(childList[childId]->childWriteFd);
+          std::string sVerbose      = std::to_string(ev.verbose ? 1 : 0);
+          std::string sPrintVal     = std::to_string(ev.printValues);
+          std::string sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
+          std::string sMemAllocType = std::to_string(static_cast<int>(memAllocType));
+
+          // Re-execute binary to clear inherited HIP/HSA driver state
+          execl("/proc/self/exe", "rccl_unit_test",
+                "--child",
+                sChildId.c_str(),
+                sChildReadFd.c_str(),
+                sChildWriteFd.c_str(),
+                sVerbose.c_str(),
+                sPrintVal.c_str(),
+                sThreading.c_str(),
+                sMemAllocType.c_str(),
+                NULL);
+          perror("execl failed");
+          _exit(1);
         }
-        else
+        else if (pid > 0)
         {
           // Parent records child process ID and closes unused ends of pipe
           childList[childId]->pid = pid;
           close(childList[childId]->childWriteFd);
           close(childList[childId]->childReadFd);
         }
-      }
-      else {
-        TEST_ERROR("fork() failed when creating child process %d", childId);
+        else 
+        {
+          TEST_ERROR("fork() failed when creating child process %d", childId);
+        }
       }
     }
 
