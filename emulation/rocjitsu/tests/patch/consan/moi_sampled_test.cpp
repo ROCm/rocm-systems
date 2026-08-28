@@ -198,6 +198,18 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   ASSERT_EQ(result.committed_lowerings.size(), 1u);
   EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.committed_lowerings.front().locations.size(), 1u);
+  ASSERT_EQ(result.runtime_static_mapping.sampled_accesses.size(), 1u);
+  const ConSanSampledStaticAccessMapping &runtime_mapping =
+      result.runtime_static_mapping.sampled_accesses.front();
+  EXPECT_EQ(runtime_mapping.access.intent_ids, result.committed_lowerings.front().intent_ids);
+  EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
+  EXPECT_EQ(runtime_mapping.first_slot, access_patch->sampled_first_slot);
+  EXPECT_EQ(runtime_mapping.range_count, access_patch->sampled_access_range_count);
+  EXPECT_EQ(runtime_mapping.bank_count, access_patch->sampled_window_bank_count);
+  EXPECT_EQ(runtime_mapping.emitted_probe_text_offset, access_patch->trampoline_offset);
+  EXPECT_EQ(runtime_mapping.relocated_guest_text_offset,
+            access_patch->relocated_guest_instruction_offset);
+  EXPECT_EQ(runtime_mapping.scratch_vgpr, access_patch->scratch_vgpr);
   EXPECT_EQ(access_patch->anchor_offset, 0u);
   ASSERT_TRUE(access_patch->scratch_vgpr);
   EXPECT_EQ(*access_patch->scratch_vgpr, 8u);

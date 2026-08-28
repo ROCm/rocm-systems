@@ -254,6 +254,14 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   const auto access_patch = std::ranges::find_if(result.patches, is_access_patch);
   ASSERT_NE(access_patch, result.patches.end());
   EXPECT_EQ(access_patch->owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(result.runtime_static_mapping.record_replay_accesses.size(), 1u);
+  const ConSanRecordReplayStaticAccessMapping &runtime_mapping =
+      result.runtime_static_mapping.record_replay_accesses.front();
+  ASSERT_EQ(runtime_mapping.access.intent_ids.size(), 1u);
+  EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
+  EXPECT_EQ(runtime_mapping.access.execution_owner_descriptor_file_offsets,
+            access_patch->owner_descriptor_file_offsets);
+  EXPECT_TRUE(runtime_mapping.access.owner_provenance_complete);
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end());

@@ -17,8 +17,65 @@ make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
         .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
     });
   }
+  ConSanStaticAccessAttribution access{
+      .intent_ids = candidate.intent_ids,
+      .original_site = candidate.physical_id,
+      .original_semantic_sites = {},
+      .execution_owner_descriptor_file_offsets = patch.owner_descriptor_file_offsets,
+      .owner_provenance_complete = !patch.owner_descriptor_file_offsets.empty(),
+  };
+  std::ranges::sort(access.execution_owner_descriptor_file_offsets);
+  access.execution_owner_descriptor_file_offsets.erase(
+      std::ranges::unique(access.execution_owner_descriptor_file_offsets).begin(),
+      access.execution_owner_descriptor_file_offsets.end());
+  std::optional<ConSanProbeIntentKind> intent_kind;
+  for (ConSanProbeIntentId id : candidate.intent_ids) {
+    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    if (intent == nullptr || (intent_kind && *intent_kind != intent->kind))
+      return std::nullopt;
+    intent_kind = intent->kind;
+    for (const SemanticSiteId &site : intent->covered_semantic_sites) {
+      if (std::ranges::find(access.original_semantic_sites, site) ==
+          access.original_semantic_sites.end()) {
+        access.original_semantic_sites.push_back(site);
+      }
+    }
+  }
+  if (!intent_kind)
+    return std::nullopt;
+
+  ConSanRuntimeStaticMapping runtime_mapping;
+  switch (*intent_kind) {
+  case ConSanProbeIntentKind::AccessRecord:
+    runtime_mapping.record_replay_accesses.push_back({.access = std::move(access)});
+    break;
+  case ConSanProbeIntentKind::SampledAccess:
+    if (patch.sampled_access_range_count == 0u || patch.sampled_window_bank_count == 0u)
+      return std::nullopt;
+    runtime_mapping.sampled_accesses.push_back({
+        .access = std::move(access),
+        .first_slot = patch.sampled_first_slot,
+        .range_count = patch.sampled_access_range_count,
+        .bank_count = patch.sampled_window_bank_count,
+        .emitted_probe_text_offset = patch.trampoline_offset,
+        .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
+        .scratch_vgpr = patch.scratch_vgpr,
+    });
+    break;
+  case ConSanProbeIntentKind::ExactShadowAccess:
+    if (patch.workgroup_shadow_compact) {
+      runtime_mapping.inline_compact_accesses.push_back({
+          .access = std::move(access),
+          .token = patch.workgroup_shadow_compact_token,
+      });
+    }
+    break;
+  default:
+    return std::nullopt;
+  }
   return make_consan_committed_lowering(result.observation_plan, candidate.intent_ids, locations,
-                                        ConSanLoweringOutcomeKind::Instrumented);
+                                        ConSanLoweringOutcomeKind::Instrumented, {},
+                                        std::move(runtime_mapping));
 }
 
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
