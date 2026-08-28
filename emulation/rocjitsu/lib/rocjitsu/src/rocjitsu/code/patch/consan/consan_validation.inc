@@ -2724,8 +2724,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const rj_code_arch_t arch = consan_arch_for_target(original.target_id());
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
-  const SyncEventIdentityIndex pristine_events =
-      build_sync_event_identity_index(pristine.program_inventory.sync().sync_events);
+  const SyncEventSemanticIndex pristine_events =
+      build_sync_event_semantic_index(pristine.program_inventory.sync().sync_events);
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -2844,10 +2844,12 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
                             "confidence, container, and block");
         continue;
       }
-      const std::string &outer_member = *patch.perturbation_edge == ConSanPerturbationEdge::Release
-                                            ? sequence->member_event_identities.front()
-                                            : sequence->member_event_identities.back();
-      const ConSanSyncEvent *anchor_event = find_sync_event(pristine_events, outer_member);
+      const size_t outer_member_index = *patch.perturbation_edge == ConSanPerturbationEdge::Release
+                                            ? 0u
+                                            : sequence->member_semantic_ids.size() - 1u;
+      const std::string &outer_member = sequence->member_event_identities[outer_member_index];
+      const ConSanSyncEvent *anchor_event = find_sequence_member_event(
+          pristine_events, sequence->member_semantic_ids[outer_member_index]);
       if (candidate->anchor_event_identity != outer_member || anchor_event == nullptr ||
           (composite && patch.perturbation_source_anchor_identity != outer_member) ||
           anchor_event->container_name != sequence->container_name ||

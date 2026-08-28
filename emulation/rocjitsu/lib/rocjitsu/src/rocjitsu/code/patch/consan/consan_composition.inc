@@ -948,8 +948,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       result.program_inventory = inventory_builder.view();
       return result;
     }
-    const SyncEventIdentityIndex sync_events =
-        build_sync_event_identity_index(synchronization_inventory.sync_events);
+    const SyncEventSemanticIndex sync_events =
+        build_sync_event_semantic_index(synchronization_inventory.sync_events);
     const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
     build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
     associate_barrier_sync_sequences(

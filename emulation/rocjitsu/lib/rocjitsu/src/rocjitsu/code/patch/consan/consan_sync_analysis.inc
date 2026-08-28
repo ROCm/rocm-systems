@@ -1058,24 +1058,42 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
   }
 }
 
-using SyncEventIdentityIndex = std::unordered_map<std::string_view, const ConSanSyncEvent *>;
+struct SyncEventSemanticIdHash {
+  [[nodiscard]] size_t operator()(const SemanticSiteId &identity) const noexcept {
+    size_t hash = std::hash<std::string>{}(identity.physical.code_object.fingerprint);
+    const auto mix = [&](uint64_t value) {
+      hash ^= std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u);
+    };
+    mix(identity.physical.code_object.byte_size);
+    mix(identity.physical.code_object.collision_verifier);
+    mix(identity.physical.original_text_offset);
+    mix(static_cast<uint8_t>(identity.domain));
+    mix(identity.member_ordinal);
+    mix(identity.range_ordinal);
+    return hash;
+  }
+};
 
-[[nodiscard]] SyncEventIdentityIndex
-build_sync_event_identity_index(std::span<const ConSanSyncEvent> sync_events) {
-  SyncEventIdentityIndex index;
+using SyncEventSemanticIndex =
+    std::unordered_map<SemanticSiteId, const ConSanSyncEvent *, SyncEventSemanticIdHash>;
+
+[[nodiscard]] SyncEventSemanticIndex
+build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events) {
+  SyncEventSemanticIndex index;
   index.reserve(sync_events.size());
   for (const ConSanSyncEvent &event : sync_events)
-    index.emplace(event.identity, &event);
+    index.emplace(event.semantic_id, &event);
   return index;
 }
 
-[[nodiscard]] const ConSanSyncEvent *find_sync_event(const SyncEventIdentityIndex &index,
-                                                     std::string_view identity) {
+[[nodiscard]] const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
+                                                                SemanticSiteId identity) {
+  identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
   const auto event = index.find(identity);
   return event == index.end() ? nullptr : event->second;
 }
 
-[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventIdentityIndex &events,
+[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
                                                           const ConSanSyncSequence &sequence);
 
 [[nodiscard]] bool is_relocatable_barrier_move_destination(const Instruction &instruction,
@@ -1304,7 +1322,7 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
 
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-    const SyncEventIdentityIndex &events, rj_code_arch_t arch,
+    const SyncEventSemanticIndex &events, rj_code_arch_t arch,
     std::span<const ConSanSyncSequence> sync_sequences, ConSanTransformArtifacts &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
@@ -1446,11 +1464,11 @@ void build_barrier_move_destination_inventory(
   return false;
 }
 
-[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventIdentityIndex &events,
+[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
                                                           const ConSanSyncSequence &sequence) {
-  if (sequence.member_event_identities.empty())
+  if (sequence.member_semantic_ids.empty())
     return nullptr;
-  return find_sync_event(events, sequence.member_event_identities.front());
+  return find_sequence_member_event(events, sequence.member_semantic_ids.front());
 }
 
 template <typename Container>
@@ -1690,7 +1708,7 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
 
 [[nodiscard]] bool
 is_rdna3_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSequence &second,
-                            const SyncEventIdentityIndex &events,
+                            const SyncEventSemanticIndex &events,
                             const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
@@ -1940,7 +1958,7 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
 }
 
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                     rj_code_arch_t arch, const SyncEventIdentityIndex &events,
+                                     rj_code_arch_t arch, const SyncEventSemanticIndex &events,
                                      SynchronizationInventoryBuildView inventory,
                                      const ConSanTransformArtifacts &result) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
@@ -2339,7 +2357,7 @@ fence_sequence_indices_by_begin(std::span<const ConSanSyncSequence> sync_sequenc
 
 void associate_ordinary_release_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, rj_code_arch_t arch,
-    const SyncEventIdentityIndex &events, SynchronizationInventoryBuildView inventory) {
+    const SyncEventSemanticIndex &events, SynchronizationInventoryBuildView inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(sync_sequences);
   std::unordered_map<size_t, size_t> associations;
@@ -2455,7 +2473,7 @@ void associate_ordinary_release_sync_sequences(
 }
 
 void associate_ordinary_acquire_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
+    const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventSemanticIndex &events,
     rj_code_arch_t arch, SynchronizationInventoryBuildView inventory,
     const ConSanTransformArtifacts &result) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
@@ -2681,12 +2699,16 @@ void associate_ordinary_acquire_sync_sequences(
 
 [[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
                                               const ConSanSyncSequence &sequence) {
+  if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
+    return false;
   uint64_t prior_end = sequence.begin_text_offset;
-  for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
+  for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
+    const SemanticSiteId &identity = sequence.member_semantic_ids[index];
     SemanticSiteId event_identity = identity;
     event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     const ConSanSyncEvent *event = result.program_inventory.sync().find_event(event_identity);
     if (event == nullptr || event->container_name != sequence.container_name ||
+        event->identity != sequence.member_event_identities[index] ||
         event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
         event->text_offset < sequence.begin_text_offset ||
         event->text_offset + event->size > sequence.end_text_offset) {
@@ -2694,15 +2716,19 @@ void associate_ordinary_acquire_sync_sequences(
     }
     prior_end = event->text_offset + event->size;
   }
-  return !sequence.member_event_identities.empty();
+  return !sequence.member_semantic_ids.empty();
 }
 
-[[nodiscard]] bool sequence_has_exact_members(const SyncEventIdentityIndex &events,
+[[nodiscard]] bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
                                               const ConSanSyncSequence &sequence) {
+  if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
+    return false;
   uint64_t prior_end = sequence.begin_text_offset;
-  for (const std::string &identity : sequence.member_event_identities) {
-    const ConSanSyncEvent *event = find_sync_event(events, identity);
+  for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
+    const ConSanSyncEvent *event =
+        find_sequence_member_event(events, sequence.member_semantic_ids[index]);
     if (event == nullptr || event->container_name != sequence.container_name ||
+        event->identity != sequence.member_event_identities[index] ||
         event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
         event->text_offset < sequence.begin_text_offset ||
         event->text_offset + event->size > sequence.end_text_offset) {
@@ -2710,14 +2736,14 @@ void associate_ordinary_acquire_sync_sequences(
     }
     prior_end = event->text_offset + event->size;
   }
-  return !sequence.member_event_identities.empty();
+  return !sequence.member_semantic_ids.empty();
 }
 
-[[nodiscard]] bool sequence_atomic_has_device_or_system_scope(const SyncEventIdentityIndex &events,
+[[nodiscard]] bool sequence_atomic_has_device_or_system_scope(const SyncEventSemanticIndex &events,
                                                               const ConSanSyncSequence &sequence) {
   const ConSanSyncEvent *atomic = nullptr;
-  for (const std::string &identity : sequence.member_event_identities) {
-    const ConSanSyncEvent *event = find_sync_event(events, identity);
+  for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
+    const ConSanSyncEvent *event = find_sequence_member_event(events, identity);
     if (event == nullptr || event->kind != ConSanSyncEventKind::Atomic)
       continue;
     if (atomic != nullptr)
@@ -2731,7 +2757,7 @@ void associate_ordinary_acquire_sync_sequences(
          (*atomic->raw_scope == 2u || *atomic->raw_scope == 3u);
 }
 
-[[nodiscard]] std::string perturbation_rejection_reason(const SyncEventIdentityIndex &events,
+[[nodiscard]] std::string perturbation_rejection_reason(const SyncEventSemanticIndex &events,
                                                         const ConSanSyncSequence &sequence,
                                                         ConSanPerturbationKind kind,
                                                         ConSanPerturbationEdge edge) {
@@ -2778,8 +2804,8 @@ void associate_ordinary_acquire_sync_sequences(
 void build_perturbation_candidate_inventory(const ProgramInventory &program_inventory,
                                             ConSanPerturbationPlanningState &planning) {
   planning.candidates.clear();
-  const SyncEventIdentityIndex events =
-      build_sync_event_identity_index(program_inventory.sync().sync_events);
+  const SyncEventSemanticIndex events =
+      build_sync_event_semantic_index(program_inventory.sync().sync_events);
   for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
@@ -2787,15 +2813,15 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
                                                           : ConSanPerturbationKind::None;
     if (kind == ConSanPerturbationKind::None)
       continue;
-    if (sequence.member_event_identities.empty())
+    if (sequence.member_semantic_ids.empty())
       continue;
     for (const ConSanPerturbationEdge edge :
          {ConSanPerturbationEdge::Release, ConSanPerturbationEdge::Acquire}) {
       const std::string rejection = perturbation_rejection_reason(events, sequence, kind, edge);
-      const std::string &anchor_identity = edge == ConSanPerturbationEdge::Release
-                                               ? sequence.member_event_identities.front()
-                                               : sequence.member_event_identities.back();
-      const ConSanSyncEvent *anchor = find_sync_event(events, anchor_identity);
+      const SemanticSiteId &anchor_member = edge == ConSanPerturbationEdge::Release
+                                                ? sequence.member_semantic_ids.front()
+                                                : sequence.member_semantic_ids.back();
+      const ConSanSyncEvent *anchor = find_sequence_member_event(events, anchor_member);
       ConSanPerturbationCandidate candidate;
       candidate.kind = kind;
       candidate.edge = edge;
@@ -2806,7 +2832,7 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       candidate.container_name = sequence.container_name;
       candidate.in_kernel = sequence.in_kernel;
       candidate.basic_block_index = sequence.basic_block_index.value_or(0);
-      candidate.anchor_event_identity = anchor_identity;
+      candidate.anchor_event_identity = anchor == nullptr ? std::string{} : anchor->identity;
       candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset;
       candidate.anchor_size = anchor == nullptr ? 0 : anchor->size;
       candidate.ordered_member_identities = sequence.member_event_identities;
