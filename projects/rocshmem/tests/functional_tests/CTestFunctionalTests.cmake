@@ -1452,19 +1452,39 @@ function(add_symmetric_buffer_tests)
         return()
     endif()
 
+    # GDA must register VMM-backed memory through dmabuf. In a GDA-only build,
+    # force the NIC path so this test cannot pass through mixed IPC instead.
+    set(symmetric_buffer_env
+        "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
+        "ROCSHMEM_GDA_ENABLE_DMABUF=1")
+    if(USE_GDA AND NOT USE_IPC)
+        list(APPEND symmetric_buffer_env "ROCSHMEM_DISABLE_MIXED_IPC=1")
+    endif()
+
     begin_test_group(
         CATEGORY "MEMORY"
         TIER standard
         BACKENDS "ipc;gda"
         GPUS "all"
         EXTRA_LABELS "RMA" "SYMMETRIC")
-        add_rocshmem_functional_test(
-            NAME buffer_register_symmetric
-            RANKS 2
-            WORKGROUPS 1
-            THREADS 1
-            UUID_ONLY
-            ENV_VARS "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix")
+        foreach(ranks 2 4)
+            add_rocshmem_functional_test(
+                NAME buffer_register_symmetric
+                RANKS ${ranks}
+                WORKGROUPS 1
+                THREADS 1
+                MAX_MSG_SIZE 64
+                UUID_ONLY
+                ENV_VARS ${symmetric_buffer_env})
+            add_rocshmem_functional_test(
+                NAME buffer_register_symmetric
+                RANKS ${ranks}
+                WORKGROUPS 2
+                THREADS 64
+                MAX_MSG_SIZE 64
+                UUID_ONLY
+                ENV_VARS ${symmetric_buffer_env})
+        endforeach()
     end_test_group()
 endfunction()
 
