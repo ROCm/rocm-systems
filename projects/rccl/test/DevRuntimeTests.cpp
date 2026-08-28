@@ -1499,6 +1499,162 @@ TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryRegisterGin, elastic path: taken when some rank contributed a
+// CPU-backed segment. Every rank must agree on the segment layout, so it checks
+// the count locally, all-gathers the sizes to check those too, then registers
+// one window per segment at its own offset. A failure part-way through
+// deregisters the windows already made.
+
+class SymMemoryRegisterGinElasticTest : public SymMemoryRegisterGinTest {
+protected:
+  std::vector<size_t> gathered;  // what the all-gather hook publishes back
+
+  void SetUp() override {
+    SymMemoryRegisterGinTest::SetUp();
+    comm->nRanks = 2;
+    mem.globalHasSysmemSegment = true;
+    mem.numSegments = 2;
+    mem.maxGlobalNumSegments = 2;
+    segmentSizes.assign({4096, 8192});
+    memHandles.assign(2, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+    mem.segmentSizes = segmentSizes.data();
+    mem.memHandles = memHandles.data();
+  }
+
+  // Every rank reports the same layout, which is what the checks require.
+  std::function<ncclResult_t(void*, void*, int)> AgreeingAllGather() {
+    return [this](void*, void* buf, int) {
+      auto* sizes = static_cast<size_t*>(buf);
+      for (int r = 0; r < comm->nRanks; r++) {
+        for (int s = 0; s < mem.maxGlobalNumSegments; s++) {
+          sizes[r * mem.maxGlobalNumSegments + s] = segmentSizes[s];
+        }
+      }
+      return ncclSuccess;
+    };
+  }
+};
+
+// Branch: this rank's segment count disagrees with the communicator's, rejected
+// before any all-gather.
+TEST_F(SymMemoryRegisterGinElasticTest, SegmentCountMismatch_ReturnsInvalidUsage) {
+  mem.numSegments = 1;  // comm-wide max is 2
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(gather.calls, 0);
+}
+
+// The happy path: one window per segment, each at its own running offset and
+// with the pointer type its location implies.
+TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegment) {
+  ScopedHook gather(g_bootstrapAllGather, AgreeingAllGather());
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeHostNuma;  // CPU-backed
+                     }
+                     return hipSuccess;
+                   });
+  std::vector<uintptr_t> addrs;
+  std::vector<size_t> sizes;
+  std::vector<int> types;
+  ScopedHook reg(g_ginRegister,
+                 [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                   addrs.push_back(reinterpret_cast<uintptr_t>(addr));
+                   sizes.push_back(size);
+                   types.push_back(memType);
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  ASSERT_EQ(reg.calls, 2);
+  const uintptr_t base = reinterpret_cast<uintptr_t>(mem.primaryAddr);
+  EXPECT_EQ(addrs[0], base);
+  EXPECT_EQ(addrs[1], base + 4096);  // advanced by the first segment's size
+  EXPECT_EQ(sizes[0], 4096u);
+  EXPECT_EQ(sizes[1], 8192u);
+  EXPECT_EQ(types[0], NCCL_PTR_HOST);  // host-NUMA segments register as host
+  EXPECT_EQ(types[1], NCCL_PTR_HOST);
+  EXPECT_EQ(mem.numGinSegments, 2);
+}
+
+// A device-backed segment on the elastic path still registers as device memory,
+// so the pointer type follows the segment rather than the path.
+TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
+  ScopedHook gather(g_bootstrapAllGather, AgreeingAllGather());
+  std::vector<int> types;
+  ScopedHook reg(g_ginRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                   types.push_back(memType);
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);  // props fake reports device
+  ASSERT_EQ(types.size(), 2u);
+  EXPECT_EQ(types[0], NCCL_PTR_CUDA);
+}
+
+// Branch: another rank reports a different segment size, so the layout check
+// rejects it after the gather.
+TEST_F(SymMemoryRegisterGinElasticTest, SizeMismatchAcrossRanks_ReturnsInvalidUsage) {
+  ScopedHook gather(g_bootstrapAllGather, [this](void*, void* buf, int) {
+    auto* sizes = static_cast<size_t*>(buf);
+    for (int r = 0; r < comm->nRanks; r++) {
+      for (int s = 0; s < mem.maxGlobalNumSegments; s++) {
+        sizes[r * mem.maxGlobalNumSegments + s] = segmentSizes[s];
+      }
+    }
+    sizes[1 * mem.maxGlobalNumSegments + 0] = 999;  // rank 1 disagrees on segment 0
+    return ncclSuccess;
+  });
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: reading a segment's allocation properties fails.
+TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorWithoutGathering) {
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+}
+
+// Branch: the all-gather itself fails.
+TEST_F(SymMemoryRegisterGinElasticTest, AllGatherFails_ReturnsError) {
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: the rollback. The second segment fails to register, so the first --
+// already registered -- must be deregistered rather than leaked.
+TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) {
+  ScopedHook gather(g_bootstrapAllGather, AgreeingAllGather());
+  int registered = 0;
+  ScopedHook reg(g_ginRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                   return ++registered == 2 ? ncclSystemError : ncclSuccess;
+                 });
+  ScopedHook dereg(g_ginDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 2);
+  EXPECT_EQ(dereg.calls, 1);  // exactly the one that succeeded
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
