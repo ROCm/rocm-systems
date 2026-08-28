@@ -51,6 +51,7 @@
 
 #include <dlfcn.h>
 #include <cstddef>
+#include <fstream>
 #include <initializer_list>
 #include <unordered_map>
 
