@@ -3400,7 +3400,7 @@
       "test_dir": "test/nccl4py",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 0,
+      "num_gpus": "auto",
       "timeout": 600,
       "tests": [
         {
@@ -4251,6 +4251,181 @@
           }
         }
       ]
+    },
+    "multisegment_host_boundary_math": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "MultiSegment_HostBoundaryMath_All",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+        }
+      ]
+    },
+    "ubr_multisegment_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_All_Core",
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_ce_before": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "NCCL_CTA_POLICY": "2"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
+        }
+      ]
+    },
+    "ubr_multisegment_lsagin_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        },
+        {
+          "name": "DeepEP_Hybrid_Positive_And_Stress",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        },
+        {
+          "name": "DeepEP_Elastic_Window_Registration",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+        }
+      ]
+    },
+    "multisegment_transport_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_Transport_All_MultiNode",
+          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        },
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment",
+          "env_variables": {
+            "NCCL_GIN_ENABLE": "0"
+          }
+        }
+      ]
     }
   },
   "test_suites": [
@@ -4264,6 +4439,31 @@
       "name": "P2P Tests - Complete Suite",
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Host Boundary Math",
+      "config": "multisegment_host_boundary_math",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CE BEFORE registration cache",
+      "config": "ubr_multisegment_ce_before",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {
