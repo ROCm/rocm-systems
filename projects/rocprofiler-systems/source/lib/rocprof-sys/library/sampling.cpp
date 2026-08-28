@@ -663,8 +663,6 @@ configure(bool _setup, std::int64_t _tid)
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
-        if(sampling_paused.load(std::memory_order_relaxed)) return std::set<int>{};
-
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
@@ -770,9 +768,10 @@ configure(bool _setup, std::int64_t _tid)
                 [](int, pid_t, long, std::int64_t _idx) {
                     if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
                         return true;
-                    auto _stopped = perf::get_instance(_idx)->stop();
-                    if(_stopped) perf::get_instance(_idx)->close();
-                    return _stopped;
+                    // Disable only - keep the fd open so a later start() can
+                    // re-enable it. Closing here would leave overflow sampling
+                    // permanently dead after the first pause.
+                    return perf::get_instance(_idx)->stop();
                 },
                 _tid, threading::get_sys_tid() });
         }
@@ -840,7 +839,11 @@ configure(bool _setup, std::int64_t _tid)
 
         *_running = true;
         sampling::get_sampler_init(_tid)->sample();
-        _sampler->start();
+        // If sampling is currently paused, leave the sampler configured but
+        // unarmed - set_sampler_timers() will start it on the next resume().
+        // Starting it now would immediately begin delivering signals for a
+        // pause window this thread was created inside of.
+        if(!sampling_paused.load(std::memory_order_relaxed)) _sampler->start();
     }
     else if(!_setup && _sampler && _is_running)
     {
@@ -991,19 +994,41 @@ enum class timer_state
 // Blocking samples only makes the handler discard them; the OS timer keeps
 // firing and its signal keeps interrupting the target's sleeps. Stop the
 // timers themselves so a paused sampler is unobservable to the application.
+//
+// The CPU-time trigger is deliberately left armed. timer::stop() deletes the
+// POSIX timer and timer::start() recreates it, and CLOCK_THREAD_CPUTIME_ID
+// binds to whichever thread calls timer_create() - which here is whichever
+// thread ran pause()/resume(), not the sampler's owner. Leaving it armed is
+// safe because a CPU-time timer cannot advance while its thread is blocked in
+// a syscall, so it cannot cut the target's sleeps short the way a wall-clock
+// timer does, and parse_timer_data() already drops any sample landing inside a
+// pause interval before it reaches the trace cache.
 void
-set_sampler_timers(timer_state state)
+set_sampler_timers(timer_state _state)
 {
     for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
     {
         auto& _sampler = get_sampler(i);
-        auto& _running = get_sampler_running(i);
-        if(!_sampler || !_running || !*_running) continue;
+        if(!_sampler)
+        {
+            continue;
+        }
 
-        if(state == timer_state::running)
-            _sampler->start();
-        else
-            _sampler->stop();
+        auto& _running = get_sampler_running(i);
+        if(!_running || !*_running)
+        {
+            continue;
+        }
+
+        for(const auto& _trigger : _sampler->get_triggers())
+        {
+            if(_trigger->signal() == get_sampling_cputime_signal())
+            {
+                continue;
+            }
+
+            _state == timer_state::running ? _trigger->start() : _trigger->stop();
+        }
     }
 }
 
