@@ -690,6 +690,12 @@ function(rj_add_consan_device_conformance_cases)
         list(GET _workload_fields 0 _workload_name)
         list(GET _workload_fields 1 _workload_target)
         list(GET _workload_fields 2 _workload_suite)
+        set(_baseline_workload_timeout 60)
+        if(_workload_name STREQUAL "ModuleLifecycle")
+            # The workload is sub-second in isolation, but a simulator process
+            # can exceed the default during teardown under the full -j16 gate.
+            set(_baseline_workload_timeout 120)
+        endif()
         foreach(_outcome IN ITEMS Correct Incorrect)
             string(TOLOWER "${_outcome}" _outcome_label)
             rj_add_consan_hip_case(
@@ -700,7 +706,7 @@ function(rj_add_consan_device_conformance_cases)
                 FILTER "${_workload_suite}.${_outcome}"
                 ${_config_args}
                 ${_resource_lock_args}
-                TIMEOUT 60
+                TIMEOUT ${_baseline_workload_timeout}
                 LABELS ${_labels} baseline "${_outcome_label}"
             )
         endforeach()
@@ -747,6 +753,14 @@ function(rj_add_consan_device_conformance_cases)
             )
                 # This is sub-second in isolation but can exceed the default
                 # under the full -j16 simulator gate's gfx1250 contention.
+                set(_workload_timeout 120)
+            elseif(
+                _mode_value STREQUAL "inline-shadow"
+                AND _device_TARGET STREQUAL "gfx1250"
+                AND _workload_name STREQUAL "GraphParameterUpdate"
+            )
+                # This is sub-second in isolation but can exceed the default
+                # during process teardown under the full -j16 simulator gate.
                 set(_workload_timeout 120)
             elseif(
                 _mode_value STREQUAL "record-replay"
