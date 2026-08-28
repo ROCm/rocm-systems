@@ -234,6 +234,14 @@ TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExact
 ///      keep 1.0.
 ///   b) 1.125 * 2^-53 + 1.25 lands 0.5625 ulp above 1.25. Nearest is past the
 ///      halfway point and steps up, as does +inf; -inf and zero truncate.
+///   c) the negative mirror of (b), 0.5625 ulp below -1.25. Nearest and -inf
+///      take the more-negative neighbor; +inf and zero truncate toward -1.25.
+///
+/// (c) is what separates the four modes from each other. Both positive rows
+/// give -inf and toward-zero the same answer, so on their own they would still
+/// pass with FE_DOWNWARD and FE_TOWARDZERO transposed. Adding a negative row
+/// splits that pair -- and splits nearest from +inf -- so each of the four
+/// MODE.FP_ROUND values is pinned to exactly one host mode.
 ///
 /// Because the reference is the ISA and not the other path, the scalar half
 /// stands on its own and runs everywhere -- it is the half that caught this bug.
@@ -248,6 +256,8 @@ TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
   constexpr uint64_t kOneAndAnEighth = 0x3FF2000000000000ULL;
   constexpr uint64_t kOneAndAQuarter = 0x3FF4000000000000ULL;
   constexpr uint64_t kTwoPowMinus53 = 0x3CA0000000000000ULL;
+  constexpr uint64_t kNegativeOneAndAnEighth = 0xBFF2000000000000ULL;
+  constexpr uint64_t kNegativeOneAndAQuarter = 0xBFF4000000000000ULL;
 
   struct Case {
     const char *what;
@@ -265,6 +275,13 @@ TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
        kTwoPowMinus53,
        kOneAndAQuarter,
        {kOneAndAQuarter + 1, kOneAndAQuarter + 1, kOneAndAQuarter, kOneAndAQuarter}},
+      // Bits are sign-magnitude, so +1 here is the neighbor further from zero.
+      {"0.5625 ulp below -1.25",
+       kNegativeOneAndAnEighth,
+       kTwoPowMinus53,
+       kNegativeOneAndAQuarter,
+       {kNegativeOneAndAQuarter + 1, kNegativeOneAndAQuarter, kNegativeOneAndAQuarter + 1,
+        kNegativeOneAndAQuarter}},
   };
 
   for (const Case &test_case : cases) {
