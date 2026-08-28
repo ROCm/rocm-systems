@@ -71,10 +71,9 @@ public:
     uint32_t l2_assoc = 16;
 
     // Engines and queues
-    uint32_t num_sdma_engines = 2;
+    uint32_t num_sdma_engines = 0;
     uint32_t num_sdma_xgmi_engines = 0;
-    // TODO(hanchung): Remove this legacy fallback with the KfdDeviceConfig fallback.
-    uint32_t num_sdma_queues_per_engine = 2;
+    uint32_t num_sdma_queues_per_engine = 0;
     uint32_t num_cp_queues = 128;
     uint32_t max_engine_clk_fcompute = 2100; // MHz
 
