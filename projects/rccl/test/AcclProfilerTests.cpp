@@ -899,4 +899,37 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
     );
 }
 
+TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.LeakedSlotsAreCounted",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5102, &mask, "sum_leak_test",
+                                     1, 1, 0, nullptr), 0);
+
+            // Three collectives that stop but never report a kernel channel,
+            // so acclShouldFinalize never fires and each slot stays pinned.
+            for (int i = 0; i < 3; i++) {
+                ncclProfilerEventDescr_v5_t d;
+                MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/(uint64_t)i,
+                              /*count=*/64);
+                void* coll = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+                ASSERT_NE(coll, nullptr);
+                ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out =
+                ReadProfilerOutput("/tmp/accl_test_sum_leak", "0x5102");
+            ASSERT_FALSE(out.empty());
+            EXPECT_NE(out.find("\"leaked_collectives\":3"), std::string::npos)
+                << "Every slot the drain reclaims must be counted";
+            EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_leak"}}
+    );
+}
+
 } // namespace RcclUnitTesting
