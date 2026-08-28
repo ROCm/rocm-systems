@@ -112,8 +112,12 @@ void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result,
       });
   if (site == result.program_inventory.access_sites().end())
     return;
-  (void)result.coverage_ledger.set_physical_lowering_outcome(
-      site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected, std::move(detail));
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    if (intent.physical_site != site->physical_id)
+      continue;
+    (void)result.coverage_ledger.set_lowering_outcome(
+        intent.id, ConSanLoweringOutcomeKind::ResourceRejected, detail);
+  }
 }
 
 /// Project final native-lowering results into the production ledger. Patch

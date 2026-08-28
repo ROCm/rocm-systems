@@ -454,22 +454,6 @@ bool ConSanCoverageLedger::set_lowering_outcome(ConSanProbeIntentId id,
   return true;
 }
 
-size_t ConSanCoverageLedger::set_physical_lowering_outcome(const PhysicalSiteId &physical_site,
-                                                           ConSanLoweringOutcomeKind outcome,
-                                                           std::string detail) {
-  if (!physical_site.valid() || !valid_lowering_outcome(outcome))
-    return 0;
-  size_t updated = 0;
-  for (ConSanIntentCoverageEntry &entry : intent_entries_) {
-    if (entry.intent.physical_site != physical_site)
-      continue;
-    entry.lowering = outcome;
-    entry.detail = detail;
-    ++updated;
-  }
-  return updated;
-}
-
 bool ConSanCoverageLedger::all_intents_instrumented() const {
   return std::ranges::all_of(intent_entries_, [](const ConSanIntentCoverageEntry &entry) {
     return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;

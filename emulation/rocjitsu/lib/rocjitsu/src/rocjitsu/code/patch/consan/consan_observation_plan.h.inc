@@ -1063,13 +1063,6 @@ public:
   [[nodiscard]] bool set_lowering_outcome(ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome,
                                           std::string detail = {});
 
-  /// Update every intent placed at one physical instruction. This is the
-  /// narrow compatibility seam used by legacy lowerers that do not yet retain
-  /// plan-local intent identifiers. Returns the number of updated intents.
-  [[nodiscard]] size_t set_physical_lowering_outcome(const PhysicalSiteId &physical_site,
-                                                     ConSanLoweringOutcomeKind outcome,
-                                                     std::string detail = {});
-
   /// Return whether every admitted intent has been instrumented.
   /// This deliberately makes no claim about runtime selection or retained
   /// evidence, which are separate later ledger axes.

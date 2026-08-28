@@ -368,27 +368,6 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
   EXPECT_EQ(ledger.intent_entry({1})->intent.kind, ConSanProbeIntentKind::BarrierRecord);
 }
 
-TEST(ConSanObservationPlan, PhysicalOutcomeAdapterUpdatesOnlyMatchingCoalescedIntents) {
-  AccessInventoryInput input;
-  ConSanKernelInfo kernel = make_policy_kernel();
-  stage_policy_access(input, kernel, make_policy_lds_site("ds_store_b32", 32, 32));
-  stage_policy_access(input, kernel, make_policy_lds_site("ds_store_b32", 48, 48));
-  input.kernels.push_back(std::move(kernel));
-  const ConSanAccessPolicyResult policy =
-      plan_consan_access_observation(build_policy_inventory(std::move(input)),
-                                     policy_request(ConSanCapabilityEngine::InlineShadow));
-  ASSERT_TRUE(policy.valid());
-  ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-  ConSanCoverageLedger ledger(policy.plan);
-  EXPECT_EQ(ledger.set_physical_lowering_outcome(policy.plan.probe_intents[1].physical_site,
-                                                 ConSanLoweringOutcomeKind::PlacementRejected,
-                                                 "no route"),
-            1u);
-  EXPECT_EQ(ledger.intent_entries()[0].lowering, ConSanLoweringOutcomeKind::Pending);
-  EXPECT_EQ(ledger.intent_entries()[1].lowering, ConSanLoweringOutcomeKind::PlacementRejected);
-  EXPECT_EQ(ledger.set_physical_lowering_outcome({}, ConSanLoweringOutcomeKind::Instrumented), 0u);
-}
-
 TEST(ConSanAccessPolicy, AllFourEnginesMapOneAccessToTheirOwnEvidenceIntent) {
   constexpr std::array expected = {
       std::pair{ConSanCapabilityEngine::SuperCollider,
