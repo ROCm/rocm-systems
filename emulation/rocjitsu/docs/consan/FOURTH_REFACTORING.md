@@ -26,60 +26,127 @@ The measurements below use commit
 
 Tests, documentation, build files, blank lines, and comments are excluded. The
 result is **84,041 implementation lines in 83 files**. The component table in
-Section 1 uses exact whole-file sums by dominant responsibility; it does not
-imply that every line in a file belongs exclusively to that responsibility.
-The variability survey in Section 2 instead uses reviewed source regions so
-that mixed files do not inherit one label wholesale.
+Section 1 and the variability survey in Section 2 both use reviewed semantic
+source regions. A region was assigned only after reading its definitions,
+inputs, outputs, callers, mutations, and downstream consumers. Scripts were
+used to strip comments and blank lines and to total that explicit ledger, not
+to infer ownership from filenames or tokens. The component ledger is exclusive
+by primary responsibility; Section 2 independently attributes the same lines
+by mode and target sensitivity.
 
 ## 1. De-facto components
 
-| Dominant responsibility | Implementation lines | Share | Files |
-| --- | ---: | ---: | ---: |
-| Shared MOI planning and lowering | 23,615 | 28.1% | 17 |
-| HSA runtime adapter and report lifecycle | 9,059 | 10.8% | 8 |
-| Mutation, composition, and final validation | 7,871 | 9.4% | 3 |
-| Inventory and semantic policy | 7,253 | 8.6% | 5 |
-| SuperCollider lowering | 6,839 | 8.1% | 4 |
-| Sampled engine | 6,050 | 7.2% | 4 |
-| Inline Shadow engine | 5,775 | 6.9% | 4 |
-| Shared mechanisms and pipeline | 5,414 | 6.4% | 13 |
-| Evidence/report model and planning | 5,288 | 6.3% | 7 |
-| Core contracts | 4,145 | 4.9% | 14 |
-| Record/Replay-specific lowering | 2,732 | 3.3% | 4 |
-| **Total** | **84,041** | **100%** | **83** |
+The deep read changes the first-pass component map substantially. The following
+are the implementation's actual primary responsibilities, whether or not the
+source and build graph enforce them as components:
 
-This is not an 84,000-line undifferentiated implementation. The code already
-has a recognizable architecture, and the main data flow is substantially the
-one intended by the design documents:
+| Reviewed semantic responsibility | Implementation lines | Share |
+| --- | ---: | ---: |
+| InlineShadow-specific lowering | 9,747 | 11.6% |
+| HSA integration and resource lifecycle | 7,101 | 8.4% |
+| Program semantic inventory and analysis | 7,038 | 8.4% |
+| Shared MOI lowering | 6,987 | 8.3% |
+| SuperCollider-specific lowering | 6,676 | 7.9% |
+| Evidence ABI, pure models, and sizing | 6,658 | 7.9% |
+| Sampled-specific lowering | 6,198 | 7.4% |
+| Target profile, normalization, and target operations | 5,959 | 7.1% |
+| Record/Replay-specific lowering | 5,825 | 6.9% |
+| MOI operating-point and resource solver | 5,487 | 6.5% |
+| Independent final validation | 4,468 | 5.3% |
+| Fault and perturbation planning/lowering | 2,583 | 3.1% |
+| Semantic policy, intent, and coverage | 2,426 | 2.9% |
+| Host evidence decode, analysis, trust, and rendering | 1,958 | 2.3% |
+| Transformation and retry coordination | 1,901 | 2.3% |
+| Request, configuration, and result facade | 1,889 | 2.2% |
+| Generic placement and image mutation | 1,140 | 1.4% |
+| **Total** | **84,041** | **100%** |
+
+These numbers do not say that InlineShadow, for example, is cleanly isolated.
+They say that 9,747 lines have InlineShadow lowering as their primary semantic
+responsibility. Section 2 may independently classify such a line as
+target-neutral or target-sensitive.
+
+Mixed files were split at semantic boundaries rather than assigned wholesale.
+For example, the host model portion and target-emission tail of
+`consan_moi_model.cpp` have different owners; report-buffer lifecycle and the
+later host analyzer in `rj_hsa_dbi_hook_moi_report.cpp` have different owners;
+the policy-publication prefix of `consan_supercollider_common.inc` is not SC
+emission; and target-fact extraction, resource solving, and patch-plan
+construction inside `consan_moi_placement.inc` were followed separately.
+
+The first-pass labels concealed several important facts:
+
+- **There is no `core contracts` component.** The colocated schemas belong to
+  configuration, inventory, policy, evidence, resource solving, mutation,
+  patch proof, and result publication. Their common header visibility is a
+  physical convenience, not one semantic authority.
+- **Evidence planning and resource planning are not one component.** Evidence
+  sizing is focused and mostly functional. The small generic register-window
+  planner in `consan_resource.cpp` is also focused, but the real MOI resource
+  authority is a roughly 5,500-line operating-point solver dominated by
+  `consan_moi_placement.inc`.
+- **Mutation, composition, and validation are three components.** Fault and
+  perturbation planning/lowering, staged transformation coordination, and the
+  independent validator have different inputs, authorities, and failure
+  semantics.
+- **The HSA side is not one adapter.** Configuration and HSA lifecycle,
+  transformation/report allocation coordination, report-buffer lifecycle, and
+  host decode/analysis/trust/rendering are distinct responsibilities.
+- **Shared MOI is not one planning/lowering block.** Its coordinator, mutable
+  resource fixed-point, shared emission mechanisms, and engine lowerings are
+  separate de-facto components despite sharing a textual translation unit.
+- **Target work is larger and more dispersed than the target-profile table.**
+  It includes normalization, register/descriptor rules, relay routing,
+  address materialization, exact emission, and target-aware placement.
+
+### 1.1 Actual control and data flow
+
+The design documents suggest a forward stage pipeline. The implementation does
+not currently execute that pipeline. Its actual control topology is:
 
 ```text
-configuration and runtime facts
-              |
-              v
-target profile -> immutable program inventory
-              |
-              v
-semantic policy -> observation plan -> coverage ledger
-              |              \
-              v               -> evidence requirements
-resource planning
-              |
-              v
-SuperCollider or MOI lowering
-              |
-              v
-placement and patch metadata -> final validation
-              |
-              v
-runtime binding -> snapshot/replay/analysis -> trust and diagnostics
+HSA load hook
+  |
+  +--> TransformResult::publish_optional --------------------------+
+  |         | validates configuration                              |
+  |         v                                                      |
+  |      lower_consan                                              |
+  |         v                                                      |
+  |      try_patch_consan_impl                                     |
+  |         +--> decode + build ProgramInventory                   |
+  |         +--> build sync graph and semantic associations        |
+  |         +--> fault/staged-composition coordinator              |
+  |         +--> SuperCollider lowerer, or                         |
+  |         `--> try_patch_consan_moi                              |
+  |                 +--> policy/ledger publication                 |
+  |                 +--> mutable MOI resource fixed-point          |
+  |                 `--> engine and target emission                |
+  |         v                                                      |
+  |      independent final validation                              |
+  |         v                                                      |
+  |      publish stage statuses and evidence requirements <--------+
+  |
+  `-- automatic MOI only: read those requirements, allocate report
+      storage, then retry lowering against the retained inventory
 ```
 
-The upper half of this pipeline is already comparatively well factored. The
-lowering and runtime halves have identifiable responsibilities too, but their
-interfaces are frequently implicit, over-broad, or reconstructed from another
-component's internal representation.
+`TransformResult::publish_optional` does validate configuration and runtime
+capability contracts before lowering. However, its inventory, observation,
+evidence, and binding stage records mostly inspect products after
+`lower_consan` returns. Evidence intent and sizing are also computed after that
+first lower. The HSA hook compensates for this order by owning the automatic
+MOI two-pass protocol: pristine unbound transform, evidence sizing, allocation,
+then retry from retained inventory.
 
-### 1.1 Components that are already strong
+The published `ConSanPipelineStage` sequence is therefore a useful result
+summary, but not yet an orchestration boundary. There are three effective
+controllers: staged composition in `try_patch_consan_impl`, the MOI
+policy/resource/emission state machine in `try_patch_consan_moi`, and the HSA
+hook's binding/retry state machine. `TransformResult::publish_optional` sits
+over them as a fourth, partly retrospective facade. They communicate through
+the broad `ConSanTransformArtifacts` aggregate.
+
+### 1.2 Boundaries that are already strong
 
 The fourth refactoring should preserve and build on these parts rather than
 redesigning them gratuitously.
@@ -88,46 +155,70 @@ redesigning them gratuitously.
 
 `ProgramInventory` is a genuine shared semantic boundary. Its immutable
 `shared_ptr<const Storage>` representation is distinct from its builder, and
-consumers receive read-only views. It is a good model for other cross-stage
-products.
+consumers receive read-only views. The inventory's scope is broader than the
+first pass stated: it includes decoded sites, ownership, a synchronization
+graph, fence candidates, and other semantic associations. That coherent
+"program semantic inventory" is a useful boundary. The `supported_mvp` field
+is one exception: it embeds a legacy target/lowerability decision in otherwise
+normalized inventory and is consumed by synchronization and fault selection.
 
 #### Central target profile
 
 `ConSanTargetProfile` centralizes the supported architecture matrix in a typed
 five-row table. This is the right authority for broad capability facts. The
 remaining problem is not the existence of target-specific facts; it is exact
-instruction admission leaking above and below the classifier boundary.
+instruction normalization and target operations being dispersed above and
+below this table.
 
 #### Semantic policy and observation planning
 
 Access, barrier, and atomic/fence policy are separate compiled functions that
 produce `ConSanObservationPlan` entries and typed reasons. The
 `ConSanCoverageLedger` is also a separate concept rather than an incidental
-counter in a lowerer. These are sound component boundaries even though their
-inputs and the later publication of their results still need correction.
+counter in a lowerer. The pure decision functions and value types are sound.
+Their assembly and publication are not yet a component: SuperCollider and MOI
+each initialize plans, ledgers, alias diagnostics, and downstream projections
+inside their lowerers.
 
-#### Evidence and resource planning
+#### Evidence sizing and pure models
 
 Evidence sizing and report planning are focused in
-`consan_moi_report_plan.cpp`, while resource planning has a small, focused
-implementation in `consan_resource.cpp`. Both express useful intermediate
-products rather than asking emitters to rediscover global decisions.
+`consan_moi_report_plan.cpp`. Report ABI/layout values and several replay or
+shadow models are similarly usable without HSA lifecycle. These are real
+seams, although their placement after the first lowering attempt is not the
+forward pipeline implied by their contracts.
 
-#### Narrow immutable emission plans
+#### Generic register-window planner
 
-Several newer lowerer paths already use narrow immutable plans, including
-`MoiPrivateEpochPrologueEmissionPlan`,
-`MoiOwnerEpochPrologueEmissionPlan`, and
-`MoiRecordEventEmissionPlan`. These plans are the appropriate pattern for
-continuing the decomposition: values grouped by an invariant and computed at
-one authority, not arbitrary subsets of a large options object.
+`consan_resource.cpp` is a small, focused generic register-window planner. It
+is a useful primitive, not the complete MOI resource-planning component. The
+larger solver repeatedly changes `MoiOptions`, rebuilds site plans, freezes and
+restores operating points, and coordinates fallback choices with diagnostics.
+
+#### Independent final validation
+
+Final validation is deliberately independent and rechecks the replacement
+image, patch geometry, ABI effects, routing, spills, descriptor changes, and
+engine invariants. Its detailed access to private patch proof is appropriate.
+Its physical size is large, but its authority and dependency direction are
+coherent.
 
 #### Trust evaluation
 
 The runtime side contains a pure trust-evaluation core. Separating the trust
 decision from report allocation and HSA lifecycle management was an important
-step; the surrounding snapshot, decode, analysis, and rendering path should now
-be brought to the same standard.
+step. It is currently a strong function-level seam in a mixed internal header,
+not yet an independently compiled host-analysis component.
+
+#### Narrow emission plans are useful local seams
+
+`MoiPrivateEpochPrologueEmissionPlan`,
+`MoiOwnerEpochPrologueEmissionPlan`, and `MoiRecordEventEmissionPlan` group
+values by an invariant and improve local reasoning. The deep read downgrades
+the earlier claim that they are component boundaries: they are constructed
+near emitters while surrounding code can still see `MoiOptions`, mutable
+artifacts, resource state, and target internals. They are the right extraction
+pattern, but not evidence that the larger boundary is enforced.
 
 #### Focused tests
 
@@ -145,12 +236,11 @@ The principal implementation anchors for these boundaries are:
 | Five-target capability table | `consan_capability_contract.h` |
 | Observation intent and coverage ledger contracts | `consan_observation_plan.h.inc` |
 | Evidence/report sizing | `consan_moi_report_plan.cpp` |
-| Resource planning | `consan_resource.cpp` |
-| Narrow prologue emission plans | `consan_moi_internal.h` |
-| Narrow record-event emission plan | `consan_moi_record_planning.inc` |
+| Generic register-window planning | `consan_resource.cpp` |
+| Independent final validation | `consan_validation.inc` |
 | Pure runtime trust evaluation | `rj_hsa_dbi_hook_internal.h` |
 
-### 1.2 Physical composition does not match the conceptual composition
+### 1.3 Physical composition does not match semantic ownership
 
 The conceptual components above are mostly assembled through two textual
 translation units:
@@ -454,7 +544,45 @@ to the wrong intent.
 Coverage must instead be published from the same transaction that commits or
 rejects an intent-bound lowering operation.
 
-### 3.2 Exact instruction admission is duplicated across policy and lowering
+### 3.2 The stage pipeline is retrospective and orchestration is split
+
+`TransformResult::publish_optional` invokes `lower_consan` before it marks the
+inventory and observation stages or constructs evidence intent and evidence
+requirements. Its stage records therefore mostly classify the artifacts that
+the monolithic lowerer happened to return; they do not drive stage execution.
+
+This is more than a naming issue because evidence requirements determine the
+runtime allocation that lowering needs. The HSA hook must implement the
+missing forward edge itself:
+
+```text
+unbound transform -> publish evidence size -> allocate -> retry lowerer
+```
+
+Meanwhile, `try_patch_consan_impl` owns parse/inventory, staged fault
+composition, dispatch to SC or MOI, and rollback; `try_patch_consan_moi` owns
+policy publication, candidate projection, the resource fixed-point, engine
+dispatch, and coverage finalization. State passes among those coordinators,
+the public facade, and the hook through mutable artifacts rather than explicit
+stage products.
+
+Consequences include:
+
+- the documented pipeline order is not the executable dependency order;
+- library callers do not own the complete automatic-binding protocol;
+- stage status can be internally well-formed while still describing a
+  different control structure from the one that ran;
+- retry correctness depends on knowing which portions of a previous artifact
+  bundle are pristine and reusable; and
+- changes to evidence planning, mutation composition, or binding can require
+  coordinated edits in three nominal layers.
+
+The refactoring needs one authoritative transform transaction with explicit
+pre-binding and post-binding products. A two-pass implementation may remain
+necessary, but it must be a library protocol expressed by types and tested as
+such, not an HSA-hook reconstruction of a nominal stage sequence.
+
+### 3.3 Exact instruction admission is duplicated across policy and lowering
 
 `consan_access_policy.cpp` includes generated CDNA5 and RDNA4 machine headers
 and knows exact constants and operand representations such as `SREG_NULL`, raw
@@ -480,7 +608,33 @@ than an explicit classifier inconsistency. Exact target normalization belongs
 in one target-classifier authority. Semantic policy should consume the
 normalized fact, and the lowerer should consume the resulting recipe.
 
-### 3.3 Broad structures act as cross-component buses
+### 3.4 The real MOI resource planner is a hidden mutable fixed-point
+
+The first pass mistook `consan_resource.cpp` for the resource-planning
+component. That file plans a generic register window. The effective MOI
+resource authority is spread through `consan_moi_placement.inc` and
+`try_patch_consan_moi`.
+
+The coordinator copies `MoiOptions` into mutable `effective_options`, builds
+resource plans, selects automatic owner and dispatch state, rebuilds plans,
+selects EXEC/VCC/SCC preservation, may discover a dynamic-stack spill only
+after that selection, restores a captured operating point, truncates warnings,
+and reruns planning. Later persistent-VGPR and engine-specific choices can
+freeze new operating points and trigger further plan changes.
+
+This is a legitimate constraint-solving problem, but it is represented as
+mutation and rollback of the same broad options and artifact buses used by
+emitters. The attempted state, accepted state, diagnostics, and site resource
+plans are not distinct products. That makes fallback order semantically
+significant, permits stale derived plans after an option change, and makes the
+solver impossible to test without much of the lowerer in scope.
+
+The component should eventually accept an immutable resource problem and
+return an explicit attempt or accepted operating point with its site plans and
+typed rejections. The exact solving algorithm can remain iterative. The
+boundary, not the absence of iteration, is what matters.
+
+### 3.5 Broad structures act as cross-component buses
 
 #### `MoiOptions`
 
@@ -515,7 +669,32 @@ Some detailed patch telemetry is legitimately needed by final validation. The
 problem is that the same representation is also used as the semantic and
 runtime communication channel.
 
-### 3.4 Runtime analysis consumes lowerer patch geometry
+### 3.6 Policy is pure at its core but not at its publication boundary
+
+The compiled access, barrier, and atomic/fence policy functions are genuine
+semantic cores. The rest of the supposed policy component is duplicated in
+engine lowerers. `initialize_sc_access_coverage` and
+`initialize_moi_access_observation_plan` each assemble policy calls, append
+plans, initialize the ledger, render physical-alias failures, and project
+admitted intents into a lowerer-specific work list. They mutate
+`ConSanTransformArtifacts` directly.
+
+This duplication is why policy appears well layered when only its compiled
+functions are inspected but remains coupled to engine control flow in
+practice. A shared observation-planning transaction should own assembly,
+validation, ledger initialization, and typed publication. Engines should
+provide a request and consume the resulting plan, not each implement the
+publication protocol.
+
+There is also a smaller upstream leak. `ConSanAccessInventorySite::supported_mvp`
+is populated by target/form-specific decode checks and then affects
+synchronization and fault candidate selection. The field is not merely a raw
+decoded fact, and its legacy name does not state which engine or lowering
+contract it supports. Exact normalization should become a typed target product;
+inventory should retain raw/normalized semantic facts without embedding an
+unnamed downstream admission decision.
+
+### 3.7 Runtime analysis consumes lowerer patch geometry
 
 `AutoMoiReportBufferRegistry::summarize` in
 `rj_hsa_dbi_hook_moi_report.cpp` combines HSA snapshotting, ABI validation,
@@ -528,11 +707,16 @@ then consume those patch-derived mappings. This directly violates the intended
 direction: the host analyzer should receive a typed semantic/static mapping,
 not reverse-engineer meaning from a lowerer proof object.
 
-The pure trust evaluator inside this path demonstrates that decomposition is
-practical. Lifecycle, decoding, analysis, trust, and rendering now need their
-own contracts.
+The deep read also reveals that the first roughly 700 lines of that source own
+allocation, binding, retirement, snapshot bookkeeping, and process budgets,
+while `summarize` combines snapshotting, ABI checks, engine-specific decoding,
+replay/conflict analysis, loss accounting, trust, and rendering. Related host
+models and presentation helpers are mixed into
+`rj_hsa_dbi_hook_internal.h`. The pure trust evaluator inside this path
+demonstrates that decomposition is practical. Lifecycle, decoding, analysis,
+trust, and rendering need their own contracts.
 
-### 3.5 One source file crosses the host/target boundary
+### 3.8 One source file crosses the host/target boundary
 
 The first roughly 2,500 lines of `consan_moi_model.cpp` implement host-side
 report and replay models. Its final roughly 500 lines implement exact
@@ -540,7 +724,7 @@ target-atomic address planning and emission. The interfaces in that tail are
 reasonably narrow, but its physical placement is a clear component error and
 makes dependencies harder to state and enforce.
 
-### 3.6 Diagnostics are not yet an edge-only concern
+### 3.9 Diagnostics are not yet an edge-only concern
 
 There are 1,858 `warnings`/`errors` `emplace_back` or `push_back` sites across
 36 production files. Current design permits string diagnostics from lowerers
@@ -553,7 +737,7 @@ component contract. Diagnostic wording should remain stable and should be
 rendered at the appropriate edge. This is a later cleanup, not a reason to
 destabilize the early cuts.
 
-### 3.7 Raw architecture branches are not uniformly violations
+### 3.10 Raw architecture branches are not uniformly violations
 
 The implementation contains 105 `ROCJITSU_CODE_ARCH_*` references across 20
 files and 120 `consan_uses_gfx*` references across 19 files. Most references in
@@ -564,7 +748,7 @@ policy or duplicated target classifiers, not every architecture branch.
 The fourth refactoring must avoid replacing explicit and reviewable target
 code with an abstraction that merely hides necessary ISA differences.
 
-### 3.8 Detailed patch access in final validation is appropriate
+### 3.11 Detailed patch access in final validation is appropriate
 
 Final validation contains 631 `patch.*` accesses and uses much of
 `ConSanPatchInfo`. This is largely correct: an independent validator must inspect
@@ -575,16 +759,20 @@ The desired boundary is that detailed patch proof remains private to lowering
 and validation, while semantic coverage and runtime analysis use smaller typed
 products.
 
-### 3.9 Severity summary
+### 3.12 Severity summary
 
 | Violation | Layering severity | Correctness risk |
 | --- | --- | --- |
 | Coverage reconstructed from patch kinds and offsets | High | Medium-high |
+| Retrospective stage facade and hook-owned binding/retry protocol | High | Medium-high |
 | Exact admission duplicated in policy and lowerer | High | Medium |
+| MOI resource solving expressed as mutable options/artifact rollback | High | Medium-high |
 | Runtime analysis consumes patch geometry | High | Medium |
 | Two textual mega-translation-units | High maintenance cost | Low immediate risk |
 | `MoiOptions` and artifacts used as broad buses | Medium-high | Medium |
 | `TransformResult` exposes private lowerer artifacts | Medium-high | Low-medium |
+| Policy assembly/publication duplicated in engine lowerers | Medium | Medium |
+| Inventory embeds unnamed downstream `supported_mvp` eligibility | Medium | Low-medium |
 | Report registry combines lifecycle, decode, analysis, and rendering | Medium-high | Medium |
 | Raw architecture branching in target lowerers | Mostly legitimate | Low |
 | Detailed patch telemetry in independent validation | Appropriate | Low |
@@ -599,9 +787,11 @@ stage gate, but a boundary that makes the interaction term larger without a
 clear semantic gain is suspect.
 
 1. **Preserve semantic authorities already established by the completed
-   reimplementation stages.** Inventory, semantic policy, observation intent,
-   resource planning, evidence requirements, lowering, final validation, and
-   runtime trust must not silently acquire competing authorities.
+   reimplementation stages.** Preserve the immutable inventory ownership
+   model, pure semantic-policy functions and typed intents, focused evidence
+   sizing, independent final validation, and pure runtime trust evaluation.
+   Do not treat the current resource fixed-point or retrospective pipeline as
+   boundaries that must be preserved unchanged.
 2. **Move truth forward; do not reconstruct it downstream.** When a stage knows
    an intent ID, normalized operation, resource decision, or static mapping, it
    must publish that typed fact for its consumers.
@@ -636,6 +826,10 @@ clear semantic gain is suspect.
 13. **Measure both exclusive lines and incidence.** The four exclusive buckets
     detect physical growth. Per-mode and per-target incidence detects blast
     radius. Neither should be replaced by lexical token counts.
+14. **Stage records must describe stages that actually executed.** If a two-pass
+    bind/retry protocol is required, model both passes explicitly. Do not infer
+    a forward pipeline by inspecting a monolithic lowerer's final artifact
+    bundle.
 
 ## 5. Provisional convergence route
 
@@ -743,14 +937,36 @@ separate debug projection. It must not remain the runtime semantic interface.
 **F2 completion criterion:** the hook's report path has no dependency on
 `ConSanPatchInfo`, patch kinds, or patch geometry for semantic attribution.
 
-### F3. Separate the public transform result from private artifacts
+### F3. Make the pipeline executable and separate its products
 
-Replace `TransformResult`'s public inheritance from
-`ConSanTransformArtifacts` with composition and explicit projections.
+Replace the retrospective `publish_optional` model with an authoritative
+library transform transaction. It must make the dependency order explicit,
+including the automatic-binding case. A likely shape is:
 
-Private lowering artifacts should remain visible only to the transformer and
-final validator. The public result should expose a reviewed set of typed
-products, likely including:
+```text
+validated request
+  -> semantic inventory
+  -> assembled observation plan and initial ledger
+  -> evidence requirements and runtime capability requirements
+  -> bound resources or a typed deferred-binding result
+  -> resource solving and lowering
+  -> independent validation
+  -> public result
+```
+
+If retaining and resuming the inventory is necessary for performance, expose a
+typed immutable pre-binding product or resume token. It must state which input
+image, mutation provenance, observation plan, and evidence requirements it
+represents. The HSA adapter may allocate and bind resources, but it should call
+the library protocol rather than own the rules for which lowering artifacts
+can be retried. Pipeline stage status must be recorded as each stage executes,
+not synthesized from the final aggregate.
+
+At this boundary, replace `TransformResult`'s public inheritance from
+`ConSanTransformArtifacts` with composition and explicit projections. Private
+lowering artifacts should remain visible only to the transaction and final
+validator. The public result should expose a reviewed set of typed products,
+likely including:
 
 - inventory and observation outcome where externally required;
 - coverage and evidence requirements;
@@ -764,8 +980,15 @@ workspaces should not escape by default. If diagnostics or development tooling
 needs them, define a separate typed debug report rather than reopening the
 production result.
 
-**F3 completion criterion:** a runtime consumer cannot access lowerer-private
-artifacts through `TransformResult`.
+Move the duplicated SC/MOI policy assembly into the transaction during this
+stage. It should accept an engine policy request and publish one validated
+observation product; engines consume the product rather than initialize their
+own ledgers and render policy failures.
+
+**F3 completion criterion:** the automatic binding/retry path is a typed
+library protocol; stage records correspond to executed stages; policy
+assembly has one authority; and a runtime consumer cannot access
+lowerer-private artifacts through `TransformResult`.
 
 ### F4. Make the target classifier the sole exact-admission authority
 
@@ -792,6 +1015,12 @@ raw target register constants, or reproduce exact encoding predicates. The
 lowerer must consume the normalized form rather than independently deciding
 whether the original instruction is supported.
 
+Replace `ConSanAccessInventorySite::supported_mvp` in this stage. Preserve any
+raw decoded fact it was standing in for, but attach exact lowerability to a
+named normalized form and an explicit consumer contract. Synchronization and
+fault planning must request the fact they need rather than inherit a generic
+legacy eligibility bit.
+
 The lowerer may still reject resource allocation, placement, or emission. It
 must not report a generic placement failure for an instruction form that the
 classifier should have rejected.
@@ -816,7 +1045,8 @@ policy fixtures fed by normalized forms on all supported architectures.
 **F4 completion criterion:** there is one exact lowerability classifier per
 operation class, semantic policy contains no generated ISA headers or raw
 architecture encoding constants, emitters do not reclassify candidates, and
-one target-operation slice has replaced duplicated mode/target lowering in at
+no unnamed `supported_mvp` eligibility remains in semantic inventory. One
+target-operation slice has replaced duplicated mode/target lowering in at
 least two engines without broadening semantic authority.
 
 ### F5. Replace broad option buses with stage contracts
@@ -835,6 +1065,13 @@ actually required:
 Do not replace one broad object with arbitrary anonymous subsets. Each value
 type should name an invariant and have a single construction authority.
 
+Make the MOI fixed-point an explicit component in the same stage. Separate an
+immutable `resource problem`, an attempted operating point, an accepted
+operating point with site plans, and typed rejection/fallback information.
+The solver may iterate and backtrack internally, but callers and emitters must
+not participate by mutating `MoiOptions`, resizing a shared warning vector, or
+assuming which derived plans survived a rollback.
+
 Continue the variability work one operation at a time. Candidate slices after
 far routing are workgroup identity, atomic address materialization, report
 atomics/cache completion, VCC/SCC preservation, and selectable-bank
@@ -844,20 +1081,24 @@ Retain the seam only when a second consumer makes it narrower or deletes more
 code than its adapters introduce.
 
 **F5 completion criterion:** native emission and placement components have zero
-`const MoiOptions &` parameters. Any surviving aggregate is confined to
-top-level orchestration and is not a cross-component bus.
+`const MoiOptions &` parameters; the operating-point solver has direct tests
+over immutable problems and explicit results; and no fallback restores state
+through a shared artifact or diagnostic bus. Any surviving aggregate is
+confined to top-level orchestration and is not a cross-component bus.
 
 ### F6. Turn conceptual lowerer components into compiled components
 
 Only after F1-F5 establish their interfaces should the textual `.inc`
 composition be split. Candidate compiled components are:
 
-- inventory construction and target classification;
+- inventory construction and semantic association;
+- observation-policy assembly and coverage contracts;
+- target profile, exact normalization, and target operations;
 - shared placement transaction;
 - SuperCollider lowering;
-- MOI observation/resource planning;
+- MOI operating-point/resource solving;
+- shared MOI lowering;
 - per-engine semantic planning and emission;
-- target operations and exact emission;
 - independent final validation.
 
 Use private headers for deliberately shared implementation contracts and public
@@ -978,7 +1219,14 @@ The fourth refactoring is complete when all of the following are true:
 - exact instruction lowerability has one target-classifier authority;
 - semantic policy has no generated ISA builders or raw architecture encoding
   constants;
+- stage records are emitted by one executable library pipeline, including a
+  typed deferred-binding/resume protocol where needed;
+- observation-policy assembly and ledger initialization have one authority;
+- semantic inventory contains no unnamed downstream eligibility flag such as
+  `supported_mvp`;
 - `TransformResult` does not publicly expose private lowerer artifacts;
+- MOI resource solving accepts immutable problems and returns explicit
+  attempted or accepted operating points without shared-bus rollback;
 - native emitters and placement helpers no longer accept `MoiOptions` as a
   general-purpose bus;
 - host lifecycle, decoding, analysis, trust, and rendering are separately
