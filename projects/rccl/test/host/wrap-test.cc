@@ -613,13 +613,24 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_AlreadyCachedReturnsStoredValueUnchanged)
 // rcclGetMaxNthreads -- rccl_wrap.cc:1605-1612.
 // ===========================================================================
 
-// RCCL_GFX950_MAX_NTHREADS and RCCL_DEFAULT_MAX_NTHREADS are both 256 today,
-// so a value assertion alone cannot distinguish "took the gfx950 arm" from
-// "took the else arm and the constants just happen to match" -- documented,
-// not fixed: an equivalent-by-current-constants situation like the residuals
-// below, not a gap in this test. Both calls are still made, so llvm-cov shows
-// both arms as reached; NCCL_PROTO_LL's assignment is arch-independent and IS
-// a real oracle either way.
+// RCCL_GFX950_MAX_NTHREADS, RCCL_DEFAULT_MAX_NTHREADS, and RCCL_LL_MAX_NTHREADS
+// are all 256 today, so a value assertion alone cannot distinguish "took the
+// gfx950 arm" from "took the else arm and the constants just happen to
+// match" -- documented, not fixed: an equivalent-by-current-constants
+// situation like the residuals below, not a gap in this test. Both calls are
+// still made, so llvm-cov shows both arms as reached; NCCL_PROTO_LL's
+// assignment is arch-independent and IS a real oracle either way.
+//
+// Pinned rather than left to rot silently: if any of the three constants
+// ever diverges, this fails to compile, forcing whoever made that change to
+// come back and give GetMaxNthreads_Gfx950Arch/NonGfx950Arch real
+// distinguishing assertions instead of the coincidental ones below.
+static_assert(RCCL_GFX950_MAX_NTHREADS == RCCL_DEFAULT_MAX_NTHREADS &&
+                  RCCL_DEFAULT_MAX_NTHREADS == RCCL_LL_MAX_NTHREADS,
+              "RCCL_GFX950_MAX_NTHREADS / RCCL_DEFAULT_MAX_NTHREADS / RCCL_LL_MAX_NTHREADS "
+              "diverged -- update GetMaxNthreads_Gfx950Arch/NonGfx950Arch below to assert "
+              "values that actually distinguish the gfx950 vs. default arm");
+
 TEST(WrapMicrotest, GetMaxNthreads_Gfx950Arch) {
   ncclComm* comm = MakeCommWithArch("gfx950");
   int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
