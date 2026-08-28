@@ -1419,3 +1419,278 @@ TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_ParamEnabledWithinThres
         delete comm;
       });
 }
+
+// ===========================================================================
+// rcclOptThreadBlockSize -- rccl_wrap.cc:1614-1642. Isolated: its own
+// maxNthreads[] is a function-local static, same pattern as the already-
+// covered rcclSetDefaultBuffSizes.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideUsedDirectlyWhenAligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideUsedDirectlyWhenAligned",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(192) : deft; // 192 = 3*64, aligned
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(192, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideRoundedUpToWarpMultiple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideRoundedUpToWarpMultiple",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(200) : deft; // not a multiple of 64
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(256, nThreads); // (200/64 + 1) * 64
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideClampedToMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideClampedToMax",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(1024) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942"); // maxNthreads[SIMPLE] == RCCL_DEFAULT_MAX_NTHREADS (256)
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_TreeAlgorithmUsesMaxThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_TreeAlgorithmUsesMaxThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2; // avoid the nNodes==1 arm so the algorithm arm is what sets nThreads
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_TREE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_SingleNodeUsesHalfThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 1;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING; // not TREE/PAT, so nNodes==1 is what sets nThreads
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024 /* divUp(1024,4)=256 <= 524288 */, nThreads);
+        EXPECT_EQ(RCCL_LL_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// commSetUnrollFactor -- rccl_wrap.cc:1660-1709. No caching, no isolation
+// needed. ncclDevFuncUnrollGenerated is a hardcoded all-true const array in
+// wrap_stubs.cc (not yet a settable hook), so the "not built for this arch"
+// fallback arms (both the user-override one and the default-selection one)
+// are unreachable here -- deferred, documented rather than contrived.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetUnrollFactor_ValidUserOverrideSucceeds) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_UNROLL_FACTOR") == 0 ? int64_t(NCCL_UNROLL_2) : deft;
+  };
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  g_loadParam = DefaultLoadParam;
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_OutOfRangeOverrideReturnsInvalidArgument) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_UNROLL_FACTOR") == 0 ? int64_t(99) : deft;
+  };
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  std::string log = RcclUnitTesting::CaptureLog([&]() { EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(comm)); });
+  EXPECT_NE(std::string::npos, log.find("Invalid RCCL_UNROLL_FACTOR"));
+  g_loadParam = DefaultLoadParam;
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx950SingleNodeDefaultsToUnroll1) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 1;
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_1, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx950MultiNodeDefaultsToUnroll2) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx908DefaultsToUnroll2) {
+  ncclComm* comm = MakeCommWithArch("gfx908");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_UnlistedArchDefaultsToUnroll4) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_4, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclCommSetP2pShiftSize -- rccl_wrap.cc:1712-1723. No caching (the
+// RCCL_PARAM redirector doesn't cache), no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_AtOrAboveLog2UsesBitReversal) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    // Exactly at nChannelsLog2: distinguishes the guard's >= from a plain >.
+    return std::strcmp(env, "RCCL_P2P_SHIFT_SIZE") == 0 ? int64_t(2) : deft;
+  };
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 4; // countOneBits(4-1) == countOneBits(0b11) == 2; shiftSize(2) >= 2
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  EXPECT_EQ(-1, comm->p2pChannelShiftSize);
+  g_loadParam = DefaultLoadParam;
+  delete comm;
+}
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_P2P_SHIFT_SIZE") == 0 ? int64_t(1) : deft;
+  };
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 4; // countOneBits(3) == 2; shiftSize(1) < 2
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  EXPECT_EQ(1, comm->p2pChannelShiftSize);
+  g_loadParam = DefaultLoadParam;
+  delete comm;
+}
+
+// ===========================================================================
+// rcclOverrideChannels -- rccl_wrap.cc:214-276. rcclParamChannelTuningEnable's
+// real default is 1 ("enabled"), so the loop body is reachable without the
+// g_loadParam seam; the seam is only needed to reach the disabled arm.
+// ncclParamMinNchannels/MaxNchannels are the hardcoded scalar fakes from an
+// earlier batch (not RCCL_PARAM-generated inside this file), always -2/-2.
+// ===========================================================================
+
+TEST(WrapMicrotest, OverrideChannels_FewerThan2NodesLeavesNcUntouched) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 1;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+  EXPECT_EQ(-100, nc);
+  delete comm;
+}
+
+TEST(WrapMicrotest, OverrideChannels_SingleGpuPerNodeLeavesNcUntouched) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 4; // one GPU per node, not gfx1151
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+  EXPECT_EQ(-100, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotestIsolated, OverrideChannels_DisabledByParamLeavesNcUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideChannels_DisabledByParamLeavesNcUntouched",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CHANNEL_TUNING_ENABLE") == 0 ? int64_t(0) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 4;
+        comm->nRanks = 8;
+        int nc = -100;
+        EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+        EXPECT_EQ(-100, nc);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotest, OverrideChannels_MatchedThresholdWithinBoundsOverridesNc) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32; // maxNChannels = max(nChannels/scalingFactor, ncclParamMaxNchannels()=-2)
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  // bytesPerRank = divUp(nBytes, nRanks) = divUp(16384, 8) = 2048, exactly at
+  // maxByteThreshold -- distinguishes the range check's <= from a plain <.
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;    // minByteThreshold (nonzero: 0 collides with CHAN_THRESHOLDS_UNDEFINED)
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048; // maxByteThreshold
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;    // channelCount
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/16384, nc));
+  EXPECT_EQ(8, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, OverrideChannels_MatchedThresholdOutsideCtaBoundsLeavesNcUntouched) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32; // maxNChannels well above channelCount -- isolates the CTA-bounds check being tested
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 4; // channelCount(8) below is above maxCTAs
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1; // nonzero: 0 collides with CHAN_THRESHOLDS_UNDEFINED
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
+  EXPECT_EQ(-100, nc); // conflicting bounds -- not overridden
+  DeleteCommWithArch(comm);
+}
