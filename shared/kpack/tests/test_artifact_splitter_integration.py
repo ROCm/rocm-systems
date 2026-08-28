@@ -59,6 +59,46 @@ class TestBaseArch:
         assert base_arch(arch) == expected
 
 
+class TestExistingKpackMarker:
+    """Tests handling of binaries that were already kpack transformed."""
+
+    def test_reprocesses_existing_marker_without_adding_another(
+        self, tmp_path: Path
+    ):
+        generic_artifact_dir = tmp_path / "test_lib_generic"
+        prefix = "stage"
+        binary_path = generic_artifact_dir / prefix / "lib" / "libtest.so"
+        binary_path.parent.mkdir(parents=True)
+        binary_path.write_bytes(b"binary")
+
+        splitter = ArtifactSplitter(
+            artifact_prefix="test_lib", toolchain=SimpleNamespace()
+        )
+
+        def transform(input_path, output_path, **kwargs):
+            output_path.write_bytes(input_path.read_bytes())
+
+        with (
+            patch(
+                "rocm_kpack.artifact_splitter.read_kpack_ref_marker",
+                return_value={"kernel_name": "stage/lib/libtest.so"},
+            ),
+            patch(
+                "rocm_kpack.artifact_splitter.kpack_offload_binary",
+                side_effect=transform,
+            ) as kpack_offload,
+        ):
+            splitter.inject_kpack_references(
+                {prefix: [binary_path]}, generic_artifact_dir, {}
+            )
+
+        assert kpack_offload.call_args.kwargs == {
+            "input_path": binary_path,
+            "output_path": binary_path.with_suffix(".so.kpacked"),
+            "verbose": False,
+        }
+
+
 class TestArtifactSplitterIntegration:
     """Integration tests for the complete artifact splitting workflow."""
 

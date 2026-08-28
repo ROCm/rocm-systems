@@ -27,7 +27,11 @@ from rocm_kpack.binutils import BundledBinary, Toolchain
 from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
-from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
+from rocm_kpack.kpack_transform import (
+    kpack_offload_binary,
+    read_kpack_ref_marker,
+    NotFatBinaryError,
+)
 
 
 def strip_target_features(target: str) -> str:
@@ -594,13 +598,20 @@ class ArtifactSplitter:
 
                     # Add kpack search pattern and transform binary in one pass
                     # (adds .rocm_kpack_ref, maps to PT_LOAD, rewrites magic, zero-pages .hip_fatbin)
-                    kpack_offload_binary(
-                        input_path=binary_path,
-                        output_path=temp_output,
-                        kpack_search_paths=[search_pattern],
-                        kernel_name=kernel_name,
-                        verbose=self.verbose,
-                    )
+                    if read_kpack_ref_marker(binary_path) is None:
+                        kpack_offload_binary(
+                            input_path=binary_path,
+                            output_path=temp_output,
+                            kpack_search_paths=[search_pattern],
+                            kernel_name=kernel_name,
+                            verbose=self.verbose,
+                        )
+                    else:
+                        kpack_offload_binary(
+                            input_path=binary_path,
+                            output_path=temp_output,
+                            verbose=self.verbose,
+                        )
 
                     # Remove original first to break hard links, then move temp
                     # (mode already preserved by kpack_offload_binary)
