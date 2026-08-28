@@ -543,6 +543,7 @@ add_executable(
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
+    race-detector/race_log_expectation_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
@@ -2514,7 +2515,13 @@ if(RJ_ENABLE_HIP_TESTS)
 
     # Helper: build a HIP test binary with amdclang++ + gtest.
     function(rj_add_hip_test TEST_NAME)
-        cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
+        cmake_parse_arguments(
+            ARG
+            ""
+            "ARCH;SOURCE"
+            "DEPENDENCIES;EXTRA_LIBS"
+            ${ARGN}
+        )
         if(NOT ARG_ARCH)
             set(ARG_ARCH ${RJ_HIP_TEST_ARCH})
         endif()
@@ -2538,7 +2545,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
                 ${RJ_HIP_SANITIZER_LINK_FLAGS}
-            DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
+            DEPENDS
+                ${HIP_TEST_SRC}
+                ${ARG_DEPENDENCIES}
+                GTest::gtest
+                GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
             VERBATIM
         )
