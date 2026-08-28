@@ -1215,6 +1215,11 @@ WriteInterceptor(const void* packets,
 
         using info_session_t = queue_info_session_t;
 
+        // packet_data and pending_waits are NOT mutually exclusive: a batch can contain
+        // both kernel dispatch packets and barrier packets carrying event dep_signals.
+        // When packet_data is non-empty, pending_waits are carried into the async handler
+        // and emitted as WAIT records after the final kernel completes. When packet_data
+        // is empty (barrier-only batch), pending_waits are cleaned up to release ref counts.
         if(!_info_session.packet_data.empty())
         {
             auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
@@ -1222,7 +1227,8 @@ WriteInterceptor(const void* packets,
 
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
-            // Enqueue the signal into the handler. Will call completed_cb when signal completes.
+            // async_started is called here (rather than per-packet) because signal_async_handler
+            // fires when the LAST kernel completes; pending_waits are emitted at the same time.
             queue.async_started();
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,

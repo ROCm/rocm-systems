@@ -582,11 +582,11 @@ struct hipStreamWaitEvent_spt;
 
 namespace
 {
-template <size_t AbiOffset>
+template <auto AbiOffset>
 bool
 table_has_entry(const ::HipDispatchTable* table)
 {
-    return common::abi::compute_table_offset(AbiOffset) < table->size;
+    return common::abi::compute_table_offset(static_cast<size_t>(AbiOffset)) < table->size;
 }
 }  // namespace
 
@@ -609,33 +609,37 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
     wrap(table->hipEventRecord_fn,
          saved.hipEventRecord_fn,
          &event_record_impl<&saved_table_t::hipEventRecord_fn>,
-         81);
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord);
 
     wrap(table->hipEventRecord_spt_fn,
          saved.hipEventRecord_spt_fn,
          &event_record_impl<&saved_table_t::hipEventRecord_spt_fn>,
-         417);
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord_spt);
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
     wrap(table->hipEventRecordWithFlags_fn,
          saved.hipEventRecordWithFlags_fn,
          &event_record_with_flags_impl,
-         473);
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags);
 #endif
 
     wrap(table->hipStreamWaitEvent_fn,
          saved.hipStreamWaitEvent_fn,
          &stream_wait_event_impl<&saved_table_t::hipStreamWaitEvent_fn>,
-         348);
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent);
 
     wrap(table->hipStreamWaitEvent_spt_fn,
          saved.hipStreamWaitEvent_spt_fn,
          &stream_wait_event_impl<&saved_table_t::hipStreamWaitEvent_spt_fn>,
-         414);
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt);
 
-    wrap(table->hipEventDestroy_fn, saved.hipEventDestroy_fn, &event_destroy_impl, 78);
+    wrap(table->hipEventDestroy_fn,
+         saved.hipEventDestroy_fn,
+         &event_destroy_impl,
+         ROCPROFILER_HIP_RUNTIME_API_ID_hipEventDestroy);
 
-    if(table_has_entry<344>(table) && table->hipStreamIsCapturing_fn)
+    if(table_has_entry<ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamIsCapturing>(table) &&
+       table->hipStreamIsCapturing_fn)
         g_original_stream_is_capturing_fn = table->hipStreamIsCapturing_fn;
 }
 

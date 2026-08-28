@@ -597,7 +597,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-trace",
-        help="Combination of --hip-runtime-trace and --hip-compiler-trace. This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
+        help="Combination of --hip-runtime-trace and --hip-compiler-trace (which in turn enables --hip-event-trace and --hip-graph-trace). This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
