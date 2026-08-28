@@ -537,10 +537,9 @@ QueueController::serializer(const Queue* queue)
                 return false;
             },
             [&](auto& m) {
-                ret =
-                    m.emplace(agent_id,
-                              std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                        .first->second.get();
+                ret = m.emplace(agent_id,
+                                std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                          .first->second.get();
                 if(should_serialize)
                 {
                     ret->wlock([&](auto& serializer) { serializer.enable({}); });
@@ -613,8 +612,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                     if(itr->second == state.enabled(agent_id)) continue;
 
                     auto queues = hsa_barrier::queue_map_ptr_t{};
-                    if(auto it = pd_map.find(agent_id); it != pd_map.end())
-                        queues = it->second;
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
 
                     auto ser_itr = serializers.find(agent_id);
                     if(ser_itr == serializers.end() || !ser_itr->second) continue;
@@ -761,10 +759,15 @@ enable_queue_intercept()
         // interceptor even when no other service is configured.
         bool has_kernel_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
 
+        // Range replay records the dispatches inside a range from WriteInterceptor and re-submits
+        // them through it, so it needs the interceptor for the same reason.
+        bool has_range_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
-           itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay)
+           itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
+           has_range_replay)
             return true;
     }
     return false;

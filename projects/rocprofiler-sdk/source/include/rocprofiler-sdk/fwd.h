@@ -188,6 +188,8 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,    ///< hipFILE API Tracing
     ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< EXPERIMENTAL: @see
                                                  ///< ::rocprofiler_kernel_replay_operation_t
+    ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,   ///< EXPERIMENTAL: @see
+                                                 ///< ::rocprofiler_range_replay_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -401,6 +403,28 @@ typedef enum rocprofiler_kernel_replay_operation_t  // NOLINT(performance-enum-s
     // TODO: ROCPROFILER_KERNEL_REPLAY_RESTORE   -- memory restore enter/exit
     ROCPROFILER_KERNEL_REPLAY_LAST,
 } rocprofiler_kernel_replay_operation_t;
+
+/**
+ * @brief ROCProfiler Range Replay Tracing Operation Types.
+ *
+ * CONFIG is delivered from ::rocprofiler_range_replay_begin (enter before the range opens, exit
+ * after the pass count is known). PASS is delivered once per re-executed pass (enter before the
+ * recorded dispatches are submitted, exit after they complete); the application's own execution of
+ * the range is pass 0 and raises no PASS callback. CLOSE is delivered once from
+ * ::rocprofiler_range_replay_end and carries the replay outcome.
+ *
+ * A vetoable pre-replay operation is anticipated as future work, for the point after a range's
+ * eligibility is known but before the first pass rewinds device memory. It is not implemented and
+ * not in this enum. @see `source/docs/conceptual/range_replay/index.md`
+ */
+typedef enum rocprofiler_range_replay_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_RANGE_REPLAY_NONE   = 0,  ///< Unknown range replay operation
+    ROCPROFILER_RANGE_REPLAY_CONFIG = 1,  ///< Range configuration (pass count, loop control)
+    ROCPROFILER_RANGE_REPLAY_PASS,        ///< Per-pass begin/end notification
+    ROCPROFILER_RANGE_REPLAY_CLOSE,       ///< Range outcome (replayed or declined)
+    ROCPROFILER_RANGE_REPLAY_LAST,
+} rocprofiler_range_replay_operation_t;
 
 /**
  * @brief PC Sampling Method.

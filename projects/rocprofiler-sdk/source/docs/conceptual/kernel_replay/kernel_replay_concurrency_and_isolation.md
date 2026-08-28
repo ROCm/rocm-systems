@@ -7,9 +7,10 @@ agent's device memory between the moment the snapshot is taken and the moment th
 finishes. This page describes how that window is isolated, what the isolation deliberately does not
 cover, and why the waits inside the window abort instead of hanging.
 
-Everything here is implemented in the HSA `WriteInterceptor` in
-`source/lib/rocprofiler-sdk/hsa/queue.cpp`. Replay runs synchronously on the thread that submitted
-the dispatch — there is no replay worker thread.
+Everything here is driven from the HSA `WriteInterceptor` in
+`source/lib/rocprofiler-sdk/hsa/queue.cpp`, using the shared window primitives in
+`source/lib/rocprofiler-sdk/hsa/replay_window.cpp`. Replay runs synchronously on the thread that
+submitted the dispatch — there is no replay worker thread.
 
 ## The replay window
 
@@ -175,12 +176,12 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 
 | Component | File | Symbol |
 |---|---|---|
-| Per-agent reader/writer lock | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `agent_replay_mutex()` |
+| Per-agent reader/writer lock | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `agent_replay_mutex()` |
 | Writer lock acquisition | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_guard` in `WriteInterceptor` |
 | Reader lock on the non-replay path | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_reader_guard` in `WriteInterceptor` |
 | Replay activity check | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `has_active_replay_contexts()` |
-| Per-pass handler drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_or_fatal()` |
-| Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_fatal()` |
+| Per-pass handler drain | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_drain_or_fatal()` |
+| Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_drain_agent_or_fatal()` |
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `scoped_local_context_control`, `set_toggles_armed()` |
