@@ -3753,7 +3753,8 @@ get_causal_mode()
         {
             auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-                // NOLINTNEXTLINE(misc-include-cleaner)
+                // NOLINTNEXTLINE(misc-include-cleaner) -- fmt::format comes from
+                // spdlog/fmt/ranges.h
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
                             mode, fmt::join(value->second->get_choices(), ", ")));
         }
