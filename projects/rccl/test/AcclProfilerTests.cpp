@@ -932,4 +932,46 @@ TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
     );
 }
 
+TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.PoolExhaustionIsCounted",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5103, &mask, "sum_pool_test",
+                                     1, 1, 0, nullptr), 0);
+
+            // Pin all 256 slots, then attempt two more allocations.
+            for (int i = 0; i < 256; i++) {
+                ncclProfilerEventDescr_v5_t d;
+                MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/(uint64_t)i,
+                              /*count=*/1);
+                void* coll = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+                ASSERT_NE(coll, nullptr) << "Pool exhausted early at i=" << i;
+                ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            }
+            for (int i = 0; i < 2; i++) {
+                ncclProfilerEventDescr_v5_t d;
+                MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/900 + i,
+                              /*count=*/1);
+                void* coll = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+                EXPECT_EQ(coll, nullptr) << "Full pool must return NULL";
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out =
+                ReadProfilerOutput("/tmp/accl_test_sum_pool", "0x5103");
+            ASSERT_FALSE(out.empty());
+            EXPECT_NE(out.find("\"dropped_collectives\":2"), std::string::npos)
+                << "Both rejected allocations must be counted";
+            EXPECT_NE(out.find("\"leaked_collectives\":256"), std::string::npos)
+                << "The pinned slots the drain reclaims are leaks, not drops";
+            EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_pool"}}
+    );
+}
+
 } // namespace RcclUnitTesting
