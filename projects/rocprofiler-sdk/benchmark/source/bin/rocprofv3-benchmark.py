@@ -66,6 +66,26 @@ CONST_ROCPROFV3_PROFILE_LIST = [
 ]
 
 # global variable that should never be modified during runtime.
+# rocprofv3 option that enables kernel replay and the truth values it accepts
+CONST_KERNEL_REPLAY_OPTION = "--kernel-replay-beta-enabled"
+CONST_TRUE_VALUES = ("y", "yes", "t", "true", "on", "1")
+CONST_FALSE_VALUES = ("n", "no", "f", "false", "off", "0")
+CONST_BOOL_VALUES = CONST_TRUE_VALUES + CONST_FALSE_VALUES
+
+# global variable that should never be modified during runtime.
+# Columns added to the schema after its first release, applied to databases
+# created before they existed. The CHECK constraint on counter_collection_mode
+# is deliberately omitted here because it cannot be added to an existing column
+# set on every supported backend; new databases get it from the schema itself.
+CONST_ADDED_COLUMNS = {
+    "benchmark_config": {
+        "kernel_replay": "INT",
+        "counter_group_count": "INT",
+        "counter_collection_mode": "TEXT",
+    },
+}
+
+# global variable that should never be modified during runtime.
 # Key is database metric name, mapped value is timem json label
 CONST_TIMEM_METRIC_MAP = {
     "wall_time": "wall_clock",
@@ -256,6 +276,24 @@ def compute_hash(data):
     return hashlib.md5(_data.encode()).hexdigest()
 
 
+def strtobool(value):
+    """
+    Interpret a rocprofv3 boolean option value the same way rocprofv3 does.
+    Args:
+        value:
+            String truth value, e.g. "true" or "off"
+    Returns:
+        bool
+    """
+
+    if value.lower() in CONST_TRUE_VALUES:
+        return True
+    elif value.lower() in CONST_FALSE_VALUES:
+        return False
+
+    raise ValueError(f"invalid truth value '{value}'")
+
+
 def log_message(*args):
 
     sys.stdout.write("\n####\n")
@@ -302,6 +340,54 @@ class StdDevSamp:
 
     def finalize(self):
         return stddev_samp(self.values)
+
+
+def get_table_columns(cursor, backend, table):
+    """
+    Return the set of column names currently present in a table.
+    """
+
+    if backend == "sqlite3":
+        cursor.execute(f"PRAGMA table_info({table})")
+        return {itr[1] for itr in cursor.fetchall()}
+    elif backend == "mysql":
+        cursor.execute(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+            (table,),
+        )
+        return {itr[0] for itr in cursor.fetchall()}
+
+    raise ValueError(f"unhandled database backend {backend}")
+
+
+def add_missing_columns(cursor, backend, table, columns):
+    """
+    Add any of the given columns that the table does not already have.
+    Args:
+        cursor:
+            Database cursor
+        backend:
+            Database backend name
+        table:
+            Table to extend
+        columns:
+            Dict of column name to column type
+    Returns:
+        List of the column names that were added
+    """
+
+    existing = get_table_columns(cursor, backend, table)
+    added = []
+
+    for name, definition in columns.items():
+        if name in existing:
+            continue
+
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        added.append(name)
+
+    return added
 
 
 # Function to connect to the MySQL database
@@ -366,6 +452,12 @@ def connect_to_database(args):
                 '("[]")': '"[]"',
             }
         execute_db_script(schema, args.db_backend, repl)
+
+    # CREATE TABLE IF NOT EXISTS leaves a database created by an older revision
+    # of the schema untouched, so columns added since then have to be filled in
+    # explicitly before anything tries to insert into them
+    for table, columns in CONST_ADDED_COLUMNS.items():
+        add_missing_columns(cursor, args.db_backend, table, columns)
 
     # SQL views substitute {{metric}} syntax with metric list
     for views in args.db_views:
@@ -536,7 +628,87 @@ def insert_benchmarked_app(cursor, cmd, launcher, environment, app_id, profile, 
     return cursor.lastrowid
 
 
-def insert_benchmark_config(cursor, sdk_id, config_record, args):
+def derive_replay_config(rocprofv3_args):
+    """
+    Derive the counter-collection and kernel-replay facts of a run from its
+    rocprofv3 command line.
+
+    rocprofv3 does not report kernel replay in the config JSON it emits, so
+    without this a replay run and a non-replay run collecting the same counters
+    produce identical config records, hash to the same benchmark_config row, and
+    become indistinguishable in the database. Reading the command line keeps the
+    distinction without requiring a change to the tool.
+
+    Args:
+        rocprofv3_args:
+            List of arguments passed to rocprofv3, or None for a run that did
+            not go through rocprofv3 at all.
+    Returns:
+        Dict of column name to value, or None when the run neither collects
+        counters nor requests replay (in which case no replay columns apply and
+        the config hash is left untouched).
+    """
+
+    if not rocprofv3_args:
+        return None
+
+    kernel_replay = None
+    counter_groups = 0
+    counter_groups_known = True
+
+    for idx, arg in enumerate(rocprofv3_args):
+        opt, _, inline_value = arg.partition("=")
+
+        if opt == CONST_KERNEL_REPLAY_OPTION:
+            if inline_value:
+                kernel_replay = strtobool(inline_value)
+            else:
+                # nargs="?" -- an optional truth value may follow as its own token
+                value = rocprofv3_args[idx + 1] if idx + 1 < len(rocprofv3_args) else None
+                if value is not None and value.lower() in CONST_BOOL_VALUES:
+                    kernel_replay = strtobool(value)
+                else:
+                    kernel_replay = True
+        elif opt == "--pmc":
+            # each --pmc occurrence introduces one counter group
+            counter_groups += 1
+        elif opt in ("-i", "--input"):
+            # counter groups may be declared in the input file, which is not
+            # parsed here, so the group count cannot be stated
+            counter_groups_known = False
+
+    if kernel_replay is None and counter_groups == 0 and counter_groups_known:
+        return None
+
+    data = {}
+
+    if kernel_replay is not None:
+        data["kernel_replay"] = 1 if kernel_replay else 0
+
+    if counter_groups_known:
+        data["counter_group_count"] = counter_groups
+
+    if kernel_replay:
+        # every group is collected in one application run by replaying each
+        # dispatch once per group
+        mode = "kernel-replay"
+    elif not counter_groups_known:
+        mode = "unknown"
+    elif counter_groups == 0:
+        mode = "none"
+    elif counter_groups == 1:
+        mode = "single-pass"
+    else:
+        # groups are rotated across dispatches within one run, so no dispatch
+        # carries every group
+        mode = "multiplexed"
+
+    data["counter_collection_mode"] = mode
+
+    return data
+
+
+def insert_benchmark_config(cursor, sdk_id, config_record, args, rocprofv3_args=None):
     """
     Insert rocprofiler-sdk information
     Args:
@@ -636,6 +808,19 @@ def insert_benchmark_config(cursor, sdk_id, config_record, args):
                         f"unexpected data type for column '{col}': {type(config_record[citr]).__name__}"
                     )
                 break
+
+    replay_data = derive_replay_config(rocprofv3_args)
+    if replay_data is not None:
+        # part of the hashed data so that runs which differ only in how the
+        # counter groups are collected land in separate rows
+        data.update(replay_data)
+
+        if replay_data.get("kernel_replay"):
+            labels.append("Kernel Replay")
+
+        groups = replay_data.get("counter_group_count")
+        if groups:
+            labels.append(f"Counter Groups={groups}")
 
     data_json = json.dumps(data)
 
@@ -886,7 +1071,7 @@ def execute_run(
             with open(_config_file, "r") as ifs:
                 _cfg = json.load(ifs)
             _sdk_id = insert_benchmarked_sdk(cursor, _cfg, args)
-            _cfg_id = insert_benchmark_config(cursor, _sdk_id, _cfg, args)
+            _cfg_id = insert_benchmark_config(cursor, _sdk_id, _cfg, args, rocprofv3_args)
         else:
             _sdk_id = None
             _cfg_id = insert_benchmark_config(cursor, _sdk_id, None, args)
