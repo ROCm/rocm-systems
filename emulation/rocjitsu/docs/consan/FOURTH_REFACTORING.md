@@ -1020,6 +1020,16 @@ Required focused tests include:
 **F1 completion criterion:** no coverage result is inferred from patch kind,
 anchor offset, or resource-plan reverse lookup.
 
+#### F1 checkpoint — complete (2026-08-28)
+
+F1 was implemented by commits `ad978bd7c2`, `fdfb9d2d26`, `8751dbaa7a`,
+and `32f1321dfa`. Lowering now publishes typed intent-bound commit or rejection
+transactions for SuperCollider and every MOI access and synchronization path.
+The legacy SuperCollider and MOI reverse-coverage finalizers and their
+patch-kind, anchor, and resource-plan joins are gone. The final F1 gate passed
+4,672/4,672 nonphysical tests at `-j16` and 635/635 physical `gfx1201` tests at
+`-j1`.
+
 ### F2. Publish a typed static mapping to the runtime
 
 Define the semantic/static mapping required for report attribution and replay.
@@ -1041,6 +1051,29 @@ separate debug projection. It must not remain the runtime semantic interface.
 
 **F2 completion criterion:** the hook's report path has no dependency on
 `ConSanPatchInfo`, patch kinds, or patch geometry for semantic attribution.
+
+#### F2 checkpoint — complete (2026-08-28)
+
+F2 was implemented by commits `9fa8edd427`, `7228ad449c`, `8d5e1604ac`, and
+`4ccbf6b3b0`. Intent-bound access commits now publish a validated
+`ConSanRuntimeStaticMapping` containing original semantic attribution,
+execution-owner provenance, Record/Replay identity, Sampled slot/bank and
+emitted/relocated locations, and InlineShadow compact-token attribution where
+applicable. The aggregate mapping is required to equal the ordered projection
+of committed lowerings and is independently checked by final validation.
+
+Runtime registration, Sampled snapshot attribution, Record/Replay replay
+suppression, Sampled owner-scope suppression, and compact-token registration
+consume only that typed product. Raw `ConSanPatchInfo` remains in the separate
+debug proof log and independent final validator, not in
+`rj_hsa_dbi_hook_moi_report.cpp`. A negative hook regression supplies complete
+legacy-looking Sampled patch telemetry without a typed mapping and proves that
+runtime attribution remains absent.
+
+The final F2 gate passed 4,673/4,673 nonphysical tests at `-j16` in 245.56
+seconds and 635/635 serialized physical `gfx1201` tests at `-j1` in 106.21
+seconds. The resulting 5,308-test inventory is the 5,302-test baseline plus six
+new F1/F2 regressions, with no lost discovery.
 
 ### F3. Make the pipeline executable and separate its products
 
