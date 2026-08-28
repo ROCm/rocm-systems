@@ -4241,10 +4241,22 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // mode, or an APU carveout. See vram_total_prefer_kfd for the rationale.
   if (mem_type == RSMI_MEM_TYPE_VRAM) {
     bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
+    // Look up the KFD per-partition total non-fatally: unlike
+    // GET_DEV_AND_KFDNODE_FROM_INDX, a missing node must not discard a valid
+    // sysfs value, so this does not early-return on absence.
+    uint64_t kfd_total = 0;
+    auto& kfd_nodes = smi.kfd_node_map();
+    auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
+    if (kfd_it != kfd_nodes.end()) {
+      kfd_it->second->get_total_memory(&kfd_total);
+    }
+    // Reading current_compute_partition touches XCD registers and can wake the
+    // GPU, so only do it when the answer depends on it: when both sources are
+    // usable and KFD reports less. Sysfs being unusable, or KFD reporting more
+    // (the APU carveout), already decides the outcome on its own, and equal
+    // totals substitute the same value either way.
     std::string compute_partition_str;
-    // The partition mode only matters when the sysfs value is usable; otherwise
-    // we already fall back to the KFD total.
-    if (sysfs_read_ok && *total != 0) {
+    if (sysfs_read_ok && *total != 0 && kfd_total > 0 && kfd_total < *total) {
       rsmi_status_t cp_ret =
           get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
       if (cp_ret != RSMI_STATUS_SUCCESS) {
@@ -4257,16 +4269,7 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
         LOG_DEBUG(cp_ss);
       }
     }
-    // Look up the KFD per-partition total non-fatally: unlike
-    // GET_DEV_AND_KFDNODE_FROM_INDX, a missing node must not discard a valid
-    // sysfs value, so this does not early-return on absence.
-    uint64_t kfd_total = 0;
-    auto& kfd_nodes = smi.kfd_node_map();
-    auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
-    if (kfd_it != kfd_nodes.end()) {
-      kfd_it->second->get_total_memory(&kfd_total);
-    }
-    if (kfd_total > 0 &&
+    if (kfd_total > 0 && kfd_total != *total &&
         amd::smi::vram_total_prefer_kfd(sysfs_read_ok, *total, compute_partition_str, kfd_total)) {
       uint64_t sysfs_total = *total;
       *total = kfd_total;
