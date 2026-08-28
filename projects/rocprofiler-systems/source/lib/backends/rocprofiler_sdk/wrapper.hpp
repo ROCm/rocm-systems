@@ -64,7 +64,7 @@ namespace rocprofsys::rocprofiler_sdk
 /// This is the `Wrapper` template argument consumed by
 /// rocprofsys::backends::rocprofiler_sdk::backend<Wrapper> (backend.hpp); it must
 /// expose the same nested types/constants/static methods that struct relies on.
-struct backend
+struct wrapper
 {
     // ─── Compile-time SDK version ────────────────────────────────────────────────
     static constexpr std::uint32_t compile_time_version = ROCPROFILER_VERSION;
@@ -296,7 +296,7 @@ struct backend
     using hip_stream_operation_t = rocprofiler_hip_stream_operation_t;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     using kfd_page_fault_record   = rocprofiler_buffer_tracing_kfd_page_fault_record_t;
     using kfd_page_migrate_record = rocprofiler_buffer_tracing_kfd_page_migrate_record_t;
     using kfd_queue_record        = rocprofiler_buffer_tracing_kfd_queue_record_t;
@@ -405,6 +405,16 @@ struct backend
         ROCPROFILER_CALLBACK_TRACING_HIP_STREAM;
 #endif
 
+#if ROCPROFILER_VERSION >= 10304
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCSHMEM_API =
+        ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API;
+#endif
+
+#if ROCPROFILER_VERSION >= 10305
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIPFILE_API =
+        ROCPROFILER_CALLBACK_TRACING_HIPFILE_API;
+#endif
+
     // ─── Buffer tracing kind constants ───────────────────────────────────────────
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
         ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
@@ -437,7 +447,7 @@ struct backend
         ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_FAULT =
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_MIGRATE =
@@ -517,7 +527,7 @@ struct backend
     static constexpr hip_stream_operation_t HIP_STREAM_SET = ROCPROFILER_HIP_STREAM_SET;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     // ─── KFD event queue operation constants ─────────────────────────────────────
     static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_NONE =
         ROCPROFILER_KFD_EVENT_QUEUE_NONE;

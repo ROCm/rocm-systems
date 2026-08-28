@@ -145,10 +145,10 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
   static_pc_address_builders_.push_back(builder);
 }
 
-std::vector<std::unique_ptr<BasicBlock>>
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
 BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-                  std::span<const uint64_t> extra_split_points) {
+                  DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -163,20 +163,21 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       // gfx1250 code objects use zero-filled alignment between function bodies.
       // Zero is not an instruction; block construction below treats sequential
       // fallthrough into it as an implicit unreachable boundary.
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
         continue;
       }
 
-      Instruction *raw_inst = nullptr;
-      try {
-        raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      } catch (const util::InvalidInst &error) {
-        throw util::InvalidInst(
-            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
-      }
-      std::unique_ptr<Instruction> inst(raw_inst);
+      auto emit_at_offset = [&](std::string_view message) {
+        emit_error.emit() << message << " at .text byte offset " << byte_offset;
+      };
+      const DecodeErrorEmitter decode_error =
+          emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
+      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      if (decode_result.failed())
+        return Result::failure();
+      std::unique_ptr<Instruction> inst = std::move(decode_result).value();
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
 
@@ -274,7 +275,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         const bool can_fall_through = !is_program_path_terminator(last) &&
                                       !is_unconditional_branch(last) &&
                                       (last.flags() & INDIRECT_BRANCH) == 0;
-        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                           next_offset < section_end &&
                                           inst_data[next_offset / sizeof(uint32_t)] == 0;
         // Running off the end of `.text` is the same boundary as running into padding: there is no
@@ -282,7 +283,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
         const bool reaches_section_end =
-            arch == ROCJITSU_CODE_ARCH_GFX1250 && i >= decoded.size() && next_offset >= section_end;
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
         if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
