@@ -154,13 +154,11 @@ struct ConSanMutationOutcome {
 
 /// Semantic and lowering artifacts owned by one static ConSan transformation.
 ///
-/// The internal native lowerer builds this value incrementally, but ownership
-/// crosses into `TransformResult` as one subobject after lowering finishes.
-/// Keeping these artifacts together prevents the production pipeline from
-/// redeclaring and individually projecting inventory, policy, coverage,
-/// mutation, resource, patch, outcome, and diagnostic state. Runtime evidence,
-/// installation state and private working candidates deliberately live
-/// elsewhere.
+/// The internal native lowerer builds this value incrementally. The pipeline
+/// consumes it once, publishes an explicit reviewed subset through
+/// `TransformResult`, and retains lowerer proof state only in private/debug
+/// storage. Runtime evidence, installation state, and private working
+/// candidates deliberately live elsewhere.
 struct ConSanTransformArtifacts {
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;

@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <string_view>
 #include <unordered_set>
@@ -16,6 +17,8 @@
 
 namespace rocjitsu {
 namespace {
+
+static_assert(!std::derived_from<TransformResult, ConSanTransformArtifacts>);
 
 [[nodiscard]] RuntimeCapabilities complete_runtime_capabilities() {
   return {
@@ -343,24 +346,25 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
 
   ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.errors);
   EXPECT_EQ(published.replacement, (std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
-  ASSERT_EQ(published.fault_sites.size(), 1u);
-  EXPECT_EQ(published.fault_sites.front().identity, "published-fault-site");
-  ASSERT_EQ(published.barrier_move_destinations.size(), 1u);
-  EXPECT_EQ(published.barrier_move_destinations.front().identity, "published-destination");
-  ASSERT_EQ(published.fault_plans.size(), 1u);
-  EXPECT_EQ(published.fault_plans.front().primary_identity, "published-fault-plan");
+  const ConSanTransformDebugReport published_debug = published.debug_report();
+  ASSERT_EQ(published_debug.fault_sites.size(), 1u);
+  EXPECT_EQ(published_debug.fault_sites.front().identity, "published-fault-site");
+  ASSERT_EQ(published_debug.barrier_move_destinations.size(), 1u);
+  EXPECT_EQ(published_debug.barrier_move_destinations.front().identity, "published-destination");
+  ASSERT_EQ(published_debug.fault_plans.size(), 1u);
+  EXPECT_EQ(published_debug.fault_plans.front().primary_identity, "published-fault-plan");
   TransformResult malformed_fault_plan = published;
-  malformed_fault_plan.fault_plans.front().source_code_object = {};
+  TransformResultTestAccess::corrupt_first_fault_plan_code_object(malformed_fault_plan);
   EXPECT_FALSE(malformed_fault_plan.well_formed());
   malformed_fault_plan = published;
   malformed_fault_plan.mutation.fault.planned = 0u;
   EXPECT_FALSE(malformed_fault_plan.well_formed());
-  ASSERT_EQ(published.resource_plans.size(), 1u);
-  EXPECT_EQ(published.resource_plans.front().candidate_index, 7u);
+  ASSERT_EQ(published_debug.resource_plans.size(), 1u);
+  EXPECT_EQ(published_debug.resource_plans.front().candidate_index, 7u);
   EXPECT_EQ(published.mutation.fault,
             (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
   EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
-  ASSERT_EQ(published.patches.size(), 3u);
+  ASSERT_EQ(published_debug.patches.size(), 3u);
   ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
   EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
                                                             .kernel_name = "kernel_a",
@@ -783,8 +787,8 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
             split.observation_plan.probe_intents.size());
   EXPECT_FALSE(split.replacement.empty());
-  EXPECT_FALSE(split.patches.empty());
-  EXPECT_FALSE(split.resource_plans.empty());
+  EXPECT_FALSE(split.debug_report().patches.empty());
+  EXPECT_FALSE(split.debug_report().resource_plans.empty());
   EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
                                              ? ConSanInstallAction::LoadReplacement
                                              : ConSanInstallAction::LoadOriginal);
@@ -881,11 +885,13 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.observation_plan, direct.observation_plan);
   EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(retried.replacement, direct.replacement);
-  EXPECT_EQ(retried.patches.size(), direct.patches.size());
-  EXPECT_EQ(retried.resource_plans.size(), direct.resource_plans.size());
-  EXPECT_EQ(retried.fault_sites.size(), direct.fault_sites.size());
-  EXPECT_EQ(retried.barrier_move_destinations.size(), direct.barrier_move_destinations.size());
-  EXPECT_EQ(retried.fault_plans.size(), direct.fault_plans.size());
+  EXPECT_EQ(retried.debug_report().patches.size(), direct.debug_report().patches.size());
+  EXPECT_EQ(retried.debug_report().resource_plans.size(),
+            direct.debug_report().resource_plans.size());
+  EXPECT_EQ(retried.debug_report().fault_sites.size(), direct.debug_report().fault_sites.size());
+  EXPECT_EQ(retried.debug_report().barrier_move_destinations.size(),
+            direct.debug_report().barrier_move_destinations.size());
+  EXPECT_EQ(retried.debug_report().fault_plans.size(), direct.debug_report().fault_plans.size());
 }
 
 TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutPristineProvenance) {
@@ -954,9 +960,9 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.errors);
   EXPECT_GT(mutated.mutation.fault.requested, 0u);
   EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
-  EXPECT_FALSE(mutated.fault_sites.empty());
-  EXPECT_FALSE(mutated.fault_plans.empty());
-  EXPECT_EQ(mutated.fault_plans.front().target_address_vgpr, 4u);
+  EXPECT_FALSE(mutated.debug_report().fault_sites.empty());
+  EXPECT_FALSE(mutated.debug_report().fault_plans.empty());
+  EXPECT_EQ(mutated.debug_report().fault_plans.front().target_address_vgpr, 4u);
   EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
 }
 
@@ -979,7 +985,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), resources);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_FALSE(result.replacement.empty());
-  ASSERT_FALSE(result.patches.empty());
+  ASSERT_FALSE(result.debug_report().patches.empty());
   ASSERT_FALSE(result.dispatch_requirements.kernels.empty());
 
   result.discard_replacement("runtime report allocation failed");
@@ -990,14 +996,14 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
-  EXPECT_TRUE(result.patches.empty());
-  EXPECT_FALSE(result.committed_lowerings.empty());
-  EXPECT_TRUE(
-      std::ranges::any_of(result.committed_lowerings, [](const ConSanCommittedLowering &commit) {
+  EXPECT_TRUE(result.debug_report().patches.empty());
+  EXPECT_FALSE(result.debug_report().committed_lowerings.empty());
+  EXPECT_TRUE(std::ranges::any_of(
+      result.debug_report().committed_lowerings, [](const ConSanCommittedLowering &commit) {
         return commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected;
       }));
-  EXPECT_TRUE(
-      std::ranges::all_of(result.committed_lowerings, [](const ConSanCommittedLowering &commit) {
+  EXPECT_TRUE(std::ranges::all_of(
+      result.debug_report().committed_lowerings, [](const ConSanCommittedLowering &commit) {
         return (commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected ||
                 commit.outcome == ConSanLoweringOutcomeKind::PlacementRejected) &&
                commit.locations.empty();

@@ -209,6 +209,20 @@ struct ConSanDispatchRequirements {
   bool operator==(const ConSanDispatchRequirements &) const = default;
 };
 
+/// Read-only diagnostic projection of lowerer-private proof artifacts.
+///
+/// These values support verbose development logs and invariant tests. They
+/// are deliberately separated from semantic/runtime products: no install,
+/// attribution, coverage, or retry decision may depend on this projection.
+struct ConSanTransformDebugReport {
+  std::span<const ConSanFaultSite> fault_sites;
+  std::span<const ConSanBarrierMoveDestination> barrier_move_destinations;
+  std::span<const ConSanFaultMutationPlan> fault_plans;
+  std::span<const ConSanCandidateResourcePlan> resource_plans;
+  std::span<const ConSanCommittedLowering> committed_lowerings;
+  std::span<const ConSanPatchInfo> patches;
+};
+
 /// Static output of one typed ConSan transformation attempt.
 ///
 /// This type separates caller-facing stage state, immutable semantic artifacts,
@@ -218,7 +232,7 @@ struct ConSanDispatchRequirements {
 /// fields allow precise construction and invariant testing during the
 /// migration, while production creates values only through `transform_consan`
 /// or `transform_consan_with_mutation`.
-class TransformResult : public ConSanTransformArtifacts {
+class TransformResult {
 public:
   TransformResult() {
     outcome = ConSanTransformOutcome::Invalid;
@@ -240,6 +254,24 @@ public:
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
   ConSanDispatchRequirements dispatch_requirements;
+  /// Immutable ownership of original code-object/container/access facts.
+  ProgramInventory program_inventory;
+  /// Target-neutral policy result assembled once for the selected engine.
+  ConSanObservationPlan observation_plan;
+  /// Joined semantic-policy and authoritative lowering outcomes.
+  ConSanCoverageLedger coverage_ledger;
+  /// Validated runtime-facing projection of committed lowerings.
+  ConSanRuntimeStaticMapping runtime_static_mapping;
+  /// Validation-only mutation result and stable applied identity.
+  ConSanMutationOutcome mutation;
+  /// Independently validated replacement image, or empty when not installable.
+  std::vector<uint8_t> replacement;
+  /// Final static classification of the transformation attempt.
+  ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
+  /// Non-fatal diagnostics from analysis, lowering, and binding.
+  std::vector<std::string> warnings;
+  /// Fatal static-transform diagnostics.
+  std::vector<std::string> errors;
 
   /// Return the state for one stage, or null when `value` is not a real stage.
   [[nodiscard]] const ConSanPipelineStageState *stage(ConSanPipelineStage value) const;
@@ -250,6 +282,11 @@ public:
 
   /// Derive loader policy solely from the split static result.
   [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
+
+  /// Return lowerer proof artifacts solely for diagnostics and development
+  /// tooling. Production semantic consumers must use the explicit typed
+  /// products above.
+  [[nodiscard]] ConSanTransformDebugReport debug_report() const;
 
   /// Demote an otherwise installable transform after a runtime-owned resource
   /// operation fails. This keeps the outcome, stage records, replacement
@@ -285,6 +322,25 @@ private:
                    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
                    std::optional<ConSanTransformArtifacts> lowering_artifacts);
+
+  /// Move a lowerer aggregate into the reviewed public products and private
+  /// diagnostic storage. Only the transaction publication boundary calls it.
+  void publish_lowering_artifacts(ConSanTransformArtifacts lowering);
+
+  /// Reconstitute a lowerer aggregate for the temporary typed inventory retry
+  /// implementation. The caller consumes this result object completely.
+  [[nodiscard]] ConSanTransformArtifacts take_lowering_artifacts();
+
+  struct PrivateLoweringArtifacts {
+    std::vector<ConSanFaultSite> fault_sites;
+    std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
+    std::vector<ConSanFaultMutationPlan> fault_plans;
+    std::vector<ConSanCandidateResourcePlan> resource_plans;
+    ConSanMoiOperatingPoint moi_operating_point;
+    std::vector<ConSanCommittedLowering> committed_lowerings;
+    std::vector<ConSanCommittedLowering> staged_moi_sync_lowerings;
+    std::vector<ConSanPatchInfo> patches;
+  } private_lowering_;
 
   /// Provenance marker set only by the pristine MOI inventory entry point.
   ///

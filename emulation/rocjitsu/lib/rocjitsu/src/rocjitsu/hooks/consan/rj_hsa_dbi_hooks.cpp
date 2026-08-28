@@ -4059,6 +4059,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
     }
     const rocjitsu::TransformResult &transform_result = *patch_result_storage;
+    const rocjitsu::ConSanTransformDebugReport transform_debug = transform_result.debug_report();
     const rocjitsu::ConSanMutationOutcome &mutation = transform_result.mutation;
     fault_installation_evidence.record_applied_mutations(mutation.fault.applied);
     if (live_fault_auto_report_capacity_inventory) {
@@ -4099,7 +4100,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                                                                     : "false",
         rocjitsu::consan_transform_outcome_name(transform_result.outcome),
         transform_result.errors.size(), transform_result.warnings.size(),
-        transform_result.patches.size(),
+        transform_debug.patches.size(),
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - patch_begin)
             .count());
     for (const std::string &warning : transform_result.warnings)
@@ -4224,7 +4225,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         transform_result.program_inventory.text_sections().size(),
         transform_result.program_inventory.kernels().size(),
         transform_result.program_inventory.functions().size());
-    for (const rocjitsu::ConSanFaultSite &site : transform_result.fault_sites) {
+    for (const rocjitsu::ConSanFaultSite &site : transform_debug.fault_sites) {
       const OwnerLogFields owners =
           owner_log_fields(site.execution_owners, transform_result.program_inventory.kernels());
       log_message(kLogVerbose,
@@ -4247,7 +4248,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   site.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
     for (const rocjitsu::ConSanBarrierMoveDestination &destination :
-         transform_result.barrier_move_destinations) {
+         transform_debug.barrier_move_destinations) {
       const OwnerLogFields owners = owner_log_fields(destination.execution_owners,
                                                      transform_result.program_inventory.kernels());
       std::string reason =
@@ -4281,7 +4282,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<unsigned long long>(destination.structured_source_offset.value_or(0)),
                   destination.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
-    for (const rocjitsu::ConSanFaultMutationPlan &plan : transform_result.fault_plans) {
+    for (const rocjitsu::ConSanFaultMutationPlan &plan : transform_debug.fault_plans) {
       std::string members;
       for (const std::string &identity : plan.ordered_member_identities) {
         if (!members.empty())
@@ -4420,8 +4421,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       const rocjitsu::ConSanResourcePlanSummary resource_summary =
-          rocjitsu::summarize_consan_resource_plans(transform_result.resource_plans,
-                                                    transform_result.patches);
+          rocjitsu::summarize_consan_resource_plans(transform_debug.resource_plans,
+                                                    transform_debug.patches);
       log_message(kLogInfo,
                   "ConSan MOI resources reader=%llu explicit=%zu dead=%zu "
                   "descriptor_growth=%zu spill=%zu unsupported=%zu "
@@ -4461,7 +4462,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::array<std::array<ResourceFailureSummary, kRegisterPlanReasonCount>,
                  kResourceSiteKindCount>
           failure_summaries{};
-      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_result.resource_plans) {
+      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_debug.resource_plans) {
         if (plan.source != rocjitsu::ConSanRegisterAllocationSource::Unsupported)
           continue;
         ResourceFailureSummary &summary = failure_summaries[static_cast<size_t>(plan.site_kind)]
@@ -4510,7 +4511,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                       summary.max_owners, summary.has_indirect_vgpr_access ? "true" : "false");
         }
       }
-      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_result.resource_plans) {
+      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_debug.resource_plans) {
         for (size_t alternative_index = 0; alternative_index < plan.alternatives.size();
              ++alternative_index) {
           const rocjitsu::ConSanResourcePlanAlternative &alternative =
@@ -4613,7 +4614,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         function_supported_lds_site_count, function_flat_site_count, function_flat_group_hint_count,
         function_flat_private_hint_count, function_flat_maybe_group_hint_count,
         function_flat_maybe_private_hint_count, function_flat_global_hint_count,
-        function_flat_unknown_hint_count, transform_result.patches.size(),
+        function_flat_unknown_hint_count, transform_debug.patches.size(),
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false");
     static_coverage_storage =
@@ -4712,14 +4713,14 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             lowering_reason = "unsupported_resource_plan";
             resource_reason = "invalid_request";
             const auto plan = std::ranges::find_if(
-                transform_result.resource_plans,
+                transform_debug.resource_plans,
                 [&](const rocjitsu::ConSanCandidateResourcePlan &candidate) {
                   return candidate.site_kind == kind &&
                          candidate.semantic_text_offset.value_or(candidate.text_offset) ==
                              decision.semantic_site.physical.original_text_offset &&
                          candidate.source == rocjitsu::ConSanRegisterAllocationSource::Unsupported;
                 });
-            if (plan != transform_result.resource_plans.end())
+            if (plan != transform_debug.resource_plans.end())
               resource_reason = rocjitsu::consan_register_plan_reason_name(plan->reason);
           } else if (placement_rejected) {
             outcome = "placement_or_lowering_failed";
@@ -4767,7 +4768,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                              [](rocjitsu::ConSanFencePolicyReason reason) {
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
-    for (const rocjitsu::ConSanPatchInfo &patch : transform_result.patches) {
+    for (const rocjitsu::ConSanPatchInfo &patch : transform_debug.patches) {
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
       const std::string private_epoch_offset =

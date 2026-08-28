@@ -26,6 +26,10 @@ struct TransformResultTestAccess {
                                              runtime_policy, debug, mutation, capabilities,
                                              resources, std::move(artifacts));
   }
+
+  static void corrupt_first_fault_plan_code_object(TransformResult &result) {
+    result.private_lowering_.fault_plans.front().source_code_object = {};
+  }
 };
 
 } // namespace rocjitsu
