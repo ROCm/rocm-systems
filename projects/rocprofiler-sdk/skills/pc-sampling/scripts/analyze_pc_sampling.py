@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-
 STALL_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_TYPE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
 
@@ -132,7 +131,11 @@ def build_dispatch_map_from_json(tool: dict[str, Any]) -> dict[int, str]:
     def kernel_name(kernel_id: int) -> str:
         if kernel_id < len(kernel_symbols):
             sym = kernel_symbols[kernel_id]
-            return sym.get("formatted_kernel_name") or sym.get("kernel_name") or f"kernel_{kernel_id}"
+            return (
+                sym.get("formatted_kernel_name")
+                or sym.get("kernel_name")
+                or f"kernel_{kernel_id}"
+            )
         return f"kernel_{kernel_id}"
 
     dispatch_map: dict[int, str] = {}
@@ -147,7 +150,9 @@ def build_dispatch_map_from_csv(path: Path) -> dict[int, str]:
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             dispatch_id = int(row["Dispatch_Id"])
-            dispatch_map[dispatch_id] = row.get("Kernel_Name") or f"kernel_{row.get('Kernel_Id', '?')}"
+            dispatch_map[dispatch_id] = (
+                row.get("Kernel_Name") or f"kernel_{row.get('Kernel_Id', '?')}"
+            )
     return dispatch_map
 
 
@@ -156,7 +161,9 @@ def find_kernel_trace_csv(pc_csv: Path) -> Path | None:
     stem = pc_csv.stem
     for marker in ("pc_sampling_stochastic", "pc_sampling_host_trap"):
         if marker in stem:
-            candidate = pc_csv.with_name(stem.replace(marker, "kernel_trace") + pc_csv.suffix)
+            candidate = pc_csv.with_name(
+                stem.replace(marker, "kernel_trace") + pc_csv.suffix
+            )
             if candidate.exists():
                 return candidate
     prefix, sep, _ = stem.partition("_pc_sampling_")
@@ -167,7 +174,9 @@ def find_kernel_trace_csv(pc_csv: Path) -> Path | None:
     return None
 
 
-def dispatch_map_covers_samples(dispatch_map: dict[int, str], samples: list[Sample]) -> bool:
+def dispatch_map_covers_samples(
+    dispatch_map: dict[int, str], samples: list[Sample]
+) -> bool:
     if not dispatch_map or not samples:
         return False
     sample_ids = {sample.dispatch_id for sample in samples}
@@ -198,9 +207,7 @@ def iter_json_samples(tool: dict[str, Any], method: str) -> Iterable[Sample]:
             source = comments[inst_index] if inst_index < len(comments) else ""
         else:
             instruction = ""
-            source = (
-                f"unrecognized code object; raw offset={record['pc'].get('code_object_offset')}"
-            )
+            source = f"unrecognized code object; raw offset={record['pc'].get('code_object_offset')}"
 
         issued: bool | None = None
         stall_reason = ""
@@ -243,7 +250,9 @@ def iter_csv_samples(path: Path, method: str) -> Iterable[Sample]:
                 if raw != "":
                     issued = raw.strip() in {"1", "true", "True"}
                 stall_reason = shorten_enum(row.get("Stall_Reason", ""), STALL_PREFIX)
-                inst_type = shorten_enum(row.get("Instruction_Type", ""), INST_TYPE_PREFIX)
+                inst_type = shorten_enum(
+                    row.get("Instruction_Type", ""), INST_TYPE_PREFIX
+                )
 
             yield Sample(
                 dispatch_id=int(row["Dispatch_Id"]),
@@ -361,9 +370,9 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
         lines.append(f"- Unique sampled locations: **{len(kernel.locations)}**")
         lines.append("")
 
-        ranked = sorted(kernel.locations.values(), key=lambda loc: loc.count, reverse=True)[
-            :top_n
-        ]
+        ranked = sorted(
+            kernel.locations.values(), key=lambda loc: loc.count, reverse=True
+        )[:top_n]
         lines.append(f"### Top {len(ranked)} sample locations")
         lines.append("")
 
@@ -427,7 +436,8 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
                 if not loc.stall_reasons:
                     continue
                 reasons = ", ".join(
-                    f"{reason} ({count})" for reason, count in loc.stall_reasons.most_common(3)
+                    f"{reason} ({count})"
+                    for reason, count in loc.stall_reasons.most_common(3)
                 )
                 lines.append(
                     f"- `{truncate(loc.instruction, 60)}` @ {format_offset(loc.offset)}: {reasons}"
