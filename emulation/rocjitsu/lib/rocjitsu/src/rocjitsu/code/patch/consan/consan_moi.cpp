@@ -660,11 +660,15 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
 
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
-
 #include "rocjitsu/code/patch/consan/consan_moi_sync_common.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_atomic.inc"
 

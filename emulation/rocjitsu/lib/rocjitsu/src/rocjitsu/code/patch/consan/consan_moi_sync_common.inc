@@ -1,3 +1,7 @@
+[[nodiscard]] bool is_rocclr_runtime_kernel_name(std::string_view name) {
+  return name.starts_with("__amd_rocclr_");
+}
+
 [[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
                                   const MoiAtomicEvidenceSitePlan &plan,
