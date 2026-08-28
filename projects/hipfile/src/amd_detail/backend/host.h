@@ -54,5 +54,5 @@ public:
 } // namespace hipFile
 
 extern "C" {
-void async_host_do(void *userargs);
+void async_io_host_do(void *userargs);
 }

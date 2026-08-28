@@ -204,32 +204,6 @@ CopyOp<CopyFn>::run()
     return total_io_bytes;
 }
 
-void
-async_io_host_do(void *userargs)
-{
-    auto &op = *static_cast<AsyncOpHost *>(userargs);
-
-    size_t size;
-    hoff_t buffer_offset, file_offset;
-
-    // Bind params. Will maintain same value if already bound.
-    buffer_offset = op.buffer_offset.emplace<const hoff_t>(*get_variant_ptr(op.buffer_offset));
-    file_offset   = op.file_offset.emplace<const hoff_t>(*get_variant_ptr(op.file_offset));
-    size          = op.size.emplace<size_t>(std::min(*get_variant_ptr(op.size), hipFile::getMaxRwCount()));
-
-    if (!paramsValid(op)) {
-        op.bytes_transferred_internal = -hipFileInvalidValue;
-        return;
-    }
-
-    size_t bytes_transferred =
-        op.io_type == IoType::Read
-            ? CopyOp<ReadFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run()
-            : CopyOp<WriteFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run();
-
-    op.bytes_transferred_internal = static_cast<ssize_t>(bytes_transferred);
-}
-
 } // namespace
 
 ssize_t
@@ -297,3 +271,38 @@ Host::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
         throw;
     }
 }
+
+extern "C" {
+
+void
+async_io_host_do(void *userargs)
+{
+    auto &op = *static_cast<AsyncOpHost *>(userargs);
+
+    size_t size;
+    hoff_t buffer_offset, file_offset;
+
+    // Bind params. Will maintain same value if already bound.
+    buffer_offset = *get_variant_ptr(op.buffer_offset);
+    op.buffer_offset.emplace<const hoff_t>(buffer_offset);
+
+    file_offset = *get_variant_ptr(op.file_offset);
+    op.file_offset.emplace<const hoff_t>(file_offset);
+
+    size = std::min(*get_variant_ptr(op.size), hipFile::getMaxRwCount());
+    op.size.emplace<size_t>(size);
+
+    if (!paramsValid(op)) {
+        op.bytes_transferred_internal = -hipFileInvalidValue;
+        return;
+    }
+
+    size_t bytes_transferred =
+        op.io_type == IoType::Read
+            ? CopyOp<ReadFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run()
+            : CopyOp<WriteFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run();
+
+    op.bytes_transferred_internal = static_cast<ssize_t>(bytes_transferred);
+}
+
+} // extern "C"
