@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/version.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -952,6 +953,20 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 {
     auto n_info = node_info::get_instance();
     auto uuid   = common::md5sum{ n_info.id, pid, ppid }.hexdigest();
+
+    // Remove any existing database file so the writer starts from a clean
+    // in-memory state. This handles multiple rocprofsys_init/finalize cycles
+    // in the same process (e.g. with ROCPROFSYS_USE_PID=OFF) where successive
+    // sessions would otherwise find the file left by the previous session and
+    // fail with "Database already initialized!".
+    if(std::filesystem::exists(m_db_output_path))
+    {
+        LOG_WARNING("rocpd output file already exists and will be overwritten: {}. "
+                    "Previous profiling data in that file will be lost. "
+                    "Set ROCPROFSYS_USE_PID=ON to give each session a unique path.",
+                    m_db_output_path);
+        std::filesystem::remove(m_db_output_path);
+    }
 
     auto storage = std::make_unique<profiler_hub::storage_t>(m_db_output_path, uuid);
     m_writer     = std::make_unique<profiler_hub::writer_t>(std::move(storage));
