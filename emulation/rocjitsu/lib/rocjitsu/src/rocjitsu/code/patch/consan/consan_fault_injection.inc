@@ -340,36 +340,38 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
 }
 
 void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
-                               ConSanTransformArtifacts &result) {
+                               ConSanTransformArtifacts &result,
+                               bool require_applicable_plan = false) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const auto reject_application = [&](std::string dry_run_warning, std::string application_error) {
+    if (require_applicable_plan)
+      result.errors.push_back(std::move(application_error));
+    else
+      result.warnings.push_back(std::move(dry_run_warning));
+  };
+  const auto make_named_plan = [&](ConSanFaultMutationKind kind, std::string primary_identity) {
+    ConSanFaultMutationPlan plan;
+    plan.source_code_object = result.program_inventory.code_object_id();
+    plan.kind = kind;
+    plan.primary_identity = std::move(primary_identity);
+    return plan;
+  };
+  const auto make_plan = [&](ConSanFaultMutationKind kind, const ConSanFaultSite &site) {
+    return make_named_plan(kind, site.identity);
+  };
   auto append_primary = [&](ConSanFaultMutationKind kind, const ConSanFaultSite *site) {
     if (site == nullptr) {
       result.warnings.emplace_back("ConSan fault dry run found no site for the requested mutation");
       return;
     }
-    result.fault_plans.push_back(
-        {.kind = kind,
-         .primary_identity = site->identity,
-         .companion_identity = std::nullopt,
-         .logical_sequence_identity = std::nullopt,
-         .ordered_member_identities = {},
-         .destination_identity = std::nullopt,
-         .barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker,
-         .structured_guard_block_index = std::nullopt,
-         .structured_destination_block_index = std::nullopt,
-         .structured_source_block_index = std::nullopt,
-         .structured_guard_offset = std::nullopt,
-         .structured_destination_offset = std::nullopt,
-         .structured_source_offset = std::nullopt,
-         .original_barrier_id = std::nullopt,
-         .target_barrier_id = std::nullopt,
-         .original_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-         .target_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-         .original_participant_count = std::nullopt,
-         .target_participant_count = std::nullopt});
+    result.fault_plans.push_back(make_plan(kind, *site));
   };
 
-  if (options.fault_drop_barrier) {
+  if (options.fault_drop_barrier && has_only_rocclr_runtime_kernels(result)) {
+    result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
+  }
+
+  if (options.fault_drop_barrier && !has_only_rocclr_runtime_kernels(result)) {
     const ConSanFaultSite *primary = select_fault_site_for_plan(
         result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
     if (!options.fault_barrier_sequence_identity.empty() ||
@@ -385,21 +387,26 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       if ((grouped && !group) || (!grouped && !pair)) {
         result.warnings.emplace_back("ConSan exact whole-barrier drop dry run rejected: " + reason);
       } else {
-        ConSanFaultMutationPlan plan;
-        plan.kind = ConSanFaultMutationKind::DropBarrier;
+        ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::DropBarrier,
+                                                 group ? *group->first.primary : *pair->primary);
         if (group) {
-          plan.primary_identity = group->first.primary->identity;
-          plan.companion_identity = group->first.companion->identity;
+          // For a grouped drop this identity selects the second logical pair;
+          // every physical member of both pairs remains in semantic order
+          // below, so the plan needs no second copy of either pair's inferred
+          // completing member.
+          plan.companion_identity = group->second.primary->identity;
           plan.logical_sequence_identity = exact_barrier_drop_group_identity(*group);
+          plan.selection_sequence_identity = group->first.sequence->identity;
+          plan.companion_selection_sequence_identity = group->second.sequence->identity;
           plan.ordered_member_identities = group->first.sequence->member_event_identities;
           plan.ordered_member_identities.insert(
               plan.ordered_member_identities.end(),
               group->second.sequence->member_event_identities.begin(),
               group->second.sequence->member_event_identities.end());
         } else {
-          plan.primary_identity = pair->primary->identity;
           plan.companion_identity = pair->companion->identity;
           plan.logical_sequence_identity = pair->sequence->identity;
+          plan.selection_sequence_identity = pair->sequence->identity;
           plan.ordered_member_identities = pair->sequence->member_event_identities;
         }
         result.fault_plans.push_back(std::move(plan));
@@ -411,7 +418,14 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
           "ConSan fault dry run rejected dropping one half of a qualified logical barrier pair; "
           "explicit destructive incomplete-drop mode is required");
     } else {
-      append_primary(ConSanFaultMutationKind::DropBarrier, primary);
+      if (primary != nullptr) {
+        ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::DropBarrier, *primary);
+        plan.destructive_incomplete_barrier_drop =
+            is_member_of_qualified_logical_barrier_pair(result, *primary);
+        result.fault_plans.push_back(std::move(plan));
+      } else {
+        append_primary(ConSanFaultMutationKind::DropBarrier, primary);
+      }
     }
   }
   if (options.fault_move_barrier) {
@@ -442,27 +456,13 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         result.warnings.emplace_back(
             "ConSan fault dry run found no completing barrier in the selected container");
       } else {
-        ConSanFaultMutationPlan plan{
-            .kind = ConSanFaultMutationKind::MoveBarrierPair,
-            .primary_identity = primary->identity,
-            .companion_identity = companion->identity,
-            .logical_sequence_identity = sequence->identity,
-            .ordered_member_identities = sequence->member_event_identities,
-            .destination_identity = std::nullopt,
-            .barrier_move_direction = options.fault_barrier_move_direction,
-            .structured_guard_block_index = std::nullopt,
-            .structured_destination_block_index = std::nullopt,
-            .structured_source_block_index = std::nullopt,
-            .structured_guard_offset = std::nullopt,
-            .structured_destination_offset = std::nullopt,
-            .structured_source_offset = std::nullopt,
-            .original_barrier_id = std::nullopt,
-            .target_barrier_id = std::nullopt,
-            .original_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-            .target_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-            .original_participant_count = std::nullopt,
-            .target_participant_count = std::nullopt,
-        };
+        ConSanFaultMutationPlan plan =
+            make_plan(ConSanFaultMutationKind::MoveBarrierPair, *primary);
+        plan.companion_identity = companion->identity;
+        plan.logical_sequence_identity = sequence->identity;
+        plan.selection_sequence_identity = sequence->identity;
+        plan.ordered_member_identities = sequence->member_event_identities;
+        plan.barrier_move_direction = options.fault_barrier_move_direction;
         if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::LegacyMarker) {
           result.fault_plans.push_back(std::move(plan));
         } else if (options.fault_barrier_destination_identity.empty()) {
@@ -532,16 +532,18 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   if (options.fault_mutate_barrier_id_scope) {
     const ConSanSyncSequence *sequence = nullptr;
     if (options.fault_barrier_sequence_identity.empty()) {
-      result.warnings.emplace_back(
-          "ConSan barrier ID/scope dry run requires an exact logical sequence identity");
+      reject_application(
+          "ConSan barrier ID/scope dry run requires an exact logical sequence identity",
+          "ConSan barrier ID/scope mutation requires an exact sequence identity and target ID");
     } else {
       const auto selected =
           std::ranges::find(sync.sync_sequences, options.fault_barrier_sequence_identity,
                             &ConSanSyncSequence::identity);
       if (selected == sync.sync_sequences.end()) {
-        result.warnings.emplace_back(
+        reject_application(
             "ConSan barrier ID/scope dry run found no logical sequence with exact identity '" +
-            options.fault_barrier_sequence_identity + "'");
+                options.fault_barrier_sequence_identity + "'",
+            "ConSan barrier ID/scope mutation requires an exact qualified two-member sequence");
       } else {
         sequence = &*selected;
       }
@@ -597,27 +599,18 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       } else {
         const ConSanBarrierLifecycleGroup *group =
             find_lifecycle_group_for_sequence(result, *sequence);
-        result.fault_plans.push_back(
-            {.kind = ConSanFaultMutationKind::BarrierIdScope,
-             .primary_identity = members[0]->identity,
-             .companion_identity = members[1]->identity,
-             .logical_sequence_identity = group != nullptr ? group->identity : sequence->identity,
-             .ordered_member_identities = group != nullptr ? group->member_event_identities
-                                                           : sequence->member_event_identities,
-             .destination_identity = std::nullopt,
-             .barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker,
-             .structured_guard_block_index = std::nullopt,
-             .structured_destination_block_index = std::nullopt,
-             .structured_source_block_index = std::nullopt,
-             .structured_guard_offset = std::nullopt,
-             .structured_destination_offset = std::nullopt,
-             .structured_source_offset = std::nullopt,
-             .original_barrier_id = sequence->barrier_id,
-             .target_barrier_id = options.fault_barrier_target_id,
-             .original_barrier_scope = sequence->barrier_scope,
-             .target_barrier_scope = target_scope,
-             .original_participant_count = std::nullopt,
-             .target_participant_count = std::nullopt});
+        ConSanFaultMutationPlan plan =
+            make_plan(ConSanFaultMutationKind::BarrierIdScope, *members[0]);
+        plan.companion_identity = members[1]->identity;
+        plan.logical_sequence_identity = group != nullptr ? group->identity : sequence->identity;
+        plan.selection_sequence_identity = sequence->identity;
+        plan.ordered_member_identities =
+            group != nullptr ? group->member_event_identities : sequence->member_event_identities;
+        plan.original_barrier_id = sequence->barrier_id;
+        plan.target_barrier_id = options.fault_barrier_target_id;
+        plan.original_barrier_scope = sequence->barrier_scope;
+        plan.target_barrier_scope = target_scope;
+        result.fault_plans.push_back(std::move(plan));
       }
     }
   }
@@ -648,26 +641,18 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       mark_participant_mutation_unsupported(
           result, "the target count must be a distinct value in the encodable range [1, 63]");
     } else {
-      result.fault_plans.push_back(
-          {.kind = ConSanFaultMutationKind::BarrierParticipantCount,
-           .primary_identity = group->member_event_identities.front(),
-           .companion_identity = std::nullopt,
-           .logical_sequence_identity = group->identity,
-           .ordered_member_identities = group->member_event_identities,
-           .destination_identity = std::nullopt,
-           .barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker,
-           .structured_guard_block_index = std::nullopt,
-           .structured_destination_block_index = std::nullopt,
-           .structured_source_block_index = std::nullopt,
-           .structured_guard_offset = std::nullopt,
-           .structured_destination_offset = std::nullopt,
-           .structured_source_offset = std::nullopt,
-           .original_barrier_id = group->barrier_id,
-           .target_barrier_id = group->barrier_id,
-           .original_barrier_scope = group->barrier_scope,
-           .target_barrier_scope = group->barrier_scope,
-           .original_participant_count = init->participant_count,
-           .target_participant_count = options.fault_barrier_target_participant_count});
+      ConSanFaultMutationPlan plan = make_named_plan(
+          ConSanFaultMutationKind::BarrierParticipantCount, group->member_event_identities.front());
+      plan.logical_sequence_identity = group->identity;
+      plan.selection_sequence_identity = selected->identity;
+      plan.ordered_member_identities = group->member_event_identities;
+      plan.original_barrier_id = group->barrier_id;
+      plan.target_barrier_id = group->barrier_id;
+      plan.original_barrier_scope = group->barrier_scope;
+      plan.target_barrier_scope = group->barrier_scope;
+      plan.original_participant_count = init->participant_count;
+      plan.target_participant_count = options.fault_barrier_target_participant_count;
+      result.fault_plans.push_back(std::move(plan));
     }
   }
   const ConSanFaultSite *atomic = nullptr;
@@ -675,16 +660,37 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       options.fault_atomic_weaken_scope) {
     atomic = select_fault_site_for_plan(result, options, ConSanFaultSiteKind::Atomic,
                                         options.fault_atomic_index);
+    if (atomic == nullptr) {
+      if (!options.fault_site_identity.empty()) {
+        result.warnings.emplace_back("ConSan atomic fault found no site with exact identity '" +
+                                     options.fault_site_identity + "'");
+      } else {
+        result.warnings.emplace_back(
+            "ConSan atomic fault found no patchable flat/global atomic at index " +
+            std::to_string(options.fault_atomic_index));
+      }
+    }
   }
   if (options.fault_atomic_wrong_address) {
     const AtomicFaultEncoding encoding =
         atomic == nullptr ? AtomicFaultEncoding::Unsupported
                           : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
-    if (!atomic_fault_supports_address(encoding)) {
-      result.warnings.emplace_back(
-          "ConSan fault dry run cannot rewrite the address for the selected atomic encoding");
+    if (atomic == nullptr) {
+      // The exact missing-site diagnostic above is authoritative.
+    } else if (!atomic_fault_supports_address(encoding)) {
+      reject_application(
+          "ConSan fault dry run cannot rewrite the address for the selected atomic encoding",
+          "ConSan atomic address fault is unsupported for the selected atomic encoding");
+    } else if (options.fault_atomic_address_delta == 0u ||
+               options.fault_atomic_address_delta % sizeof(uint32_t) != 0u ||
+               options.fault_atomic_address_delta > 0x7fffffu) {
+      result.errors.emplace_back(
+          "ConSan atomic address delta must be a positive aligned signed-24-bit offset");
     } else {
-      append_primary(ConSanFaultMutationKind::AtomicWrongAddress, atomic);
+      ConSanFaultMutationPlan plan =
+          make_plan(ConSanFaultMutationKind::AtomicWrongAddress, *atomic);
+      plan.address_delta_bytes = options.fault_atomic_address_delta;
+      result.fault_plans.push_back(std::move(plan));
     }
   }
   if (options.fault_atomic_weaken_order) {
@@ -721,42 +727,38 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         }
       }
     }
-    if (atomic == nullptr || (fence == nullptr && !release_wait_text_offset)) {
+    if (atomic == nullptr) {
+      // The exact missing-site diagnostic above is authoritative.
+    } else if (!atomic_fault_supports_order(encoding)) {
+      reject_application(
+          "ConSan fault dry run cannot weaken order for the selected atomic encoding",
+          "ConSan atomic order fault is unsupported for the selected atomic encoding");
+    } else if (fence == nullptr && !release_wait_text_offset) {
       result.warnings.emplace_back(
           "ConSan fault dry run found no qualified atomic ordering boundary to weaken");
     } else {
-      result.fault_plans.push_back(
-          {.kind = ConSanFaultMutationKind::AtomicWeakenOrder,
-           .primary_identity = atomic->identity,
-           .companion_identity =
-               fence != nullptr
-                   ? std::optional<std::string>(fence->identity)
-                   : std::optional<std::string>(sequence->identity + "|release-wait-boundary"),
-           .logical_sequence_identity = std::nullopt,
-           .ordered_member_identities = {},
-           .destination_identity = std::nullopt,
-           .barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker,
-           .structured_guard_block_index = std::nullopt,
-           .structured_destination_block_index = std::nullopt,
-           .structured_source_block_index = std::nullopt,
-           .structured_guard_offset = std::nullopt,
-           .structured_destination_offset = std::nullopt,
-           .structured_source_offset = std::nullopt,
-           .original_barrier_id = std::nullopt,
-           .target_barrier_id = std::nullopt,
-           .original_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-           .target_barrier_scope = ConSanBarrierSite::Scope::Unknown,
-           .original_participant_count = std::nullopt,
-           .target_participant_count = std::nullopt});
+      ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::AtomicWeakenOrder, *atomic);
+      plan.companion_identity =
+          fence != nullptr
+              ? std::optional<std::string>(fence->identity)
+              : std::optional<std::string>(sequence->identity + "|release-wait-boundary");
+      plan.logical_sequence_identity = sequence->identity;
+      plan.selection_sequence_identity = sequence->identity;
+      plan.ordered_member_identities = sequence->member_event_identities;
+      plan.atomic_order_edge = options.fault_atomic_order_edge;
+      result.fault_plans.push_back(std::move(plan));
     }
   }
   if (options.fault_atomic_weaken_scope) {
     const AtomicFaultEncoding encoding =
         atomic == nullptr ? AtomicFaultEncoding::Unsupported
                           : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
-    if (!atomic_fault_supports_scope(encoding)) {
-      result.warnings.emplace_back(
-          "ConSan fault dry run cannot weaken scope for the selected atomic encoding");
+    if (atomic == nullptr) {
+      // The exact missing-site diagnostic above is authoritative.
+    } else if (!atomic_fault_supports_scope(encoding)) {
+      reject_application(
+          "ConSan fault dry run cannot weaken scope for the selected atomic encoding",
+          "ConSan atomic scope fault is unsupported for the selected atomic encoding");
     } else {
       append_primary(ConSanFaultMutationKind::AtomicWeakenScope, atomic);
     }
@@ -764,7 +766,19 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   if (options.fault_lds_wrong_address) {
     const ConSanFaultSite *lds = select_fault_site_for_plan(
         result, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
-    append_primary(ConSanFaultMutationKind::LdsWrongAddress, lds);
+    if (lds == nullptr) {
+      append_primary(ConSanFaultMutationKind::LdsWrongAddress, lds);
+    } else if (!options.fault_lds_address_vgpr) {
+      result.errors.emplace_back("ConSan LDS address fault requires an explicit replacement VGPR");
+    } else if (!lds->address_vgpr || lds->address_vgpr == options.fault_lds_address_vgpr) {
+      result.errors.emplace_back(
+          "ConSan LDS address fault requires a distinct 8-bit replacement VGPR");
+    } else {
+      ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::LdsWrongAddress, *lds);
+      plan.original_address_vgpr = lds->address_vgpr;
+      plan.target_address_vgpr = options.fault_lds_address_vgpr;
+      result.fault_plans.push_back(std::move(plan));
+    }
   }
   if (options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
       options.fault_ordinary_weaken_scope) {
@@ -775,12 +789,21 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     } else {
       const auto append_ordinary = [&](ConSanFaultMutationKind kind,
                                        std::optional<std::string> companion) {
-        ConSanFaultMutationPlan plan;
-        plan.kind = kind;
-        plan.primary_identity = target->site->identity;
+        if (kind == ConSanFaultMutationKind::OrdinaryWrongAddress &&
+            (options.fault_ordinary_address_delta == 0u ||
+             options.fault_ordinary_address_delta % sizeof(uint32_t) != 0u ||
+             options.fault_ordinary_address_delta > 0x7fffffu)) {
+          result.errors.emplace_back(
+              "ConSan ordinary address delta must be a positive aligned signed-24-bit offset");
+          return;
+        }
+        ConSanFaultMutationPlan plan = make_plan(kind, *target->site);
         plan.companion_identity = std::move(companion);
         plan.logical_sequence_identity = target->sequence->identity;
+        plan.selection_sequence_identity = target->sequence->identity;
         plan.ordered_member_identities = target->sequence->member_event_identities;
+        if (kind == ConSanFaultMutationKind::OrdinaryWrongAddress)
+          plan.address_delta_bytes = options.fault_ordinary_address_delta;
         result.fault_plans.push_back(std::move(plan));
       };
       if (options.fault_ordinary_wrong_address)
@@ -790,6 +813,12 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       if (options.fault_ordinary_weaken_scope)
         append_ordinary(ConSanFaultMutationKind::OrdinaryWeakenScope, std::nullopt);
     }
+  }
+  if (std::ranges::any_of(result.fault_plans, [](const ConSanFaultMutationPlan &plan) {
+        return !plan.well_formed();
+      })) {
+    result.errors.emplace_back(
+        "ConSan fault planner produced an internally inconsistent typed mutation plan");
   }
   result.mutation.fault.planned = result.fault_plans.size();
   if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&

@@ -404,6 +404,20 @@ ConSanTransformArtifacts complete_consan_lowering(
   }
 }
 
+ConSanTransformArtifacts test_apply_consan_fault_plans(std::span<const uint8_t> code_object_bytes,
+                                                       const ConSanOptions &application_context,
+                                                       ConSanTransformArtifacts planned_artifacts) {
+  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
+                                                       code_object_bytes.data(),
+                                                       code_object_bytes.size());
+  AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
+  const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
+  apply_fault_mutation_to_inventory(code_object, arch, application_context,
+                                    planned_artifacts.fault_plans, planned_artifacts);
+  return finalize_consan_result(std::move(planned_artifacts), code_object_bytes,
+                                application_context.moi_report_dispatch_id);
+}
+
 ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes,
                                       const ConSanOptions &options) {
   return complete_consan_lowering(code_object_bytes, options);

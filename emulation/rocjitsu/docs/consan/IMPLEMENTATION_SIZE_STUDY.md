@@ -692,6 +692,47 @@ contracts rather than a second analysis/lowering path, and every remaining
 mutation-specific structure represents an actual fault or perturbation
 semantic.
 
+#### Stage 6 exit evidence
+
+Stage 6 is complete. `ConSanFaultMutationPlan` is now the immutable authority
+between pristine semantic selection and byte rewriting. Each plan is bound to
+the content identity of its source code object and carries the exact stable
+site and sequence identities plus the kind-specific rewrite payload: barrier
+group and movement proof, ID/scope and participant cardinality, atomic ordering
+edge, address displacement, or LDS source and replacement operands. Its closed
+`well_formed()` contract rejects irrelevant, incomplete, and invalid payload
+combinations before an emitter sees them.
+
+Fault application now consumes only retained typed plans and immutable
+`ProgramInventory`. It rejects stale-source, malformed, duplicate-kind, and
+inconsistently composed plans, then applies the site and payload selected by
+planning even when the surrounding request contains conflicting indices or
+values. The old request shape remains only as a private adapter into the
+existing per-family byte emitters; it has no site-selection authority and is a
+later target-lowering cleanup seam. The ordinary lowering path no longer
+contains a second raw-request fault-application call, and composed
+fault-plus-instrumentation transforms clear destructive mutation intent at one
+boundary before translating retained operating points into the replacement
+image.
+
+Direct unit tests cover every mutation kind, all kind-specific validity rules,
+invalid enum values, plan equality and result publication, source binding,
+duplicate and malformed rejection, and application under deliberately
+conflicting raw selection state. Existing cross-architecture mutation and
+composition tests continue to exercise every family through the typed
+dispatcher.
+
+Relative to the Stage 5 revision, production changes add 428 physical lines.
+The measured implementation is now 95,243 physical lines, 90,835 nonblank
+lines, and 83,929 comment-excluded code lines in the same 79 files: temporary
+increases of 428 physical, 416 nonblank, and 334 code lines to make the mutation
+boundary explicit and independently validatable before the family-emitter
+adapters are narrowed or deleted.
+
+The full checked-in ConSan gate passed all 5,282 tests at this revision,
+including 3,501 device tests and all 593 serialized physical-gfx950 tests.
+`ctest -j64` completed in 566.36 seconds wall time with no failures.
+
 ### Stage 7: delete residual flavor-private mechanics
 
 Once the shared placement, target-emission, synchronization, evidence/report,

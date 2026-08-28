@@ -227,6 +227,13 @@ bool TransformResult::well_formed() const {
   }
   if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
     return false;
+  if (mutation.fault.planned != fault_plans.size() ||
+      mutation.fault.applied > mutation.fault.planned ||
+      std::ranges::any_of(fault_plans, [&](const ConSanFaultMutationPlan &plan) {
+        return !plan.well_formed() || plan.source_code_object != code_object;
+      })) {
+    return false;
+  }
   if (evidence_intent_plan.has_value() != evidence_requirements.has_value())
     return false;
   if (evidence_intent_plan &&

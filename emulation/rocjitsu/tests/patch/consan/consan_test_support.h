@@ -57,6 +57,15 @@ namespace rocjitsu {
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {});
+
+/// Apply an already selected fault plan through the production mutation
+/// boundary. Tests use this entry to vary the original request after planning
+/// and prove that emitters obey the retained typed plan rather than selecting
+/// again from mutable flags, indices, or payload values.
+[[nodiscard]] ConSanTransformArtifacts
+test_apply_consan_fault_plans(std::span<const uint8_t> code_object_bytes,
+                              const ConSanOptions &application_context,
+                              ConSanTransformArtifacts planned_artifacts);
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {

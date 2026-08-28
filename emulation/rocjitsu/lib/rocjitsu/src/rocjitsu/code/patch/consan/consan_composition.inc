@@ -294,30 +294,200 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options,
   result.fault_plans.clear();
 }
 
+/// Remove every destructive fault kind while retaining independently planned
+/// perturbation policy. A composed instrumentation pass uses this boundary to
+/// ensure it cannot accidentally reapply the already committed fault.
+void clear_fault_mutation_kinds(MutationRequest &request) {
+  request.fault_drop_barrier = false;
+  request.fault_move_barrier = false;
+  request.fault_mutate_barrier_id_scope = false;
+  request.fault_mutate_barrier_participants = false;
+  request.fault_atomic_wrong_address = false;
+  request.fault_atomic_weaken_order = false;
+  request.fault_atomic_weaken_scope = false;
+  request.fault_lds_wrong_address = false;
+  request.fault_ordinary_wrong_address = false;
+  request.fault_ordinary_weaken_order = false;
+  request.fault_ordinary_weaken_scope = false;
+}
+
+/// Build the private compatibility input used by the existing family
+/// emitters. All mutation selection state is removed; the caller then fills it
+/// exclusively from one or more retained `ConSanFaultMutationPlan` values.
+/// Non-mutation context, such as an exact dispatch-owner filter, remains
+/// available while those emitters are incrementally narrowed.
+[[nodiscard]] ConSanOptions make_fault_application_options(const ConSanOptions &context) {
+  ConSanOptions options = context;
+  static_cast<MutationRequest &>(options) = MutationRequest{};
+  return options;
+}
+
+[[nodiscard]] const ConSanFaultMutationPlan *
+find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutationKind kind) {
+  const auto plan = std::ranges::find(plans, kind, &ConSanFaultMutationPlan::kind);
+  return plan == plans.end() ? nullptr : &*plan;
+}
+
+[[nodiscard]] bool validate_fault_application_plans(std::span<const ConSanFaultMutationPlan> plans,
+                                                    const ProgramInventory &inventory,
+                                                    ConSanTransformArtifacts &result) {
+  for (size_t index = 0; index < plans.size(); ++index) {
+    const ConSanFaultMutationPlan &plan = plans[index];
+    if (!plan.well_formed()) {
+      result.errors.emplace_back("ConSan fault application received malformed typed plan " +
+                                 std::to_string(index));
+      return false;
+    }
+    if (plan.source_code_object != inventory.code_object_id()) {
+      result.errors.emplace_back(
+          "ConSan fault application rejected a plan from a different pristine code object");
+      return false;
+    }
+    if (std::ranges::count(plans, plan.kind, &ConSanFaultMutationPlan::kind) != 1) {
+      result.errors.emplace_back(
+          "ConSan fault application received duplicate plans for one mutation kind");
+      return false;
+    }
+  }
+  return true;
+}
+
 void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                       const ConSanOptions &options,
+                                       const ConSanOptions &context,
+                                       std::span<const ConSanFaultMutationPlan> plans,
                                        ConSanTransformArtifacts &result) {
-  if (options.fault_drop_barrier)
+  if (!validate_fault_application_plans(plans, result.program_inventory, result))
+    return;
+
+  if (const ConSanFaultMutationPlan *plan =
+          find_fault_plan(plans, ConSanFaultMutationKind::DropBarrier)) {
+    ConSanOptions options = make_fault_application_options(context);
+    options.fault_drop_barrier = true;
+    options.fault_site_identity = plan->primary_identity;
+    options.fault_allow_destructive_incomplete_barrier_drop =
+        plan->destructive_incomplete_barrier_drop;
+    if (plan->selection_sequence_identity)
+      options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
+    if (plan->companion_selection_sequence_identity) {
+      options.fault_barrier_companion_site_identity = *plan->companion_identity;
+      options.fault_barrier_companion_sequence_identity =
+          *plan->companion_selection_sequence_identity;
+    }
     try_apply_barrier_drop_fault_patch(code_object, arch, options, result);
-  if (options.fault_move_barrier && result.errors.empty())
+  }
+  if (const ConSanFaultMutationPlan *plan =
+          find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);
+      plan != nullptr && result.errors.empty()) {
+    ConSanOptions options = make_fault_application_options(context);
+    options.fault_move_barrier = true;
+    options.fault_site_identity = plan->primary_identity;
+    options.fault_barrier_move_direction = plan->barrier_move_direction;
+    if (plan->destination_identity)
+      options.fault_barrier_destination_identity = *plan->destination_identity;
+    options.fault_allow_completing_conditional_barrier_move =
+        plan->barrier_move_cfg_contract ==
+        ConSanBarrierMoveCfgContract::CompletingStructuredDiamond;
+    options.fault_allow_destructive_divergent_barrier_move =
+        plan->barrier_move_cfg_contract ==
+        ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond;
     try_apply_barrier_move_fault_patch(code_object, arch, options, result);
-  if (options.fault_mutate_barrier_id_scope && result.errors.empty())
+  }
+  if (const ConSanFaultMutationPlan *plan =
+          find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);
+      plan != nullptr && result.errors.empty()) {
+    ConSanOptions options = make_fault_application_options(context);
+    options.fault_mutate_barrier_id_scope = true;
+    options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
+    options.fault_barrier_target_id = plan->target_barrier_id;
     try_apply_barrier_id_scope_fault_patch(code_object, options, result);
-  if (options.fault_mutate_barrier_participants && result.errors.empty() &&
-      result.outcome != ConSanTransformOutcome::Unsupported)
+  }
+  if (const ConSanFaultMutationPlan *plan =
+          find_fault_plan(plans, ConSanFaultMutationKind::BarrierParticipantCount);
+      plan != nullptr && result.errors.empty() &&
+      result.outcome != ConSanTransformOutcome::Unsupported) {
+    ConSanOptions options = make_fault_application_options(context);
+    options.fault_mutate_barrier_participants = true;
+    options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
+    options.fault_barrier_target_participant_count = plan->target_participant_count;
     try_apply_barrier_participant_fault_patch(code_object, options, result);
-  if ((options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-       options.fault_atomic_weaken_scope) &&
-      result.errors.empty())
-    try_apply_atomic_fault_patch(code_object, arch, options, result);
-  if (options.fault_lds_wrong_address && result.errors.empty())
-    try_apply_lds_fault_patch(code_object, arch, options, result);
-  if ((options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
-       options.fault_ordinary_weaken_scope) &&
-      result.errors.empty())
-    try_apply_ordinary_fault_patch(code_object, options, result);
+  }
+
+  const ConSanFaultMutationPlan *atomic_address =
+      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWrongAddress);
+  const ConSanFaultMutationPlan *atomic_order =
+      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenOrder);
+  const ConSanFaultMutationPlan *atomic_scope =
+      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenScope);
+  if ((atomic_address || atomic_order || atomic_scope) && result.errors.empty()) {
+    const ConSanFaultMutationPlan &primary =
+        atomic_address ? *atomic_address : (atomic_order ? *atomic_order : *atomic_scope);
+    if ((atomic_address && atomic_address->primary_identity != primary.primary_identity) ||
+        (atomic_order && atomic_order->primary_identity != primary.primary_identity) ||
+        (atomic_scope && atomic_scope->primary_identity != primary.primary_identity)) {
+      result.errors.emplace_back(
+          "ConSan atomic fault plans do not describe one composed semantic target");
+    } else {
+      ConSanOptions options = make_fault_application_options(context);
+      options.fault_site_identity = primary.primary_identity;
+      options.fault_atomic_wrong_address = atomic_address != nullptr;
+      options.fault_atomic_weaken_order = atomic_order != nullptr;
+      options.fault_atomic_weaken_scope = atomic_scope != nullptr;
+      if (atomic_address)
+        options.fault_atomic_address_delta = *atomic_address->address_delta_bytes;
+      if (atomic_order)
+        options.fault_atomic_order_edge = *atomic_order->atomic_order_edge;
+      try_apply_atomic_fault_patch(code_object, arch, options, result);
+    }
+  }
+  if (const ConSanFaultMutationPlan *plan =
+          find_fault_plan(plans, ConSanFaultMutationKind::LdsWrongAddress);
+      plan != nullptr && result.errors.empty()) {
+    const ConSanFaultSite *site =
+        find_fault_site_by_identity(result, plan->primary_identity, ConSanFaultSiteKind::LdsAccess);
+    if (site == nullptr || site->address_vgpr != plan->original_address_vgpr) {
+      result.errors.emplace_back(
+          "ConSan LDS fault plan no longer matches its pristine address operand");
+    } else {
+      ConSanOptions options = make_fault_application_options(context);
+      options.fault_lds_wrong_address = true;
+      options.fault_site_identity = plan->primary_identity;
+      options.fault_lds_address_vgpr = plan->target_address_vgpr;
+      try_apply_lds_fault_patch(code_object, arch, options, result);
+    }
+  }
+
+  const ConSanFaultMutationPlan *ordinary_address =
+      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWrongAddress);
+  const ConSanFaultMutationPlan *ordinary_order =
+      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenOrder);
+  const ConSanFaultMutationPlan *ordinary_scope =
+      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenScope);
+  if ((ordinary_address || ordinary_order || ordinary_scope) && result.errors.empty()) {
+    const ConSanFaultMutationPlan &primary =
+        ordinary_address ? *ordinary_address : (ordinary_order ? *ordinary_order : *ordinary_scope);
+    const auto same_target = [&](const ConSanFaultMutationPlan *plan) {
+      return plan == nullptr ||
+             (plan->primary_identity == primary.primary_identity &&
+              plan->selection_sequence_identity == primary.selection_sequence_identity &&
+              plan->ordered_member_identities == primary.ordered_member_identities);
+    };
+    if (!same_target(ordinary_address) || !same_target(ordinary_order) ||
+        !same_target(ordinary_scope)) {
+      result.errors.emplace_back(
+          "ConSan ordinary fault plans do not describe one composed semantic target");
+    } else {
+      ConSanOptions options = make_fault_application_options(context);
+      options.fault_site_identity = primary.primary_identity;
+      options.fault_ordinary_wrong_address = ordinary_address != nullptr;
+      options.fault_ordinary_weaken_order = ordinary_order != nullptr;
+      options.fault_ordinary_weaken_scope = ordinary_scope != nullptr;
+      if (ordinary_address)
+        options.fault_ordinary_address_delta = *ordinary_address->address_delta_bytes;
+      try_apply_ordinary_fault_patch(code_object, options, result);
+    }
+  }
   result.mutation.fault.applied = applied_fault_mutation_count(result);
-  if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
+  if (context.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
       result.mutation.fault.applied != 1u) {
     result.errors.emplace_back(
         "ConSan fault injection required exactly one applied mutation, got " +
@@ -333,7 +503,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
+    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {},
+    bool require_applicable_fault_plan = false) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -382,11 +553,12 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       build_perturbation_candidate_inventory(pristine_mutation_plan.program_inventory,
                                              pristine_perturbation);
       build_fault_mutation_plan(planning_options, pristine_mutation_plan.program_inventory.arch(),
-                                pristine_mutation_plan);
+                                pristine_mutation_plan, true);
       build_perturbation_plan(planning_options, pristine_perturbation, pristine_mutation_plan);
     } else {
-      pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options, {},
-                                                     std::nullopt, &pristine_perturbation);
+      pristine_mutation_plan =
+          try_patch_consan_impl(code_object_bytes, planning_options, {}, std::nullopt,
+                                &pristine_perturbation, {}, {}, true);
     }
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
@@ -429,7 +601,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
     const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-    apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
+    apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result.fault_plans,
+                                      fault_result);
     fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
                                           fault_options.moi_report_dispatch_id);
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
@@ -442,17 +615,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
     MoiOptions instrument_options = options;
     ConSanPreappliedMutationLayout instrument_preapplied;
-    instrument_options.fault_drop_barrier = false;
-    instrument_options.fault_move_barrier = false;
-    instrument_options.fault_mutate_barrier_id_scope = false;
-    instrument_options.fault_mutate_barrier_participants = false;
-    instrument_options.fault_atomic_wrong_address = false;
-    instrument_options.fault_atomic_weaken_order = false;
-    instrument_options.fault_atomic_weaken_scope = false;
-    instrument_options.fault_lds_wrong_address = false;
-    instrument_options.fault_ordinary_wrong_address = false;
-    instrument_options.fault_ordinary_weaken_order = false;
-    instrument_options.fault_ordinary_weaken_scope = false;
+    clear_fault_mutation_kinds(instrument_options);
     // Cardinality was enforced on the mutation stage. The subsequent
     // instrumentation-only pass has no mutation of its own to count.
     instrument_options.fault_require_exactly_one = false;
@@ -823,7 +986,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
   result.program_inventory = inventory_builder.view();
   if (options.fault_dry_run) {
-    build_fault_mutation_plan(options, arch, result);
+    build_fault_mutation_plan(options, arch, result, require_applicable_fault_plan);
     build_perturbation_plan(options, perturbation, result, carried_plans);
     return result;
   }
@@ -926,7 +1089,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
 
   finalize_sc_access_coverage_ledger(result);
-  apply_fault_mutation_to_inventory(*code_object, arch, options, result);
 
   return result;
 }

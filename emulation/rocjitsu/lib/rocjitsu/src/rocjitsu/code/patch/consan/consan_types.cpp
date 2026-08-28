@@ -59,6 +59,143 @@ namespace {
 
 } // namespace
 
+bool ConSanFaultMutationPlan::well_formed() const {
+  if (!source_code_object.valid() || primary_identity.empty())
+    return false;
+  const auto nonempty = [](const std::optional<std::string> &value) {
+    return !value || !value->empty();
+  };
+  if (!nonempty(companion_identity) || !nonempty(logical_sequence_identity) ||
+      !nonempty(selection_sequence_identity) || !nonempty(companion_selection_sequence_identity) ||
+      !nonempty(destination_identity))
+    return false;
+  for (const std::string &identity : ordered_member_identities) {
+    if (identity.empty())
+      return false;
+  }
+  const bool no_move = !destination_identity &&
+                       barrier_move_direction == ConSanBarrierMoveDirection::LegacyMarker &&
+                       barrier_move_cfg_contract == ConSanBarrierMoveCfgContract::SameBlock &&
+                       !structured_guard_block_index && !structured_destination_block_index &&
+                       !structured_source_block_index && !structured_guard_offset &&
+                       !structured_destination_offset && !structured_source_offset;
+  const bool no_barrier_retarget = !original_barrier_id && !target_barrier_id &&
+                                   original_barrier_scope == ConSanBarrierSite::Scope::Unknown &&
+                                   target_barrier_scope == ConSanBarrierSite::Scope::Unknown &&
+                                   !original_participant_count && !target_participant_count;
+  const bool no_address = !address_delta_bytes && !original_address_vgpr && !target_address_vgpr;
+  const bool sequence_present = logical_sequence_identity && !ordered_member_identities.empty();
+  const bool valid_delta = address_delta_bytes && *address_delta_bytes != 0u &&
+                           *address_delta_bytes % sizeof(uint32_t) == 0u &&
+                           *address_delta_bytes <= 0x7fffffu;
+  const auto valid_barrier_scope = [](ConSanBarrierSite::Scope scope) {
+    return scope == ConSanBarrierSite::Scope::Workgroup ||
+           scope == ConSanBarrierSite::Scope::Cluster;
+  };
+  const auto valid_atomic_edge = [](const std::optional<ConSanAtomicOrderEdge> &edge) {
+    if (!edge)
+      return false;
+    switch (*edge) {
+    case ConSanAtomicOrderEdge::Any:
+    case ConSanAtomicOrderEdge::Release:
+    case ConSanAtomicOrderEdge::Acquire:
+      return true;
+    }
+    return false;
+  };
+  switch (kind) {
+  case ConSanFaultMutationKind::DropBarrier:
+    return no_move && no_barrier_retarget && no_address && !atomic_order_edge &&
+           ((!companion_identity && !logical_sequence_identity && !selection_sequence_identity &&
+             !companion_selection_sequence_identity && ordered_member_identities.empty()) ||
+            (companion_identity && sequence_present && selection_sequence_identity &&
+             (!companion_selection_sequence_identity ||
+              *companion_selection_sequence_identity != *selection_sequence_identity))) &&
+           (!destructive_incomplete_barrier_drop || !companion_identity);
+  case ConSanFaultMutationKind::MoveBarrierPair: {
+    if (!companion_identity || !sequence_present || !selection_sequence_identity ||
+        companion_selection_sequence_identity || no_barrier_retarget == false || !no_address ||
+        atomic_order_edge || destructive_incomplete_barrier_drop)
+      return false;
+    if (barrier_move_direction == ConSanBarrierMoveDirection::LegacyMarker)
+      return !destination_identity &&
+             barrier_move_cfg_contract == ConSanBarrierMoveCfgContract::SameBlock &&
+             !structured_guard_block_index && !structured_destination_block_index &&
+             !structured_source_block_index && !structured_guard_offset &&
+             !structured_destination_offset && !structured_source_offset;
+    if (!destination_identity || (barrier_move_direction != ConSanBarrierMoveDirection::Earlier &&
+                                  barrier_move_direction != ConSanBarrierMoveDirection::Later))
+      return false;
+    const bool has_structured_coordinates =
+        structured_guard_block_index && structured_destination_block_index &&
+        structured_source_block_index && structured_guard_offset && structured_destination_offset &&
+        structured_source_offset;
+    switch (barrier_move_cfg_contract) {
+    case ConSanBarrierMoveCfgContract::SameBlock:
+      return !structured_guard_block_index && !structured_destination_block_index &&
+             !structured_source_block_index && !structured_guard_offset &&
+             !structured_destination_offset && !structured_source_offset;
+    case ConSanBarrierMoveCfgContract::CompletingStructuredDiamond:
+    case ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
+      return has_structured_coordinates;
+    }
+    return false;
+  }
+  case ConSanFaultMutationKind::BarrierIdScope:
+    return no_move && companion_identity && sequence_present && selection_sequence_identity &&
+           !companion_selection_sequence_identity && original_barrier_id && target_barrier_id &&
+           *original_barrier_id != *target_barrier_id &&
+           valid_barrier_scope(original_barrier_scope) &&
+           valid_barrier_scope(target_barrier_scope) && !original_participant_count &&
+           !target_participant_count && no_address && !atomic_order_edge &&
+           !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::BarrierParticipantCount:
+    return no_move && !companion_identity && sequence_present && selection_sequence_identity &&
+           !companion_selection_sequence_identity && original_barrier_id && target_barrier_id &&
+           *original_barrier_id == *target_barrier_id &&
+           valid_barrier_scope(original_barrier_scope) &&
+           original_barrier_scope == target_barrier_scope && original_participant_count &&
+           target_participant_count && *original_participant_count != 0u &&
+           *target_participant_count != 0u && *target_participant_count <= 63u &&
+           *original_participant_count != *target_participant_count && no_address &&
+           !atomic_order_edge && !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::AtomicWrongAddress:
+    return no_move && no_barrier_retarget && !companion_identity && !logical_sequence_identity &&
+           !selection_sequence_identity && !companion_selection_sequence_identity &&
+           ordered_member_identities.empty() && valid_delta && !original_address_vgpr &&
+           !target_address_vgpr && !atomic_order_edge && !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::AtomicWeakenOrder:
+    return no_move && no_barrier_retarget && companion_identity && sequence_present &&
+           selection_sequence_identity && !companion_selection_sequence_identity && no_address &&
+           valid_atomic_edge(atomic_order_edge) && !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::AtomicWeakenScope:
+    return no_move && no_barrier_retarget && !companion_identity && !logical_sequence_identity &&
+           !selection_sequence_identity && !companion_selection_sequence_identity &&
+           ordered_member_identities.empty() && no_address && !atomic_order_edge &&
+           !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::LdsWrongAddress:
+    return no_move && no_barrier_retarget && !companion_identity && !logical_sequence_identity &&
+           !selection_sequence_identity && !companion_selection_sequence_identity &&
+           ordered_member_identities.empty() && !address_delta_bytes && original_address_vgpr &&
+           target_address_vgpr && *original_address_vgpr != *target_address_vgpr &&
+           !atomic_order_edge && !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::OrdinaryWrongAddress:
+    return no_move && no_barrier_retarget && !companion_identity && sequence_present &&
+           selection_sequence_identity && !companion_selection_sequence_identity && valid_delta &&
+           !original_address_vgpr && !target_address_vgpr && !atomic_order_edge &&
+           !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::OrdinaryWeakenOrder:
+    return no_move && no_barrier_retarget && companion_identity && sequence_present &&
+           selection_sequence_identity && !companion_selection_sequence_identity && no_address &&
+           !atomic_order_edge && !destructive_incomplete_barrier_drop;
+  case ConSanFaultMutationKind::OrdinaryWeakenScope:
+    return no_move && no_barrier_retarget && !companion_identity && sequence_present &&
+           selection_sequence_identity && !companion_selection_sequence_identity && no_address &&
+           !atomic_order_edge && !destructive_incomplete_barrier_drop;
+  }
+  return false;
+}
+
 std::optional<uint16_t> consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
                                                         uint64_t text_file_offset,
                                                         uint64_t container_entry_text_offset,

@@ -6,6 +6,141 @@
 namespace rocjitsu {
 namespace {
 
+[[nodiscard]] ConSanFaultMutationPlan make_well_formed_fault_plan(ConSanFaultMutationKind kind) {
+  constexpr std::array<uint8_t, 3> source_bytes = {1u, 2u, 3u};
+  ConSanFaultMutationPlan plan;
+  plan.source_code_object = make_consan_code_object_id(source_bytes);
+  plan.kind = kind;
+  plan.primary_identity = "primary";
+  switch (kind) {
+  case ConSanFaultMutationKind::DropBarrier:
+    break;
+  case ConSanFaultMutationKind::MoveBarrierPair:
+    plan.companion_identity = "companion";
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"first", "second"};
+    plan.destination_identity = "destination";
+    plan.barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
+    break;
+  case ConSanFaultMutationKind::BarrierIdScope:
+    plan.companion_identity = "companion";
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"first", "second"};
+    plan.original_barrier_id = -1;
+    plan.target_barrier_id = -2;
+    plan.original_barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+    plan.target_barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+    break;
+  case ConSanFaultMutationKind::BarrierParticipantCount:
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"init", "join", "wait"};
+    plan.original_barrier_id = 1;
+    plan.target_barrier_id = 1;
+    plan.original_barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+    plan.target_barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+    plan.original_participant_count = 8u;
+    plan.target_participant_count = 4u;
+    break;
+  case ConSanFaultMutationKind::AtomicWrongAddress:
+    plan.address_delta_bytes = 4u;
+    break;
+  case ConSanFaultMutationKind::AtomicWeakenOrder:
+    plan.companion_identity = "release-boundary";
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"release-boundary", "atomic"};
+    plan.atomic_order_edge = ConSanAtomicOrderEdge::Release;
+    break;
+  case ConSanFaultMutationKind::AtomicWeakenScope:
+    break;
+  case ConSanFaultMutationKind::LdsWrongAddress:
+    plan.original_address_vgpr = 2u;
+    plan.target_address_vgpr = 6u;
+    break;
+  case ConSanFaultMutationKind::OrdinaryWrongAddress:
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"load", "cache"};
+    plan.address_delta_bytes = 4u;
+    break;
+  case ConSanFaultMutationKind::OrdinaryWeakenOrder:
+    plan.companion_identity = "cache";
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"load", "cache"};
+    break;
+  case ConSanFaultMutationKind::OrdinaryWeakenScope:
+    plan.logical_sequence_identity = "logical";
+    plan.selection_sequence_identity = "selection";
+    plan.ordered_member_identities = {"load", "cache"};
+    break;
+  }
+  return plan;
+}
+
+TEST(ConSan, FaultMutationPlanValidatesEverySemanticPayloadKind) {
+  constexpr std::array kinds = {
+      ConSanFaultMutationKind::DropBarrier,
+      ConSanFaultMutationKind::MoveBarrierPair,
+      ConSanFaultMutationKind::BarrierIdScope,
+      ConSanFaultMutationKind::BarrierParticipantCount,
+      ConSanFaultMutationKind::AtomicWrongAddress,
+      ConSanFaultMutationKind::AtomicWeakenOrder,
+      ConSanFaultMutationKind::AtomicWeakenScope,
+      ConSanFaultMutationKind::LdsWrongAddress,
+      ConSanFaultMutationKind::OrdinaryWrongAddress,
+      ConSanFaultMutationKind::OrdinaryWeakenOrder,
+      ConSanFaultMutationKind::OrdinaryWeakenScope,
+  };
+  for (const ConSanFaultMutationKind kind : kinds) {
+    SCOPED_TRACE(static_cast<uint32_t>(kind));
+    const ConSanFaultMutationPlan plan = make_well_formed_fault_plan(kind);
+    EXPECT_TRUE(plan.well_formed());
+    EXPECT_EQ(plan, plan);
+  }
+
+  ConSanFaultMutationPlan missing_source =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::AtomicWrongAddress);
+  missing_source.source_code_object = {};
+  EXPECT_FALSE(missing_source.well_formed());
+
+  ConSanFaultMutationPlan invalid_delta =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::OrdinaryWrongAddress);
+  invalid_delta.address_delta_bytes = 2u;
+  EXPECT_FALSE(invalid_delta.well_formed());
+
+  ConSanFaultMutationPlan foreign_payload =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::AtomicWeakenScope);
+  foreign_payload.target_address_vgpr = 7u;
+  EXPECT_FALSE(foreign_payload.well_formed());
+
+  ConSanFaultMutationPlan invalid_kind =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::DropBarrier);
+  invalid_kind.kind = static_cast<ConSanFaultMutationKind>(255u);
+  EXPECT_FALSE(invalid_kind.well_formed());
+
+  ConSanFaultMutationPlan invalid_edge =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::AtomicWeakenOrder);
+  invalid_edge.atomic_order_edge = static_cast<ConSanAtomicOrderEdge>(255u);
+  EXPECT_FALSE(invalid_edge.well_formed());
+
+  ConSanFaultMutationPlan invalid_move =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::MoveBarrierPair);
+  invalid_move.barrier_move_cfg_contract = static_cast<ConSanBarrierMoveCfgContract>(255u);
+  EXPECT_FALSE(invalid_move.well_formed());
+  invalid_move = make_well_formed_fault_plan(ConSanFaultMutationKind::MoveBarrierPair);
+  invalid_move.barrier_move_direction = static_cast<ConSanBarrierMoveDirection>(255u);
+  EXPECT_FALSE(invalid_move.well_formed());
+
+  ConSanFaultMutationPlan invalid_scope =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::BarrierIdScope);
+  invalid_scope.target_barrier_scope = static_cast<ConSanBarrierSite::Scope>(255u);
+  EXPECT_FALSE(invalid_scope.well_formed());
+}
+
 std::vector<uint8_t> make_lds_address_fault_code_object(rj_code_arch_t arch) {
   const auto access =
       instrumentation::build_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/4u, arch);
@@ -25,6 +160,88 @@ std::vector<uint8_t> make_lds_address_fault_code_object(rj_code_arch_t arch) {
   default:
     return {};
   }
+}
+
+TEST(ConSan, FaultApplicationConsumesRetainedPlanInsteadOfReselectingFromRequest) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
+  ConSanOptions planning;
+  planning.flavor = ConSanFlavor::SuperCollider;
+  planning.fault_atomic_wrong_address = true;
+  planning.fault_atomic_index = 1u;
+  planning.fault_atomic_address_delta = 8u;
+  planning.fault_dry_run = true;
+  const ConSanTransformArtifacts planned = test_lower_consan(bytes, planning);
+  ASSERT_TRUE(planned.errors.empty()) << testing::PrintToString(planned.errors);
+  ASSERT_EQ(planned.fault_sites.size(), 2u);
+  ASSERT_EQ(planned.fault_plans.size(), 1u);
+  ASSERT_TRUE(planned.fault_plans.front().well_formed());
+  EXPECT_EQ(planned.fault_plans.front().primary_identity, planned.fault_sites[1].identity);
+  EXPECT_EQ(planned.fault_plans.front().address_delta_bytes, 8u);
+
+  // Every legacy selection input now disagrees with the retained plan. The
+  // typed application boundary must still rewrite the planned second site by
+  // the planned eight-byte delta.
+  ConSanOptions conflicting_context = planning;
+  conflicting_context.fault_dry_run = false;
+  conflicting_context.fault_require_exactly_one = true;
+  conflicting_context.fault_atomic_index = 0u;
+  conflicting_context.fault_site_identity = planned.fault_sites[0].identity;
+  conflicting_context.fault_atomic_address_delta = 4u;
+  const ConSanTransformArtifacts applied =
+      test_apply_consan_fault_plans(bytes, conflicting_context, planned);
+  ASSERT_EQ(applied.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(applied.errors);
+  ASSERT_EQ(applied.patches.size(), 1u);
+  EXPECT_EQ(applied.patches.front().kind, ConSanPatchKind::InlineAtomicAddressRewrite);
+  EXPECT_EQ(applied.patches.front().anchor_offset, planned.fault_sites[1].text_offset);
+  uint32_t rewritten_offset_word = 0;
+  std::memcpy(&rewritten_offset_word,
+              applied.replacement.data() + planned.fault_sites[1].file_offset +
+                  2u * sizeof(uint32_t),
+              sizeof(rewritten_offset_word));
+  EXPECT_EQ(rewritten_offset_word >> 8u, 8u);
+}
+
+TEST(ConSan, FaultApplicationRejectsMalformedForeignAndDuplicatePlans) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_atomic_wrong_address = true;
+  options.fault_atomic_address_delta = 4u;
+  options.fault_dry_run = true;
+  const ConSanTransformArtifacts planned = test_lower_consan(bytes, options);
+  ASSERT_EQ(planned.fault_plans.size(), 1u);
+  options.fault_dry_run = false;
+
+  ConSanTransformArtifacts malformed = planned;
+  malformed.fault_plans.front().address_delta_bytes.reset();
+  const ConSanTransformArtifacts malformed_result =
+      test_apply_consan_fault_plans(bytes, options, std::move(malformed));
+  EXPECT_EQ(malformed_result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(malformed_result.replacement.empty());
+  EXPECT_TRUE(std::ranges::any_of(malformed_result.errors, [](const std::string &error) {
+    return error.find("malformed typed plan") != std::string::npos;
+  }));
+
+  ConSanTransformArtifacts foreign = planned;
+  ++foreign.fault_plans.front().source_code_object.collision_verifier;
+  const ConSanTransformArtifacts foreign_result =
+      test_apply_consan_fault_plans(bytes, options, std::move(foreign));
+  EXPECT_EQ(foreign_result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(foreign_result.replacement.empty());
+  EXPECT_TRUE(std::ranges::any_of(foreign_result.errors, [](const std::string &error) {
+    return error.find("different pristine code object") != std::string::npos;
+  }));
+
+  ConSanTransformArtifacts duplicate = planned;
+  duplicate.fault_plans.push_back(duplicate.fault_plans.front());
+  const ConSanTransformArtifacts duplicate_result =
+      test_apply_consan_fault_plans(bytes, options, std::move(duplicate));
+  EXPECT_EQ(duplicate_result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(duplicate_result.replacement.empty());
+  EXPECT_TRUE(std::ranges::any_of(duplicate_result.errors, [](const std::string &error) {
+    return error.find("duplicate plans") != std::string::npos;
+  }));
 }
 
 TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch) {

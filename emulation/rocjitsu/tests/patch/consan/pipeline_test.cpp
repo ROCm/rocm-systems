@@ -307,7 +307,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.replacement = {0x7f, 'E', 'L', 'F'};
   mechanism.fault_sites.emplace_back().identity = "published-fault-site";
   mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
-  mechanism.fault_plans.emplace_back().primary_identity = "published-fault-plan";
+  ConSanFaultMutationPlan published_fault_plan;
+  published_fault_plan.source_code_object = inventory.code_object_id();
+  published_fault_plan.kind = ConSanFaultMutationKind::DropBarrier;
+  published_fault_plan.primary_identity = "published-fault-plan";
+  mechanism.fault_plans.push_back(std::move(published_fault_plan));
   mechanism.mutation.fault = {.requested = 1u, .planned = 1u, .applied = 1u};
   mechanism.resource_plans.emplace_back().candidate_index = 7u;
   mechanism.warnings.emplace_back("published-warning");
@@ -345,6 +349,12 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   EXPECT_EQ(published.barrier_move_destinations.front().identity, "published-destination");
   ASSERT_EQ(published.fault_plans.size(), 1u);
   EXPECT_EQ(published.fault_plans.front().primary_identity, "published-fault-plan");
+  TransformResult malformed_fault_plan = published;
+  malformed_fault_plan.fault_plans.front().source_code_object = {};
+  EXPECT_FALSE(malformed_fault_plan.well_formed());
+  malformed_fault_plan = published;
+  malformed_fault_plan.mutation.fault.planned = 0u;
+  EXPECT_FALSE(malformed_fault_plan.well_formed());
   ASSERT_EQ(published.resource_plans.size(), 1u);
   EXPECT_EQ(published.resource_plans.front().candidate_index, 7u);
   EXPECT_EQ(published.mutation.fault,
@@ -936,7 +946,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
 
   MutationRequest mutation;
   mutation.fault_lds_wrong_address = true;
-  mutation.fault_lds_address_vgpr = 0;
+  mutation.fault_lds_address_vgpr = 4;
   mutation.fault_dry_run = true;
   TransformResult mutated = transform_consan_with_mutation(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
@@ -945,6 +955,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
   EXPECT_FALSE(mutated.fault_sites.empty());
   EXPECT_FALSE(mutated.fault_plans.empty());
+  EXPECT_EQ(mutated.fault_plans.front().target_address_vgpr, 4u);
   EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
 }
 
