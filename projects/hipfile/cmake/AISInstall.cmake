@@ -79,11 +79,12 @@ if(CMAKE_HIP_PLATFORM STREQUAL "amd")
     set(_rocm_major "${CMAKE_MATCH_1}")
     set(_rocm_minor "${CMAKE_MATCH_2}")
     if(_rocm_major GREATER 7 OR (_rocm_major EQUAL 7 AND _rocm_minor GREATER_EQUAL 11))
-        # 7.11+ ships runtime + dev as a single amdrocm-runtime-dev<MAJOR>.<MINOR>
-        # meta-package on repo.amd.com; rocm-core, hip-runtime-amd, and hip-dev
-        # do not exist there, so suppress rocm-cmake's auto-added rocm-core dep.
+        # rocm-core is a meta-package all legacy ROCm packages depend on. It does not
+        # exist in the current ROCm package repository.
+        # Suppress rocm-cmake's auto-added rocm-core dependency.
         set(ROCM_DEP_ROCMCORE OFF CACHE BOOL "" FORCE)
         rocm_package_add_deb_dependencies(DEPENDS "amdrocm-runtime-dev${_rocm_major}.${_rocm_minor}")
+        rocm_package_add_rpm_dependencies(DEPENDS "amdrocm-runtime-devel${_rocm_major}.${_rocm_minor}")
     else()
         rocm_package_add_dependencies(DEPENDS hip-runtime-amd) # Need minimum version
         rocm_package_add_deb_dependencies(DEPENDS hip-dev) # Need minimum version
