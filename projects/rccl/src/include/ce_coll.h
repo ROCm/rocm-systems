@@ -98,7 +98,7 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
-  size_t ceArMaxBytes;     // resolved at init: env var RCCL_CE_AR_MAX_MSG_BYTES > arch table ceArMax
+  size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
   size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
