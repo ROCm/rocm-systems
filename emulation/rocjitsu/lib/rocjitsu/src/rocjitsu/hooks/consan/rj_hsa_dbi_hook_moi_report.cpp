@@ -1908,13 +1908,17 @@ private:
       log_message(kLogInfo,
                   "ConSan MOI auto atomic reader=%llu index=%u event_index=%u kind=%u owner=%u "
                   "generation=%llu epoch=%u workgroup=(%u,%u,%u) inst=0x%x address=0x%llx "
-                  "scope=%u semantics=%u",
+                  "scope=%u semantics=%u operation=%u outcome=%u lane_mask=0x%llx "
+                  "success_lane_mask=0x%llx",
                   static_cast<unsigned long long>(entry.reader), i, record.event_index,
                   static_cast<uint32_t>(record.kind), record.owner_id,
                   static_cast<unsigned long long>(record.generation), record.epoch,
                   record.workgroup_x, record.workgroup_y, record.workgroup_z,
                   record.instruction_offset, static_cast<unsigned long long>(record.atomic_address),
-                  record.scope, record.semantics);
+                  record.scope, record.semantics, static_cast<uint32_t>(record.operation),
+                  static_cast<uint32_t>(record.outcome),
+                  static_cast<unsigned long long>(record.lane_mask),
+                  static_cast<unsigned long long>(record.success_lane_mask));
     }
     const uint32_t diagnostic_sample_count = consan_moi_auto_detail_log_count(visible_diagnostics);
     for (uint32_t i = 0; i < diagnostic_sample_count; ++i) {

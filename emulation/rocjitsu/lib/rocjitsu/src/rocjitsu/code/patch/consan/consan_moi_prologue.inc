@@ -2659,18 +2659,35 @@ void try_apply_owner_epoch_prologue_patch(
       }
       const uint16_t sgpr_base = needs_full_entry_scalar_backup ? *kernel_options.moi_exec_save_sgpr
                                                                 : *kernel_options.moi_owner_sgpr;
-      const uint16_t sgpr_count =
+      const uint16_t borrowed_sgpr_count =
           needs_full_entry_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
-      if (sgpr_count == 0u || !moi_entry_scalar_backup_preserves_persistent_outputs(
-                                  kernel_options, sgpr_base, sgpr_count)) {
-        result.errors.emplace_back(
-            "ConSan MOI entry scalar backup overlaps persistent output state");
-        return;
-      }
       const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
       if (!original_descriptor) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup descriptor exceeds original ELF bytes");
+        return;
+      }
+      if (borrowed_sgpr_count == 0u) {
+        result.errors.emplace_back("ConSan MOI entry scalar backup has an empty borrowed window");
+        return;
+      }
+      const uint32_t guest_entry_sgpr_count =
+          moi_descriptor_user_sgpr_count(*original_descriptor) +
+          moi_descriptor_system_sgpr_count(*original_descriptor);
+      const uint32_t backup_end = std::min<uint32_t>(
+          static_cast<uint32_t>(sgpr_base) + borrowed_sgpr_count, guest_entry_sgpr_count);
+      const uint16_t sgpr_count =
+          sgpr_base < backup_end ? static_cast<uint16_t>(backup_end - sgpr_base) : 0u;
+
+      // The hardware initializes only the descriptor-declared user and system
+      // SGPR prefix. Values above that prefix are undefined at kernel entry;
+      // restoring them later can overwrite guest values written after entry
+      // if the prologue's VALU lane transfers are still retiring. Preserve
+      // only the initialized intersection of the borrowed scalar window.
+      if (sgpr_count != 0u && !moi_entry_scalar_backup_preserves_persistent_outputs(
+                                  kernel_options, sgpr_base, sgpr_count)) {
+        result.errors.emplace_back(
+            "ConSan MOI entry scalar backup overlaps persistent output state");
         return;
       }
       if (sgpr_count > kernel_wavefront_size(arch, *original_descriptor)) {
@@ -2680,48 +2697,50 @@ void try_apply_owner_epoch_prologue_patch(
         return;
       }
 
-      const uint32_t entry_abi_vgpr_count = *workitem_id_dimensions;
-      const uint32_t original_allocation =
-          descriptor_ordinary_vgpr_allocation_count(*original_descriptor, arch);
-      const uint32_t unified_allocation =
-          descriptor_vgpr_allocation_count(*original_descriptor, arch);
-      const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
-      const uint32_t tail_begin = std::max(original_allocation, entry_abi_vgpr_count);
-      const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
-      std::optional<uint16_t> backup_vgpr;
-      for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
-        if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
-                                                static_cast<uint16_t>(candidate), arch)) {
-          backup_vgpr = static_cast<uint16_t>(candidate);
-          break;
+      if (sgpr_count != 0u) {
+        const uint32_t entry_abi_vgpr_count = *workitem_id_dimensions;
+        const uint32_t original_allocation =
+            descriptor_ordinary_vgpr_allocation_count(*original_descriptor, arch);
+        const uint32_t unified_allocation =
+            descriptor_vgpr_allocation_count(*original_descriptor, arch);
+        const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
+        const uint32_t tail_begin = std::max(original_allocation, entry_abi_vgpr_count);
+        const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
+        std::optional<uint16_t> backup_vgpr;
+        for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
+                                                  static_cast<uint16_t>(candidate), arch)) {
+            backup_vgpr = static_cast<uint16_t>(candidate);
+            break;
+          }
         }
-      }
-      // The value of every non-ABI ordinary VGPR is dead at hardware entry.
-      // If an AccVGPR boundary or a full ordinary file leaves no fresh tail,
-      // reuse a lower entry-local carrier while excluding the exact VGPRs
-      // consumed by this prologue. Guest uses are safe because the scalar
-      // window is restored before the displaced guest entry executes.
-      for (uint32_t candidate = entry_abi_vgpr_count;
-           !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
-        if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
-                                                static_cast<uint16_t>(candidate), arch)) {
-          backup_vgpr = static_cast<uint16_t>(candidate);
+        // The value of every non-ABI ordinary VGPR is dead at hardware entry.
+        // If an AccVGPR boundary or a full ordinary file leaves no fresh tail,
+        // reuse a lower entry-local carrier while excluding the exact VGPRs
+        // consumed by this prologue. Guest uses are safe because the scalar
+        // window is restored before the displaced guest entry executes.
+        for (uint32_t candidate = entry_abi_vgpr_count;
+             !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
+                                                  static_cast<uint16_t>(candidate), arch)) {
+            backup_vgpr = static_cast<uint16_t>(candidate);
+          }
         }
+        if (!backup_vgpr) {
+          result.outcome = ConSanTransformOutcome::Unsupported;
+          result.warnings.emplace_back(has_live_accvgpr_bank
+                                           ? "ConSan MOI entry scalar backup has no entry-local "
+                                             "ordinary VGPR below the AccVGPR boundary"
+                                           : "ConSan MOI entry scalar backup has no entry-local "
+                                             "VGPR carrier");
+          return;
+        }
+        entry_scalar_backup = MoiEntryScalarBackup{
+            .vgpr = *backup_vgpr,
+            .sgpr_base = sgpr_base,
+            .sgpr_count = sgpr_count,
+        };
       }
-      if (!backup_vgpr) {
-        result.outcome = ConSanTransformOutcome::Unsupported;
-        result.warnings.emplace_back(has_live_accvgpr_bank
-                                         ? "ConSan MOI entry scalar backup has no entry-local "
-                                           "ordinary VGPR below the AccVGPR boundary"
-                                         : "ConSan MOI entry scalar backup has no entry-local "
-                                           "VGPR carrier");
-        return;
-      }
-      entry_scalar_backup = MoiEntryScalarBackup{
-          .vgpr = *backup_vgpr,
-          .sgpr_base = sgpr_base,
-          .sgpr_count = sgpr_count,
-      };
     }
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {

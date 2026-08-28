@@ -2521,6 +2521,10 @@ bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
   }
 }
 
+bool is_sdma_copy_signal_op(uint32_t op) {
+  return op == sdma::COPY_LINEAR_SIGNAL_OP_ADD64 || op == sdma::COPY_LINEAR_SIGNAL_OP_SUB64;
+}
+
 } // namespace
 
 void CommandProcessor::flush_gpu_caches() {
@@ -2646,9 +2650,22 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
            (sdma_caps.compact_wait_signal_copy &&
             (header &
              (sdma::COPY_LINEAR_INDIRECT_SRC_FLAG | sdma::COPY_LINEAR_INDIRECT_DST_FLAG))))) {
-        const bool compact_layout = sdma_caps.compact_wait_signal_copy;
         const bool has_wait = (header & (1u << 30)) != 0;
         const bool has_signal = (header & (1u << 31)) != 0;
+        bool compact_layout = sdma_caps.compact_wait_signal_copy;
+        // ROCr versions paired with newer gfx1250 toolchains can emit the
+        // GFX11-style fixed 19-DWORD signal-only form even though older
+        // gfx1250 runtimes omit the disabled WAIT block. Distinguish the two
+        // forms by their completion operation: compact places it at DW7,
+        // while fixed places it at DW14. Both layouts coincide whenever WAIT
+        // is present.
+        if (compact_layout && !has_wait && has_signal &&
+            rpos + sdma::COPY_LINEAR_FIXED_DWORDS <= wpos &&
+            !is_sdma_copy_signal_op(dw(1 + sdma::COPY_LINEAR_BODY_DWORDS) & 0x7F) &&
+            is_sdma_copy_signal_op(
+                dw(1 + sdma::COPY_LINEAR_WAIT_DWORDS + sdma::COPY_LINEAR_BODY_DWORDS) & 0x7F)) {
+          compact_layout = false;
+        }
         // projects/rocr-runtime/runtime/hsa-runtime/core/inc/sdma_registers.h
         // defines the gfx1250 packet as a maximum-size layout and explicitly
         // states that disabled WAIT/SIGNAL blocks are absent. Its

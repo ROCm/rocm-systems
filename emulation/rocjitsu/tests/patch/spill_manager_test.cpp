@@ -770,6 +770,9 @@ TEST(SpillManager, BuildsLaneBackedScalarSpillAcrossEveryConSanArchitecture) {
 
     std::vector<uint32_t> expected_save;
     std::vector<uint32_t> expected_restore;
+    const auto scalar_load_wait = instrumentation::build_s_wait_scalar_load0(target.arch);
+    ASSERT_TRUE(scalar_load_wait);
+    expected_save.push_back(*scalar_load_wait);
     for (uint16_t lane = 0u; lane < kSgprCount; ++lane) {
       const uint16_t sgpr = static_cast<uint16_t>(kSgprBase + lane);
       const auto save =
@@ -885,12 +888,13 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
     EXPECT_EQ(projected.slot_offsets, sequence->slot_offsets);
     EXPECT_EQ(projected.save_words, sequence->save_words);
     EXPECT_EQ(projected.restore_words, sequence->restore_words);
-    ASSERT_EQ(sequence->save_words.size(), rdna3 ? 21u : 26u);
+    ASSERT_EQ(sequence->save_words.size(), rdna3 ? 22u : 27u);
     ASSERT_EQ(sequence->restore_words.size(), rdna3 ? 17u : 22u);
-    const size_t save_tail = rdna3 ? 12u : 17u;
+    const size_t save_tail = rdna3 ? 13u : 18u;
     ASSERT_TRUE(wait_load && wait_store);
     EXPECT_EQ(sequence->save_words.front(), *wait_load);
     EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(arch));
+    EXPECT_EQ(sequence->save_words[2], *instrumentation::build_s_wait_scalar_load0(arch));
     EXPECT_EQ(sequence->save_words[save_tail], *wait_store);
     EXPECT_EQ(sequence->save_words[save_tail + 1u],
               rdna3 ? *build_rdna3_v_mov_b32(/*vdst=*/4u, /*s2=*/2u, arch)
@@ -1037,6 +1041,9 @@ TEST(SpillManager, ComposesDynamicStackVgprAndSgprFramesAcrossArchitectures) {
 
     std::vector<uint32_t> expected_save;
     std::vector<uint32_t> expected_restore;
+    const auto scalar_load_wait = instrumentation::build_s_wait_scalar_load0(target.arch);
+    ASSERT_TRUE(scalar_load_wait);
+    expected_save.push_back(*scalar_load_wait);
     for (uint16_t index = 0; index < kSgprCount; ++index) {
       const uint16_t source_sgpr = static_cast<uint16_t>(kSgprBase + index);
       const uint32_t byte_offset =

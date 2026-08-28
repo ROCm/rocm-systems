@@ -1051,6 +1051,20 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       words.push_back(*intersect_lo);
       words.push_back(*intersect_hi);
     }
+    // VCC bits outside EXEC are architecturally unspecified after a vector
+    // compare. Simulators commonly leave them clear, but physical gfx1201 can
+    // retain arbitrary values there. Only lanes that executed the guest CAS
+    // have an outcome, so canonicalize both halves before publishing them.
+    const auto active_success_lo =
+        instrumentation::build_v_and_b32(success_lo, kRdna4ExecLo, success_lo, arch);
+    const auto active_success_hi =
+        instrumentation::build_v_and_b32(success_hi, kRdna4ExecHi, success_hi, arch);
+    if (!active_success_lo || !active_success_hi) {
+      errors.emplace_back("ConSan MOI atomic record CAS could not mask inactive outcome lanes");
+      return std::nullopt;
+    }
+    words.push_back(*active_success_lo);
+    words.push_back(*active_success_hi);
   }
   const auto save_active_exec =
       instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);

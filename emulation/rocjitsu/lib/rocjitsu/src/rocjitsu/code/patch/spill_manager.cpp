@@ -265,7 +265,8 @@ std::optional<SgprSpillSequence> build_sgpr_spill_sequence(SpillManager &manager
                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
-  if (!required_private_bytes || !wait_store || !wait_load)
+  const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!required_private_bytes || !wait_store || !wait_load || !wait_scalar_load)
     return std::nullopt;
 
   SgprSpillSequence sequence;
@@ -273,8 +274,9 @@ std::optional<SgprSpillSequence> build_sgpr_spill_sequence(SpillManager &manager
   sequence.sgpr_count = sgpr_count;
   sequence.memory_transfer_vgpr = transfer_vgpr;
   sequence.memory_slot_store_words.reserve(sgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 4u + 1u);
+  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 4u + 2u);
   sequence.restore_words.reserve(static_cast<size_t>(sgpr_count) * 5u);
+  sequence.save_words.push_back(*wait_scalar_load);
   for (uint16_t i = 0; i < sgpr_count; ++i) {
     const uint16_t sgpr = static_cast<uint16_t>(sgpr_base + i);
     const auto offset = planned_manager.offset_for(RegisterRef{RegClass::SGPR, sgpr, 1u});
@@ -336,7 +338,8 @@ build_lane_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count, uint16_t
     return std::nullopt;
   }
   const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
-  if (!restore_wait)
+  const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!restore_wait || !wait_scalar_load)
     return std::nullopt;
 
   SgprSpillSequence sequence;
@@ -344,8 +347,13 @@ build_lane_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count, uint16_t
   sequence.sgpr_count = sgpr_count;
   sequence.total_private_bytes = total_private_bytes;
   sequence.lane_reservoir_vgpr = reservoir_vgpr;
-  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 2u);
+  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 2u + 1u);
   sequence.restore_words.reserve(static_cast<size_t>(sgpr_count) * 2u + 1u);
+  // A borrowed SGPR can still be the destination of an outstanding scalar
+  // load whose original consumer wait follows this patch point. Drain that
+  // load before the VALU observes the register, or the epilogue can restore a
+  // stale value over the load's eventual result.
+  sequence.save_words.push_back(*wait_scalar_load);
   for (uint16_t lane = 0u; lane < sgpr_count; ++lane) {
     const uint16_t sgpr = static_cast<uint16_t>(sgpr_base + lane);
     const auto save = instrumentation::build_v_writelane_b32(reservoir_vgpr, sgpr, lane, arch);
@@ -574,7 +582,9 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
           ? build_rdna3_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch)
           : build_rdna4_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch);
   const auto wait_lds = instrumentation::build_s_wait_lds0(arch);
-  if (!wait_store || !wait_load || !wait_lds || !capture_scc || !advance_stack || !restore_scc)
+  const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!wait_store || !wait_load || !wait_lds || !wait_scalar_load || !capture_scc ||
+      !advance_stack || !restore_scc)
     return std::nullopt;
 
   DynamicStackBorrowedSgprSpillSequence sequence;
@@ -585,12 +595,13 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   sequence.total_private_bytes = *total_private_bytes;
   sequence.dynamic_frame_bytes = static_cast<uint32_t>(frame_bytes);
   sequence.slot_offsets.reserve(vgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 13u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 14u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 9u);
   std::vector<uint32_t> fill_words;
   fill_words.reserve(static_cast<size_t>(vgpr_count) * 3u);
   sequence.save_words.push_back(*wait_load);
   sequence.save_words.push_back(*wait_lds);
+  sequence.save_words.push_back(*wait_scalar_load);
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const uint32_t offset = static_cast<uint32_t>(i) * SpillManager::kSlotBytes;
@@ -692,7 +703,8 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
-  if (!wait_store || !wait_load)
+  const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!wait_store || !wait_load || !wait_scalar_load)
     return std::nullopt;
 
   SgprSpillSequence sequence;
@@ -701,8 +713,9 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
   sequence.total_private_bytes = vgpr_frame.total_private_bytes;
   sequence.memory_transfer_vgpr = transfer_vgpr;
   sequence.memory_slot_store_words.reserve(sgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 4u + 1u);
+  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 4u + 2u);
   sequence.restore_words.reserve(static_cast<size_t>(sgpr_count) * 5u);
+  sequence.save_words.push_back(*wait_scalar_load);
   for (uint16_t i = 0; i < sgpr_count; ++i) {
     const uint16_t sgpr = static_cast<uint16_t>(sgpr_base + i);
     const uint32_t offset = frame_byte_offset + static_cast<uint32_t>(i) * SpillManager::kSlotBytes;

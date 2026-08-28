@@ -2693,17 +2693,9 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   const auto verify_entry = [&](uint64_t entry_offset) {
     const char *text = patched.text_sections().front()->data();
     uint64_t cursor = entry_offset;
-    ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-    ASSERT_TRUE(prologue->entry_scalar_backup_sgpr_base);
-    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 1u);
-    const auto owner_backup = instrumentation::build_v_writelane_b32(
-        *prologue->entry_scalar_backup_vgpr, *prologue->entry_scalar_backup_sgpr_base,
-        /*lane=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
-    ASSERT_TRUE(owner_backup);
-    std::array<uint32_t, 2> encoded_owner_backup{};
-    std::memcpy(encoded_owner_backup.data(), text + cursor, sizeof(encoded_owner_backup));
-    EXPECT_EQ(encoded_owner_backup, *owner_backup);
-    cursor += sizeof(encoded_owner_backup);
+    EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
+    EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
+    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
     const auto expect_write = [&](uint32_t expected) {
       uint32_t word = 0;
       std::memcpy(&word, text + cursor, sizeof(word));

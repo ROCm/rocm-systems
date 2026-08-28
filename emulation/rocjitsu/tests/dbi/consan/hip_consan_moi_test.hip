@@ -920,7 +920,7 @@ __launch_bounds__(64) void moi_repeated_dispatch_saturation_preserves_output_for
                  : "memory");
   }
   __syncthreads();
-  if (tid == 32) {
+  if (tid == 32 && blockIdx.x == 0) {
     uint32_t loaded = 0;
     asm volatile("ds_load_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_dscnt 0\n\t"
                  : "=v"(loaded)
@@ -1627,19 +1627,22 @@ TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
 
 TEST(ConSanMoiHipTest, SampledSaturationPreservesRepeatedDispatchOutput) {
   constexpr uint32_t kDispatchCount = 10u;
+  constexpr uint32_t kWorkgroupCount = 10u;
   uint32_t *d_out = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, kDispatchCount * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(d_out, 0, kDispatchCount * sizeof(uint32_t)));
 
   for (uint32_t dispatch = 0; dispatch < kDispatchCount; ++dispatch) {
     const uint32_t expected = 0x5A170000u ^ dispatch;
-    moi_repeated_dispatch_saturation_preserves_output_for_instrumentation<<<1, 64>>>(
+    moi_repeated_dispatch_saturation_preserves_output_for_instrumentation<<<kWorkgroupCount, 64>>>(
         d_out, dispatch, expected);
     HIP_ASSERT(hipGetLastError());
-    const hipError_t sync = hipDeviceSynchronize();
-    ASSERT_EQ(sync, hipSuccess) << "dispatch " << dispatch
-                                << " HIP error: " << hipGetErrorString(sync);
   }
+  // Ten workgroups exceed the eight causal-window banks even when a target
+  // uses its stable code-object identity fallback. Keep every packet live
+  // until the queue has observed all dispatches so targets with hardware
+  // dispatch identity exercise that dimension too.
+  HIP_ASSERT(hipDeviceSynchronize());
 
   std::array<uint32_t, kDispatchCount> out{};
   HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));

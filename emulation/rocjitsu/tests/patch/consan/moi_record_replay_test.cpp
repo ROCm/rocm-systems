@@ -5368,9 +5368,8 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
   }));
 }
 
-TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillPreservesKernargPreloadScalarWindow) {
+TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillSkipsUninitializedScalarWindow) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
-  constexpr uint16_t kExecWindowSize = 7u;
   constexpr uint32_t kAccessCount = 9u;
   constexpr std::array<uint16_t, 4> kRouterScalars = {66u, 67u, 75u, 76u};
 
@@ -5428,29 +5427,14 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillPreservesKernargPreloadScalarWindo
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
-
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> prologue_words =
-      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  const auto first_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u, kArch);
-  const auto last_restore = instrumentation::build_v_readlane_b32(
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kExecWindowSize - 1u),
-      *prologue->entry_scalar_backup_vgpr, kExecWindowSize - 1u, kArch);
-  ASSERT_TRUE(first_save);
-  ASSERT_TRUE(last_restore);
-  EXPECT_TRUE(contains_subsequence(prologue_words, *first_save));
-  EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
+  EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
+  EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, SparseRecordReplaySpillPreservesEntryHashWindowAcrossTargets) {
+TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTargets) {
   constexpr uint16_t kExecSaveSgpr = 80u;
-  constexpr uint16_t kExecWindowSize = 7u;
   for (const rj_code_arch_t arch : {
            ROCJITSU_CODE_ARCH_CDNA3,
            ROCJITSU_CODE_ARCH_CDNA4,
@@ -5515,23 +5499,9 @@ TEST(ConSanMoi, SparseRecordReplaySpillPreservesEntryHashWindowAcrossTargets) {
     const auto prologue = std::ranges::find(
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
-    ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, kExecSaveSgpr);
-    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
-
-    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-    ASSERT_TRUE(patched.is_valid());
-    const std::vector<uint32_t> prologue_words =
-        text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-    const auto first_save = instrumentation::build_v_writelane_b32(
-        *prologue->entry_scalar_backup_vgpr, kExecSaveSgpr, /*lane=*/0u, arch);
-    const auto last_restore = instrumentation::build_v_readlane_b32(
-        kExecSaveSgpr + kExecWindowSize - 1u, *prologue->entry_scalar_backup_vgpr,
-        kExecWindowSize - 1u, arch);
-    ASSERT_TRUE(first_save);
-    ASSERT_TRUE(last_restore);
-    EXPECT_TRUE(contains_subsequence(prologue_words, *first_save));
-    EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
+    EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
+    EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
+    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
@@ -10410,10 +10380,12 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u, 0x40883804u,
+                                  0xC4050018u,
+                                  0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu, 0x00080000u,
+                                  0xEE0AC07Cu,
+                                  0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11643,7 +11615,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+      0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an
@@ -12301,10 +12274,19 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto captured_lo = std::find(outcome_compare, words.end(), capture_success_lo);
   const auto captured_hi = std::find(outcome_compare, words.end(), capture_success_hi);
+  const auto mask_success_lo = instrumentation::build_v_and_b32(
+      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4ExecLo,
+      static_cast<uint16_t>(*options.scratch_vgpr + 3u), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mask_success_hi = instrumentation::build_v_and_b32(
+      static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4ExecLo + 1u,
+      static_cast<uint16_t>(*options.scratch_vgpr + 4u), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(captured_lo, words.end());
   ASSERT_NE(captured_hi, words.end());
+  ASSERT_TRUE(mask_success_lo && mask_success_hi);
   EXPECT_LT(outcome_compare, captured_lo);
   EXPECT_LT(captured_lo, captured_hi);
+  EXPECT_TRUE(contains_subsequence(std::span<const uint32_t>(captured_hi, words.end()),
+                                   std::array<uint32_t, 2>{*mask_success_lo, *mask_success_hi}));
   const auto store_success_lo = instrumentation::build_flat_store_b32(
       *options.scratch_vgpr, static_cast<uint16_t>(*options.scratch_vgpr + 3u),
       ROCJITSU_CODE_ARCH_RDNA4);

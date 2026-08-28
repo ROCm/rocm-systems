@@ -585,6 +585,34 @@ TEST(Gfx1250SdmaTest, CompactCopySignalPacketCopiesAndSignals) {
   EXPECT_EQ(queue.signal_value(), 4);
 }
 
+TEST(Gfx1250SdmaTest, FixedCopySignalPacketCopiesAndSignals) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  queue.signal_value() = 5;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x4d);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  // DW1-DW7 retain the disabled WAIT block in the fixed layout.
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+  packet[14] = 0x70;
+  write_sdma_qword_va(packet, 15, 16, queue.signal_va());
+  packet[17] = 1;
+  packet[18] = 0;
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+  EXPECT_EQ(queue.signal_value(), 4);
+}
+
 TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedWaitAddressDoesNotAdvance) {
   Gfx1250Sim sim;
   TranslatedSdmaQueueForTest queue(sim);

@@ -1668,6 +1668,9 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
       // v0:v31 are ordinary and v32:v39 are live accumulators. The automatic
       // owner/epoch/workgroup tuple exactly consumes the v29:v31 ordinary tail.
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+      // Keep the borrowed owner scratch in the initialized entry window so
+      // this test exercises its ordinary-VGPR backup carrier.
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
     });
     append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/false,
                                 /*sgpr_count=*/0u,
@@ -1678,6 +1681,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
                                 /*vgpr_count=*/29u);
 
     MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_exec_save_sgpr = 4u;
     options.moi_track_atomics = false;
     options.moi_track_barriers = false;
     options.moi_report_buffer_address = 0x100000000ull;
@@ -3255,6 +3259,7 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
 }
 
 TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
+  constexpr uint16_t kInitializedEntrySgprCount = 8u;
   std::vector<uint32_t> text_words(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   size_t cursor = 0u;
   text_words[cursor++] = 0xD8340000u;
@@ -3266,10 +3271,14 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
     text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  const std::vector<uint8_t> bytes =
+  std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "inline_branch_only_dynamic_stack",
                                  kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
                                  /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                    kInitializedEntrySgprCount);
+  });
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -3299,7 +3308,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
   EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
   ASSERT_EQ(prologue->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(prologue->owner_descriptor_file_offsets.front(), assignment.descriptor_file_offset);
   const auto branch_only =
@@ -3322,14 +3331,14 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto last_save = instrumentation::build_v_writelane_b32(
       *prologue->entry_scalar_backup_vgpr,
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      kConSanMoiInlineExecSaveSgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
+      kInitializedEntrySgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto first_restore = instrumentation::build_v_readlane_b32(
       assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto last_restore = instrumentation::build_v_readlane_b32(
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u,
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
+      *prologue->entry_scalar_backup_vgpr, kInitializedEntrySgprCount - 1u,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_wait = instrumentation::build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(first_save);
@@ -3373,6 +3382,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
 }
 
 void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_arch_t arch) {
+  constexpr uint16_t kInitializedEntrySgprCount = 8u;
   std::vector<uint32_t> text_words(800u, build_s_nop(0, arch));
   size_t cursor = 0u;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
@@ -3387,7 +3397,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
     text_words[cursor++] = build_s_mov_b32(105u, sgpr, arch);
   text_words.back() = build_s_endpgm(arch);
-  const std::vector<uint8_t> bytes =
+  std::vector<uint8_t> bytes =
       arch == ROCJITSU_CODE_ARCH_CDNA5
           ? make_gfx1250_code_object(text_words, "inline_branch_only_fixed_stack_gfx1250",
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
@@ -3395,6 +3405,10 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
           : make_rdna4_lds_code_object(text_words, "inline_branch_only_fixed_stack_rdna4",
                                        kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
                                        /*uses_dynamic_stack=*/false);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                    kInitializedEntrySgprCount);
+  });
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -3424,7 +3438,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
   EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
   const auto branch_only =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end());
@@ -3439,13 +3453,13 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
       *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u, arch);
   const auto last_save = instrumentation::build_v_writelane_b32(
       *prologue->entry_scalar_backup_vgpr,
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      kConSanMoiInlineExecSaveSgprCount - 1u, arch);
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
+      kInitializedEntrySgprCount - 1u, arch);
   const auto first_restore = instrumentation::build_v_readlane_b32(
       assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u, arch);
   const auto last_restore = instrumentation::build_v_readlane_b32(
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u, arch);
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
+      *prologue->entry_scalar_backup_vgpr, kInitializedEntrySgprCount - 1u, arch);
   ASSERT_TRUE(first_save);
   ASSERT_TRUE(last_save);
   ASSERT_TRUE(first_restore);
@@ -3467,6 +3481,7 @@ TEST(ConSanMoi, Gfx1250InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
 
 void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
     rj_code_arch_t arch) {
+  constexpr uint16_t kInitializedEntrySgprCount = 8u;
   std::vector<uint32_t> text_words(1600u, build_s_nop(0, arch));
   size_t cursor = 0u;
   // Model the checked-in device reduction: a large live scalar window still
@@ -3494,7 +3509,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
     text_words[cursor++] = build_s_mov_b32(105u, sgpr, arch);
   }
   text_words.back() = build_s_endpgm(arch);
-  const std::vector<uint8_t> bytes =
+  std::vector<uint8_t> bytes =
       arch == ROCJITSU_CODE_ARCH_CDNA5
           ? make_gfx1250_code_object(text_words, "inline_branch_only_preferred_gfx1250",
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
@@ -3502,6 +3517,10 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
           : make_rdna4_lds_code_object(text_words, "inline_branch_only_preferred_rdna4",
                                        kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
                                        /*uses_dynamic_stack=*/false);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                    kInitializedEntrySgprCount);
+  });
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -3530,7 +3549,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
 }
 
 TEST(ConSanMoi, Rdna4InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter) {
@@ -4274,13 +4293,9 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   ASSERT_TRUE(owner_init);
   ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
   ASSERT_GE(prologue_words.size(), 11u);
-  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-  ASSERT_TRUE(prologue->entry_scalar_backup_sgpr_base);
-  const auto entry_owner_backup = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr, *prologue->entry_scalar_backup_sgpr_base,
-      /*lane=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(entry_owner_backup);
-  EXPECT_TRUE(std::ranges::equal(std::span(prologue_words).first<2>(), *entry_owner_backup));
+  EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
+  EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
   const std::array<uint32_t, 6> owner_sequence = {
       *owner_init,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
@@ -5639,12 +5654,12 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const uint16_t retry_count_sgpr = 50u;
   const std::array<uint32_t, 2> initialize_retries = {
       build_s_mov_b32(retry_count_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
-      2048u,
+      kConSanMoiInlineMetadataPublicationRetryLimit,
   };
   EXPECT_TRUE(contains_subsequence(text_words, initialize_retries));
   const std::array<uint32_t, 2> clobber_saved_vcc = {
       build_s_mov_b32(/*sdst=*/38, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
-      2048u,
+      kConSanMoiInlineMetadataPublicationRetryLimit,
   };
   EXPECT_FALSE(contains_subsequence(text_words, clobber_saved_vcc));
   EXPECT_NE(std::find(text_words.begin(), text_words.end(),
@@ -8731,6 +8746,13 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   ASSERT_LE(body_file_offset + patch->trampoline_size, valid.replacement.size());
   std::vector<uint32_t> body(patch->trampoline_size / sizeof(uint32_t));
   std::memcpy(body.data(), valid.replacement.data() + body_file_offset, patch->trampoline_size);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(valid));
+  const std::vector<uint32_t> contention_retry_init = {
+      build_s_mov_b32(static_cast<uint16_t>(*test_moi_exec_save_sgpr(valid) + 20u),
+                      /*literal=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
+      kConSanMoiInlineMetadataPublicationRetryLimit,
+  };
+  EXPECT_TRUE(contains_subsequence(body, contention_retry_init));
   const uint16_t scratch = *patch->scratch_vgpr;
   const auto version_cas = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       scratch, static_cast<uint16_t>(scratch + 14u), static_cast<uint16_t>(scratch + 14u),

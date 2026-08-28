@@ -1038,11 +1038,15 @@
   };
 
   failure.stage = "slot snapshot";
-  constexpr uint32_t kContentionRetryLimit = 2048u;
   if (retry_contention) {
     constexpr uint16_t kScalarLiteralSource = 255u;
     words.push_back(build_s_mov_b32(retry_count_sgpr, kScalarLiteralSource, arch));
-    words.push_back(kContentionRetryLimit);
+    // Exact-shadow publication has the same bounded critical-section
+    // requirement as the atomic metadata tables. In particular, physical
+    // hardware can keep several waves from one workgroup in lockstep long
+    // enough for the historical 2K budget to expire while another wave is
+    // still publishing a perfectly healthy slot.
+    words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
   }
   if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
                                       offsetof(ConSanMoiInlineExactShadowSlot, version),

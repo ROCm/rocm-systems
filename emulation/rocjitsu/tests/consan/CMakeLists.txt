@@ -184,6 +184,28 @@ function(rj_add_consan_hip_case)
     if(NOT _case_TIMEOUT)
         set(_case_TIMEOUT 30)
     endif()
+    if(DEFINED _rj_consan_physical_target)
+        if(_case_CONFIG)
+            message(
+                FATAL_ERROR
+                "physical ConSan case ${_case_NAME} cannot use simulator config ${_case_CONFIG}"
+            )
+        endif()
+        list(
+            APPEND _case_LABELS
+            consan
+            consan-device
+            "${_rj_consan_physical_target}"
+            physical
+        )
+        list(REMOVE_DUPLICATES _case_LABELS)
+        if(NOT _case_RESOURCE_LOCK)
+            set(
+                _case_RESOURCE_LOCK
+                "consan_physical_${_rj_consan_physical_target}"
+            )
+        endif()
+    endif()
     if(
         "consan-device" IN_LIST _case_LABELS
         AND "physical" IN_LIST _case_LABELS
@@ -703,6 +725,35 @@ function(rj_add_consan_device_conformance_cases)
             list(GET _workload_fields 0 _workload_name)
             list(GET _workload_fields 1 _workload_target)
             list(GET _workload_fields 2 _workload_suite)
+            set(_workload_timeout 60)
+            if(
+                _mode_value STREQUAL "inline-shadow"
+                AND _workload_name STREQUAL "Gfx950LargeLdsPipeline"
+            )
+                # This takes about 53 seconds by itself on a 32-thread host,
+                # but can exceed 120 seconds in the full -j32 simulator gate.
+                set(_workload_timeout 240)
+            elseif(
+                _mode_value STREQUAL "inline-shadow"
+                AND _workload_name STREQUAL "Gfx1250LargeLdsPipeline"
+            )
+                # This takes about 25 seconds by itself but can exceed the
+                # default 60 seconds under full simulator contention.
+                set(_workload_timeout 120)
+            elseif(
+                _mode_value STREQUAL "record-replay"
+                AND (
+                    _workload_name STREQUAL
+                        "RecordReplaySparseDensePipeline"
+                    OR _workload_name STREQUAL
+                        "RecordReplayManyOwnerPressure"
+                )
+            )
+                # These take 10--12 seconds serially but can exceed the
+                # default on any simulator target under the front-loaded
+                # contention of the -j32 gate.
+                set(_workload_timeout 180)
+            endif()
             list(LENGTH _workload_fields _workload_field_count)
             if(_workload_field_count GREATER 3)
                 list(GET _workload_fields 3 _workload_feature)
@@ -943,7 +994,7 @@ function(rj_add_consan_device_conformance_cases)
                 FILTER "${_workload_suite}.Correct"
                 ${_config_args}
                 ${_resource_lock_args}
-                TIMEOUT 60
+                TIMEOUT ${_workload_timeout}
                 ${_correct_pass_regex_args}
                 ENVIRONMENT ${_correct_environment}
                 LABELS ${_labels} "${_mode_value}" clean
@@ -968,7 +1019,7 @@ function(rj_add_consan_device_conformance_cases)
                 FILTER "${_workload_suite}.Incorrect"
                 ${_config_args}
                 ${_resource_lock_args}
-                TIMEOUT 60
+                TIMEOUT ${_workload_timeout}
                 ${_incorrect_pass_regex_args}
                 ENVIRONMENT ${_incorrect_environment}
                 LABELS ${_incorrect_labels}
@@ -2306,7 +2357,10 @@ function(rj_add_consan_scalar_spill_exec_cases)
     set(_resource_args)
     set(_execution_label simulator)
     if(_spill_PHYSICAL)
-        list(APPEND _resource_args RESOURCE_LOCK "consan_physical_gfx950")
+        list(
+            APPEND _resource_args
+            RESOURCE_LOCK "consan_physical_${_spill_ARCH_LABEL}"
+        )
         set(_execution_label physical)
     endif()
 
@@ -3595,6 +3649,25 @@ function(rj_add_consan_hip_tests)
         "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
     )
     if(HAS_GFX1201_GPU)
+        # Every case registered in this scope executes against the native
+        # gfx1201 device. Supply the common physical labels and target-scoped
+        # resource lock to direct cases and nested registration helpers alike.
+        set(_rj_consan_physical_target gfx1201)
+        rj_add_consan_device_conformance_cases(
+            PREFIX "ConSanDeviceGfx1201Physical"
+            TARGET gfx1201
+            PHYSICAL
+        )
+        rj_add_consan_scalar_spill_exec_cases(
+            PREFIX "ConSanGfx1201Physical"
+            TARGET hip_consan_moi_test
+            ARCH_LABEL gfx1201
+            CORRECT_TEST
+                "ConSanMoiHipTest.ZeroExecScalarSpillCorrectPreservesLiveScalars"
+            INCORRECT_TEST
+                "ConSanMoiHipTest.NonemptyScalarSpillIncorrectReportsRace"
+            PHYSICAL
+        )
         rj_add_consan_inline_exact_byte_cases(
             "ConSanGfx1201Physical"
             hip_consan_lds_test
@@ -4486,11 +4559,13 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_consan_hip_case(
-                NAME "ConSanMoiHipTest.DbiAutoBufferReportsImmediateSampledConflict"
+                NAME "ConSanMoiHipTest.DbiAutoBufferReportsSampledConflict"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
                 TIMEOUT 30
-                PASS_REGEX "sampled_immediate_conflicts=[1-9]"
+                # Immediate adjacency checking is a lower-fidelity optional
+                # path; the portable contract is the exact host-side conflict.
+                PASS_REGEX "sampled_conflicts=[1-9]"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -4605,7 +4680,10 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
-                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                    # Dispatch zero is not selected by stride two on every
+                    # runtime. Select every workgroup so this remains a
+                    # saturation/output test rather than a sampling-residue test.
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
@@ -4772,5 +4850,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
+        unset(_rj_consan_physical_target)
     endif()
 endfunction()
