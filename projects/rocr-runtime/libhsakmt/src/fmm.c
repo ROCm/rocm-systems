@@ -3596,6 +3596,24 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	fmm_ctx->gpu_mem_count = 0;
 }
 
+HSAKMT_STATUS hsakmt_fmm_get_default_host_gpu(HsaKFDContext *ctx,
+					      HSAuint32 *node_id,
+					      HSAuint32 *gpu_id)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx;
+
+	if (!ctx || !node_id || !gpu_id)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	fmm_ctx = ctx->fmm_context;
+	if (!fmm_ctx || !fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	*node_id = fmm_ctx->first_gpu_mem->node_id;
+	*gpu_id = fmm_ctx->first_gpu_mem->gpu_id;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
 			HSAuint32 node_id, int *drm_render_fd,
 			uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point)
