@@ -179,13 +179,14 @@ producer_loop(
     const auto interval_microseconds = static_cast<size_t>(1E6 * buffer_size / sqtt_bandwidth);
 
     auto buffer_packets = std::move(parameters.buffer_packets);
-    for (auto& packet : buffer_packets) CHECK_NOTNULL(packet);
+    for(auto& packet : buffer_packets)
+        CHECK_NOTNULL(packet);
 
     auto submit_signal = scoped_signal_t{};
 
-    auto     start_t0 = std::chrono::system_clock::now();
-    bool     do_sleep{false};
-    uint64_t next_chunk_index = 0;
+    auto                  start_t0 = std::chrono::system_clock::now();
+    bool                  do_sleep{false};
+    std::vector<uint64_t> next_chunk_indices(parameters.num_shader_engines);
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -224,7 +225,7 @@ producer_loop(
         buffer.flags            = flags;
         buffer.size             = size;
         buffer.se_id            = shader_engine_id;
-        buffer.chunk_index      = next_chunk_index++;
+        buffer.chunk_index      = next_chunk_id(next_chunk_indices, shader_engine_id);
         buffer.read_offset      = read_offset;
 
         if(!isHeader)
@@ -246,7 +247,7 @@ producer_loop(
     };
 
     auto submit_wait_timeout = [&]() {
-        if (worker_flag == WORKER_FLAG_ERROR) return false;
+        if(worker_flag == WORKER_FLAG_ERROR) return false;
         if(signal_wait(submit_signal.sig, 1 << 28)) return true;
 
         worker_flag.store(WORKER_FLAG_ERROR);
@@ -267,13 +268,14 @@ producer_loop(
     auto iterate_trace = [&]() {
         constexpr auto FLAG_END = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
 
-        for (auto& wptr : iterate_data(parameters.control_packet->GetHandle()))
+        for(auto& wptr : iterate_data(parameters.control_packet->GetHandle()))
         {
             ROCP_INFO << "Iterate data for " << wptr.se_id << " with size: " << wptr.size;
             send_to_consumer(wptr.data, wptr.size, FLAG_END, wait_for_free_slot(), wptr.se_id);
         }
 
-        for (auto& packet : buffer_packets) packet->reset_current_buffer();
+        for(auto& packet : buffer_packets)
+            packet->reset_current_buffer();
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
@@ -281,19 +283,19 @@ producer_loop(
     auto send_header = [&] {
         ROCP_INFO << "Restarting the trace!";
 
-        for (auto& packet : buffer_packets)
+        for(auto& packet : buffer_packets)
         {
-            if (packet->header == 0) continue;
+            if(packet->header == 0) continue;
 
             header_plus_zeros.at(0) = packet->header;
-            size_t hidx = wait_for_free_slot();
+            size_t hidx             = wait_for_free_slot();
 
             send_to_consumer(header_plus_zeros.data(),
-                            sizeof(header_plus_zeros),
-                            ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
-                            hidx,
-                            packet->shader_engine_id,
-                            true);
+                             sizeof(header_plus_zeros),
+                             ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
+                             hidx,
+                             packet->shader_engine_id,
+                             true);
         }
     };
 
@@ -314,7 +316,7 @@ producer_loop(
         if(!submit_wait_timeout()) break;
 
         bool any_full = false;
-        for (auto& packet : buffer_packets)
+        for(auto& packet : buffer_packets)
         {
             if(auto status = packet->query_buffer_status())
             {
@@ -333,9 +335,9 @@ producer_loop(
             }
         }
 
-        if (any_full) stop_trace();
+        if(any_full) stop_trace();
 
-        for (auto& status : buffers_requiring_swap)
+        for(auto& status : buffers_requiring_swap)
         {
             // Try to claim a free CPU slot. If none free, the consumers haven't kept up
             size_t     slot_idx = try_claim_slot();
@@ -346,13 +348,20 @@ producer_loop(
             if(cpu_full && !any_full) stop_trace();
             any_full |= cpu_full;
 
-            int flags = cpu_full ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL : ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+            int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+            if(status.gpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
+            if(cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
 
             // If CPU was full we must wait for a slot before we can publish.
-            if (cpu_full) slot_idx = wait_for_free_slot();
+            if(cpu_full) slot_idx = wait_for_free_slot();
 
-            send_to_consumer(
-                status.data, status.size, flags, slot_idx, status.shader_engine_id, false, status.read_offset);
+            send_to_consumer(status.data,
+                             status.size,
+                             flags,
+                             slot_idx,
+                             status.shader_engine_id,
+                             false,
+                             status.read_offset);
         }
 
         buffers_requiring_swap.clear();

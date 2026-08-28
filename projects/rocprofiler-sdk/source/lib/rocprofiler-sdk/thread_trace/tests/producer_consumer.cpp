@@ -180,13 +180,14 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> mock_buffer{};
     mock_buffer.emplace_back(std::move(buffer_packet));
 
-    auto producer_data             = triple_buffer_producer_data_t{};
-    producer_data.producer_running = running_flag;
-    producer_data.start_pkt_signal = start_signal;
-    producer_data.control_packet   = std::move(control_packet);
-    producer_data.copy_data_fn     = copy_data_mock;
-    producer_data.shared           = worker_data;
-    producer_data.buffer_packets   = std::move(mock_buffer);
+    auto producer_data               = triple_buffer_producer_data_t{};
+    producer_data.producer_running   = running_flag;
+    producer_data.start_pkt_signal   = start_signal;
+    producer_data.control_packet     = std::move(control_packet);
+    producer_data.copy_data_fn       = copy_data_mock;
+    producer_data.shared             = worker_data;
+    producer_data.num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
+    producer_data.buffer_packets     = std::move(mock_buffer);
 
     consumer_producer_t ret{};
     ret.mock_queue = std::move(mock_queue);
@@ -246,6 +247,16 @@ TEST(thread_trace, status_query)
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
+}
+
+TEST(thread_trace, chunk_index_is_independent_per_shader_engine)
+{
+    auto chunk_indices = std::vector<uint64_t>(4);
+    for(uint64_t i = 0; i < 20; ++i)
+    {
+        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 0), i);
+        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 2), i);
+    }
 }
 
 TEST(thread_trace, multiple_calls)
