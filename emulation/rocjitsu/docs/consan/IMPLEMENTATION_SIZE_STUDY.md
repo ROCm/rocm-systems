@@ -894,6 +894,38 @@ own more of this integration. Define its deletion boundary early during Stage
 This stage exits when ConSan's hook-facing surface is narrow and the 9,044-line
 layer has an explicit keep/delete map tied to the DBI migration timeline.
 
+#### Stage 9 exit evidence
+
+Stage 9 is complete without a cosmetic rewrite of the HSA integration layer.
+The hook already consumes `ConSanInstrumentationRequest`,
+`ConSanInstrumentationResult`, `ConSanReportLayout`, and typed bound-resource
+contracts. Report decoding remains in the report-owned translation unit, and a
+new pure `AutoMoiReportTrustEvaluation` projection now owns the policy for
+visible evidence, dropped records, Inline coverage loss, dynamic
+incompleteness, and required-record absence. Generic teardown consumes that
+projection instead of rebuilding report semantics from individual counters.
+
+`DESIGN.md` now records the exact reader-to-inventory-to-layout-to-allocation-
+to-bounded-retry-to-replacement-load lifecycle, dispatch association, and
+destroy/unload cleanup. It also records that before/after placement belongs to
+`ConSanProbeIntent`, not to the HSA hook. The keep/delete map preserves ConSan
+semantics, schema, Record/Replay decoding and causal replay, host analysis, and
+trust evaluation; adapts the production request/result/layout/resource
+contracts into DBI; and deletes HSA API interposition, code-object snapshot and
+variant mechanics, report transport, and lifecycle coordination only as the
+corresponding common DBI contracts become real. `HSA_TOOLS_LIB` remains the
+near-term host-only integration, and translated-code instrumentation remains
+deferred.
+
+The trust projection has a direct unit contract for its exact aggregate and
+required-record behavior. At code revision `45fe35d547`, the final Stage 9
+gate passed all 5,303 tests. The `-j16` nonphysical tier passed 4,668/4,668 in
+253.05 seconds, including all 2,908 five-target device-emulation rows. The
+serialized `-j1` physical gfx1201 tier passed 635/635 in 109.54 seconds. A
+single gfx1250 SuperCollider D16 test that passed in 0.72 seconds alone had
+exceeded its 60-second allowance under full simulator contention; its targeted
+loaded-gate allowance is now 120 seconds, and the complete rerun is clean.
+
 ### Stage 10: simplify validation and perform the final deletion audit
 
 Validation is a beneficiary of the preceding stages, not an isolated size
