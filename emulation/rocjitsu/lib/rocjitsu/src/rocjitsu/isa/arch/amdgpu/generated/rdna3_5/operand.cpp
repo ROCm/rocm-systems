@@ -81,6 +81,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
     break;
+  case OperandType::OPR_GPUMEM:
+    if (!((encoding_value >= 0 && encoding_value <= 0)))
+      defer_encoding_error(EncodingError::InvalidSelector);
+    break;
   case OperandType::OPR_PC:
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
@@ -320,6 +324,11 @@ std::string Operand::name() const {
   case OperandType::OPR_FLAT_SCRATCH: {
     if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH)
       return "flat_scratch";
+    break;
+  }
+  case OperandType::OPR_GPUMEM: {
+    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM)
+      return "gpumem";
     break;
   }
   case OperandType::OPR_PC: {
@@ -681,8 +690,30 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_SENDMSG:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_SENDMSG_RTN:
+  case OperandType::OPR_SENDMSG_RTN: {
+    switch (static_cast<uint32_t>(encoding_value_) & 0xFFFF) {
+    case 128:
+      return "sendmsg(MSG_RTN_GET_DOORBELL)";
+    case 129:
+      return "sendmsg(MSG_RTN_GET_DDID)";
+    case 130:
+      return "sendmsg(MSG_RTN_GET_TMA)";
+    case 131:
+      return "sendmsg(MSG_RTN_GET_REALTIME)";
+    case 132:
+      return "sendmsg(MSG_RTN_SAVE_WAVE)";
+    case 133:
+      return "sendmsg(MSG_RTN_GET_TBA)";
+    case 134:
+      return "sendmsg(MSG_RTN_GET_TBA_TO_PC)";
+    default:
+      break;
+    }
+    const uint32_t value = static_cast<uint32_t>(encoding_value_) & 0xFFFF;
+    if (value <= 0xFF)
+      return std::format("sendmsg({}, 0, 0)", value);
     return std::to_string(encoding_value_);
+  }
   case OperandType::OPR_SIMM16:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM32:
@@ -739,6 +770,9 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
+    break;
+  }
+  case OperandType::OPR_GPUMEM: {
     break;
   }
   case OperandType::OPR_PC: {
