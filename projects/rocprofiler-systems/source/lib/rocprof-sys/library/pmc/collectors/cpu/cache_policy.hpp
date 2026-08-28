@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fmt/format.h>
 #include <limits>
 #include <optional>
 #include <set>
