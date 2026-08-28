@@ -228,7 +228,8 @@ protected:
     {
         m_session->subscribe({ .on_pause  = [this]() { stop_count++; },
                                .on_resume = [this]() { start_count++; },
-                               .name      = "test_counters" });
+                               .name      = "test_counters",
+                               .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
                                      .use_perfetto           = false,
@@ -864,7 +865,8 @@ protected:
     {
         m_session->subscribe({ .on_pause  = [this]() { stop_count++; },
                                .on_resume = [this]() { start_count++; },
-                               .name      = "test_counters" });
+                               .name      = "test_counters",
+                               .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
                                      .use_perfetto           = false,
@@ -1008,7 +1010,7 @@ protected:
         explicit other_trigger(rocprofsys::control::session& sess)
         : m_session{ sess }
         {
-            m_session.register_trigger(trigger_name, rocprofsys::control::Action::Trace);
+            m_session.register_trigger(trigger_name, rocprofsys::control::action::trace);
         }
 
         ~other_trigger() { m_session.unregister_trigger(trigger_name); }
@@ -1018,7 +1020,7 @@ protected:
         other_trigger(other_trigger&&)                 = delete;
         other_trigger& operator=(other_trigger&&)      = delete;
 
-        void set_action(rocprofsys::control::Action act) const
+        void set_action(rocprofsys::control::action act) const
         {
             m_session.set_action(trigger_name, act);
         }
@@ -1060,7 +1062,7 @@ TEST_F(roctx_marker_gating_test, should_write_false_when_session_paused_by_other
     const auto& session = client->get_session();
 
     const other_trigger other{ *session };
-    other.set_action(rocprofsys::control::Action::Pause);
+    other.set_action(rocprofsys::control::action::pause);
 
     ASSERT_TRUE(client->get_trigger().should_write_markers())
         << "the roctx trigger itself has no filter and is not paused - only the "
