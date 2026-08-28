@@ -61,11 +61,34 @@ else()
     endif()
   endif()
 
-  # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
-  # (e.g. -DFFMPEG_ROOT=C:/ffmpeg)
+  # Collect hints from FFMPEG_ROOT (CMake var or env var).
+  set(_FFMPEG_ROOT_HINTS
+    ${FFMPEG_ROOT}
+    $ENV{FFMPEG_ROOT}
+  )
+
+  # On Windows, if no root was given, probe PATH for ffmpeg.exe and derive the
+  # prefix from it (bin/../).  All common Windows FFmpeg distributions — winget,
+  # Chocolatey, Scoop, and manual extracts — put their bin/ on PATH.
+  if(WIN32 AND NOT _FFMPEG_ROOT_HINTS)
+    find_program(_FFMPEG_EXECUTABLE NAMES ffmpeg ffmpeg.exe)
+    if(_FFMPEG_EXECUTABLE)
+      get_filename_component(_FFMPEG_BIN "${_FFMPEG_EXECUTABLE}" DIRECTORY)
+      get_filename_component(_FFMPEG_ROOT_FROM_PATH "${_FFMPEG_BIN}" DIRECTORY)
+      list(APPEND _FFMPEG_ROOT_HINTS "${_FFMPEG_ROOT_FROM_PATH}")
+    endif()
+    # Fallback: well-known package-manager install locations
+    list(APPEND _FFMPEG_ROOT_HINTS
+      "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg"
+      "$ENV{USERPROFILE}/scoop/apps/ffmpeg/current"
+      "C:/Program Files/ffmpeg"
+      "C:/ffmpeg"
+    )
+  endif()
+
   if(WIN32)
-    set(_FFMPEG_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
-    set(_FFMPEG_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+    set(_FFMPEG_SEARCH_INCLUDE)
+    set(_FFMPEG_SEARCH_LIB)
   else()
     set(_FFMPEG_SEARCH_INCLUDE
       ${_FFMPEG_AVCODEC_INCLUDE_DIRS}
@@ -84,12 +107,15 @@ else()
   # AVCODEC
   find_path(AVCODEC_INCLUDE_DIR
     NAMES libavcodec/avcodec.h
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
   find_library(AVCODEC_LIBRARY
     NAMES avcodec
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
     PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVCODEC_LIBRARY)
@@ -97,12 +123,15 @@ else()
   # AVFORMAT
   find_path(AVFORMAT_INCLUDE_DIR
     NAMES libavformat/avformat.h
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
   find_library(AVFORMAT_LIBRARY
     NAMES avformat
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
     PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVFORMAT_LIBRARY)
@@ -110,12 +139,15 @@ else()
   # AVUTIL
   find_path(AVUTIL_INCLUDE_DIR
     NAMES libavutil/avutil.h
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
   find_library(AVUTIL_LIBRARY
     NAMES avutil
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
     PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVUTIL_LIBRARY)
