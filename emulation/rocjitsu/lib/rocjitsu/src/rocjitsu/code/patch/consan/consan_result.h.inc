@@ -185,6 +185,9 @@ struct ConSanTransformArtifacts {
   ConSanMoiOperatingPoint moi_operating_point;
   /// Authoritative intent-bound lowering results published by placement.
   std::vector<ConSanCommittedLowering> committed_lowerings;
+  /// Validated runtime-facing projection accumulated from committed lowering
+  /// transactions. Hooks consume this product instead of patch telemetry.
+  ConSanRuntimeStaticMapping runtime_static_mapping;
   /// Intent-bound synchronization products staged across the MOI atomic,
   /// fence, and barrier emitters. A shared address-capture intent can serve
   /// more than one emitted record, so the pipeline merges all of its machine
@@ -221,13 +224,17 @@ struct ConSanTransformArtifacts {
   }
   /// Atomically publish and retain a complete group of lowering results.
   [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits) {
-    committed_lowerings.reserve(committed_lowerings.size() + commits.size());
     ConSanCoverageLedger next_ledger = coverage_ledger;
+    ConSanRuntimeStaticMapping next_mapping = runtime_static_mapping;
     for (const ConSanCommittedLowering &commit : commits) {
-      if (!next_ledger.publish_lowering_commit(commit))
+      if (!consan_runtime_static_mapping_matches_commit(observation_plan, commit) ||
+          !next_ledger.publish_lowering_commit(commit))
         return false;
+      next_mapping.append(commit.runtime_mapping);
     }
     coverage_ledger = std::move(next_ledger);
+    runtime_static_mapping = std::move(next_mapping);
+    committed_lowerings.reserve(committed_lowerings.size() + commits.size());
     committed_lowerings.insert(committed_lowerings.end(), std::make_move_iterator(commits.begin()),
                                std::make_move_iterator(commits.end()));
     return true;
@@ -243,6 +250,7 @@ struct ConSanTransformArtifacts {
         return false;
       std::vector<ConSanProbeIntentId> ids = incoming.intent_ids;
       std::vector<ConSanCommittedLoweringLocation> locations = incoming.locations;
+      ConSanRuntimeStaticMapping runtime_mapping = std::move(incoming.runtime_mapping);
       for (size_t index = 0; index < next.size();) {
         const bool overlaps = std::ranges::any_of(next[index].intent_ids, [&](const auto &id) {
           return std::ranges::find(ids, id) != ids.end();
@@ -259,10 +267,12 @@ struct ConSanTransformArtifacts {
           if (std::ranges::find(locations, location) == locations.end())
             locations.push_back(location);
         }
+        runtime_mapping.append(std::move(next[index].runtime_mapping));
         next.erase(next.begin() + static_cast<std::ptrdiff_t>(index));
       }
       auto merged = make_consan_committed_lowering(observation_plan, ids, locations,
-                                                   ConSanLoweringOutcomeKind::Instrumented);
+                                                   ConSanLoweringOutcomeKind::Instrumented, {},
+                                                   std::move(runtime_mapping));
       if (!merged)
         return false;
       next.push_back(std::move(*merged));
@@ -283,6 +293,7 @@ struct ConSanTransformArtifacts {
   void discard_candidate_modification() {
     replacement.clear();
     patches.clear();
+    runtime_static_mapping = {};
     staged_moi_sync_lowerings.clear();
     std::erase_if(committed_lowerings, [](const ConSanCommittedLowering &commit) {
       return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;

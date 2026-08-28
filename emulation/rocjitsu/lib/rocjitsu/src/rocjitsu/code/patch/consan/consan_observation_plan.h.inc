@@ -1002,6 +1002,86 @@ consan_lowering_outcome_kind_name(ConSanLoweringOutcomeKind kind) {
 static_assert(kConSanLoweringOutcomeKinds.size() ==
               static_cast<size_t>(ConSanLoweringOutcomeKind::Count));
 
+/// Original-program attribution shared by every runtime-facing access map.
+///
+/// The intent IDs make this a forward product of semantic planning rather
+/// than a later offset join. `original_site` and `original_semantic_sites`
+/// retain pristine identities, while execution owners state the complete
+/// static kernel scope only when `owner_provenance_complete` is true.
+struct ConSanStaticAccessAttribution {
+  std::vector<ConSanProbeIntentId> intent_ids;
+  PhysicalSiteId original_site;
+  std::vector<SemanticSiteId> original_semantic_sites;
+  std::vector<uint64_t> execution_owner_descriptor_file_offsets;
+  bool owner_provenance_complete = false;
+
+  bool operator==(const ConSanStaticAccessAttribution &) const = default;
+};
+
+/// Static attribution used to suppress impossible cross-kernel conflicts
+/// while replaying Record/Replay access evidence.
+struct ConSanRecordReplayStaticAccessMapping {
+  ConSanStaticAccessAttribution access;
+
+  bool operator==(const ConSanRecordReplayStaticAccessMapping &) const = default;
+};
+
+/// Static attribution of one Sampled access to its report slots and emitted
+/// guest/probe locations.
+///
+/// These are named runtime facts, not a projection of `ConSanPatchInfo`.
+/// Report decoding uses the slot window; stable diagnostics use the emitted
+/// probe, relocated guest, and scratch-register values.
+struct ConSanSampledStaticAccessMapping {
+  ConSanStaticAccessAttribution access;
+  uint32_t first_slot = 0;
+  uint32_t range_count = 0;
+  uint32_t bank_count = 0;
+  uint64_t emitted_probe_text_offset = 0;
+  std::optional<uint64_t> relocated_guest_text_offset;
+  std::optional<uint16_t> scratch_vgpr;
+
+  bool operator==(const ConSanSampledStaticAccessMapping &) const = default;
+};
+
+/// Original access named by one InlineShadow compact diagnostic token.
+struct ConSanInlineCompactStaticAccessMapping {
+  ConSanStaticAccessAttribution access;
+  uint16_t token = 0;
+
+  bool operator==(const ConSanInlineCompactStaticAccessMapping &) const = default;
+};
+
+/// Validated static transform product consumed by runtime evidence analysis.
+///
+/// Keeping the three evidence protocols in separate typed sequences prevents
+/// the runtime from switching on lowerer patch kinds. Every member is also
+/// retained by the intent-bound lowering commit that created it.
+struct ConSanRuntimeStaticMapping {
+  std::vector<ConSanRecordReplayStaticAccessMapping> record_replay_accesses;
+  std::vector<ConSanSampledStaticAccessMapping> sampled_accesses;
+  std::vector<ConSanInlineCompactStaticAccessMapping> inline_compact_accesses;
+
+  [[nodiscard]] bool empty() const {
+    return record_replay_accesses.empty() && sampled_accesses.empty() &&
+           inline_compact_accesses.empty();
+  }
+
+  void append(ConSanRuntimeStaticMapping mapping) {
+    record_replay_accesses.insert(record_replay_accesses.end(),
+                                  std::make_move_iterator(mapping.record_replay_accesses.begin()),
+                                  std::make_move_iterator(mapping.record_replay_accesses.end()));
+    sampled_accesses.insert(sampled_accesses.end(),
+                            std::make_move_iterator(mapping.sampled_accesses.begin()),
+                            std::make_move_iterator(mapping.sampled_accesses.end()));
+    inline_compact_accesses.insert(inline_compact_accesses.end(),
+                                   std::make_move_iterator(mapping.inline_compact_accesses.begin()),
+                                   std::make_move_iterator(mapping.inline_compact_accesses.end()));
+  }
+
+  bool operator==(const ConSanRuntimeStaticMapping &) const = default;
+};
+
 /// One machine-code location emitted as part of an intent-bound lowering.
 ///
 /// The location is semantic telemetry rather than proof-by-patch-kind. It
@@ -1037,6 +1117,8 @@ struct ConSanCommittedLowering {
   std::vector<SemanticSiteId> original_semantic_sites;
   /// One or more committed locations, empty for a rejected transaction.
   std::vector<ConSanCommittedLoweringLocation> locations;
+  /// Runtime-facing semantic/static mapping created by this same transaction.
+  ConSanRuntimeStaticMapping runtime_mapping;
   /// Explicit final mechanism outcome shared by every bound intent.
   ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::Pending;
   /// Optional mechanism detail with no semantic-policy meaning.
@@ -1048,11 +1130,16 @@ struct ConSanCommittedLowering {
 /// Prepare one authoritative lowering result from immutable intent identity.
 /// Returns no value for stale/duplicate intent IDs, inconsistent locations,
 /// pending outcomes, or emitted locations attached to a rejection.
-[[nodiscard]] std::optional<ConSanCommittedLowering>
-make_consan_committed_lowering(const ConSanObservationPlan &plan,
-                               std::span<const ConSanProbeIntentId> intent_ids,
-                               std::span<const ConSanCommittedLoweringLocation> locations,
-                               ConSanLoweringOutcomeKind outcome, std::string detail = {});
+[[nodiscard]] std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
+    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
+    std::span<const ConSanCommittedLoweringLocation> locations, ConSanLoweringOutcomeKind outcome,
+    std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {});
+
+/// Verify that every runtime mapping member is owned by the intents and
+/// original sites of the same committed-lowering transaction.
+[[nodiscard]] bool
+consan_runtime_static_mapping_matches_commit(const ConSanObservationPlan &plan,
+                                             const ConSanCommittedLowering &commit);
 
 /// One admitted intent joined to its current lowering result.
 ///

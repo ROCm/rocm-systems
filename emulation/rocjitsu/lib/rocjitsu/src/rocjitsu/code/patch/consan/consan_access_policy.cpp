@@ -442,11 +442,10 @@ const ConSanIntentCoverageEntry *ConSanCoverageLedger::intent_entry(ConSanProbeI
   return entry.intent.id == id ? &entry : nullptr;
 }
 
-std::optional<ConSanCommittedLowering>
-make_consan_committed_lowering(const ConSanObservationPlan &plan,
-                               std::span<const ConSanProbeIntentId> intent_ids,
-                               std::span<const ConSanCommittedLoweringLocation> locations,
-                               ConSanLoweringOutcomeKind outcome, std::string detail) {
+std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
+    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
+    std::span<const ConSanCommittedLoweringLocation> locations, ConSanLoweringOutcomeKind outcome,
+    std::string detail, ConSanRuntimeStaticMapping runtime_mapping) {
   if (intent_ids.empty() || outcome == ConSanLoweringOutcomeKind::Pending ||
       !valid_lowering_outcome(outcome)) {
     return std::nullopt;
@@ -460,6 +459,7 @@ make_consan_committed_lowering(const ConSanObservationPlan &plan,
       .original_physical_sites = {},
       .original_semantic_sites = {},
       .locations = std::vector(locations.begin(), locations.end()),
+      .runtime_mapping = std::move(runtime_mapping),
       .outcome = outcome,
       .detail = std::move(detail),
   };
@@ -498,7 +498,77 @@ make_consan_committed_lowering(const ConSanObservationPlan &plan,
       }
     }
   }
+  if (!consan_runtime_static_mapping_matches_commit(plan, commit))
+    return std::nullopt;
   return commit;
+}
+
+bool consan_runtime_static_mapping_matches_commit(const ConSanObservationPlan &plan,
+                                                  const ConSanCommittedLowering &commit) {
+  if (commit.outcome != ConSanLoweringOutcomeKind::Instrumented)
+    return commit.runtime_mapping.empty();
+
+  std::vector<ConSanProbeIntentId> mapped_intents;
+  const auto valid_attribution = [&](const ConSanStaticAccessAttribution &access,
+                                     ConSanProbeIntentKind expected_kind) {
+    if (access.intent_ids.empty() || !access.original_site.valid() ||
+        std::ranges::find(commit.original_physical_sites, access.original_site) ==
+            commit.original_physical_sites.end()) {
+      return false;
+    }
+    if (access.owner_provenance_complete &&
+        access.execution_owner_descriptor_file_offsets.empty()) {
+      return false;
+    }
+    for (uint64_t owner : access.execution_owner_descriptor_file_offsets) {
+      if (std::ranges::count(access.execution_owner_descriptor_file_offsets, owner) != 1)
+        return false;
+    }
+
+    std::vector<SemanticSiteId> expected_semantic_sites;
+    for (ConSanProbeIntentId id : access.intent_ids) {
+      if (std::ranges::find(commit.intent_ids, id) == commit.intent_ids.end() ||
+          std::ranges::find(mapped_intents, id) != mapped_intents.end()) {
+        return false;
+      }
+      const ConSanProbeIntent *intent = plan.intent(id);
+      if (intent == nullptr || intent->kind != expected_kind ||
+          intent->physical_site != access.original_site) {
+        return false;
+      }
+      mapped_intents.push_back(id);
+      for (const SemanticSiteId &site : intent->covered_semantic_sites) {
+        if (std::ranges::find(expected_semantic_sites, site) == expected_semantic_sites.end())
+          expected_semantic_sites.push_back(site);
+      }
+    }
+    if (access.original_semantic_sites.size() != expected_semantic_sites.size())
+      return false;
+    return std::ranges::all_of(expected_semantic_sites, [&](const SemanticSiteId &site) {
+      return std::ranges::count(access.original_semantic_sites, site) == 1;
+    });
+  };
+
+  for (const ConSanRecordReplayStaticAccessMapping &mapping :
+       commit.runtime_mapping.record_replay_accesses) {
+    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::AccessRecord))
+      return false;
+  }
+  for (const ConSanSampledStaticAccessMapping &mapping : commit.runtime_mapping.sampled_accesses) {
+    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::SampledAccess) ||
+        mapping.range_count == 0u || mapping.bank_count == 0u) {
+      return false;
+    }
+  }
+  for (const ConSanInlineCompactStaticAccessMapping &mapping :
+       commit.runtime_mapping.inline_compact_accesses) {
+    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::ExactShadowAccess) ||
+        mapping.token == 0u || !mapping.access.owner_provenance_complete ||
+        mapping.access.execution_owner_descriptor_file_offsets.size() != 1u) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool ConSanCoverageLedger::set_lowering_outcome(ConSanProbeIntentId id,

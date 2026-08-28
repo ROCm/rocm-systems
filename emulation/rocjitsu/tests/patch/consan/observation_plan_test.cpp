@@ -385,6 +385,53 @@ TEST(ConSanObservationPlan, CommittedLoweringRetainsEveryLocationInASequence) {
   EXPECT_EQ(commit->locations, (std::vector(locations.begin(), locations.end())));
 }
 
+TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactionally) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  const ConSanProbeIntent &intent = policy.plan.probe_intents.front();
+  const std::array intent_ids = {intent.id};
+  const std::array locations = {ConSanCommittedLoweringLocation{
+      .original_site = intent.physical_site,
+      .emitted_text_offset = 0x200,
+      .emitted_size = 16,
+      .relocated_guest_text_offset = 0x208,
+  }};
+  ConSanRuntimeStaticMapping mapping;
+  mapping.record_replay_accesses.push_back({
+      .access =
+          {
+              .intent_ids = {intent.id},
+              .original_site = intent.physical_site,
+              .original_semantic_sites = intent.covered_semantic_sites,
+              .execution_owner_descriptor_file_offsets = {192u},
+              .owner_provenance_complete = true,
+          },
+  });
+  const ConSanRuntimeStaticMapping expected_mapping = mapping;
+  auto commit = make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                               ConSanLoweringOutcomeKind::Instrumented, "mapped",
+                                               std::move(mapping));
+  ASSERT_TRUE(commit);
+
+  ConSanTransformArtifacts result;
+  result.observation_plan = policy.plan;
+  result.coverage_ledger = ConSanCoverageLedger(policy.plan);
+  ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
+  EXPECT_EQ(result.runtime_static_mapping, expected_mapping);
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().runtime_mapping, expected_mapping);
+
+  ConSanRuntimeStaticMapping malformed = expected_mapping;
+  malformed.record_replay_accesses.front().access.original_site.original_text_offset += 4u;
+  EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                              ConSanLoweringOutcomeKind::Instrumented, {},
+                                              std::move(malformed)));
+  EXPECT_FALSE(make_consan_committed_lowering(
+      policy.plan, intent_ids, std::span<const ConSanCommittedLoweringLocation>{},
+      ConSanLoweringOutcomeKind::PlacementRejected, {}, expected_mapping));
+}
+
 TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
