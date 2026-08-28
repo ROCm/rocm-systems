@@ -16,19 +16,48 @@
 #include "gin_scratch__types.h"
 #endif
 
-__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/true>) {
+  bcastMultimem(handler, tn, t, input, output, nElts);
+}
+
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/false>) {
+  ncclTeam lsa = ncclTeamLsa(handler.comm);
+  T const* src = input.localPtr();
+    // When the chunk already landed locally the self store is redundant, and it
+    // races with the ring warp relaying that same chunk over GIN.
+  int selfSkip = (input == output) ? 1 : 0;
+  for (size_t i = t; i < nElts; i += tn) {
+    T v = src[i];
+      // Stagger the first destination by LSA rank so the node's GPUs don't all
+      // target the same peer at once.
+    for (int s = selfSkip; s < lsa.nRanks; s++) {
+      int r = (lsa.rank + s) % lsa.nRanks;
+      output.lsaPtr(r)[i] = v;
+    }
+  }
+}
+
+template <bool multimem>
+static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
   ncclCoopCta cta;
   ncclSymkArgsHandler handler(args);
   ncclTeam rail = ncclTeamRail(handler.comm);
   ncclGin gin(handler.comm, (int)(blockIdx.x % handler.comm.ginContextCount));
   constexpr int chunkSize = ncclSymkAllGather_RailRing_ChunkSize;
   ncclGinSignal_t railSignals = handler.ginSyncHandle.railSignals + blockIdx.x * rail.nRanks;
-  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, /*multimem=*/true);
+  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, multimem);
   int nextPeer = (rail.rank + 1) % rail.nRanks;
   int prevPeer = (rail.rank + rail.nRanks - 1) % rail.nRanks;
   uint64_t* localSignalPtr = gin.getSignalShadowPtr(railSignals + prevPeer);
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
+
+    // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
 
   bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
@@ -77,8 +106,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
           while (remainingElts) {
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
               // Put self rank's data
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), input + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag);
             offset += chunkElts;
             remainingElts -= chunkElts;
           }
@@ -87,8 +116,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
               // Wait for signal from other peers before putting their data
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag);
             offset += chunkElts;
             remainingElts -= chunkElts;
             localSignalValue++;
@@ -103,4 +132,12 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
     *localSignalPtr = localSignalValue;
   }
   bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
+}
+
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaST(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier(args, /*multimem=*/BoolTag<false>{});
+}
+
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier(args, /*multimem=*/BoolTag<true>{});
 }

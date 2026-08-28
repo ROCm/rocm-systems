@@ -26,6 +26,7 @@ constexpr char const* kernelName[] = {
   "AllGather_ST",
   "AllGather_TmaSTMC",
   "AllGather_STMC",
+  "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
@@ -52,6 +53,7 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
@@ -75,6 +77,7 @@ constexpr uint32_t kernelMask_LSA =
 
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
@@ -358,6 +361,7 @@ static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
   *timeUs = FLT_MAX;
   *nBlocks = 0;
   switch (k) {
+  case ncclSymkKernelId_AllGather_RailRing_LsaST:
   case ncclSymkKernelId_AllGather_RailRing_LsaSTMC:
     {
       constexpr int railChunkSize = ncclSymkAllGather_RailRing_ChunkSize;

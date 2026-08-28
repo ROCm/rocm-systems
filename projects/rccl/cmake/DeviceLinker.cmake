@@ -1038,7 +1038,7 @@ if(GENERATE_SYM_KERNELS)
     # just ingest and DCE it, wasting compile time.
     set(_this_bc_flag "")
     set(_this_bc_deps "")
-    if(_sym_name MATCHES "_gin_")
+    if(_sym_name MATCHES "_gin")
       set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
       set(_this_bc_deps "${_sym_rocshmem_deps}")
     endif()
