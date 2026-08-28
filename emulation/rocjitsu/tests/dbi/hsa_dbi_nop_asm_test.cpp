@@ -53,6 +53,8 @@ constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_T
 // compiles it for gfx950 already), so this target needs no fixture of its own.
 constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
                                        "vector_add", nullptr, "gfx950"};
+constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+                                       "vector_add_gfx1201", nullptr, "gfx1201"};
 
 } // namespace
 
@@ -357,6 +359,31 @@ TEST_F(HsaDbiNopAsmCdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
 }
 
 TEST_F(HsaDbiNopAsmCdna4Hardware, TrampolineIsActuallyExecutedByGpu) {
+  run_trampoline_is_actually_executed_by_gpu();
+}
+
+// gfx1201 / RDNA4.
+
+class HsaDbiNopAsmRdna4Static : public HsaDbiNopAsmFixture {
+protected:
+  HsaDbiNopAsmRdna4Static() : HsaDbiNopAsmFixture(kRdna4Params) {}
+};
+
+class HsaDbiNopAsmRdna4Hardware : public HsaDbiNopAsmHardwareBase<kRdna4Params> {};
+
+TEST_F(HsaDbiNopAsmRdna4Static, PatchedElfActuallyContainsInstrumentation) {
+  run_patched_elf_actually_contains_instrumentation();
+}
+
+TEST_F(HsaDbiNopAsmRdna4Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopAsmRdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopAsmRdna4Hardware, TrampolineIsActuallyExecutedByGpu) {
   run_trampoline_is_actually_executed_by_gpu();
 }
 

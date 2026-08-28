@@ -948,6 +948,8 @@ set(RJ_CDNA4_KMD_2GPU_CONFIG
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CDNA2_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx90a_mi210_kmd.json")
+# gfx1201_r9700.json is the RDNA4 KMD config
+set(RJ_RDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
 )
@@ -969,6 +971,7 @@ set(RJ_HIP_TEST_2GPU_CONFIG
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA2_KMD_CONFIG_NAME "${RJ_CDNA2_KMD_CONFIG}" NAME)
+get_filename_component(RJ_RDNA4_KMD_CONFIG_NAME "${RJ_RDNA4_KMD_CONFIG}" NAME)
 get_filename_component(
     RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME
     "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}"
@@ -2321,6 +2324,64 @@ if(HSA_RUNTIME64)
             )
         endif()
 
+        # gfx1201 / RDNA4. First RDNA target through the CLI launcher; the DBI
+        # envelope itself is already RDNA4-validated by dbi_spill_sim_test.
+        register_hsa_dbi_nop_asm_case(Rdna4 Static PatchedElfActuallyContainsInstrumentation)
+        register_hsa_dbi_nop_asm_case(
+            Rdna4
+            Hardware
+            PatchedElfLoadsAndValidatesInHsaExecutable
+            SIM
+            CONFIG ${RJ_RDNA4_KMD_CONFIG}
+            CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Rdna4
+            Hardware
+            PatchedKernelDispatchMatchesOriginal
+            SIM
+            CONFIG ${RJ_RDNA4_KMD_CONFIG}
+            CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Rdna4
+            Hardware
+            TrampolineIsActuallyExecutedByGpu
+            SIM
+            CONFIG ${RJ_RDNA4_KMD_CONFIG}
+            CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+
+        if(HAS_GFX1201_GPU)
+            register_hsa_dbi_nop_asm_case(
+                Rdna4
+                Hardware
+                PatchedElfLoadsAndValidatesInHsaExecutable
+            )
+            register_hsa_dbi_nop_asm_case(
+                Rdna4
+                Hardware
+                PatchedKernelDispatchMatchesOriginal
+                TIMEOUT 30
+            )
+            register_hsa_dbi_nop_asm_case(
+                Rdna4
+                Hardware
+                TrampolineIsActuallyExecutedByGpu
+                TIMEOUT 30
+            )
+            message(STATUS "HSA DBI nop-asm test enabled (gfx1201 detected)")
+        else()
+            message(
+                STATUS
+                "HSA DBI nop-asm hardware cases NOT registered with CTest "
+                "(no gfx1201); the Sim cases still run"
+            )
+        endif()
+
         # Pin the FAIL_ON_SKIP guard, the way GtestFilterGuard.RejectsMissingTest
         # pins the zero-test guard. Launching the gfx90a fixture against a
         # simulated gfx942 selects one test, find_gpu_agent() finds no match,
@@ -2383,6 +2444,7 @@ if(HSA_RUNTIME64)
                 device_kernels
                 probe_rj_nop_probe_gfx90a
                 probe_rj_nop_probe_gfx950
+                probe_rj_nop_probe_gfx1201
                 rocjitsu_bin
                 rocjitsu_shared
             )
@@ -2591,6 +2653,70 @@ if(HSA_RUNTIME64)
                     STATUS
                     "HSA DBI nop-probe hardware cases NOT registered with "
                     "CTest (no gfx950); the Sim cases still run"
+                )
+            endif()
+
+            # gfx1201 / RDNA4, gated as for the nop-asm test above.
+            register_hsa_dbi_nop_probe_case(
+                Rdna4
+                Static
+                PatchedElfContainsProbeCallInstrumentation
+            )
+            register_hsa_dbi_nop_probe_case(
+                Rdna4
+                Hardware
+                PatchedElfLoadsAndValidatesInHsaExecutable
+                SIM
+                CONFIG ${RJ_RDNA4_KMD_CONFIG}
+                CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+                TIMEOUT 300
+            )
+            register_hsa_dbi_nop_probe_case(
+                Rdna4
+                Hardware
+                PatchedKernelDispatchMatchesOriginal
+                SIM
+                CONFIG ${RJ_RDNA4_KMD_CONFIG}
+                CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+                TIMEOUT 300
+            )
+            register_hsa_dbi_nop_probe_case(
+                Rdna4
+                Hardware
+                ProbeBodyIsActuallyCalledByGpu
+                SIM
+                CONFIG ${RJ_RDNA4_KMD_CONFIG}
+                CONFIG_NAME ${RJ_RDNA4_KMD_CONFIG_NAME}
+                TIMEOUT 300
+            )
+
+            if(HAS_GFX1201_GPU)
+                register_hsa_dbi_nop_probe_case(
+                    Rdna4
+                    Hardware
+                    PatchedElfLoadsAndValidatesInHsaExecutable
+                )
+                register_hsa_dbi_nop_probe_case(
+                    Rdna4
+                    Hardware
+                    PatchedKernelDispatchMatchesOriginal
+                    TIMEOUT 30
+                )
+                register_hsa_dbi_nop_probe_case(
+                    Rdna4
+                    Hardware
+                    ProbeBodyIsActuallyCalledByGpu
+                    TIMEOUT 30
+                )
+                message(
+                    STATUS
+                    "HSA DBI nop-probe smoke test enabled (gfx1201 detected)"
+                )
+            else()
+                message(
+                    STATUS
+                    "HSA DBI nop-probe hardware cases NOT registered with "
+                    "CTest (no gfx1201); the Sim cases still run"
                 )
             endif()
         else()
