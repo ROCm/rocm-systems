@@ -757,27 +757,17 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         stream.writeln()
 
 
-def has_gpu_od_interface(bdf):
-    """Check if a GPU has the gpu_od sysfs interface.
-
-    Delegates to amdsmi_helpers.AMDSMIHelpers.detect_gpu_od(). Requires the
-    AMD-SMI CLI to be installed (amdsmi_helpers is imported on first call).
-
-    Args:
-        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
-
-    Returns:
-        bool: True if gpu_od directory exists for this GPU
-    """
+def _import_amdsmi_helpers():
+    """Import amdsmi_helpers from the installed AMD-SMI CLI."""
     # TODO(amdsmi_team): Refactor to create an amdsmi_get_gpu_fan_speed_range() API
     #                    amdsmi_get_gpu_fan_speed_range(
     #                                           amdsmi_processor_handle processor_handle,
     #                                           uint32_t sensor_ind,
     #                                           amdsmi_range_t* fan_speed_range)
-    # and begin deprecation of amdsmi_get_gpu_fan_speed_max(). This will allow us
-    # to remove the dependency on amdsmi_helpers from this common module.
-    # Exposing non-public SYSFS API interfaces in the CLI (and in general)
-    # is a bad design pattern and needs to be addressed in the future.
+    # so the range accepted by amdsmi_set_gpu_fan_speed() is queryable through the
+    # public API. This will allow us to remove the dependency on amdsmi_helpers from
+    # this common module. Exposing non-public SYSFS API interfaces in the CLI (and in
+    # general) is a bad design pattern and needs to be addressed in the future.
     amdsmi_cli_path = os.path.normpath(
         os.path.join(amdsmi_path, "..", "..", "libexec", "amdsmi_cli")
     )
@@ -794,8 +784,46 @@ def has_gpu_od_interface(bdf):
         raise ImportError(
             f'Could not import the "amdsmi_helpers" module from "{amdsmi_cli_path}"'
         ) from e
+    return amdsmi_helpers
+
+
+def has_gpu_od_interface(bdf):
+    """Check if a GPU has the gpu_od sysfs interface.
+
+    Delegates to amdsmi_helpers.AMDSMIHelpers.detect_gpu_od(). Requires the
+    AMD-SMI CLI to be installed (amdsmi_helpers is imported on first call).
+
+    Args:
+        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+
+    Returns:
+        bool: True if gpu_od directory exists for this GPU
+    """
+    amdsmi_helpers = _import_amdsmi_helpers()
     has_gpu_od, _ = amdsmi_helpers.AMDSMIHelpers.detect_gpu_od(bdf)
     return has_gpu_od
+
+
+def get_fan_speed_set_range(bdf):
+    """Get the range that amdsmi_set_gpu_fan_speed() validates against.
+
+    On gpu_od GPUs this is the gpu_od OD_RANGE, which is a different unit space
+    than pwm1/pwm1_max and therefore not derivable from
+    amdsmi_get_gpu_fan_speed_max().
+
+    Args:
+        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+
+    Returns:
+        tuple: (min_speed, max_speed) accepted by amdsmi_set_gpu_fan_speed()
+    """
+    amdsmi_helpers = _import_amdsmi_helpers()
+    has_gpu_od, gpu_od_path = amdsmi_helpers.AMDSMIHelpers.detect_gpu_od(bdf)
+    if has_gpu_od:
+        od_min, od_max = amdsmi_helpers.AMDSMIHelpers.parse_gpu_od_fan_range(gpu_od_path)
+        if od_min is not None:
+            return od_min, od_max
+    return 0, 255
 
 
 class Common:
