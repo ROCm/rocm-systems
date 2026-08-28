@@ -513,7 +513,7 @@ TEST_F(DoneEventOrdering, GroupedPathBaseline)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
-// First AllReduce on hipStreamDefault, second on a named stream — tests the default-stream tag (1) vs no-launch sentinel (0).
+// Default stream first, named stream second. Tests the default-stream tag (1) vs the no-launch sentinel (0).
 TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -742,6 +742,125 @@ TEST_F(DoneEventOrdering, SameStreamThenSwitch)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
+// Shared body for the two stream-destroy tests. drainBeforeDestroy picks which HIP regime the
+// destroy lands in, and the two regimes fail differently, so both are worth covering:
+//   true  - streamA is idle, so hipStreamDestroy frees the stream object and the stale handle
+//           becomes invalid. A record on it fails fast with 'invalid resource handle'.
+//   false - work is still in flight, so HIP defers the free and the stale handle still resolves.
+//           A record on it succeeds on a dying stream and the ordering edge never fires, which
+//           surfaces only as a hang caught by withTimeout.
+static void runStreamDestroyedThenSwitch(int nGpus, bool drainBeforeDestroy)
+{
+    std::vector<int> devices(nGpus);
+    std::iota(devices.begin(), devices.end(), 0);
+
+    std::vector<ncclComm_t> comms(nGpus, nullptr);
+    {
+        ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
+        ASSERT_EQ(res, ncclSuccess) << ncclGetErrorString(res);
+    }
+    std::vector<RCCLTestGuards::NcclCommAutoGuard> commGuards;
+    commGuards.reserve(nGpus);
+    for(int i = 0; i < nGpus; ++i)
+        commGuards.push_back(RCCLTestGuards::makeCommAutoGuard(comms[i]));
+
+    std::vector<RCCLTestGuards::HipStreamAutoGuard>    decoyGuards, streamBGuards;
+    std::vector<RCCLTestGuards::DeviceBufferAutoGuard> sendbufGuards, recvbufGuards;
+    decoyGuards.reserve(static_cast<size_t>(nGpus) * kDecoyStreams);
+    streamBGuards.reserve(nGpus);
+    sendbufGuards.reserve(nGpus);
+    recvbufGuards.reserve(nGpus);
+
+    // streamA is destroyed mid-test on purpose, so it is not RAII-guarded.
+    std::vector<hipStream_t> streamA(nGpus, nullptr);
+    std::vector<hipStream_t> streamB(nGpus, nullptr);
+    std::vector<float*>      sendbuf(nGpus, nullptr);
+    std::vector<float*>      recvbuf(nGpus, nullptr);
+
+    for(int i = 0; i < nGpus; ++i)
+    {
+        HIP_CHECK(hipSetDevice(devices[i]));
+        HIP_CHECK(hipStreamCreate(&streamA[i]));
+
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&sendbuf[i]), kBufferBytes));
+        sendbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(sendbuf[i]));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&recvbuf[i]), kBufferBytes));
+        recvbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(recvbuf[i]));
+
+        HIP_CHECK(RCCLTestHelpers::initializeBufferWithPattern<float>(
+            sendbuf[i], kElemCount,
+            [i](size_t) { return static_cast<float>(i + 1); }));
+        HIP_CHECK(RCCLTestHelpers::zeroInitializeBuffer<float>(recvbuf[i], kElemCount));
+    }
+
+    const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
+
+    // Phase 1: collectives on streamA.
+    for(int i = 0; i < nGpus; ++i)
+    {
+        ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
+                                         ncclFloat, ncclSum, comms[i], streamA[i]);
+        ASSERT_EQ(res, ncclSuccess)
+            << "phase1 rank=" << i << ": " << ncclGetErrorString(res);
+    }
+    if(drainBeforeDestroy)
+    {
+        for(int i = 0; i < nGpus; ++i)
+        {
+            HIP_CHECK(hipSetDevice(devices[i]));
+            HIP_CHECK(hipStreamSynchronize(streamA[i]));
+        }
+    }
+
+    // Each communicator now holds streamA's identity. Destroy it; the comm lives on.
+    for(int i = 0; i < nGpus; ++i)
+    {
+        HIP_CHECK(hipSetDevice(devices[i]));
+        HIP_CHECK(hipStreamDestroy(streamA[i]));
+    }
+
+    for(int i = 0; i < nGpus; ++i)
+    {
+        HIP_CHECK(hipSetDevice(devices[i]));
+        for(int k = 0; k < kDecoyStreams; ++k)
+        {
+            hipStream_t decoy = nullptr;
+            HIP_CHECK(hipStreamCreate(&decoy));
+            decoyGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(decoy));
+        }
+        HIP_CHECK(hipStreamCreate(&streamB[i]));
+        streamBGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(streamB[i]));
+    }
+
+    // Phase 2: the stream change. Before the fix this recorded doneEvent on the
+    // destroyed streamA and returned ncclUnhandledCudaError, or segfaulted.
+    for(int i = 0; i < nGpus; ++i)
+    {
+        ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
+                                         ncclFloat, ncclSum, comms[i], streamB[i]);
+        ASSERT_EQ(res, ncclSuccess)
+            << "phase2 rank=" << i << ": " << ncclGetErrorString(res);
+    }
+    for(int i = 0; i < nGpus; ++i)
+    {
+        HIP_CHECK(hipSetDevice(devices[i]));
+        HIP_CHECK(hipStreamSynchronize(streamB[i]));
+    }
+
+    for(int i = 0; i < nGpus; ++i)
+    {
+        size_t errIdx = 0;
+        float  expVal = 0.0f, actVal = 0.0f;
+        bool   ok = RCCLTestHelpers::verifyBufferData<float>(
+            recvbuf[i], kElemCount,
+            [expected](size_t) { return expected; },
+            kElemCount, 0.0, &errIdx, &expVal, &actVal);
+        EXPECT_TRUE(ok)
+            << "rank " << i << ": wrong at index " << errIdx
+            << " expected " << expVal << " got " << actVal;
+    }
+}
+
 // Communicator outlives the stream it last launched on. Destroying that stream and then
 // issuing a collective on a fresh one must not touch the dead handle (ROCM-29677).
 TEST_F(DoneEventOrdering, StreamDestroyedThenSwitch)
@@ -761,112 +880,34 @@ TEST_F(DoneEventOrdering, StreamDestroyedThenSwitch)
                 const int nGpus = std::min(devCount, kMaxGpus);
                 if(nGpus < 2)
                     GTEST_SKIP() << "Requires >= 2 GPUs; found " << devCount;
+                runStreamDestroyedThenSwitch(nGpus, /*drainBeforeDestroy=*/true);
+            })
+            .withNumGpus(kMaxGpus)
+            .withEnvironment({{"NCCL_DEBUG", "WARN"}})
+            .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
+}
 
-                std::vector<int> devices(nGpus);
-                std::iota(devices.begin(), devices.end(), 0);
+// Same switch, but streamA is destroyed with RCCL work still in flight. HIP defers the free, so
+// the stale handle stays resolvable and a record on it would not error; the missing ordering edge
+// shows up as a hang instead. Covers the regime StreamDestroyedThenSwitch cannot reach.
+TEST_F(DoneEventOrdering, StreamDestroyedInFlightThenSwitch)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
 
-                std::vector<ncclComm_t> comms(nGpus, nullptr);
-                {
-                    ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
-                    ASSERT_EQ(res, ncclSuccess) << ncclGetErrorString(res);
-                }
-                std::vector<RCCLTestGuards::NcclCommAutoGuard> commGuards;
-                commGuards.reserve(nGpus);
-                for(int i = 0; i < nGpus; ++i)
-                    commGuards.push_back(RCCLTestGuards::makeCommAutoGuard(comms[i]));
-
-                std::vector<RCCLTestGuards::HipStreamAutoGuard>    decoyGuards, streamBGuards;
-                std::vector<RCCLTestGuards::DeviceBufferAutoGuard> sendbufGuards, recvbufGuards;
-                decoyGuards.reserve(static_cast<size_t>(nGpus) * kDecoyStreams);
-                streamBGuards.reserve(nGpus);
-                sendbufGuards.reserve(nGpus);
-                recvbufGuards.reserve(nGpus);
-
-                // streamA is destroyed mid-test on purpose, so it is not RAII-guarded.
-                std::vector<hipStream_t> streamA(nGpus, nullptr);
-                std::vector<hipStream_t> streamB(nGpus, nullptr);
-                std::vector<float*>      sendbuf(nGpus, nullptr);
-                std::vector<float*>      recvbuf(nGpus, nullptr);
-
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    HIP_CHECK(hipSetDevice(devices[i]));
-                    HIP_CHECK(hipStreamCreate(&streamA[i]));
-
-                    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&sendbuf[i]), kBufferBytes));
-                    sendbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(sendbuf[i]));
-                    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&recvbuf[i]), kBufferBytes));
-                    recvbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(recvbuf[i]));
-
-                    HIP_CHECK(RCCLTestHelpers::initializeBufferWithPattern<float>(
-                        sendbuf[i], kElemCount,
-                        [i](size_t) { return static_cast<float>(i + 1); }));
-                    HIP_CHECK(RCCLTestHelpers::zeroInitializeBuffer<float>(recvbuf[i], kElemCount));
-                }
-
-                const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
-
-                // Phase 1: collectives on streamA, then drain so the destroy below is clean.
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
-                                                     ncclFloat, ncclSum, comms[i], streamA[i]);
-                    ASSERT_EQ(res, ncclSuccess)
-                        << "phase1 rank=" << i << ": " << ncclGetErrorString(res);
-                }
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    HIP_CHECK(hipSetDevice(devices[i]));
-                    HIP_CHECK(hipStreamSynchronize(streamA[i]));
-                }
-
-                // Each communicator now holds streamA's identity. Destroy it; the comm lives on.
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    HIP_CHECK(hipSetDevice(devices[i]));
-                    HIP_CHECK(hipStreamDestroy(streamA[i]));
-                }
-
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    HIP_CHECK(hipSetDevice(devices[i]));
-                    for(int k = 0; k < kDecoyStreams; ++k)
-                    {
-                        hipStream_t decoy = nullptr;
-                        HIP_CHECK(hipStreamCreate(&decoy));
-                        decoyGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(decoy));
-                    }
-                    HIP_CHECK(hipStreamCreate(&streamB[i]));
-                    streamBGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(streamB[i]));
-                }
-
-                // Phase 2: the stream change. Before the fix this recorded doneEvent on the
-                // destroyed streamA and returned ncclUnhandledCudaError, or segfaulted.
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
-                                                     ncclFloat, ncclSum, comms[i], streamB[i]);
-                    ASSERT_EQ(res, ncclSuccess)
-                        << "phase2 rank=" << i << ": " << ncclGetErrorString(res);
-                }
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    HIP_CHECK(hipSetDevice(devices[i]));
-                    HIP_CHECK(hipStreamSynchronize(streamB[i]));
-                }
-
-                for(int i = 0; i < nGpus; ++i)
-                {
-                    size_t errIdx = 0;
-                    float  expVal = 0.0f, actVal = 0.0f;
-                    bool   ok = RCCLTestHelpers::verifyBufferData<float>(
-                        recvbuf[i], kElemCount,
-                        [expected](size_t) { return expected; },
-                        kElemCount, 0.0, &errIdx, &expVal, &actVal);
-                    EXPECT_TRUE(ok)
-                        << "StreamDestroyedThenSwitch rank " << i << ": wrong at index " << errIdx
-                        << " expected " << expVal << " got " << actVal;
-                }
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "StreamDestroyedInFlightThenSwitch",
+            []()
+            {
+                int devCount = 0;
+                HIP_CHECK(hipGetDeviceCount(&devCount));
+                const int nGpus = std::min(devCount, kMaxGpus);
+                if(nGpus < 2)
+                    GTEST_SKIP() << "Requires >= 2 GPUs; found " << devCount;
+                runStreamDestroyedThenSwitch(nGpus, /*drainBeforeDestroy=*/false);
             })
             .withNumGpus(kMaxGpus)
             .withEnvironment({{"NCCL_DEBUG", "WARN"}})
