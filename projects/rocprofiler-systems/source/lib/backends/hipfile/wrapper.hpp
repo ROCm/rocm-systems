@@ -82,7 +82,8 @@ struct wrapper
     static bool runtime_version_supported() noexcept
     {
         static const bool _supported = []() {
-            // NOLINTBEGIN(misc-const-correctness) -- out-parameters for hipFileGetVersion
+            // NOLINTBEGIN(misc-const-correctness) -- hipFileGetVersion writes through
+            // unsigned*; these cannot be const
             unsigned major = 0;
             unsigned minor = 0;
             unsigned patch = 0;
