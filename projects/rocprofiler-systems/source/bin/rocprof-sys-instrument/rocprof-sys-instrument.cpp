@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iterator>
 #include <map>
@@ -1740,11 +1741,6 @@ main(int argc, char** argv)
     if(!main_func && main_fname == "main")
         main_func = find_function(filtered_modules, "_main");
 
-    auto* user_start_func = find_function(filtered_modules, "rocprofsys_user_start_trace",
-                                          { "rocprofsys_user_start_thread_trace" });
-    auto* user_stop_func  = find_function(filtered_modules, "rocprofsys_user_stop_trace",
-                                          { "rocprofsys_user_stop_thread_trace" });
-
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :
@@ -2027,9 +2023,6 @@ main(int argc, char** argv)
 
     if(!binary_rewrite) env_vars.clear();
 
-    env_vars.emplace_back(
-        fmt::format("{}={}", rocprofsys::env_vars::INIT_ENABLED,
-                    (user_start_func && user_stop_func) ? "OFF" : "ON"));
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
                                       (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi)
@@ -2488,11 +2481,17 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        const auto& outf = outfile;
-        if(outf.find('/') != string_t::npos)
+        const auto outdir = path::parent_path(outfile);
+        if(!outdir.empty())
         {
-            auto outdir = outf.substr(0, outf.find_last_of('/'));
-            tim::makedir(outdir);
+            try
+            {
+                std::filesystem::create_directories(outdir);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                errprintf(0, "Failed to create output directory '%s': %s\n",
+                          outdir.c_str(), e.code().message().c_str());
+            }
         }
 
         const bool success = app_binary->writeFile(outfile.c_str());
