@@ -2015,6 +2015,118 @@ TEST_F(SymMemoryObtainRegisterTest, LinksOntoMemHeadAndReportsOut) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryObtain, rollback: three labels unwind progressively more work --
+// fail_mem frees the allocations, fail_mem_space also returns the reserved
+// space, and fail_mem_space_teams also unbinds every team already bound. None
+// of this is visible in the return code, so the assertions are on the driver
+// and allocator calls the rollback makes.
+
+class SymMemoryObtainRollbackTest : public SymMemoryObtainSetupTest {
+protected:
+  std::vector<unsigned char> teamStorage;
+
+  void SetUp() override {
+    SymMemoryObtainSetupTest::SetUp();
+    // A peer larger than us, so lsaMaxSize differs from our own size and the
+    // space accounting has to use the right one.
+    agreeing = GatherReporting({{1, false, 4096}, {1, false, 16384}});
+  }
+
+  void TearDown() override {
+    comm->devrState.teamHead = nullptr;  // borrowed storage, not malloc'd
+    SymMemoryObtainSetupTest::TearDown();
+  }
+
+  std::function<ncclResult_t(void*, void*, int)> agreeing;
+
+  // ncclDevrTeam ends in a flexible array member, so back it with a buffer.
+  void PushTeam() {
+    teamStorage.assign(sizeof(ncclDevrTeam) + sizeof(int), 0);
+    auto* t = reinterpret_cast<ncclDevrTeam*>(teamStorage.data());
+    t->team.nRanks = 1;
+    comm->devrState.teamHead = t;
+  }
+
+  // Hand out a recognisable offset so the matching free can be checked.
+  std::function<ncclResult_t(ncclSpace*, int64_t, int64_t, int, int64_t*)> AllocAt(int64_t offset) {
+    return [offset](ncclSpace*, int64_t, int64_t, int, int64_t* out) {
+      *out = offset;
+      return ncclSuccess;
+    };
+  }
+};
+
+// Label fail_mem_space: the LSA mapping failed after space was reserved, so the
+// reservation is returned -- at the offset it was given, sized on lsaMaxSize
+// (the largest LSA rank) rather than our own size.
+TEST_F(SymMemoryObtainRollbackTest, MapLsaTeamFails_ReturnsReservedSpace) {
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook alloc(g_spaceAlloc, AllocAt(8192));
+  int64_t freedOffset = -1, freedSize = -1;
+  ScopedHook spaceFree(g_spaceFree, [&](ncclSpace*, int64_t offset, int64_t size) {
+    freedOffset = offset;
+    freedSize = size;
+    return ncclSuccess;
+  });
+  // Fail the team barrier rather than the VA reservation: the fixture already
+  // has an lsaFlatBase, so the reservation is skipped and never runs.
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSystemError; });
+
+  EXPECT_NE(Obtain(/*numSegments=*/1, /*size=*/4096), ncclSuccess);
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(freedOffset, 8192);
+  EXPECT_EQ(freedSize, 16384);  // lsaMaxSize, the peer's size -- not our 4096
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Label fail_mem_space_teams: GIN registration failed after teams were bound,
+// so the unbind loop runs and the space is still returned.
+TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace) {
+  PushTeam();
+  comm->devrState.ginEnabled = true;
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook alloc(g_spaceAlloc, AllocAt(4096));
+  ScopedHook spaceFree(g_spaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSystemError; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Same label, reached from the RMA branch instead.
+TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking) {
+  PushTeam();
+  comm->nRanks = 2;
+  comm->devrState.nLsaTeams = 2;
+  comm->config.numRmaCtx = 1;
+  comm->globalRmaProxySupport = true;
+  ScopedHook gather(g_bootstrapAllGather, agreeing);
+  ScopedHook alloc(g_spaceAlloc, AllocAt(0));
+  ScopedHook spaceFree(g_spaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook reg(g_rmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Label fail_mem: a failure before the reservation must not free space that was
+// never taken.
+TEST_F(SymMemoryObtainRollbackTest, EarlyFailure_DoesNotFreeUnreservedSpace) {
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
+  ScopedHook spaceFree(g_spaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(spaceFree.calls, 0);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy: the original lifecycle regression.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
