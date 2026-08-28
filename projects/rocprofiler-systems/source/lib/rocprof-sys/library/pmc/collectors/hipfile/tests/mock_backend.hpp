@@ -27,8 +27,8 @@ struct mock_backend
     bool           available  = true;
     std::size_t    call_count = 0;
 
-    /// Timestamps passed to get_stats, in order. Lets a test assert the backend saw
-    /// exactly one query per interval.
+    /// Timestamps passed to get_stats, in order. The mock does not memoize; each
+    /// get_metrics records one entry so a test can check which stamps were forwarded.
     std::vector<std::uint64_t> queried_timestamps;
 
     [[nodiscard]] const stats_snapshot& get_stats(std::uint64_t timestamp)

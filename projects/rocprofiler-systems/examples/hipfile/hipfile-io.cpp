@@ -25,9 +25,11 @@
 #include <cstring>
 #include <limits>
 #include <thread>
+#include <utility>
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace
@@ -42,7 +44,8 @@ print_usage(const char* program)
 {
     fprintf(stderr,
             "usage: %s [FILE] [GPUID] [SECONDS]\n"
-            "  FILE     scratch file to write and read, removed on exit\n"
+            "  FILE     scratch file to write and read, created fresh and removed on\n"
+            "           exit; must not already exist\n"
             "           (default: hipfile-io.bin in the current directory)\n"
             "  GPUID    GPU ordinal to run on (default: 0)\n"
             "  SECONDS  duration of the I/O loop, at least 1 (default: 5)\n",
@@ -68,39 +71,65 @@ parse_int(const char* text, int minimum, int& out)
     return true;
 }
 
-/// Owns the scratch file so that every exit path closes the descriptor and removes
-/// the file, including the setup failures that return before the I/O loop starts.
-class scratch_file
+/// Runs its cleanup callable at scope exit, so the setup failures that return before
+/// the I/O loop starts still release whatever has already been acquired.
+///
+template <typename Cleanup>
+class scope_guard
 {
 public:
-    scratch_file(const char* path, int file_descriptor)
-    : m_path{ path }
-    , m_fd{ file_descriptor }
+    explicit scope_guard(Cleanup cleanup)
+    : m_cleanup{ std::move(cleanup) }
     {}
 
-    ~scratch_file()
-    {
-        if(m_fd >= 0)
-        {
-            close(m_fd);
-        }
-        if(m_path != nullptr)
-        {
-            unlink(m_path);
-        }
-    }
+    ~scope_guard() { m_cleanup(); }
 
-    scratch_file(const scratch_file&)            = delete;
-    scratch_file& operator=(const scratch_file&) = delete;
-    scratch_file(scratch_file&&)                 = delete;
-    scratch_file& operator=(scratch_file&&)      = delete;
-
-    [[nodiscard]] int fd() const noexcept { return m_fd; }
+    scope_guard(const scope_guard&)            = delete;
+    scope_guard& operator=(const scope_guard&) = delete;
+    scope_guard(scope_guard&&)                 = delete;
+    scope_guard& operator=(scope_guard&&)      = delete;
 
 private:
-    const char* m_path;
-    int         m_fd;
+    Cleanup m_cleanup;
 };
+
+struct io_result
+{
+    /// False when an operation reported an error or moved fewer bytes than asked for;
+    /// either one leaves the file and the hipFile counters in a state this workload
+    /// does not claim, so neither counts as an iteration.
+    bool          succeeded;
+    std::uint64_t iterations;
+};
+
+/// Writes the buffer and reads it back until @p seconds have elapsed.
+io_result
+run_io_loop(hipFileHandle_t handle, void* devbuf, size_t bytes, int seconds)
+{
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    std::uint64_t iterations = 0;
+    while(std::chrono::steady_clock::now() < deadline)
+    {
+        const auto bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
+        if(bytes_written != static_cast<ssize_t>(bytes))
+        {
+            fprintf(stderr, "hipFileWrite returned %zd, expected %zu\n", bytes_written,
+                    bytes);
+            return { false, iterations };
+        }
+        const auto bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
+        if(bytes_read != static_cast<ssize_t>(bytes))
+        {
+            fprintf(stderr, "hipFileRead returned %zd, expected %zu\n", bytes_read,
+                    bytes);
+            return { false, iterations };
+        }
+        ++iterations;
+        std::this_thread::sleep_for(std::chrono::milliseconds(k_loop_sleep_ms));
+    }
+    return { true, iterations };
+}
 }  // namespace
 
 // NOLINTBEGIN(readability-function-size)
@@ -142,7 +171,18 @@ main(int argc, char** argv)
         fprintf(stderr, "hipMalloc failed\n");
         return EXIT_FAILURE;
     }
-    (void) hipMemset(devbuf, k_buffer_fill_byte, bytes);
+    const scope_guard devbuf_guard{ [&] {
+        if(hipFree(devbuf) != hipSuccess)
+        {
+            fprintf(stderr, "hipFree failed\n");
+        }
+    } };
+
+    if(hipMemset(devbuf, k_buffer_fill_byte, bytes) != hipSuccess)
+    {
+        fprintf(stderr, "hipMemset failed\n");
+        return EXIT_FAILURE;
+    }
 
     hipFileError_t err = hipFileBufRegister(devbuf, bytes, 0);
     if(err.err != hipFileSuccess)
@@ -151,17 +191,39 @@ main(int argc, char** argv)
                 hipFileGetOpErrorString(err.err));
         return EXIT_FAILURE;
     }
+    const scope_guard bufreg_guard{ [&] {
+        const hipFileError_t status = hipFileBufDeregister(devbuf);
+        if(status.err != hipFileSuccess)
+        {
+            fprintf(stderr, "hipFileBufDeregister failed (%s)\n",
+                    hipFileGetOpErrorString(status.err));
+        }
+    } };
 
-    const int raw_fd = open(path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    // O_EXCL, not O_TRUNC: the file is unlinked on exit, so a mistyped FILE would
+    // otherwise overwrite and then delete data the user meant to keep.
+    const int raw_fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
     if(raw_fd < 0)
     {
-        fprintf(stderr, "open(%s) failed (%s)\n", path, strerror(errno));
+        if(errno == EEXIST)
+        {
+            fprintf(stderr,
+                    "%s already exists; hipfile-io only writes a file it creates, and "
+                    "removes it on exit. Remove it or pass a different FILE.\n",
+                    path);
+        }
+        else
+        {
+            fprintf(stderr, "open(%s) failed (%s)\n", path, strerror(errno));
+        }
         return EXIT_FAILURE;
     }
+    const scope_guard file_guard{ [&] {
+        close(raw_fd);
+        unlink(path);
+    } };
 
-    const scratch_file file{ path, raw_fd };
-
-    if(ftruncate(file.fd(), bytes) != 0)
+    if(ftruncate(raw_fd, bytes) != 0)
     {
         fprintf(stderr, "ftruncate failed (%s)\n", strerror(errno));
         return EXIT_FAILURE;
@@ -170,7 +232,7 @@ main(int argc, char** argv)
     hipFileHandle_t handle{};
     hipFileDescr_t  descr;
     descr.type      = hipFileHandleTypeOpaqueFD;
-    descr.handle.fd = file.fd();
+    descr.handle.fd = raw_fd;
     err             = hipFileHandleRegister(&handle, &descr);
     if(err.err != hipFileSuccess)
     {
@@ -178,41 +240,19 @@ main(int argc, char** argv)
                 hipFileGetOpErrorString(err.err));
         return EXIT_FAILURE;
     }
+    const scope_guard handle_guard{ [&] { hipFileHandleDeregister(handle); } };
 
     printf("hipfile-io: pid=%d looping hipFile I/O for %ds\n", static_cast<int>(getpid()),
            seconds);
     fflush(stdout);
 
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
-    std::uint64_t iters = 0;
-    while(std::chrono::steady_clock::now() < deadline)
-    {
-        const auto bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
-        if(bytes_written < 0)
-        {
-            fprintf(stderr, "hipFileWrite failed (%zd)\n", bytes_written);
-            break;
-        }
-        const auto bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
-        if(bytes_read < 0)
-        {
-            fprintf(stderr, "hipFileRead failed (%zd)\n", bytes_read);
-            break;
-        }
-        ++iters;
-        std::this_thread::sleep_for(std::chrono::milliseconds(k_loop_sleep_ms));
-    }
+    const io_result result = run_io_loop(handle, devbuf, bytes, seconds);
 
-    printf("hipfile-io: completed %llu write+read iterations\n",
-           static_cast<unsigned long long>(iters));
+    printf("hipfile-io: %s after %llu write+read iterations\n",
+           result.succeeded ? "completed" : "failed",
+           static_cast<unsigned long long>(result.iterations));
     fflush(stdout);
 
-    // Ordering matters: hipFile must release the handle before ~scratch_file closes the
-    // descriptor it was registered against.
-    hipFileHandleDeregister(handle);
-    (void) hipFileBufDeregister(devbuf);
-    (void) hipFree(devbuf);
-    return EXIT_SUCCESS;
+    return result.succeeded ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 // NOLINTEND(readability-function-size)

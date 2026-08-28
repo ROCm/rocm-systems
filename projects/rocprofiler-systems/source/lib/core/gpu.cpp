@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cstddef>
 #include <exception>
 #include <mutex>
@@ -169,11 +170,15 @@ visibility_mask_is_ordered_subset(std::string_view value)
         }
         const auto last = token.find_last_not_of(" \t");
         token           = token.substr(first, last - first + 1);
-        if(token.find_first_not_of("0123456789") != std::string::npos)
+
+        std::size_t ordinal        = 0;
+        const auto* token_end      = token.data() + token.size();
+        const auto [parse_end, ec] = std::from_chars(token.data(), token_end, ordinal);
+        if(ec != std::errc{} || parse_end != token_end)
         {
             return false;
         }
-        const auto ordinal = std::stoull(token);
+
         if(have_previous && ordinal <= previous)
         {
             return false;
@@ -219,6 +224,7 @@ unreliable_hip_ordinal_mask()
         return mask_if_unreliable("HIP_VISIBLE_DEVICES", hip);
     }
 
+    // SDK also reads CUDA_VISIBLE_DEVICES/GPU_DEVICE_ORDINAL to determine visible GPUs
     const auto cuda = rocprofsys::get_env<std::string>("CUDA_VISIBLE_DEVICES", "");
     if(!cuda.empty())
     {

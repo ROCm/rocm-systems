@@ -30,7 +30,7 @@ Usage: `hipfile-io [FILE] [GPUID] [SECONDS]`
 
 | Argument  | Default          | Description                                        |
 | --------- | ---------------- | -------------------------------------------------- |
-| `FILE`    | `hipfile-io.bin` | Scratch file in cwd unless a path is given         |
+| `FILE`    | `hipfile-io.bin` | Scratch file in cwd; must not already exist        |
 | `GPUID`   | `0`              | GPU ordinal to run on                              |
 | `SECONDS` | `5`              | Duration of the I/O loop, at least 1               |
 
@@ -38,6 +38,11 @@ The workload writes and reads back a 1 MiB buffer per iteration, pausing 20 ms
 between iterations so the profiler's periodic sampler observes several points.
 It removes the scratch file before exiting, including when it fails during
 setup, so repeated runs leave nothing behind.
+
+Because the scratch file is deleted on exit, `FILE` is created with `O_EXCL` and
+the run is refused if it already exists — a mistyped path cannot overwrite and
+then delete something you meant to keep. If a previous run was killed before it
+could clean up, remove the leftover file (or pass a different path) to run again.
 
 Point `FILE` at the filesystem you want to measure. The default is deliberately
 the current directory rather than `/tmp`, which on many systems is `tmpfs` and
@@ -87,7 +92,16 @@ the workload actually ran before looking at a trace:
 
 ```text
 hipfile-io: pid=12345 looping hipFile I/O for 5s
-hipfile-io: completed 208 write+read iterations
+hipfile-io: completed after 208 write+read iterations
+```
+
+A read or write that fails or transfers fewer bytes than requested stops the loop,
+reports the returned and expected byte counts on stderr, and exits non-zero:
+
+```text
+hipfile-io: pid=12345 looping hipFile I/O for 5s
+hipFileWrite returned -5, expected 1048576
+hipfile-io: failed after 12 write+read iterations
 ```
 
 `hipfile-trace` prints the detected hipFILE version:
