@@ -185,6 +185,11 @@ struct ConSanTransformArtifacts {
   ConSanMoiOperatingPoint moi_operating_point;
   /// Authoritative intent-bound lowering results published by placement.
   std::vector<ConSanCommittedLowering> committed_lowerings;
+  /// Intent-bound synchronization products staged across the MOI atomic,
+  /// fence, and barrier emitters. A shared address-capture intent can serve
+  /// more than one emitted record, so the pipeline merges all of its machine
+  /// locations before publishing one authoritative result at finalization.
+  std::vector<ConSanCommittedLowering> staged_moi_sync_lowerings;
   /// Validated byte-level changes emitted by lowering.
   std::vector<ConSanPatchInfo> patches;
   /// Complete validated code-object replacement, or empty when none is installable.
@@ -227,11 +232,58 @@ struct ConSanTransformArtifacts {
                                std::make_move_iterator(commits.end()));
     return true;
   }
+  /// Stage and transitively merge MOI synchronization commits that share an
+  /// intent. Publication is deferred until every synchronization emitter has
+  /// contributed, allowing one address-capture intent to name both an atomic
+  /// record and an associated fence record without duplicate ownership.
+  [[nodiscard]] bool stage_moi_sync_lowering_commits(std::vector<ConSanCommittedLowering> commits) {
+    std::vector<ConSanCommittedLowering> next = staged_moi_sync_lowerings;
+    for (ConSanCommittedLowering &incoming : commits) {
+      if (incoming.outcome != ConSanLoweringOutcomeKind::Instrumented)
+        return false;
+      std::vector<ConSanProbeIntentId> ids = incoming.intent_ids;
+      std::vector<ConSanCommittedLoweringLocation> locations = incoming.locations;
+      for (size_t index = 0; index < next.size();) {
+        const bool overlaps = std::ranges::any_of(next[index].intent_ids, [&](const auto &id) {
+          return std::ranges::find(ids, id) != ids.end();
+        });
+        if (!overlaps) {
+          ++index;
+          continue;
+        }
+        for (ConSanProbeIntentId id : next[index].intent_ids) {
+          if (std::ranges::find(ids, id) == ids.end())
+            ids.push_back(id);
+        }
+        for (const ConSanCommittedLoweringLocation &location : next[index].locations) {
+          if (std::ranges::find(locations, location) == locations.end())
+            locations.push_back(location);
+        }
+        next.erase(next.begin() + static_cast<std::ptrdiff_t>(index));
+      }
+      auto merged = make_consan_committed_lowering(observation_plan, ids, locations,
+                                                   ConSanLoweringOutcomeKind::Instrumented);
+      if (!merged)
+        return false;
+      next.push_back(std::move(*merged));
+    }
+    staged_moi_sync_lowerings = std::move(next);
+    return true;
+  }
+  /// Publish the complete synchronization transaction after every emitter has
+  /// contributed its locations.
+  [[nodiscard]] bool publish_staged_moi_sync_lowerings() {
+    if (!publish_lowering_commits(staged_moi_sync_lowerings))
+      return false;
+    staged_moi_sync_lowerings.clear();
+    return true;
+  }
   /// Discard the candidate image and its patch telemetry without changing the
   /// caller-owned outcome, diagnostics, semantic inventory, or mutation facts.
   void discard_candidate_modification() {
     replacement.clear();
     patches.clear();
+    staged_moi_sync_lowerings.clear();
     std::erase_if(committed_lowerings, [](const ConSanCommittedLowering &commit) {
       return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
     });

@@ -921,6 +921,11 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
             ConSanLoweringOutcomeKind::PlacementRejected);
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().outcome,
+            ConSanLoweringOutcomeKind::PlacementRejected);
+  EXPECT_EQ(result.committed_lowerings.front().intent_ids.size(), 1u);
+  EXPECT_TRUE(result.committed_lowerings.front().locations.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("cannot retain every range") != std::string::npos;
   }));
@@ -1015,6 +1020,15 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_EQ(patch->anchor_offset, 20u);
   ASSERT_TRUE(patch->scratch_vgpr);
   EXPECT_EQ(*patch->scratch_vgpr, 8u);
+  const ConSanCommittedLowering *atomic_commit = consan_committed_lowering_for_intent_kind(
+      result, ConSanProbeIntentKind::SampledAtomicOrdering);
+  ASSERT_NE(atomic_commit, nullptr);
+  EXPECT_TRUE(consan_committed_lowering_has_intent_kind(
+      result, *atomic_commit, ConSanProbeIntentKind::AtomicAddressCapture));
+  EXPECT_EQ(atomic_commit->intent_ids.size(), 2u);
+  ASSERT_EQ(atomic_commit->locations.size(), 1u);
+  EXPECT_EQ(atomic_commit->locations.front().emitted_text_offset, patch->trampoline_offset);
+  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6249,6 +6263,15 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  const ConSanCommittedLowering *barrier_commit =
+      consan_committed_lowering_for_intent_kind(result, ConSanProbeIntentKind::SampledBarrierEpoch);
+  ASSERT_NE(barrier_commit, nullptr);
+  EXPECT_EQ(barrier_commit->intent_ids.size(), 1u);
+  EXPECT_EQ(barrier_commit->original_semantic_sites.size(), 2u);
+  EXPECT_EQ(barrier_commit->locations.size(), 2u);
+  EXPECT_EQ(barrier_commit->locations.front().emitted_text_offset, patch->anchor_offset);
+  EXPECT_EQ(barrier_commit->locations.back().emitted_text_offset, patch->trampoline_offset);
+  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
   ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
                                   [&](const ConSanBarrierSiteDecision &decision) {
@@ -8085,6 +8108,11 @@ TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
   EXPECT_TRUE(consan_decision_has_lowering(result,
                                            result.observation_plan.barrier_site_decisions.front(),
                                            ConSanLoweringOutcomeKind::ResourceRejected));
+  const ConSanCommittedLowering *rejection =
+      consan_committed_lowering_for_intent_kind(result, ConSanProbeIntentKind::SampledBarrierEpoch);
+  ASSERT_NE(rejection, nullptr);
+  EXPECT_EQ(rejection->outcome, ConSanLoweringOutcomeKind::ResourceRejected);
+  EXPECT_TRUE(rejection->locations.empty());
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Barrier &&
            plan.source == ConSanRegisterAllocationSource::Unsupported &&

@@ -217,7 +217,8 @@ inline_ordinary_acquire_load(const InlineReleaseSequenceTarget &target) {
     };
   }
   return {
-      0xEE050004u, 4u | (2u << 18u),
+      0xEE050004u,
+      4u | (2u << 18u),
       2u, // global_load_b32 v4, v2, s[4:5], scope:device
   };
 }
@@ -3390,6 +3391,35 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
       fences.push_back(&patch);
   }
   ASSERT_EQ(fences.size(), 2u);
+  const ConSanCommittedLowering *fence_commit =
+      consan_committed_lowering_for_intent_kind(result, ConSanProbeIntentKind::FenceRecord);
+  ASSERT_NE(fence_commit, nullptr);
+  EXPECT_EQ(std::ranges::count_if(fence_commit->intent_ids,
+                                  [&](ConSanProbeIntentId id) {
+                                    const ConSanProbeIntent *intent =
+                                        result.observation_plan.intent(id);
+                                    return intent != nullptr &&
+                                           intent->kind == ConSanProbeIntentKind::FenceRecord;
+                                  }),
+            2u);
+  EXPECT_EQ(fence_commit->outcome, ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_TRUE(consan_committed_lowering_has_intent_kind(
+      result, *fence_commit, ConSanProbeIntentKind::AtomicAddressCapture));
+  EXPECT_EQ(fence_commit->original_physical_sites.size(), 3u);
+  for (const PhysicalSiteId &site : fence_commit->original_physical_sites) {
+    EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
+      return location.original_site == site;
+    }));
+  }
+  for (const ConSanPatchInfo *fence : fences) {
+    EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
+      return location.emitted_text_offset == fence->anchor_offset;
+    }));
+    EXPECT_TRUE(std::ranges::any_of(fence_commit->locations, [&](const auto &location) {
+      return location.emitted_text_offset == fence->trampoline_offset;
+    }));
+  }
+  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
   EXPECT_EQ(fences[0]->anchor_offset, result.program_inventory.sync()
                                           .moi_fence_candidates[0]
                                           .fence_event.physical.original_text_offset);
@@ -3472,7 +3502,8 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
   for (const InlineReleaseSequenceTarget &target : targets) {
     SCOPED_TRACE(target.label);
     const std::array<uint32_t, 3> load = {
-        0xEE050004u, 2u | (2u << 18u),
+        0xEE050004u,
+        2u | (2u << 18u),
         2u, // global_load_b32 v2, v2, s[4:5], scope:device
     };
     std::vector<uint32_t> guest_words;

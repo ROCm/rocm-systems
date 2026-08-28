@@ -2,6 +2,102 @@
   return name.starts_with("__amd_rocclr_");
 }
 
+/// Prepare the semantic half of one synchronization byte-mutation
+/// transaction. Intent identity comes from the immutable lowering plan, while
+/// emitted geometry comes from the patch product being committed in the same
+/// transaction. No patch kind or anchor is interpreted to recover either.
+[[nodiscard]] std::optional<ConSanCommittedLowering>
+make_moi_sync_lowering_commit(const ConSanTransformArtifacts &result,
+                              std::span<const ConSanProbeIntentId> intent_ids,
+                              const ConSanPatchInfo &patch) {
+  std::vector<PhysicalSiteId> original_sites;
+  for (ConSanProbeIntentId id : intent_ids) {
+    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    if (intent == nullptr)
+      return std::nullopt;
+    if (std::ranges::find(original_sites, intent->physical_site) == original_sites.end())
+      original_sites.push_back(intent->physical_site);
+  }
+
+  std::vector<ConSanCommittedLoweringLocation> locations;
+  locations.reserve(original_sites.size() * (patch.trampoline_size == 0u ? 1u : 2u));
+  for (const PhysicalSiteId &site : original_sites) {
+    if (patch.original_size != 0u) {
+      locations.push_back({
+          .original_site = site,
+          .emitted_text_offset = patch.anchor_offset,
+          .emitted_size = patch.original_size,
+          .relocated_guest_text_offset =
+              patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
+      });
+    }
+    if (patch.trampoline_size != 0u) {
+      locations.push_back({
+          .original_site = site,
+          .emitted_text_offset = patch.trampoline_offset,
+          .emitted_size = patch.trampoline_size,
+          .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
+      });
+    }
+  }
+  return make_consan_committed_lowering(result.observation_plan, intent_ids, locations,
+                                        ConSanLoweringOutcomeKind::Instrumented);
+}
+
+[[nodiscard]] bool append_moi_sync_lowering_commit(ConSanTransformArtifacts &result,
+                                                   std::span<const ConSanProbeIntentId> intent_ids,
+                                                   const ConSanPatchInfo &patch,
+                                                   std::string_view probe_name,
+                                                   std::vector<ConSanCommittedLowering> &commits) {
+  auto commit = make_moi_sync_lowering_commit(result, intent_ids, patch);
+  if (!commit) {
+    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                               " produced an invalid intent-bound lowering");
+    return false;
+  }
+  commits.push_back(std::move(*commit));
+  return true;
+}
+
+[[nodiscard]] bool
+append_moi_atomic_lowering_commit(ConSanTransformArtifacts &result,
+                                  const MoiAtomicEvidenceSitePlan &plan,
+                                  const ConSanPatchInfo &patch, std::string_view probe_name,
+                                  std::vector<ConSanCommittedLowering> &commits) {
+  const std::array<ConSanProbeIntentId, 2> ids = {plan.address_capture_intent,
+                                                  plan.evidence_intent};
+  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
+}
+
+[[nodiscard]] bool append_moi_fence_lowering_commit(ConSanTransformArtifacts &result,
+                                                    const MoiFenceEvidenceSitePlan &plan,
+                                                    const ConSanPatchInfo &patch,
+                                                    std::string_view probe_name,
+                                                    std::vector<ConSanCommittedLowering> &commits) {
+  const std::array<ConSanProbeIntentId, 2> ids = {plan.address_capture_intent,
+                                                  plan.evidence_intent};
+  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
+}
+
+[[nodiscard]] bool
+append_moi_barrier_lowering_commit(ConSanTransformArtifacts &result,
+                                   const MoiBarrierEvidenceSitePlan &plan,
+                                   const ConSanPatchInfo &patch, std::string_view probe_name,
+                                   std::vector<ConSanCommittedLowering> &commits) {
+  const std::array<ConSanProbeIntentId, 1> ids = {plan.evidence_intent};
+  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
+}
+
+[[nodiscard]] bool publish_moi_sync_lowering_commits(ConSanTransformArtifacts &result,
+                                                     std::vector<ConSanCommittedLowering> commits,
+                                                     std::string_view probe_name) {
+  if (result.stage_moi_sync_lowering_commits(std::move(commits)))
+    return true;
+  result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                             " could not stage its semantic lowerings");
+  return false;
+}
+
 [[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
                                   const MoiAtomicEvidenceSitePlan &plan,
@@ -165,10 +261,15 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
     if (decision.kind != ConSanSiteDecisionKind::Admitted)
       continue;
 
+    ConSanProbeIntentId address_capture;
     ConSanProbeIntentId evidence;
     for (ConSanProbeIntentId id : decision.intent_ids) {
       const ConSanProbeIntent *intent = observation.intent(id);
-      if (intent == nullptr || intent->kind != ConSanProbeIntentKind::FenceRecord)
+      if (intent == nullptr)
+        continue;
+      if (intent->kind == ConSanProbeIntentKind::AtomicAddressCapture)
+        address_capture = id;
+      if (intent->kind != ConSanProbeIntentKind::FenceRecord)
         continue;
       if (evidence.valid()) {
         errors.emplace_back("ConSan MOI admitted fence has multiple record intents");
@@ -178,8 +279,8 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
     }
     if (!evidence.valid())
       continue;
-    if (!decision.association) {
-      errors.emplace_back("ConSan MOI admitted fence record lost its graph association");
+    if (!address_capture.valid() || !decision.association) {
+      errors.emplace_back("ConSan MOI admitted fence record lost its capture or graph association");
       return {};
     }
     const ConSanProbeIntent *intent = observation.intent(evidence);
@@ -221,6 +322,7 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
     plan.semantic_site = decision.semantic_site;
     plan.association = *decision.association;
     plan.evidence_intent = evidence;
+    plan.address_capture_intent = address_capture;
     plan.memory_role = association->memory_role;
     plan.patch_text_offset = fence_event->text_offset;
     plan.patch_file_offset = fence_event->file_offset;

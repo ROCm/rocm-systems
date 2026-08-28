@@ -75,6 +75,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
                                      candidate_index, candidate.patch_text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &candidate.communication_site);
+    plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan) {
       if (candidate.patch_text_offset != fence_text_offset)
         plan.semantic_text_offset = fence_text_offset;
@@ -164,6 +165,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
   for (const PlannedFenceRecord &planned : selected) {
     MoiAtomicEvidenceSitePlan scalar_clause_candidate;
     scalar_clause_candidate.site = planned.candidate.communication_site;
@@ -501,12 +503,17 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     info.original_size = displaced_original_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     note_moi_probe_patch_info(info, planned);
+    if (!append_moi_fence_lowering_commit(result, planned.candidate, info, "fence record patch",
+                                          lowering_commits))
+      return;
     patches.push_back(std::move(info));
     ++record_index;
   }
   if (!replace_consan_text(patcher, new_text, options, "MOI fence record patch", result)) {
     return;
   }
+  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits), "fence record patch"))
+    return;
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();
@@ -562,6 +569,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                      candidate.kernel_descriptor_file_offset, owner_scratch_count);
         }
       }
+      plan.intent_ids = {candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
   }
@@ -589,9 +597,11 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                      : options.moi_engine == ConSanMoiEngine::InlineShadow
                                          ? inline_shadow_atomic_scratch_count(state.arch)
                                          : atomic_record_scratch_count(candidate.site, state.arch);
-      plans.push_back(plan_moi_resource_site(
+      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site));
+          candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site);
+      plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
+      plans.push_back(std::move(plan));
     }
   }
   if (options.moi_track_atomics && options.moi_engine == ConSanMoiEngine::RecordReplay) {
@@ -608,188 +618,58 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           &candidate.communication_site);
       if (candidate.patch_text_offset != candidate.semantic_site.physical.original_text_offset)
         plan.semantic_text_offset = candidate.semantic_site.physical.original_text_offset;
+      plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
   }
 }
 
-[[nodiscard]] std::optional<ConSanResourceSiteKind>
-moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch) {
-  switch (patch.kind) {
-  case ConSanPatchKind::InlineMoiAccessRecordStore:
-  case ConSanPatchKind::TrampolineMoiAccessRecordStore:
-  case ConSanPatchKind::InlineMoiExactShadowStore:
-  case ConSanPatchKind::TrampolineMoiExactShadowStore:
-  case ConSanPatchKind::InlineMoiSampledWatchpointStore:
-  case ConSanPatchKind::TrampolineMoiSampledWatchpointStore:
-    return ConSanResourceSiteKind::Access;
-  case ConSanPatchKind::TrampolineMoiBarrierRecord:
-  case ConSanPatchKind::TrampolineMoiInlineEpochBarrier:
-  case ConSanPatchKind::InlineMalformedBarrierAbort:
-    return ConSanResourceSiteKind::Barrier;
-  case ConSanPatchKind::TrampolineMoiInlineAtomicOrdering:
-  case ConSanPatchKind::TrampolineMoiAtomicRecord:
-    return ConSanResourceSiteKind::Atomic;
-  case ConSanPatchKind::TrampolineMoiFenceRecord:
-    return ConSanResourceSiteKind::Fence;
-  case ConSanPatchKind::TrampolineMoiSampledSyncMetadata:
-    return std::nullopt;
-  default:
-    return std::nullopt;
+/// Close every MOI intent that did not participate in a committed byte
+/// mutation. Unsupported resource plans reject the exact intent IDs they
+/// governed; all other still-pending intents receive an explicit placement
+/// rejection. This terminal path never searches patches, anchors, or graph
+/// geometry to rediscover what lowering attempted.
+void publish_pending_moi_lowering_rejections(ConSanTransformArtifacts &result) {
+  if (!result.publish_staged_moi_sync_lowerings()) {
+    result.errors.emplace_back("ConSan MOI could not publish its synchronization transaction");
+    return;
   }
-}
-
-void finalize_moi_site_lowering_outcomes(ConSanTransformArtifacts &result) {
-  struct SiteKey {
-    ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
-    uint64_t text_offset = 0;
-
-    bool operator==(const SiteKey &) const = default;
-  };
-  struct SiteKeyHash {
-    size_t operator()(const SiteKey &key) const {
-      const size_t offset_hash = std::hash<uint64_t>{}(key.text_offset);
-      return offset_hash ^ (static_cast<size_t>(key.kind) + 0x9e3779b9u + (offset_hash << 6u) +
-                            (offset_hash >> 2u));
-    }
-  };
-
-  std::unordered_map<uint64_t, ConSanResourceSiteKind> resource_kind_by_offset;
-  std::unordered_map<SiteKey, ConSanRegisterPlanReason, SiteKeyHash> failed_sites;
-  resource_kind_by_offset.reserve(result.resource_plans.size());
-  failed_sites.reserve(result.resource_plans.size());
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    const uint64_t semantic_offset = plan.semantic_text_offset.value_or(plan.text_offset);
-    resource_kind_by_offset.try_emplace(semantic_offset, plan.site_kind);
-    if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-      failed_sites.try_emplace({plan.site_kind, semantic_offset}, plan.reason);
-  }
-
-  std::unordered_map<std::string_view, const ConSanSyncEvent *> event_by_identity;
-  std::unordered_map<uint64_t, const ConSanSyncEvent *> barrier_event_by_offset;
-  event_by_identity.reserve(result.program_inventory.sync().sync_events.size());
-  barrier_event_by_offset.reserve(result.program_inventory.sync().sync_events.size());
-  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
-    event_by_identity.try_emplace(event.identity, &event);
-    if (event.kind == ConSanSyncEventKind::Barrier)
-      barrier_event_by_offset.try_emplace(event.text_offset, &event);
-  }
-  std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_member;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    for (const std::string &identity : sequence.member_event_identities) {
-      const auto [found, inserted] = sequence_by_member.try_emplace(identity, &sequence);
-      if (!inserted)
-        found->second = nullptr;
-    }
-  }
-
-  std::unordered_set<SiteKey, SiteKeyHash> patched_sites;
-  patched_sites.reserve(result.patches.size());
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.phase != ConSanPatchPhase::Instrumentation)
+    if (plan.source != ConSanRegisterAllocationSource::Unsupported || plan.intent_ids.empty())
       continue;
-    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata) {
-      const auto patch_kind = moi_instrumentation_patch_site_kind(patch);
-      if (patch_kind) {
-        const auto plan = std::ranges::find_if(result.resource_plans, [&](const auto &candidate) {
-          return candidate.site_kind == *patch_kind && candidate.text_offset == patch.anchor_offset;
-        });
-        const uint64_t semantic_offset =
-            plan == result.resource_plans.end()
-                ? patch.anchor_offset
-                : plan->semantic_text_offset.value_or(plan->text_offset);
-        patched_sites.insert({*patch_kind, semantic_offset});
+    std::vector<ConSanProbeIntentId> pending;
+    for (ConSanProbeIntentId id : plan.intent_ids) {
+      const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
+      if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending &&
+          std::ranges::find(pending, id) == pending.end()) {
+        pending.push_back(id);
       }
-      continue;
     }
-
-    if (patch.sampled_access_kind == ConSanLdsAccessKind::Atomic)
-      patched_sites.insert({ConSanResourceSiteKind::Atomic, patch.anchor_offset});
-    const auto patch_kind = resource_kind_by_offset.find(patch.anchor_offset);
-    if (patch.sampled_access_kind != ConSanLdsAccessKind::Atomic &&
-        patch_kind != resource_kind_by_offset.end())
-      patched_sites.insert({patch_kind->second, patch.anchor_offset});
-    if (patch.covered_sync_event_count == 0)
+    if (pending.empty())
       continue;
-    const auto anchor_event = barrier_event_by_offset.find(patch.anchor_offset);
-    if (anchor_event == barrier_event_by_offset.end())
-      continue;
-    const auto sequence = sequence_by_member.find(anchor_event->second->identity);
-    if (sequence == sequence_by_member.end() || sequence->second == nullptr ||
-        sequence->second->member_event_identities.size() != patch.covered_sync_event_count)
-      continue;
-    for (const std::string &identity : sequence->second->member_event_identities) {
-      const auto event = event_by_identity.find(identity);
-      if (event != event_by_identity.end() && event->second->kind == ConSanSyncEventKind::Barrier)
-        patched_sites.insert({ConSanResourceSiteKind::Barrier, event->second->text_offset});
+    auto commit = make_consan_committed_lowering(
+        result.observation_plan, pending, std::span<const ConSanCommittedLoweringLocation>{},
+        ConSanLoweringOutcomeKind::ResourceRejected,
+        "MOI resource plan rejected intents: " +
+            std::string(consan_register_plan_reason_name(plan.reason)));
+    if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+      result.errors.emplace_back("ConSan MOI could not publish a resource rejection");
+      return;
     }
   }
 
-  // Publish every admitted intent directly from resource and patch placement
-  // state. Semantic applicability remains immutable in the observation plan;
-  // lowering cannot overwrite it with a second disposition vocabulary.
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
-    uint64_t disposition_offset = intent.physical_site.original_text_offset;
-    std::string_view subject = "access";
-    switch (intent.kind) {
-    case ConSanProbeIntentKind::RedundantAccessObservation:
-    case ConSanProbeIntentKind::AccessRecord:
-    case ConSanProbeIntentKind::SampledAccess:
-    case ConSanProbeIntentKind::ExactShadowAccess:
-      break;
-    case ConSanProbeIntentKind::BarrierRecord:
-    case ConSanProbeIntentKind::SampledBarrierEpoch:
-    case ConSanProbeIntentKind::ExactBarrierEpoch:
-      site_kind = ConSanResourceSiteKind::Barrier;
-      subject = "barrier";
-      break;
-    case ConSanProbeIntentKind::AtomicRecord:
-    case ConSanProbeIntentKind::SampledAtomicOrdering:
-    case ConSanProbeIntentKind::ExactAtomicOrdering:
-      site_kind = ConSanResourceSiteKind::Atomic;
-      subject = "atomic";
-      break;
-    case ConSanProbeIntentKind::FenceRecord:
-      site_kind = ConSanResourceSiteKind::Fence;
-      subject = "fence";
-      break;
-    case ConSanProbeIntentKind::AtomicAddressCapture: {
-      site_kind = ConSanResourceSiteKind::Atomic;
-      subject = "atomic";
-      const auto owning_fence = std::ranges::find_if(
-          result.observation_plan.fence_site_decisions,
-          [&](const ConSanFenceSiteDecision &decision) {
-            return decision.kind == ConSanSiteDecisionKind::Admitted &&
-                   std::ranges::find(decision.intent_ids, intent.id) != decision.intent_ids.end() &&
-                   std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
-                     const ConSanProbeIntent *candidate = result.observation_plan.intent(id);
-                     return candidate != nullptr &&
-                            candidate->kind == ConSanProbeIntentKind::FenceRecord;
-                   });
-          });
-      if (owning_fence != result.observation_plan.fence_site_decisions.end()) {
-        site_kind = ConSanResourceSiteKind::Fence;
-        disposition_offset = owning_fence->semantic_site.physical.original_text_offset;
-        subject = "fence";
-      }
-      break;
-    }
-    case ConSanProbeIntentKind::Count:
-      break;
-    }
-    const SiteKey key{site_kind, disposition_offset};
-    if (patched_sites.contains(key)) {
-      (void)result.coverage_ledger.set_lowering_outcome(intent.id,
-                                                        ConSanLoweringOutcomeKind::Instrumented);
-    } else if (failed_sites.contains(key)) {
-      (void)result.coverage_ledger.set_lowering_outcome(
-          intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
-          "MOI resource plan rejected the " + std::string(subject));
-    } else {
-      (void)result.coverage_ledger.set_lowering_outcome(
-          intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
-          "MOI lowerer emitted no " + std::string(subject) + " patch");
+    const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+    if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
+      continue;
+    const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
+    auto commit = make_consan_committed_lowering(
+        result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
+        ConSanLoweringOutcomeKind::PlacementRejected,
+        "MOI lowerer selected no placement for the admitted intent");
+    if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+      result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
+      return;
     }
   }
 }

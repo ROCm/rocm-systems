@@ -913,7 +913,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
-    finalize_moi_site_lowering_outcomes(result);
+    publish_pending_moi_lowering_rejections(result);
     return result;
   }
   // Sampled persistent-state demand depends on the immutable semantic sync
@@ -927,7 +927,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_vgprs(effective_options, result)) {
-    finalize_moi_site_lowering_outcomes(result);
+    publish_pending_moi_lowering_rejections(result);
     return result;
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
@@ -1057,12 +1057,12 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (result.errors.empty())
     freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
-    finalize_moi_site_lowering_outcomes(result);
+    publish_pending_moi_lowering_rejections(result);
     return result;
   }
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
-  finalize_moi_site_lowering_outcomes(result);
+  publish_pending_moi_lowering_rejections(result);
   if (result.modified()) {
     const auto patch_count = [&result](ConSanPatchKind kind) {
       return static_cast<uint32_t>(

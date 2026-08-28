@@ -932,6 +932,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Barrier, index,
                                  site.text_offset, candidate.barrier.kernel_descriptor_file_offset,
                                  options.automatic_moi_private_epoch ? 9u : 7u);
+      plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans.push_back(plan);
       resource_plan_index = result.resource_plans.size() - 1u;
       barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
@@ -953,6 +954,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       plan = plan_moi_resource_site(resource_state, candidate_options,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
                                     candidate.barrier.kernel_descriptor_file_offset, scratch_count);
+      plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans[resource_plan_index] = plan;
     }
     const auto resources = resolve_moi_scratch_plan(plan, candidate_options,
@@ -993,6 +995,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                                           : 0u;
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   const auto try_emit_direct_barrier = [&](size_t barrier_index, bool allow_local_island) -> bool {
@@ -1098,6 +1101,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     info.covered_sync_event_count =
         static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
     note_moi_probe_patch_info(info, planned);
+    if (!append_moi_barrier_lowering_commit(result, planned.candidate.barrier, info,
+                                            "sampled barrier sync", lowering_commits))
+      return false;
     patches.push_back(std::move(info));
     return true;
   };
@@ -1515,12 +1521,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         info.covered_sync_event_count =
             static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
         note_moi_probe_patch_info(info, planned);
+        if (!append_moi_barrier_lowering_commit(result, planned.candidate.barrier, info,
+                                                "sampled barrier sync", lowering_commits))
+          return;
         patches.push_back(std::move(info));
       }
     }
     if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
       return;
     }
+    if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
+                                           "sampled barrier sync"))
+      return;
     result.replacement = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.mark_modified();
@@ -1533,6 +1545,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
     return;
   }
+  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
+                                         "sampled barrier sync"))
+    return;
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();
@@ -1996,6 +2011,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                           index, site.text_offset,
                                           candidate.atomic.kernel_descriptor_file_offset,
                                           scratch_count, nullptr, &site);
+    plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
     const auto resources =
@@ -2085,6 +2101,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   MoiLocalNopIslandAllocator indirect_allocator(
       old_text, result, arch, kMoiLocalIndirectIslandWords, local_island_reserved_ranges);
   std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
   for (const Planned &planned : selected) {
     if (!neutralize_atomic_scalar_clause(new_text, planned.candidate.atomic, arch, patches,
                                          result.errors))
@@ -2149,22 +2166,26 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   };
   const auto append_atomic_patch =
       [&](const Planned &planned, uint64_t cave_offset, std::span<const uint32_t> cave_words,
-          uint32_t guest_instruction_offset, bool guest_preserved_at_anchor = false) {
-        const ConSanAtomicSite &site = planned.candidate.atomic.site;
-        ConSanPatchInfo info;
-        info.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
-        info.anchor_offset = site.text_offset;
-        info.trampoline_offset = cave_offset;
-        info.original_size = guest_preserved_at_anchor ? 0u : planned.relocated_guest_size;
-        info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
-        info.relocated_guest_instruction_offset =
-            guest_preserved_at_anchor ? site.text_offset : cave_offset + guest_instruction_offset;
-        info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
-        info.sampled_first_slot = planned.candidate.selected_slot;
-        info.sampled_window_bank_count = planned.candidate.bank_count;
-        note_moi_probe_patch_info(info, planned);
-        patches.push_back(std::move(info));
-      };
+          uint32_t guest_instruction_offset, bool guest_preserved_at_anchor = false) -> bool {
+    const ConSanAtomicSite &site = planned.candidate.atomic.site;
+    ConSanPatchInfo info;
+    info.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
+    info.anchor_offset = site.text_offset;
+    info.trampoline_offset = cave_offset;
+    info.original_size = guest_preserved_at_anchor ? 0u : planned.relocated_guest_size;
+    info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
+    info.relocated_guest_instruction_offset =
+        guest_preserved_at_anchor ? site.text_offset : cave_offset + guest_instruction_offset;
+    info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
+    info.sampled_first_slot = planned.candidate.selected_slot;
+    info.sampled_window_bank_count = planned.candidate.bank_count;
+    note_moi_probe_patch_info(info, planned);
+    if (!append_moi_atomic_lowering_commit(result, planned.candidate.atomic, info,
+                                           "sampled atomic sync", lowering_commits))
+      return false;
+    patches.push_back(std::move(info));
+    return true;
+  };
 
   // An ordered atomic can sit near the front of a large generated kernel,
   // beyond SOPP reach of both its pristine-end relay and every appended
@@ -2611,7 +2632,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         anchor.front() = call;
         std::memcpy(new_text.data() + planned.physical_anchor_offset, anchor.data(),
                     planned.relocated_guest_size);
-        append_atomic_patch(planned, body.offset, body.words, body.guest_instruction_offset);
+        if (!append_atomic_patch(planned, body.offset, body.words, body.guest_instruction_offset))
+          return;
         routed_by_dense_relay[body.selected_index] = true;
       }
     }
@@ -2903,12 +2925,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       prefix_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
       patches.push_back(std::move(prefix_info));
     }
-    append_atomic_patch(planned, cave_offset, *cave_words, guest_instruction_offset,
-                        preserve_guest_at_anchor);
+    if (!append_atomic_patch(planned, cave_offset, *cave_words, guest_instruction_offset,
+                             preserve_guest_at_anchor))
+      return;
   }
   if (!replace_consan_text(patcher, new_text, options, "MOI sampled atomic sync", result)) {
     return;
   }
+  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
+                                         "sampled atomic sync"))
+    return;
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();

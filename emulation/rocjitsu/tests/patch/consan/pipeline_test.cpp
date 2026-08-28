@@ -991,6 +991,22 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
   EXPECT_TRUE(result.patches.empty());
+  EXPECT_FALSE(result.committed_lowerings.empty());
+  EXPECT_TRUE(
+      std::ranges::any_of(result.committed_lowerings, [](const ConSanCommittedLowering &commit) {
+        return commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected;
+      }));
+  EXPECT_TRUE(
+      std::ranges::all_of(result.committed_lowerings, [](const ConSanCommittedLowering &commit) {
+        return (commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected ||
+                commit.outcome == ConSanLoweringOutcomeKind::PlacementRejected) &&
+               commit.locations.empty();
+      }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
+        return entry.lowering == ConSanLoweringOutcomeKind::ResourceRejected ||
+               entry.lowering == ConSanLoweringOutcomeKind::PlacementRejected;
+      }));
   EXPECT_EQ(result.warnings.back(), "runtime report allocation failed");
   EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Unsupported);

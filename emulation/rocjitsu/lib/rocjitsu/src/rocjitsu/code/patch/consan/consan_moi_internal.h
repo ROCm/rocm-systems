@@ -676,6 +676,11 @@ struct MoiFenceEvidenceSitePlan {
   /// After-guest `FenceRecord` intent implemented by this lowering plan.
   ConSanProbeIntentId evidence_intent;
 
+  /// Before-guest intent that preserves the communication address reported
+  /// by the fence record. This intent can name the address-bearing ordinary
+  /// operation while `semantic_site` names the completing fence.
+  ConSanProbeIntentId address_capture_intent;
+
   /// Diagnostic container spelling, including `kernel:` or `function:`.
   std::string container_name;
 
@@ -715,7 +720,8 @@ struct MoiFenceEvidenceSitePlan {
   [[nodiscard]] bool is_well_formed() const {
     return semantic_site.valid() &&
            semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
-           association.valid() && evidence_intent.valid() && !container_name.empty() &&
+           association.valid() && evidence_intent.valid() && address_capture_intent.valid() &&
+           evidence_intent != address_capture_intent && !container_name.empty() &&
            communication_site.size != 0u && communication_site.width_bits != 0u &&
            (memory_role == ConSanSyncMemoryRole::Release ||
             memory_role == ConSanSyncMemoryRole::Acquire) &&

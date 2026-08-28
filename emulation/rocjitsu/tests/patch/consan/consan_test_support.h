@@ -372,6 +372,25 @@ consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_
   });
 }
 
+[[nodiscard]] bool consan_committed_lowering_has_intent_kind(const ConSanTransformArtifacts &result,
+                                                             const ConSanCommittedLowering &commit,
+                                                             ConSanProbeIntentKind kind) {
+  return std::ranges::any_of(commit.intent_ids, [&](ConSanProbeIntentId id) {
+    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    return intent != nullptr && intent->kind == kind;
+  });
+}
+
+[[nodiscard]] const ConSanCommittedLowering *
+consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result,
+                                          ConSanProbeIntentKind kind) {
+  const auto commit = std::ranges::find_if(
+      result.committed_lowerings, [&](const ConSanCommittedLowering &candidate) {
+        return consan_committed_lowering_has_intent_kind(result, candidate, kind);
+      });
+  return commit == result.committed_lowerings.end() ? nullptr : &*commit;
+}
+
 [[nodiscard]] const ConSanBarrierSiteDecision *
 consan_barrier_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(

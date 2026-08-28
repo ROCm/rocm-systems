@@ -104,6 +104,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
                                      candidate_index, site.text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &site);
+    plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources =
@@ -166,6 +167,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
       return;
@@ -260,6 +262,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     note_moi_probe_patch_info(info, planned);
+    if (!append_moi_atomic_lowering_commit(result, candidate, info, "atomic record patch",
+                                           lowering_commits))
+      return;
     patches.push_back(info);
     ++record_index;
   }
@@ -267,6 +272,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   if (!replace_consan_text(patcher, new_text, options, "MOI atomic record patch", result)) {
     return;
   }
+  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
+                                         "atomic record patch"))
+    return;
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();

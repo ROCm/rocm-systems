@@ -278,13 +278,25 @@ ConSanInstallAction TransformResult::install_action(bool fail_closed) const {
 }
 
 void TransformResult::discard_replacement(std::string warning) {
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    (void)coverage_ledger.set_lowering_outcome(intent.id,
-                                               ConSanLoweringOutcomeKind::ResourceRejected,
-                                               "runtime-owned report allocation failed");
-  }
   outcome = ConSanTransformOutcome::Unsupported;
   discard_candidate_modification();
+  std::vector<ConSanCommittedLowering> rejections;
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    const ConSanIntentCoverageEntry *entry = coverage_ledger.intent_entry(intent.id);
+    if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
+      continue;
+    const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
+    auto rejection = make_consan_committed_lowering(
+        observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
+        ConSanLoweringOutcomeKind::ResourceRejected, "runtime-owned report allocation failed");
+    if (!rejection) {
+      errors.emplace_back("ConSan runtime binding produced an invalid intent rejection");
+      break;
+    }
+    rejections.push_back(std::move(*rejection));
+  }
+  if (!publish_lowering_commits(std::move(rejections)))
+    errors.emplace_back("ConSan runtime binding could not publish intent rejections");
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   moi_retry_inventory_available_ = false;

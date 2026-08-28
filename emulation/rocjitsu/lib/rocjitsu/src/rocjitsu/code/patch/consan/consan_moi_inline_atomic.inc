@@ -140,6 +140,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                      candidate_index, site.text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &site);
+    plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources =
@@ -310,6 +311,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   };
   std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
       return;
@@ -702,6 +704,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           note_moi_probe_patch_info(info, planned);
           note_moi_persistent_vgpr_state(info, group_options, result.moi_operating_point);
           info.persistent_sgpr_state = group_options.moi_persistent_sgprs;
+          if (!append_moi_atomic_lowering_commit(result, planned.candidate, info,
+                                                 "inline atomic patch", lowering_commits))
+            return;
           patches.push_back(std::move(info));
           routed_by_dense_relay[body.planned_index] = true;
         }
@@ -810,6 +815,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_probe_patch_info(info, planned);
     note_moi_persistent_vgpr_state(info, candidate_options, result.moi_operating_point);
     info.persistent_sgpr_state = candidate_options.moi_persistent_sgprs;
+    if (!append_moi_atomic_lowering_commit(result, candidate, info, "inline atomic patch",
+                                           lowering_commits))
+      return;
     patches.push_back(info);
   }
 
@@ -820,6 +828,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   if (!replace_consan_text(patcher, new_text, options, "MOI inline atomic patch", result)) {
     return;
   }
+  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
+                                         "inline atomic patch"))
+    return;
   result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();

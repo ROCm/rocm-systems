@@ -373,6 +373,7 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
   plan.association = {.value = "ordinary-acquire-sequence"};
+  plan.address_capture_intent = {.value = 6u};
   plan.evidence_intent = {.value = 7u};
   plan.container_name = "kernel:fence";
   plan.communication_site.size = 12u;
@@ -385,6 +386,12 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   consan_detail::MoiFenceEvidenceSitePlan missing_intent = plan;
   missing_intent.evidence_intent = {};
   EXPECT_FALSE(missing_intent.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan missing_capture = plan;
+  missing_capture.address_capture_intent = {};
+  EXPECT_FALSE(missing_capture.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan aliased_intents = plan;
+  aliased_intents.address_capture_intent = aliased_intents.evidence_intent;
+  EXPECT_FALSE(aliased_intents.is_well_formed());
   consan_detail::MoiFenceEvidenceSitePlan missing_communication = plan;
   missing_communication.communication_site.width_bits = 0u;
   EXPECT_FALSE(missing_communication.is_well_formed());
