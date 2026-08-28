@@ -2983,8 +2983,8 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   };
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, add_f16_dpp8_words));
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_dpp");
-  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2, v3.l dpp8:[7,0,3,2,5,4,1,6]");
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_e32");
+  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2.l, v3.l dpp8:[7,0,3,2,5,4,1,6]");
   cu->execute_instruction(inst.get(), *wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -4326,8 +4326,8 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
     std::unique_ptr<Instruction> inst(
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16_e64_dpp");
-    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2, v0 dpp8:[7,0,5,2,3,6,1,4] fi:1");
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
+    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2.l, v0.l dpp8:[7,0,5,2,3,6,1,4] fi:1");
     cu->execute_instruction(inst.get(), *wf);
     for (uint32_t lane = 0; lane < kWaveSize; ++lane)
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
@@ -5183,6 +5183,44 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   cu->execute_instruction(inst.get(), *wf);
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
+  amdgpu::GpuMemory gpu_mem("rdna35_true16_vop1_mem");
+  amdgpu::L2Cache l2("rdna35_true16_vop1_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_5", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 5, 0, 0xAAAA1111u);
+  cu->write_vgpr(vb + 1, 0, 0x2222BBBBu);
+
+  // v_swap_b16 v5.l, v1.h
+  const uint32_t words[] = {0x7E0ACD81u, 0u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->disassemble(), "v_swap_b16 v5.l, v1.h");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
+  EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
 
   if (!wf->is_halted())
     wf->halt();
