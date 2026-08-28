@@ -2251,9 +2251,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // Fused launch + doneEvent record. Sizes are work-items (grid*block), not blocks; stopEvent IS the doneEvent
-    // record, silently deleted by #3741 -> ROCM-29677, so don't delete it again (a separate record is ~2.8us/launch).
-    // Fast path only: hipGraph capture drops a fused stopEvent (never BindCommand'd), and !persistent => not capturing.
+    // Sizes are work-items (grid*block), not blocks. Passing doneEvent as stopEvent fuses the record into the
+    // dispatch, so no separate hipEventRecord. Fast path only: graph capture never binds a fused stopEvent.
     CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
                                            block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
                                            /*stopEvent=*/comm->doneEvent, /*flags=*/0),
