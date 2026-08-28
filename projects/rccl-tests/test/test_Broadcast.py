@@ -207,6 +207,13 @@ def test_BroadcastGinSdma2GiBHangGuard(request):
     assert rc == 0, "Broadcast 2 GiB data check failed (nonzero exit)"
 
 
+@_bcast_skip
+def test_BroadcastGinSdma4GiBHangGuard(request):
+    """4 GiB completion guard with default tier selection (ring / SAG path)."""
+    rc, _ = _run_bcast_gin_sdma(request, 4 * GiB, "int32", force_flat_gin=False)
+    assert rc == 0, "Broadcast 4 GiB data check failed (nonzero exit)"
+
+
 @pytest.mark.parametrize("nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype",
     itertools.product(nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype))
 def test_BroadcastMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype):
