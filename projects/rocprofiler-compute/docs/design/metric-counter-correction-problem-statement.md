@@ -54,6 +54,8 @@ Data path: `/home/feizheng/Downloads/aiprofcomp78-cpx-data/` (also summarized in
 | rocflop CPX | HBM Read Traffic | 99.70% | 96.98% | 100% | Mild or no violation |
 | rocflop CPX | Workgroup Manager Utilization | 100.08% | 99.60% | 100.52% | Mild avg |
 
+**Scope (all three workloads):** Each full-panel run reports **54 Percent metrics**. With bound violations defined as avg, min, or max **> 100%** (excluding intentional VALU dual-issue on gfx942), the three CPX test cases show **11 abnormal workload×metric combinations** in total — **occupancy_cpx 1**, **mat_exp CPX 7**, **rocflop CPX 3** (**9** distinct metric ids). The **7 rows above** are **representatives** chosen for §3.5 hardware validation, not an exhaustive inventory. Other abnormal metrics in the same logs include mat_exp CPC Stall Rate (max **199.67%**), CPC Packet Decoding Utilization (max **148.69%**), Uncached Read Traffic (max **126.88%**), and rocflop HBM Write and Atomic Traffic (avg **102.01%**, max **113.38%**).
+
 Violations are **workload-dependent** and **sporadic** (minority of dispatches), not uniform across every kernel.
 
 ### 3.2 Raw PMC: partners collected in different passes
