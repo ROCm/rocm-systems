@@ -33,10 +33,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   python-version-tests:
     name: Python ${{matrix.python-version}}
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     # 3.6/3.7 run inside official python images because actions/setup-python no
     # longer provides those EOL interpreters on a supported hosted runner (they
     # were only on ubuntu-20.04, itself being retired). The images are archived,
@@ -65,7 +73,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # rocm-systems is a large monorepo; only the amdsmi tests are needed.
           sparse-checkout: |

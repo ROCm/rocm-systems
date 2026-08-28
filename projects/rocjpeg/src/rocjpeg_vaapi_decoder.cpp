@@ -53,6 +53,7 @@ RocJpegVaapiMemoryPool::RocJpegVaapiMemoryPool() {
  * Finally, it resets the HIP interop structure for each entry in the memory pool.
  */
 void RocJpegVaapiMemoryPool::ReleaseResources() {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     VAStatus va_status;
     hipError_t hip_status;
     for (auto& pair : mem_pool_) {
@@ -159,6 +160,7 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if the operation is successful.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, const RocJpegVaapiMemPoolEntry& pool_entry) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     size_t total_mem_pool_size = GetTotalMemPoolSize();
     auto& entries = mem_pool_[surface_format];
     if (total_mem_pool_size < max_pool_size_) {
@@ -184,6 +186,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
  * @return The matching `RocJpegVaapiMemPoolEntry` if found, or a default-initialized entry if not found.
  */
 RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_format, uint32_t image_width, uint32_t image_height, uint32_t num_surfaces) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& entry : mem_pool_[surface_format]) {
         if (entry.image_width >= image_width && entry.image_height >= image_height && entry.va_surface_ids.size() == num_surfaces && entry.entry_status == kIdle) {
             entry.entry_status = kBusy;
@@ -194,6 +197,7 @@ RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_forma
 }
 
 bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
@@ -221,6 +225,7 @@ bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
  *         ROCJPEG_STATUS_INVALID_PARAMETER if the requested surface_id is not found in the memory pool.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, HipInteropDeviceMem& hip_interop) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         auto& entries = pair.second;
         auto it = std::find_if(entries.begin(), entries.end(),
@@ -319,6 +324,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
 }
 
 bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {

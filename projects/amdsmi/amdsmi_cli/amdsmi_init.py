@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 ### Handle safe initialization for amdsmi
 
@@ -71,8 +54,33 @@ AMDSMI_INIT_FLAG = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
 AMD_VENDOR_ID = 4098
 
 
+def check_wsl_dxg():
+    """Returns true if running under WSL2 (not Hyper-V) with /dev/dxg present.
+
+    /dev/dxg is created by dxgkrnl for any WDDM GPU, so we additionally require
+    the WSL2 kernel signature in /proc/version to avoid false-positives on
+    Hyper-V Linux guests or native hosts where dxgkrnl may be loaded.
+    Vendor confirmation (AMD 0x1002) is deferred to amdsmi_init(), which calls
+    into librocdxg and rejects non-AMD adapters.
+    """
+    if not Path("/dev/dxg").exists():
+        return False
+    try:
+        osrelease = Path("/proc/sys/kernel/osrelease").read_text(encoding="ascii").lower()
+        return "microsoft" in osrelease and "wsl" in osrelease
+    except OSError:
+        return False
+
+
 def check_amdgpu_driver():
     """Returns true if amdgpu is found in the list of initialized modules"""
+    # WSL2: no native amdgpu module; use /dev/dxg via dxgkrnl instead.
+    # check_wsl_dxg() requires the WSL2 kernel string, so this is safe for
+    # Hyper-V guests (which lack "wsl" in osrelease) and bare-metal hosts.
+    # Vendor confirmation (AMD 0x1002) is done inside librocdxg during amdsmi_init().
+    if check_wsl_dxg():
+        return True
+
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
         try:

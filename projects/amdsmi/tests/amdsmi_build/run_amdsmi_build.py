@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """
 run_amdsmi_build.py - Local runner for the AMDSMI build and install workflow.
 
@@ -1147,7 +1150,7 @@ def parse_args() -> RunnerConfig:
         "--python-interpreters",
         default=None,
         help="Comma-separated interpreters for the Python-version loader tests "
-        "(default: discovered python3.6..3.13)",
+        "(default: discovered python3.6..3.14)",
     )
     parser.add_argument(
         "--no-autodetect",
@@ -1437,6 +1440,26 @@ def main() -> None:
         report_and_raise("PYTHON VERSIONS", exc)
     _write_result(cfg.test_results_dir, "python_versions_result.txt", "PYTHON VERSIONS PASSED")
 
+    # 5d. Upgrade/downgrade from a prior package (only when one is provided).
+    # Deliberately ahead of the install/wheel stages: `pip install` puts the
+    # wheel under /usr/local, which precedes the deb/rpm site-packages path for
+    # `import amdsmi`, so running this afterwards would verify the wheel on
+    # every transition instead of the package actually being upgraded.
+    if not cfg.skip_install and cfg.upgrade_from:
+        try:
+            verify_upgrade_downgrade(cfg, artifact)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "upgrade_downgrade_result.txt",
+                f"UPGRADE/DOWNGRADE FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("UPGRADE/DOWNGRADE", exc)
+        _write_result(
+            cfg.test_results_dir, "upgrade_downgrade_result.txt", "UPGRADE/DOWNGRADE PASSED"
+        )
+
     # 6. Install
     if not cfg.skip_install:
         try:
@@ -1494,22 +1517,6 @@ def main() -> None:
             )
             report_and_raise("DUAL COPY CHECK", exc)
         _write_result(cfg.test_results_dir, "dual_copy_result.txt", "DUAL COPY CHECK PASSED")
-
-    # 10. Upgrade/downgrade from a prior package (only when one is provided)
-    if not cfg.skip_install and cfg.upgrade_from:
-        try:
-            verify_upgrade_downgrade(cfg, artifact)
-        except CommandError as exc:
-            _write_result(
-                cfg.test_results_dir,
-                "upgrade_downgrade_result.txt",
-                f"UPGRADE/DOWNGRADE FAILED: {exc.name} exited {exc.code}\n\n"
-                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
-            )
-            report_and_raise("UPGRADE/DOWNGRADE", exc)
-        _write_result(
-            cfg.test_results_dir, "upgrade_downgrade_result.txt", "UPGRADE/DOWNGRADE PASSED"
-        )
 
     print("AMDSMI workflow complete")
 

@@ -443,20 +443,6 @@ class GDAContext : public Context {
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
 
-  /**
-   * @brief Resolve the node-local peer pointer for a symmetric address.
-   *
-   * Delegates to the shared IpcImpl::ipcPeerPtr resolver, indexed by this PE's
-   * shm rank and the node-local peer index (as returned by isIpcAvailable).
-   * Handles both heap objects and IPC-registered user buffers; returns nullptr
-   * when the address is not reachable over IPC (e.g. an NIC-only registered
-   * buffer or IPC disabled), so callers fall back to the NIC path.
-   */
-  __device__ __forceinline__ char *ipc_peer_ptr(const void *sym_addr,
-                                                 int local_pe) {
-    return ipcImpl_.ipcPeerPtr(sym_addr, ipcImpl_.shm_rank, local_pe);
-  }
-
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
 

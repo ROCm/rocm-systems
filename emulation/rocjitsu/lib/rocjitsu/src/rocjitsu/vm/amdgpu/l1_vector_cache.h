@@ -8,12 +8,14 @@
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
 class L2Cache;
+class RequestMtypeResolver;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -41,13 +43,22 @@ public:
 
   void set_l2(L2Cache *l2);
   void set_memory(GpuMemory *mem);
+
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
   void load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
             uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
-            uint32_t vmid = 0);
+            uint32_t vmid = 0, uint32_t addr_stride = 0,
+            std::span<const uint64_t> element_lane_masks = {});
 
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
   void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
              const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t wf_size,
-             uint32_t vmid = 0);
+             uint32_t vmid = 0, uint32_t addr_stride = 0,
+             std::span<const uint64_t> element_lane_masks = {});
 
   void invalidate(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all();
@@ -58,12 +69,12 @@ public:
   uint64_t store_l2_writes() const { return store_l2_writes_; }
 
 private:
-  void invalidate_all_locked();
-  void synchronize_epoch_locked();
-  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
-                  bool request_l1_bypass, uint32_t vmid);
-  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
-                   uint32_t vmid);
+  void invalidate_all_lines();
+  void synchronize_epoch();
+  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
+                  bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
+  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
+                   uint32_t vmid, RequestMtypeResolver &mtypes);
   void ensure_line(uint64_t addr, uint32_t vmid);
 
   CacheStore cache_;

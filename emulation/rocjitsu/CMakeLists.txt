@@ -56,18 +56,14 @@ if(
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
 )
     add_compile_options(-Wno-uninitialized)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+        add_compile_options(-Wno-maybe-uninitialized -Wno-stringop-overflow)
+    endif()
 endif()
 
 # HSA/KFD headers (local copies from rocr-runtime).
 set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
-)
-
-# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
-# interposer service the amdgpu DRM ioctl surface using the real kernel structs
-# instead of hand-mirrored copies, without depending on libdrm library types.
-set(DRM_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
 )
 
 include(rj_log)
@@ -352,6 +348,10 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
+target_sources(
+    rocjitsu_shared
+    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
+)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
@@ -371,6 +371,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_drm_headers
         util
         flatbuffers
         Threads::Threads
@@ -387,7 +388,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_shared
         PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
     )
-    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
@@ -405,7 +405,6 @@ add_subdirectory(fuzz/decode)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
 endif()
-# Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
@@ -428,14 +427,31 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The translator ships alongside the hook: both must resolve to the SAME
+    # shared object, or the cache identity they derive from it would differ and
+    # neither could read what the other wrote.
     install(
-        TARGETS hsa_hotswap_rocjitsu
+        TARGETS hsa_hotswap_rocjitsu rocjitsu_gfx1250_b0_to_a0
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # rj_pretranslate ships because the tier it fills is only worth having if an
+    # image build or a post-install step can fill it.
+    install(
+        TARGETS rocjitsu_bin rj_pretranslate
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    # And the wrapper ships with it. rj_pretranslate takes standalone code
+    # objects; the script is the only piece that knows how to find them inside
+    # fat binaries, offload bundles and KPACK archives, and the tool's own help
+    # text points at it. Installing one without the other leaves that pointer
+    # dangling and the deployed workflow with no entry point.
+    install(
+        PROGRAMS scripts/rocjitsu-pretranslate.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

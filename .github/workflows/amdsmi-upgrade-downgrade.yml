@@ -24,6 +24,7 @@ on:
       - 'projects/amdsmi/RPM/**'
       - 'projects/amdsmi/py-interface/**'
       - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/tests/run_amdsmi_component_removal_test.py'
       - 'projects/amdsmi/tests/run_amdsmi_upgrade_downgrade_test.py'
       - '.github/workflows/amdsmi-upgrade-downgrade.yml'
   push:
@@ -33,6 +34,7 @@ on:
       - 'projects/amdsmi/RPM/**'
       - 'projects/amdsmi/py-interface/**'
       - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/tests/run_amdsmi_component_removal_test.py'
       - 'projects/amdsmi/tests/run_amdsmi_upgrade_downgrade_test.py'
       - '.github/workflows/amdsmi-upgrade-downgrade.yml'
   workflow_dispatch:
@@ -40,10 +42,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   upgrade-downgrade:
     name: ${{matrix.name}}
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     container: ${{matrix.container}}
     strategy:
       fail-fast: false
@@ -86,7 +96,7 @@ jobs:
             git gcc gcc-c++ cmake make rpm-build file \
             libdrm-devel libnl3-devel libmnl-devel python3 sudo
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # rocm-systems is a large monorepo; only the amdsmi project is needed.
           sparse-checkout: |
@@ -133,4 +143,18 @@ jobs:
           python3 tests/run_amdsmi_upgrade_downgrade_test.py \
             --old-package /tmp/pkgs/old.${{matrix.ext}} \
             --new-package /tmp/pkgs/new.${{matrix.ext}} \
+            --package-manager ${{matrix.manager}}
+
+      - name: Remove tests component without removing main package state
+        working-directory: projects/amdsmi
+        run: |
+          set -e
+          # The tests package depends on the main package. Removing that optional
+          # component must not run main-package removal scripts or delete its state.
+          tests_pkg=$(find "$BUILD_DIR" -maxdepth 1 \
+            -name "amd-smi-lib-tests[-_]*.${{matrix.ext}}" | sort -V | tail -1)
+          cp "$tests_pkg" /tmp/pkgs/tests.${{matrix.ext}}
+          python3 tests/run_amdsmi_component_removal_test.py \
+            --main-package /tmp/pkgs/new.${{matrix.ext}} \
+            --tests-package /tmp/pkgs/tests.${{matrix.ext}} \
             --package-manager ${{matrix.manager}}

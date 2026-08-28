@@ -122,7 +122,7 @@ Environment Variables:
     ROCPROFSYS_KEEP_TEST_OUTPUT     - Keep test output on success (ON/OFF, default: ON)
     ROCPROFSYS_USE_ROCPD            - Enable/disable ROCpd validation (ON/OFF, default: ON if available)
     ROCPROFSYS_VALIDATE_PERFETTO    - Enable/disable Perfetto validation (ON/OFF, default: ON if available)
-    ROCPROFSYS_TRACE_PROC_SHELL     - Path to trace_processor_shell binary (auto-detected)
+    ROCPROFSYS_TRACE_PROC_SHELL     - Path to trace_processor_shell binary (default: the binary staged in the build tree, else a Perfetto download)
     ROCM_PATH                       - Path to ROCm installation (default: /opt/rocm)
     ROCM_LLVM_OBJDUMP               - Path to ROCm's llvm-objdump (default: auto-detected)
 """
