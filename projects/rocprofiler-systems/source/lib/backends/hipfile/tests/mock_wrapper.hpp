@@ -6,6 +6,7 @@
 #include "backends/hipfile/backend.hpp"
 #include "backends/hipfile/types.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -17,7 +18,8 @@ namespace rocprofsys::backends::hipfile::testing
 // backend<>::query() compiles against them unchanged. snake_case is intentional.
 // Nothing here includes <hipfile.h>, which is the point: these tests build and run
 // on machines with no hipFile package installed.
-// NOLINTBEGIN(readability-identifier-naming)
+// NOLINTBEGIN(readability-identifier-naming) -- field names must match
+// hipFilePerGpuStats_t / hipFileStatsLevel3_t
 
 struct mock_per_gpu_stats_t
 {
@@ -40,9 +42,8 @@ struct mock_per_gpu_stats_t
 
 struct mock_stats_l3_t
 {
-    std::uint32_t num_gpus = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    mock_per_gpu_stats_t per_gpu_stats[MAX_GPUS] = {};
+    std::uint32_t                              num_gpus = 0;
+    std::array<mock_per_gpu_stats_t, MAX_GPUS> per_gpu_stats{};
 };
 
 // NOLINTEND(readability-identifier-naming)
