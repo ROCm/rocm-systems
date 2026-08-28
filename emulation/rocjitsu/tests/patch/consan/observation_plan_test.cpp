@@ -318,6 +318,104 @@ TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPl
   EXPECT_EQ(copied.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
 }
 
+TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ASSERT_EQ(plan.probe_intents.size(), 2u);
+  ASSERT_EQ(plan.probe_intents[0].physical_site, plan.probe_intents[1].physical_site);
+
+  ConSanTransformArtifacts result;
+  result.observation_plan = plan;
+  result.coverage_ledger = ConSanCoverageLedger(plan);
+  ConSanPatchInfo unrelated_patch;
+  unrelated_patch.kind = ConSanPatchKind::InlineNopRewrite;
+  unrelated_patch.anchor_offset = plan.probe_intents[0].physical_site.original_text_offset;
+  result.patches.push_back(std::move(unrelated_patch));
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending)
+      << "patch telemetry must not publish semantic coverage";
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering, ConSanLoweringOutcomeKind::Pending);
+
+  const std::array intent_ids = {ConSanProbeIntentId{0}, ConSanProbeIntentId{1}};
+  const std::array locations = {ConSanCommittedLoweringLocation{
+      .original_site = plan.probe_intents[0].physical_site,
+      .emitted_text_offset = 0x200,
+      .emitted_size = 16,
+      .relocated_guest_text_offset = 0x208,
+  }};
+  auto commit = make_consan_committed_lowering(
+      plan, intent_ids, locations, ConSanLoweringOutcomeKind::Instrumented, "coalesced");
+  ASSERT_TRUE(commit);
+  ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().intent_ids,
+            (std::vector{ConSanProbeIntentId{0}, ConSanProbeIntentId{1}}));
+  EXPECT_EQ(result.committed_lowerings.front().original_physical_sites.size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
+            ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
+            ConSanLoweringOutcomeKind::Instrumented);
+}
+
+TEST(ConSanObservationPlan, CommittedLoweringRetainsEveryLocationInASequence) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  const PhysicalSiteId original = policy.plan.probe_intents.front().physical_site;
+  const std::array intent_ids = {ConSanProbeIntentId{0}};
+  const std::array locations = {
+      ConSanCommittedLoweringLocation{
+          .original_site = original,
+          .emitted_text_offset = 0x200,
+          .emitted_size = 8,
+          .relocated_guest_text_offset = std::nullopt,
+      },
+      ConSanCommittedLoweringLocation{
+          .original_site = original,
+          .emitted_text_offset = 0x300,
+          .emitted_size = 12,
+          .relocated_guest_text_offset = 0x308,
+      },
+  };
+  const auto commit = make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                                     ConSanLoweringOutcomeKind::Instrumented);
+  ASSERT_TRUE(commit);
+  EXPECT_EQ(commit->locations, (std::vector(locations.begin(), locations.end())));
+}
+
+TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ConSanTransformArtifacts result;
+  result.observation_plan = plan;
+  result.coverage_ledger = ConSanCoverageLedger(plan);
+
+  const std::array rejected_id = {ConSanProbeIntentId{1}};
+  auto rejection = make_consan_committed_lowering(
+      plan, rejected_id, std::span<const ConSanCommittedLoweringLocation>{},
+      ConSanLoweringOutcomeKind::ResourceRejected, "no scratch registers");
+  ASSERT_TRUE(rejection);
+  ASSERT_TRUE(result.publish_lowering_commit(std::move(*rejection)));
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
+            ConSanLoweringOutcomeKind::ResourceRejected);
+
+  const std::array both_ids = {ConSanProbeIntentId{0}, ConSanProbeIntentId{1}};
+  auto stale = make_consan_committed_lowering(plan, both_ids,
+                                              std::span<const ConSanCommittedLoweringLocation>{},
+                                              ConSanLoweringOutcomeKind::PlacementRejected);
+  ASSERT_TRUE(stale);
+  EXPECT_FALSE(result.publish_lowering_commit(std::move(*stale)));
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending)
+      << "a mixed stale transaction must not partially update the ledger";
+  EXPECT_EQ(result.committed_lowerings.size(), 1u);
+}
+
 TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDecisions) {
   const ConSanAccessPolicyResult access = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));

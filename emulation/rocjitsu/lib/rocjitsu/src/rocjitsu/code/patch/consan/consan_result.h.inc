@@ -181,6 +181,8 @@ struct ConSanTransformArtifacts {
   /// Accepted MOI operating point consumed by emitted mechanisms and final
   /// semantic validation. Non-MOI transforms leave this value empty.
   ConSanMoiOperatingPoint moi_operating_point;
+  /// Authoritative intent-bound lowering results published by placement.
+  std::vector<ConSanCommittedLowering> committed_lowerings;
   /// Validated byte-level changes emitted by lowering.
   std::vector<ConSanPatchInfo> patches;
   /// Complete validated code-object replacement, or empty when none is installable.
@@ -203,6 +205,13 @@ struct ConSanTransformArtifacts {
   void mark_modified() {
     if (outcome == ConSanTransformOutcome::Unchanged)
       outcome = ConSanTransformOutcome::ModifiedValid;
+  }
+  /// Publish and retain one authoritative intent-bound lowering result.
+  [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit) {
+    if (!coverage_ledger.publish_lowering_commit(commit))
+      return false;
+    committed_lowerings.push_back(std::move(commit));
+    return true;
   }
   /// Discard the candidate image and its patch telemetry without changing the
   /// caller-owned outcome, diagnostics, semantic inventory, or mutation facts.

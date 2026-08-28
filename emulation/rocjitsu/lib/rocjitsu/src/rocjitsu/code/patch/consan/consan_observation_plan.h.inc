@@ -1002,6 +1002,58 @@ consan_lowering_outcome_kind_name(ConSanLoweringOutcomeKind kind) {
 static_assert(kConSanLoweringOutcomeKinds.size() ==
               static_cast<size_t>(ConSanLoweringOutcomeKind::Count));
 
+/// One machine-code location emitted as part of an intent-bound lowering.
+///
+/// The location is semantic telemetry rather than proof-by-patch-kind. It
+/// names the original physical site whose lowering owns the emitted bytes and
+/// records enough geometry for later static mapping without exposing the
+/// lowerer's patch representation.
+struct ConSanCommittedLoweringLocation {
+  /// Original physical instruction implemented by this emitted operation.
+  PhysicalSiteId original_site;
+  /// Text-relative location of the committed machine-code operation.
+  uint64_t emitted_text_offset = 0;
+  /// Number of committed machine-code bytes at `emitted_text_offset`.
+  uint32_t emitted_size = 0;
+  /// Relocated guest instruction, when this operation displaced the guest.
+  std::optional<uint64_t> relocated_guest_text_offset;
+
+  bool operator==(const ConSanCommittedLoweringLocation &) const = default;
+};
+
+/// Authoritative result of one intent-bound lowering transaction.
+///
+/// A single emitted operation can satisfy several coalesced intents, while a
+/// synchronization sequence can require several emitted locations for one
+/// intent. Original sites are copied from the immutable observation plan when
+/// the transaction is prepared; no consumer reconstructs them from patch
+/// kinds, anchors, or resource-plan geometry.
+struct ConSanCommittedLowering {
+  /// Every admitted intent completed or rejected by this transaction.
+  std::vector<ConSanProbeIntentId> intent_ids;
+  /// Unique original physical sites owned by the bound intents.
+  std::vector<PhysicalSiteId> original_physical_sites;
+  /// Unique semantic sites covered by the bound intents.
+  std::vector<SemanticSiteId> original_semantic_sites;
+  /// One or more committed locations, empty for a rejected transaction.
+  std::vector<ConSanCommittedLoweringLocation> locations;
+  /// Explicit final mechanism outcome shared by every bound intent.
+  ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::Pending;
+  /// Optional mechanism detail with no semantic-policy meaning.
+  std::string detail;
+
+  bool operator==(const ConSanCommittedLowering &) const = default;
+};
+
+/// Prepare one authoritative lowering result from immutable intent identity.
+/// Returns no value for stale/duplicate intent IDs, inconsistent locations,
+/// pending outcomes, or emitted locations attached to a rejection.
+[[nodiscard]] std::optional<ConSanCommittedLowering>
+make_consan_committed_lowering(const ConSanObservationPlan &plan,
+                               std::span<const ConSanProbeIntentId> intent_ids,
+                               std::span<const ConSanCommittedLoweringLocation> locations,
+                               ConSanLoweringOutcomeKind outcome, std::string detail = {});
+
 /// One admitted intent joined to its current lowering result.
 ///
 /// `detail` is diagnostic context only; control flow and trust evaluation use
@@ -1062,6 +1114,11 @@ public:
   /// Returns false for an invalid/stale identifier or invalid enum value.
   [[nodiscard]] bool set_lowering_outcome(ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome,
                                           std::string detail = {});
+
+  /// Publish one prepared lowering transaction directly against its intents.
+  /// The operation validates every bound identity before changing any entry
+  /// and refuses to overwrite an already finalized intent.
+  [[nodiscard]] bool publish_lowering_commit(const ConSanCommittedLowering &commit);
 
   /// Return whether every admitted intent has been instrumented.
   /// This deliberately makes no claim about runtime selection or retained
