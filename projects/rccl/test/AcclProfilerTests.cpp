@@ -734,4 +734,67 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
     );
 }
 
+// =========================================================================
+// nChannels uint8_t wrap: RCCL's ncclTaskColl::nChannels is uint16_t but the
+// v5 descriptor field is uint8_t, so a collective using MAXCHANNELS (256)
+// channels is delivered to the plugin as nChannels == 0.
+// =========================================================================
+TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerNChannels.Wrapped256IsProfiledNotDropped",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x2601, &mask, "nch256_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t d;
+            MakeCollDescr(&d, /*nChannels=*/0, /*seqNumber=*/70, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+            ASSERT_NE(coll, nullptr)
+                << "A collective reporting nChannels=0 must not be dropped — at "
+                   "256 channels the uint8_t ABI field wraps to 0";
+
+            // Drive all 256 channels: start every channel, then stop the coll,
+            // then stop every channel (RCCL fires coll-stop right after
+            // ncclProxyStart, while kernel events are still in flight).
+            void* kch[256];
+            for (int c = 0; c < 256; c++) {
+                ncclProfilerEventDescr_v5_t kd;
+                memset(&kd, 0, sizeof(kd));
+                kd.type = ncclProfileKernelCh;
+                kd.parentObj = coll;
+                kd.kernelCh.channelId = (uint8_t)c;
+                kd.kernelCh.pTimer = 1000000;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &kch[c], &kd), 0);
+                ASSERT_NE(kch[c], nullptr) << "channel " << c;
+            }
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;  // +10000 ticks = 100 us at 100 MHz
+            for (int c = 0; c < 256; c++) {
+                ASSERT_EQ(acclPluginRecordEventState(
+                    kch[c], ncclProfilerKernelChStop, &sa), 0);
+                ASSERT_EQ(acclPluginStopEvent(kch[c]), 0);
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out =
+                ReadProfilerOutput("/tmp/accl_test_nch256", "0x2601");
+            ASSERT_FALSE(out.empty()) << "No profiler output produced";
+            EXPECT_NE(out.find("\"coll_sn\":70"), std::string::npos)
+                << "The 256-channel collective must produce a record";
+            EXPECT_NE(out.find("\"coll_n_channels\":256"), std::string::npos)
+                << "A reported 0 must be promoted to 256 as the completion target";
+            EXPECT_NE(out.find("\"coll_n_channels_reported\":0"),
+                      std::string::npos)
+                << "The raw ABI value must stay visible so 0 is never ambiguous";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch256"}}
+    );
+}
+
 } // namespace RcclUnitTesting
