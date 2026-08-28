@@ -980,22 +980,22 @@ with warnings and direct tests. Independent ELF, descriptor, branch, ABI,
 exact-byte, mutation, and coverage validation also remains deliberately:
 those properties cannot be proved from construction of the semantic plan.
 
-The Stage 10 code/test checkpoint is `c7368412ec`. Its seven implementation
+The Stage 10 code/test checkpoint is `a12265d0db`. Its eight implementation
 commits establish profile-driven relay validation, evidence-intent-only
 sizing, profile-driven validation policy, typed synchronization graph joins,
 and the final boundary-language audit. The final 83-file production scope
-contains 95,484 physical lines, 91,054 nonblank lines, and 84,028
-comment-excluded code lines. That is 626 code lines above the typed Stage 0
+contains 95,512 physical lines, 91,081 nonblank lines, and 84,055
+comment-excluded code lines. That is 653 code lines above the typed Stage 0
 snapshot, reflecting durable contracts and cross-target coverage added by the
-plan, and 5,521 lines below the 89,549-line deletion-phase start. Direct
+plan, and 5,494 lines below the 89,549-line deletion-phase start. Direct
 target-vocabulary lines fell from
 1,358 in 39 files to 1,153 in 36 files.
 
 At that revision the checked-in gate passed all 5,303 tests. The `-j16`
-nonphysical tier passed 4,668/4,668 in 262.38 seconds, including every one of
+nonphysical tier passed 4,668/4,668 in 258.38 seconds, including every one of
 the 2,908 RocJitsu device-emulation rows across gfx942, gfx950, gfx1100,
 gfx1201, and gfx1250. After that tier completed, the serialized `-j1` physical
-gfx1201 tier passed 635/635 in 107.81 seconds. Two simulator rows that had
+gfx1201 tier passed 635/635 in 108.85 seconds. Two simulator rows that had
 completed their GTest bodies in under one second but exceeded the 60-second
 CTest process allowance under full load passed alone in 0.35 and 0.72 seconds;
 their targeted allowances are now 120 seconds. No E2E qualification was used

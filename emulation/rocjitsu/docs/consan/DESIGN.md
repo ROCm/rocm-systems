@@ -931,6 +931,11 @@ hook cannot consume it. Per-patch plans own decisions that cross into native
 emission. Shared inventory, resource planning, descriptor growth, placement,
 and target profiles are consumed by all four engines.
 
+Synchronization construction, association, perturbation policy, and final
+validation join events through typed `SemanticSiteId` values. Stable string
+names remain only as adjacent consistency checks and as the deliberate
+diagnostic and fault-mutation selection interface.
+
 Final validation consumes the published inventory, observation plan, coverage
 ledger, operating point, resource plans, patch metadata, and immutable target
 profile. It independently checks ELF structure, exact emitted bytes, branch
