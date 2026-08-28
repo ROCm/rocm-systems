@@ -22,18 +22,25 @@
 RCCL_PARAM(DirectA2aEnable, "DIRECT_A2A_ENABLE", 0);
 RCCL_PARAM(DirectA2aOneShotThreshold, "DIRECT_A2A_ONESHOT_THRESHOLD",
            RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES);
+RCCL_PARAM(DirectA2aMaxBytes, "DIRECT_A2A_MAX_BYTES", RCCL_DIRECT_A2A_MAX_BYTES);
 
 namespace {
 
 constexpr int kDirectA2aThreads = 256;
 constexpr int kDirectA2aMaxBlocks = 256;
+constexpr size_t kDirectA2aMaxBytesCeiling = 1ULL << 25; // env cap 32 MiB
 static_assert(RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES <= RCCL_DIRECT_A2A_MAX_BYTES,
               "DIRECT_A2A one-shot threshold must not exceed its maximum message size");
 static_assert(RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES <= RCCL_DIRECT_A2A_MAX_BYTES,
               "DIRECT_A2A two-rank maximum must not exceed its global maximum message size");
+static_assert(RCCL_DIRECT_A2A_MAX_BYTES <= kDirectA2aMaxBytesCeiling,
+              "DIRECT_A2A default maximum must not exceed the env ceiling");
 
 size_t directA2aMaxBytes(int nRanks) {
-  return nRanks == 2 ? RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES : RCCL_DIRECT_A2A_MAX_BYTES;
+  if (nRanks == 2) return RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES;
+  const int64_t configured = rcclParamDirectA2aMaxBytes();
+  if (configured <= 0) return 0;
+  return std::min<size_t>((size_t)configured, kDirectA2aMaxBytesCeiling);
 }
 
 size_t directA2aOneShotThreshold(int nRanks) {

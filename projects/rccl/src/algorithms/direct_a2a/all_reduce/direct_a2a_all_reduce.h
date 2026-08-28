@@ -14,7 +14,7 @@ struct ncclComm;
 
 constexpr size_t RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES = 1ULL << 16;
 constexpr size_t RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES = 1ULL << 22;
-constexpr size_t RCCL_DIRECT_A2A_MAX_BYTES = 1ULL << 23;
+constexpr size_t RCCL_DIRECT_A2A_MAX_BYTES = 1ULL << 24;
 constexpr int RCCL_DIRECT_A2A_MIN_RANKS = 2;
 constexpr int RCCL_DIRECT_A2A_MAX_RANKS = 4;
 
@@ -29,6 +29,7 @@ bool rcclDirectA2aAllReduceEligible(struct ncclComm* comm, size_t count, ncclDat
 
 // Two-rank AllReduce uses one-shot through its rank-specific maximum. Other
 // supported rank counts use one-shot for small messages and two-shot
-// ReduceScatter + AllGather for larger messages.
+// ReduceScatter + AllGather up to 16 MiB by default (override with
+// RCCL_DIRECT_A2A_MAX_BYTES, capped at 32 MiB).
 ncclResult_t rcclDirectA2aAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);
