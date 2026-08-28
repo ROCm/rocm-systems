@@ -140,10 +140,10 @@ choose_flat_check_trap_indirect_scalar_scratch(
     const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
     std::span<const LivenessAnalysis *const> owner_liveness,
     std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
-    uint16_t required_vgprs, rj_code_arch_t arch) {
+    uint16_t required_vgprs, const ConSanTargetProfile &target) {
   if (options.scratch_vgpr) {
     return choose_flat_scratch_vgpr(access, options, inst, nullptr, min_auto_scratch_vgpr,
-                                    max_auto_scratch_vgpr, required_vgprs, arch);
+                                    max_auto_scratch_vgpr, required_vgprs, target.arch);
   }
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness,
@@ -151,30 +151,33 @@ choose_flat_check_trap_indirect_scalar_scratch(
       required_vgprs > std::numeric_limits<uint8_t>::max())
     return std::nullopt;
 
-  uint16_t search_start =
-      std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
-  while (search_start < REGISTER_SET_MAX_VGPRS) {
-    const auto candidate =
-        owner_liveness.front()->find_free_run(inst, required_vgprs, search_start);
-    if (!candidate)
-      return std::nullopt;
-    const uint32_t candidate_end = static_cast<uint32_t>(*candidate) + required_vgprs;
-    if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
-      return std::nullopt;
-    const RegisterRef ref{RegClass::VGPR, *candidate, static_cast<uint8_t>(required_vgprs)};
-    const bool dead_for_every_owner =
-        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->any_live_before(*inst, ref);
-        });
-    if (candidate_end <= REGISTER_SET_MAX_VGPRS && dead_for_every_owner &&
-        flat_scratch_tuple_base_is_valid(access, arch, *candidate) &&
-        !is_forbidden_flat_scratch_vgpr_run(access, *candidate, required_vgprs))
-      return candidate;
-    if (*candidate == UINT16_MAX)
-      return std::nullopt;
-    search_start = static_cast<uint16_t>(*candidate + 1u);
-  }
-  return std::nullopt;
+  RegisterSet live_before_all_owners;
+  for (const LivenessAnalysis *liveness : owner_liveness)
+    live_before_all_owners |= liveness->live_before(*inst);
+
+  ConSanRegisterRequest request;
+  request.reg_class = RegClass::VGPR;
+  request.count = required_vgprs;
+  request.alignment =
+      flat_dword_count(access).value_or(0u) > 1u && target.requires_even_vgpr_tuples ? 2u : 1u;
+  request.search_start =
+      std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
+  request.current_allocation_count = max_auto_scratch_vgpr.value_or(REGISTER_SET_MAX_VGPRS);
+  request.max_referenced_count = min_auto_scratch_vgpr.value_or(0u);
+  request.architecture_limit = request.current_allocation_count;
+  request.allow_spill = false;
+  const uint16_t data_vgprs = flat_dword_count(access).value_or(1u);
+  if (access.operands.address_vgpr)
+    request.forbidden.expand({RegClass::VGPR, *access.operands.address_vgpr, 2u});
+  if (access.operands.destination_vgpr)
+    request.forbidden.expand(
+        {RegClass::VGPR, *access.operands.destination_vgpr, static_cast<uint8_t>(data_vgprs)});
+  if (access.operands.data_vgpr)
+    request.forbidden.expand(
+        {RegClass::VGPR, *access.operands.data_vgpr, static_cast<uint8_t>(data_vgprs)});
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live_before_all_owners);
+  return plan.source == ConSanRegisterAllocationSource::LivenessDead ? plan.base : std::nullopt;
 }
 
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
@@ -410,7 +413,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
     auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
                                                        min_auto_scratch_vgpr, max_auto_scratch_vgpr,
-                                                       scratch_vgprs, arch);
+                                                       scratch_vgprs, target);
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
