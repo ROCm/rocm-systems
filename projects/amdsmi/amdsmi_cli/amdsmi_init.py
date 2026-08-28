@@ -12,6 +12,8 @@ import sys
 import threading
 from pathlib import Path
 
+from amdsmi_cli_exceptions import AmdSmiExitCode
+
 # CLI module resolution order (distinct from `import amdsmi` in a user script):
 #   1. this installation's share/amd_smi copy -- the modules the CLI shipped
 #      with, always preferred so `amd-smi` uses its own version even on a host
@@ -41,8 +43,6 @@ except ImportError as e:
     print(
         "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
     )
-    from amdsmi_cli_exceptions import AmdSmiExitCode
-
     sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 # Using basic python logging for user errors and development
@@ -185,8 +185,6 @@ def amdsmi_cli_init():
     if init_thread.is_alive():
         # The library hung with no status, so exit with a CLI code (not a borrowed
         # library status) -- the exit code unambiguously means the CLI watchdog gave up.
-        from amdsmi_cli_exceptions import AmdSmiExitCode
-
         logging.error(
             "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
             _INIT_TIMEOUT_SEC,
@@ -212,8 +210,6 @@ def amdsmi_cli_init():
             )
             or init_flag == 0
         ):
-            from amdsmi_cli_exceptions import AmdSmiExitCode
-
             logging.error(
                 "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
             )
