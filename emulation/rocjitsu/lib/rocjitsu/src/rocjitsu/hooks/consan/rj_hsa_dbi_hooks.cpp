@@ -2356,17 +2356,8 @@ public:
                    sc_report_summary.complete() ? "true" : "false");
       std::fflush(stderr);
     }
-    const uint64_t visible_evidence_count = moi_report_summary.visible_access_record_count +
-                                            moi_report_summary.visible_barrier_record_count +
-                                            moi_report_summary.visible_atomic_record_count +
-                                            moi_report_summary.visible_fence_record_count +
-                                            moi_report_summary.visible_diagnostic_record_count +
-                                            moi_report_summary.visible_inline_publication_count +
-                                            moi_report_summary.visible_exact_shadow_entry_count +
-                                            moi_report_summary.visible_inline_atomic_release_count +
-                                            moi_report_summary.visible_inline_acquired_token_count +
-                                            moi_report_summary.visible_sampled_watchpoint_count;
-    const bool required_records_missing = moi_require_records && visible_evidence_count == 0;
+    const AutoMoiReportTrustEvaluation moi_trust =
+        evaluate_auto_moi_report_trust(moi_report_summary, moi_require_records);
     std::fprintf(
         stderr,
         "[rocjitsu-dbi-hooks] ConSan MOI report memory required_bytes=%llu "
@@ -2407,32 +2398,10 @@ public:
                  process_patched_image_growth_ceiling.c_str());
     const uint64_t dynamic_incomplete_count =
         sc_report_summary.allocation_failure_count + sc_report_summary.read_failure_count +
-        sc_report_summary.cleanup_failure_count + moi_report_summary.allocation_failure_count +
-        moi_report_summary.cleanup_failure_count + moi_report_summary.dropped_access_record_count +
-        moi_report_summary.dropped_barrier_record_count +
-        moi_report_summary.dropped_atomic_record_count +
-        moi_report_summary.dropped_fence_record_count +
-        moi_report_summary.dropped_diagnostic_record_count +
-        moi_report_summary.record_replay_bank_saturation_count +
-        moi_report_summary.record_replay_invalid_site_token_count +
-        moi_report_summary.sampled_dropped_window_count +
-        moi_report_summary.sampled_unusable_snapshot_count() +
-        moi_report_summary.exact_unusable_snapshot_count() +
-        moi_report_summary.release_unusable_snapshot_count() +
-        moi_report_summary.token_unusable_snapshot_count() +
-        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
-        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count +
-        moi_report_summary.sampled_unsupported_sync_count +
-        moi_report_summary.sampled_malformed_sync_count +
-        moi_report_summary.replay_dropped_access_count +
-        moi_report_summary.replay_dropped_barrier_count +
-        moi_report_summary.replay_unsupported_access_count +
-        moi_report_summary.replay_unsupported_atomic_count +
-        moi_report_summary.replay_unsupported_fence_count +
-        moi_report_summary.replay_metadata_full_count +
-        moi_report_summary.replay_diagnostic_capacity_exhausted_count;
+        sc_report_summary.cleanup_failure_count + moi_trust.dynamic_incomplete_count;
     const bool static_complete = static_coverage_summary.complete();
-    const bool dynamic_complete = dynamic_incomplete_count == 0 && !required_records_missing;
+    const bool dynamic_complete =
+        dynamic_incomplete_count == 0 && !moi_trust.required_records_missing;
     const bool analysis_complete = static_complete && dynamic_complete;
     std::fprintf(
         stderr,
@@ -2457,7 +2426,7 @@ public:
         static_cast<unsigned long long>(static_coverage_summary.supported_atomic),
         static_cast<unsigned long long>(static_coverage_summary.patched_fence),
         static_cast<unsigned long long>(static_coverage_summary.supported_fence),
-        static_cast<unsigned long long>(visible_evidence_count),
+        static_cast<unsigned long long>(moi_trust.visible_evidence_count),
         static_cast<unsigned long long>(dynamic_incomplete_count),
         static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count),
         static_cast<unsigned long long>(moi_report_summary.record_replay_invalid_site_token_count),
@@ -2466,13 +2435,7 @@ public:
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_fence_count),
         static_cast<unsigned long long>(moi_report_summary.replay_metadata_full_count));
     std::fflush(stderr);
-    const uint64_t moi_dropped_record_count = moi_report_summary.dropped_access_record_count +
-                                              moi_report_summary.dropped_barrier_record_count +
-                                              moi_report_summary.dropped_atomic_record_count +
-                                              moi_report_summary.dropped_fence_record_count +
-                                              moi_report_summary.dropped_diagnostic_record_count +
-                                              moi_report_summary.sampled_dropped_window_count;
-    if (moi_dropped_record_count != 0) {
+    if (moi_trust.dropped_record_count != 0) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] ConSan MOI report overflow: dropped access=%llu "
@@ -2569,10 +2532,7 @@ public:
       if (moi_forbid_overflow)
         std::_Exit(90);
     }
-    const uint64_t inline_coverage_loss =
-        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
-        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count;
-    if (inline_coverage_loss != 0) {
+    if (moi_trust.inline_coverage_loss_count != 0) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] ConSan MOI inline coverage loss: undercoverage=%llu "
@@ -2586,7 +2546,7 @@ public:
       if (moi_forbid_overflow)
         std::_Exit(90);
     }
-    if (required_records_missing) {
+    if (moi_trust.required_records_missing) {
       if (dispatch_summary.packet_count == 0u) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
@@ -2649,12 +2609,7 @@ public:
                    static_cast<unsigned long long>(moi_report_summary.inline_undercoverage_count));
       std::fflush(stderr);
     }
-    const bool moi_has_diagnostics = moi_report_summary.visible_diagnostic_record_count +
-                                         moi_report_summary.replay_diagnostic_count +
-                                         moi_report_summary.sampled_conflict_count +
-                                         moi_report_summary.sampled_immediate_conflict_count >
-                                     0;
-    if (moi_require_diagnostics && !moi_has_diagnostics) {
+    if (moi_require_diagnostics && !moi_trust.has_diagnostics) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS requested, but "
@@ -2676,7 +2631,7 @@ public:
       std::fflush(stderr);
       std::_Exit(88);
     }
-    if (moi_forbid_diagnostics && moi_has_diagnostics) {
+    if (moi_forbid_diagnostics && moi_trust.has_diagnostics) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_FORBID_DIAGNOSTICS requested, but "

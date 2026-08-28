@@ -636,6 +636,57 @@ struct AutoMoiReportSummary {
   }
 };
 
+/// Host-side trust projection derived solely from one completed report
+/// summary and the caller's evidence requirement. HSA lifecycle coordination
+/// consumes this value; it must not reconstruct report completeness or
+/// diagnostic meaning from individual counters.
+struct AutoMoiReportTrustEvaluation {
+  uint64_t visible_evidence_count = 0;
+  uint64_t dynamic_incomplete_count = 0;
+  uint64_t dropped_record_count = 0;
+  uint64_t inline_coverage_loss_count = 0;
+  bool required_records_missing = false;
+  bool dynamic_complete = false;
+  bool has_diagnostics = false;
+};
+
+[[nodiscard]] inline AutoMoiReportTrustEvaluation
+evaluate_auto_moi_report_trust(const AutoMoiReportSummary &summary, bool require_records) {
+  AutoMoiReportTrustEvaluation result;
+  result.visible_evidence_count =
+      summary.visible_access_record_count + summary.visible_barrier_record_count +
+      summary.visible_atomic_record_count + summary.visible_fence_record_count +
+      summary.visible_diagnostic_record_count + summary.visible_inline_publication_count +
+      summary.visible_exact_shadow_entry_count + summary.visible_inline_atomic_release_count +
+      summary.visible_inline_acquired_token_count + summary.visible_sampled_watchpoint_count;
+  result.required_records_missing = require_records && result.visible_evidence_count == 0u;
+  result.dropped_record_count =
+      summary.dropped_access_record_count + summary.dropped_barrier_record_count +
+      summary.dropped_atomic_record_count + summary.dropped_fence_record_count +
+      summary.dropped_diagnostic_record_count + summary.sampled_dropped_window_count;
+  result.inline_coverage_loss_count =
+      summary.inline_undercoverage_count + summary.inline_overflow_count +
+      summary.inline_unsupported_count + summary.inline_malformed_count;
+  result.dynamic_incomplete_count =
+      summary.allocation_failure_count + summary.cleanup_failure_count +
+      result.dropped_record_count + summary.record_replay_bank_saturation_count +
+      summary.record_replay_invalid_site_token_count + summary.sampled_unusable_snapshot_count() +
+      summary.exact_unusable_snapshot_count() + summary.release_unusable_snapshot_count() +
+      summary.token_unusable_snapshot_count() + result.inline_coverage_loss_count +
+      summary.sampled_unsupported_sync_count + summary.sampled_malformed_sync_count +
+      summary.replay_dropped_access_count + summary.replay_dropped_barrier_count +
+      summary.replay_unsupported_access_count + summary.replay_unsupported_atomic_count +
+      summary.replay_unsupported_fence_count + summary.replay_metadata_full_count +
+      summary.replay_diagnostic_capacity_exhausted_count;
+  result.dynamic_complete =
+      result.dynamic_incomplete_count == 0u && !result.required_records_missing;
+  result.has_diagnostics = summary.visible_diagnostic_record_count +
+                               summary.replay_diagnostic_count + summary.sampled_conflict_count +
+                               summary.sampled_immediate_conflict_count >
+                           0u;
+  return result;
+}
+
 [[nodiscard]] constexpr uint64_t
 record_replay_bank_saturation_count(const ConSanMoiReportHeader &header, ConSanMoiEngine engine) {
   return engine == ConSanMoiEngine::RecordReplay &&

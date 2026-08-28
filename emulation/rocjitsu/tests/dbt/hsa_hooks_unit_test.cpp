@@ -3254,6 +3254,50 @@ TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
             0u);
 }
 
+TEST(HsaHooksUnitTest, MoiReportTrustEvaluationOwnsDynamicCompleteness) {
+  rocjitsu::consan_hook::AutoMoiReportSummary summary;
+  const auto missing =
+      rocjitsu::consan_hook::evaluate_auto_moi_report_trust(summary, /*require_records=*/true);
+  EXPECT_EQ(missing.visible_evidence_count, 0u);
+  EXPECT_TRUE(missing.required_records_missing);
+  EXPECT_FALSE(missing.dynamic_complete);
+
+  summary.visible_access_record_count = 1;
+  summary.visible_sampled_watchpoint_count = 2;
+  summary.replay_diagnostic_count = 1;
+  summary.allocation_failure_count = 1;
+  summary.cleanup_failure_count = 2;
+  summary.dropped_access_record_count = 1;
+  summary.sampled_dropped_window_count = 2;
+  summary.record_replay_bank_saturation_count = 1;
+  summary.record_replay_invalid_site_token_count = 1;
+  summary.sampled_stale_snapshot_count = 1;
+  summary.exact_incomplete_snapshot_count = 1;
+  summary.release_changed_snapshot_count = 1;
+  summary.token_malformed_snapshot_count = 1;
+  summary.inline_undercoverage_count = 2;
+  summary.inline_overflow_count = 1;
+  summary.sampled_unsupported_sync_count = 1;
+  summary.sampled_malformed_sync_count = 1;
+  summary.replay_dropped_access_count = 1;
+  summary.replay_dropped_barrier_count = 1;
+  summary.replay_unsupported_access_count = 1;
+  summary.replay_unsupported_atomic_count = 1;
+  summary.replay_unsupported_fence_count = 1;
+  summary.replay_metadata_full_count = 1;
+  summary.replay_diagnostic_capacity_exhausted_count = 1;
+
+  const auto evaluated =
+      rocjitsu::consan_hook::evaluate_auto_moi_report_trust(summary, /*require_records=*/true);
+  EXPECT_EQ(evaluated.visible_evidence_count, 3u);
+  EXPECT_EQ(evaluated.dropped_record_count, 3u);
+  EXPECT_EQ(evaluated.inline_coverage_loss_count, 3u);
+  EXPECT_EQ(evaluated.dynamic_incomplete_count, 24u);
+  EXPECT_FALSE(evaluated.required_records_missing);
+  EXPECT_FALSE(evaluated.dynamic_complete);
+  EXPECT_TRUE(evaluated.has_diagnostics);
+}
+
 TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanout) {
   rocjitsu::ConSanMoiReportHeader header;
   header.access_record_capacity = 8;
