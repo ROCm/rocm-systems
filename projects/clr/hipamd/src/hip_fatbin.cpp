@@ -7,6 +7,7 @@
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
+#include <algorithm>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -183,25 +184,36 @@ static std::string TargetToGeneric(const std::string &input) {
   return generic_name;
 }
 
-static bool IsCodeObjectUncompressed(const void* image) {
+static bool IsCodeObjectUncompressed(const void* image, size_t image_size) {
+  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
+  if (image_size < magic_size) {
+    return false;
+  }
   return std::memcmp(image,
                      reinterpret_cast<const void*>(symbols::kOffloadBundleUncompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1) == 0;
+                     magic_size) == 0;
 }
 
-static bool IsCodeObjectCompressed(const void* image) {
+static bool IsCodeObjectCompressed(const void* image, size_t image_size) {
+  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1;
+  if (image_size < magic_size) {
+    return false;
+  }
   return std::memcmp(image,
                      reinterpret_cast<const void*>(symbols::kOffloadBundleCompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1) == 0;
+                     magic_size) == 0;
 }
 
-static bool IsCodeObjectElf(const void* image) {
+static bool IsCodeObjectElf(const void* image, size_t image_size) {
+  if (image_size < sizeof(amd::Elf64_Ehdr)) {
+    return false;
+  }
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
   return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
 static bool UncompressAndPopulateCodeObject(
-    const void* image, const std::set<std::string>& unique_isa_names,
+    const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
   auto remove_file_extension = [](const std::string& input) -> std::string {
     size_t index = input.find_last_of(".");
@@ -219,8 +231,19 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bis.c_str());
   }
 
+  if (image_bound < sizeof(symbols::ClangOffloadBundleCompressedHeader)) {
+    LogError("Compressed fat binary header is truncated");
+    return false;
+  }
+
   const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
+  if (size > image_bound) {
+    LogPrintfError("Rejecting compressed fat binary: totalSize=%llu exceeds image bound=%llu",
+                   static_cast<unsigned long long>(size),
+                   static_cast<unsigned long long>(image_bound));
+    return false;
+  }
 
   bool passed = false;
   do {
@@ -342,7 +365,7 @@ static bool UncompressAndPopulateCodeObject(
 }
 
 static bool PopulateCodeObjectMap(
-    const void* image, const std::set<std::string>& unique_isa_names,
+    const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
   bool passed = false;
   do {
@@ -353,9 +376,11 @@ static bool PopulateCodeObjectMap(
       break;
     }
 
-    // There is no way to find size of offload bundle, so we pass 4096 here.
-    if (auto comgr_status =
-            amd::Comgr::set_data(data_object.get(), 4096, reinterpret_cast<const char*>(image));
+    // There is no encoded total size for an uncompressed bundle. Limit COMGR's
+    // header lookup to the readable image range.
+    const size_t header_size = std::min<size_t>(4096, image_bound);
+    if (auto comgr_status = amd::Comgr::set_data(data_object.get(), header_size,
+                                                 reinterpret_cast<const char*>(image));
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
       LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
       break;
@@ -381,8 +406,16 @@ static bool PopulateCodeObjectMap(
 
     for (const auto& item : query_list_array) {
       if (item.size > 0) {
+        if (item.offset > image_bound || item.size > image_bound - item.offset) {
+          LogPrintfError(
+              "Rejecting fat binary: code object for isa '%s' is out of bounds "
+              "(offset=%llu size=%zu image bound=%zu)",
+              item.isa, static_cast<unsigned long long>(item.offset), item.size, image_bound);
+          return false;
+        }
+
         // Map the offset pointer and size from the image
-        auto loc = reinterpret_cast<const char*>(image) + item.offset;
+        auto loc = reinterpret_cast<const char*>(image) + static_cast<size_t>(item.offset);
         code_obj_map[item.isa] = std::make_pair(loc, item.size);
       }
     }
@@ -407,10 +440,17 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
+  // hipModuleLoadData has no length parameter. For pointer inputs, the remaining
+  // readable mapping is a safety ceiling; file loads have an exact size.
+  size_t image_bound = 0;
   if (image_ != nullptr) {
-    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
+    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_, &image_bound)) {
       fname_ = std::string("");
       foffset_ = 0;
+    }
+    if (image_bound == 0) {
+      LogError("Cannot determine a readable bound for fat binary input");
+      return hipErrorInvalidImage;
     }
   } else {
     size_t fsize = 0;
@@ -425,19 +465,26 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       return hipErrorInvalidValue;
     }
     image_size_ = fsize;
+    image_bound = image_size_;
     image_mapped_ = true;
   }
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
 
-  bool is_compressed = IsCodeObjectCompressed(image_),
-       is_uncompressed = IsCodeObjectUncompressed(image_);
+  bool is_compressed = IsCodeObjectCompressed(image_, image_bound),
+       is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
 
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
-    if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
+    if (IsCodeObjectElf(image_, image_bound)) {
+      auto elf_size = amd::Elf::getElfSize(image_, image_bound);
+      // If we got 0, validation has failed.
+      if (elf_size == 0) {
+        LogPrintfError(
+            "Invalid ELF code object: failed size/bounds validation, image bound is: %zu",
+            image_bound);
+        return hipErrorInvalidImage;
+      }
       for (auto* device : devices) {
         if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
           return hipErrorInvalidImage;
@@ -479,7 +526,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
-    if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
+    if (!UncompressAndPopulateCodeObject(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
     // For compressed code objects, we use comgr to extract and make a copy.
@@ -487,7 +534,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
-    if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
+    if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
   }

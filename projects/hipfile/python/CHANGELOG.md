@@ -4,7 +4,20 @@ All notable changes to the hipFile Python bindings will be documented in this fi
 
 ## [Unreleased]
 
-## [0.3.0dev0]
+## [0.4.0.dev0]
+
+### Added
+
+- Cython and Python API support for the hipFile async stream I/O APIs.
+- High-level `FileHandle.read_async` / `FileHandle.write_async` methods for
+  submitting asynchronous I/O on a stream.
+- `Stream` context manager for registering and deregistering a HIP stream.
+- `AsyncIOHandle` holding the async operation's I/O parameters and receiving
+  the transferred byte count once the stream completes.
+- `supports_async()` to report whether the loaded library implements the async
+  API.
+
+## [0.3.0.dev0]
 
 ### Added
 

@@ -106,6 +106,8 @@ class Bench_gfx9(benchmark_base.Bench_base):
         }
         """
 
+        self.bf16_flops_benchmark_src = """"""
+
         # Matrix operations
         # ----------------------------------------
         # Kernels need arch-specific definitions or are unsupported by the hardware

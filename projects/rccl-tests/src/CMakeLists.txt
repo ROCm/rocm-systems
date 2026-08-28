@@ -76,6 +76,8 @@ set(COMMON_FILES
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
+  rccl_vector_types.h
+  multimem_ops.h
   timer.h
   timer.cc
   util.h
@@ -141,6 +143,34 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
+if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
+    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM ENABLE_ROCSHMEM_GIN)
+    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    find_library(_DRM drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    find_library(_DRM_AMDGPU drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 hsakmt numa ${_DRM} ${_DRM_AMDGPU})
+    # -rdynamic exports symbols so librccl.so can resolve rocshmem host functions
+    # from this executable (librccl.so is built with ENABLE_ROCSHMEM_GIN which
+    # leaves rocshmem host symbols unresolved)
+    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
+endif()
+if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY AND RCCL_SOURCE_DIR)
+    add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
+    target_include_directories(gin_rocshmem_gda_factory_test PRIVATE
+        ${ROCM_PATH}/include
+        ${RCCL_SOURCE_DIR}/src/include
+        ${ROCSHMEM_SOURCE_DIR}/src
+        ${ROCSHMEM_SOURCE_DIR}/include
+        ${ROCSHMEM_INSTALL_DIR}/include
+    )
+    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --offload-arch=${GPU_TARGETS} -xhip)
+    target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
+        roc::rccl ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 hsakmt numa ${_DRM} ${_DRM_AMDGPU}
+        $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
+    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link --offload-arch=${GPU_TARGETS} -rdynamic)
+    set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
 add_rccl_test(gather)

@@ -30,7 +30,7 @@
  *   - Async LDS operations
  *   - Unified s_waitcnt instruction
  *
- * - Strix / Strix Halo / Krackan (RDNA 3.5, gfx1150 / gfx1151 / gfx1152) APU iGPU:
+ * - Strix / Strix Halo / Krackan (RDNA 3.5 gfx115x) APU iGPU:
  *   - Wave32 native, WMMA (FP16/BF16/INT8), VOPD same-wave dual-issue VALU
  *   - No CDNA-style FP8/BF8 cvt builtins; scalar FP in scalar unit; s_singleuse_vdst hint
  *
@@ -308,7 +308,7 @@ test_fp8_conversions(TestResults* results, int lane_id)
     // Verify non-zero output
     passed = (fp8_packed != 0);
 
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#elif ARCH_RDNA35_APU
     // RDNA 3.5 APU (Strix): NO FP8 conversion builtins - mark as bypassed
     if(lane_id == 0)
     {
@@ -375,7 +375,7 @@ test_bf8_conversions(TestResults* results, int lane_id)
     // Verify non-zero result
     passed = (bf8_packed != 0);
 
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#elif ARCH_RDNA35_APU
     // RDNA 3.5 APU (Strix): NO BF8 conversion builtins - mark as bypassed
     if(lane_id == 0)
     {
@@ -809,8 +809,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // ========================================================================
     // global_atomic_add/sub/and/or/xor/min/max/swap
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) ||                 \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA and RDNA 3.5 APU: Use HIP atomics (inline ASM syntax differs)
     {
         int old_val       = atomicAdd(&global_int_ptr[tid % 64], 1);
@@ -851,8 +850,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // ========================================================================
     // global_atomic_add_f32 - supported on all target architectures
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) ||                 \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA and RDNA 3.5 APU: Use HIP atomics (inline ASM syntax differs)
     {
         float old_val     = atomicAdd(&global_f32_ptr[tid % 64], 1.0f);
@@ -916,7 +914,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
         atomicMin(&results->atomic_global_f64_passed, -1);
     }
     global_f64_passed = true;  // Don't count as failure
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#elif ARCH_RDNA35_APU
     // RDNA 3.5 APU (gfx115x): no hardware FP64 global atomics — bypass
     if(lane_id == 0 && tid < 32)
     {
@@ -932,8 +930,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // ========================================================================
     // flat_atomic_add/sub/min/max - unified addressing
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) ||                 \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA and RDNA 3.5 APU: Use HIP atomics (inline ASM syntax differs)
     {
         int old_val     = atomicAdd(&global_int_ptr[(tid % 64) + 128], 1);
@@ -1039,8 +1036,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // ========================================================================
     // global_atomic_pk_add_f16 - Atomically add two FP16 values
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) ||                 \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA and RDNA 3.5 APU: Use HIP atomics for packed FP16
     {
         // Use regular atomicAdd on reinterpreted pointer
@@ -1074,14 +1070,13 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
 #endif
 
     // ========================================================================
-    // TEST 9: PACKED BF16 ATOMICS (gfx942+, gfx1150/gfx1151/gfx1152, gfx1200/gfx1201)
+    // TEST 9: PACKED BF16 ATOMICS (gfx942+, gfx115x, gfx1200/gfx1201)
     // ========================================================================
     // global_atomic_pk_add_bf16 - Atomically add two BF16 values
-    // Available on: gfx942, gfx950, gfx1150, gfx1151, gfx1152, gfx1200, gfx1201
+    // Available on: gfx942, gfx950, gfx115x, gfx1200, gfx1201
     // NOT available on: gfx90a
     //
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1150__) ||                \
-    defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA3+ and RDNA 3.5 APU: Use HIP atomics for packed BF16
     {
         unsigned int packed_bf16 = 0x3F803F80;
@@ -1124,8 +1119,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // ========================================================================
     // global_atomic_cmpswap - Atomic compare and swap
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) ||                 \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || ARCH_RDNA35_APU
     // CDNA and RDNA 3.5 APU: Use HIP atomicCAS
     {
         int compare_val = 0;
@@ -1164,15 +1158,13 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     {
         atomicAdd(&results->atomic_global_int_passed, global_int_passed ? 1 : 0);
         atomicAdd(&results->atomic_global_f32_passed, global_f32_passed ? 1 : 0);
-#if !defined(__gfx1200__) && !defined(__gfx1201__) && !defined(__gfx1150__) &&           \
-    !defined(__gfx1151__) && !defined(__gfx1152__)
+#if !defined(__gfx1200__) && !defined(__gfx1201__) && !ARCH_RDNA35_APU
         atomicAdd(&results->atomic_global_f64_passed, global_f64_passed ? 1 : 0);
 #endif
         atomicAdd(&results->atomic_flat_int_passed, flat_int_passed ? 1 : 0);
         atomicAdd(&results->atomic_ds_int_passed, ds_int_passed ? 1 : 0);
         atomicAdd(&results->atomic_ds_f32_passed, ds_f32_passed ? 1 : 0);
-#if !defined(__gfx1200__) && !defined(__gfx1201__) && !defined(__gfx1150__) &&           \
-    !defined(__gfx1151__) && !defined(__gfx1152__)
+#if !defined(__gfx1200__) && !defined(__gfx1201__) && !ARCH_RDNA35_APU
         atomicAdd(&results->atomic_ds_f64_passed, ds_f64_passed ? 1 : 0);
 #endif
         atomicAdd(&results->atomic_pk_f16_passed, pk_f16_passed ? 1 : 0);
@@ -1444,9 +1436,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
         flat_passed = flat_passed && (fabsf(global_ptr[tid] - store_val) < 0.001f);
     }
 
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
-    defined(__gfx1151__) ||                                                              \
-    defined(__gfx1152__)  // GFX12-style names: flat_load_b32 / flat_store_b32 (gfx12 + gfx115x)
+#elif defined(__gfx1200__) || defined(__gfx1201__) || ARCH_RDNA35_APU  // GFX12-style names: flat_load_b32 / flat_store_b32 (gfx12 + gfx115x)
     if(in_bounds)
     {
         float test_val   = (float) tid + 1.0f;
@@ -1514,9 +1504,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
         global_passed = global_passed && (fabsf(global_ptr[tid] - store_val) < 0.001f);
     }
 
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
-    defined(__gfx1151__) ||                                                              \
-    defined(__gfx1152__)  // GFX12-style names: global_load_b32 / global_store_b32 (gfx12 + gfx115x)
+#elif defined(__gfx1200__) || defined(__gfx1201__) || ARCH_RDNA35_APU  // GFX12-style names: global_load_b32 / global_store_b32 (gfx12 + gfx115x)
     if(in_bounds)
     {
         float test_val   = (float) (tid * 3) + 0.5f;
@@ -1634,7 +1622,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
         buffer_passed = true;  // Implicit test via global operations
     }
 
-#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if ARCH_RDNA35_APU
     bool tex_load_passed  = true;
     bool tex_store_passed = true;
 
@@ -1680,7 +1668,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
         atomicAdd(&results->vmem_buffer_passed, buffer_passed ? 1 : 0);
         atomicAdd(&results->vmem_scratch_passed, scratch_passed ? 1 : 0);
         atomicAdd(&results->vmem_lds_passed, lds_passed ? 1 : 0);
-#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if ARCH_RDNA35_APU
         atomicAdd(&results->vmem_tex_load_passed, tex_load_passed ? 1 : 0);
         atomicAdd(&results->vmem_tex_store_passed, tex_store_passed ? 1 : 0);
 #else
@@ -1753,7 +1741,7 @@ test_dot_products(TestResults* results, int lane_id)
     int dot4_result = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3;
     passed          = (dot4_result == 10);
 
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#elif ARCH_RDNA35_APU
     // RDNA 3.5 APU (gfx115x): DOT4 family per RDNA 3.5 ISA; same software sanity path as gfx120x here
     unsigned int a = 0x01020304;
     unsigned int b = 0x01010101;
@@ -2797,8 +2785,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
 
 // Vector types for WMMA operations (RDNA4)
 // Fragment types: 8 elements per lane for 16x16 matrix
-#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||              \
-    defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx1200__) || defined(__gfx1201__) || ARCH_RDNA35_APU
 using wmma_f16_frag  = __attribute__((__vector_size__(8 * sizeof(_Float16)))) _Float16;
 using wmma_bf16_frag = __attribute__((__vector_size__(8 * sizeof(short)))) short;
 using wmma_f32_frag  = __attribute__((__vector_size__(8 * sizeof(float)))) float;
@@ -2924,9 +2911,9 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         atomicAdd(&results->wmma_i8_passed, i8_passed ? 1 : 0);
     }
 
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#elif ARCH_RDNA35_APU
     // ========================================================================
-    // RDNA 3.5 APU (gfx1150/gfx1151/gfx1152 - Strix) WMMA Tests
+    // RDNA 3.5 APU (gfx115x - Strix) WMMA Tests
     // Uses GFX11 WMMA builtins (wmma-256b-insts) with _Vector<16> inputs
     // These are DIFFERENT from GFX12 builtins which use _Vector<8> inputs
     // ========================================================================
@@ -3178,8 +3165,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 __device__ void
 test_rdna4_features([[maybe_unused]] TestResults* results, [[maybe_unused]] int lane_id)
 {
-#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||              \
-    defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx1200__) || defined(__gfx1201__) || ARCH_RDNA35_APU
     bool passed = true;
 
     // Test 1: Wave32 operations (RDNA4 is Wave32 native)

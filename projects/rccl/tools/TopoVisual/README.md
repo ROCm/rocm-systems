@@ -7,7 +7,7 @@ Following packages are required to run Topology Visualizer:
 2. graphviz
 
 ## Usage
-Topology Visualizer accepts both RCCL log files or simulator output, i.e. [Topology Explorer](https://github.com/ROCm/rccl/tree/master/tools/topo_expl "Topology Explorer").
+Topology Visualizer accepts both RCCL log files or simulator output, i.e. [Topology Explorer](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/tools/topo_expl "Topology Explorer").
 
 RCCL logs needs to be collected with NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS=INIT,GRAPH environmental variables. Example command line:
 ```shell

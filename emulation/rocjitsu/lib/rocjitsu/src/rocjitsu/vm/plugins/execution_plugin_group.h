@@ -27,6 +27,27 @@
 
 namespace rocjitsu {
 
+/// @brief Deleter for owned plugin instances.
+///
+/// Every plugin instance is freed through a destroy function, so allocation and
+/// deallocation always stay on the same side of the plugin ABI boundary. For
+/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
+/// is a small host trampoline that `delete`s the instance (see
+/// delete_execution_plugin()). The pointer is only ever handed back to the
+/// deleter that created it, and `std::unique_ptr` never invokes the deleter on
+/// a null instance, so no null check is needed here.
+struct PluginDeleter {
+  void (*destroyFn)(void *) = nullptr;
+  void operator()(ExecutionPlugin *p) const { destroyFn(static_cast<void *>(p)); }
+};
+
+/// @brief Owning pointer to a plugin instance with a boundary-aware deleter.
+using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
+
+/// @brief Host destroy trampoline for in-tree plugins created with `new`.
+inline void delete_execution_plugin(void *p) { delete static_cast<ExecutionPlugin *>(p); }
+
 class ExecutionPluginGroup {
 public:
   ExecutionPluginGroup() = default;
@@ -43,7 +64,8 @@ public:
   /// this call gets a FileSink at <dir>/<plugin_name>.log.
   void set_sink_dir(const std::string &dir) { sink_dir_ = dir; }
 
-  bool add(std::unique_ptr<ExecutionPlugin> p) {
+  /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
+  bool add(OwnedPlugin p) {
     if (!p)
       return false;
     for (const auto &existing : plugins_)
@@ -55,16 +77,21 @@ public:
     return true;
   }
 
+  /// Add an in-tree plugin freed with `delete` (host/test convenience).
+  bool add(std::unique_ptr<ExecutionPlugin> p) {
+    return add(OwnedPlugin(p.release(), PluginDeleter{&delete_execution_plugin}));
+  }
+
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // -- Lifecycle (non-virtual) --
-  void onInit() {
+  // -- Lifecycle --
+  virtual void onInit() {
     for (auto &p : plugins_)
       p->onInit();
   }
 
-  void onShutdown() {
+  virtual void onShutdown() {
     for (auto &p : plugins_)
       p->onShutdown();
   }
@@ -125,11 +152,18 @@ public:
       p->onAmdgpuWavefrontHalted(wf);
   }
 
-  virtual void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                 uint32_t lane_begin, uint32_t lane_end,
-                                 uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+  virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                                     uint64_t lane_mask,
+                                     uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
     for (auto &p : plugins_)
-      p->onAmdgpuReadVgprs(wf, physical_reg, lane_begin, lane_end, byte_mask);
+      p->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+  }
+
+  virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                                      uint64_t lane_mask,
+                                      uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+    for (auto &p : plugins_)
+      p->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
@@ -143,8 +177,21 @@ public:
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
-    static auto instance = std::make_shared<ExecutionPluginGroup>();
-    return instance;
+    // Immortal singleton: the shared_ptr is heap-allocated and deliberately never
+    // deleted, so its control block outlives process teardown. In local-mode
+    // (LD_PRELOAD interposer) the simulation engine runs on a detached thread that
+    // is still executing when exit() drives static/atexit destructors on the main
+    // thread. A plain function-local `static shared_ptr` would have its control
+    // block destroyed by a __cxa_atexit handler during __run_exit_handlers while the
+    // engine thread is mid-startup() copying this default plugin group into a
+    // CompletionTracker/ComputeUnit — a data race on the refcount that surfaced as a
+    // use-after-free SIGSEGV in _Sp_counted_base::_M_release under `ctest -jN`.
+    // Leaking the control block removes that teardown race; the OS reclaims the
+    // memory at process death. Matches the interposer singleton's never-destructed
+    // design for the same reason.
+    static std::shared_ptr<ExecutionPluginGroup> *instance =
+        new std::shared_ptr<ExecutionPluginGroup>(std::make_shared<ExecutionPluginGroup>());
+    return *instance;
   }
 
 protected:
@@ -162,8 +209,15 @@ protected:
       composite->add(s);
     if (has_file) {
       auto fs = std::make_unique<FileSink>(sink_dir_ + "/" + file_name);
-      composite->add(fs.get());
-      owned_sinks_.push_back(std::move(fs));
+      if (fs->is_open()) {
+        composite->add(fs.get());
+        owned_sinks_.push_back(std::move(fs));
+      } else if (composite->empty()) {
+        // Preserve output when the file was the only requested destination.
+        // Do not add stderr when another configured sink is already usable,
+        // because doing so would unexpectedly duplicate output.
+        composite->add(&StderrSink::instance());
+      }
     }
     auto *result = composite.get();
     owned_sinks_.push_back(std::move(composite));
@@ -180,7 +234,7 @@ private:
       p.sink_ = s;
   }
 
-  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
+  std::vector<std::unique_ptr<ExecutionPlugin, PluginDeleter>> plugins_;
 };
 
 } // namespace rocjitsu

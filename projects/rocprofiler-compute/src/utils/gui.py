@@ -107,7 +107,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
         hbm_row = display_df[display_df["Metric"] == "HBM Bandwidth"]
         if not hbm_row.empty:
             hbm_bw = float(hbm_row["Avg"].iloc[0])
-            gb_data = display_df[display_df["Unit"] == "Gb/s"]
+            gb_data = display_df[display_df["Unit"] == "GB/s"]
             charts.append(
                 px.bar(
                     gb_data,

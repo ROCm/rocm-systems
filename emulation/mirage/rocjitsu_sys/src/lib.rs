@@ -1,4 +1,4 @@
-//! `rocjitsu_sys` — runtime FFI bindings to the rocjitsu VM C API.
+//! `rocjitsu_sys` — runtime FFI bindings to the rocjitsu C API.
 //!
 //! mirage drives the rocjitsu functional emulator directly through its
 //! public C API (`rj_vm_*`, declared in `rocjitsu/vm/rj_vm.h`) instead
@@ -50,6 +50,38 @@ pub struct RjVm {
     _private: [u8; 0],
 }
 
+/// Opaque daemon handle (`rj_daemon_t`). Only ever held behind a pointer.
+#[repr(C)]
+pub struct RjDaemon {
+    _private: [u8; 0],
+}
+
+/// Observable daemon lifecycle state (`rj_daemon_status_t`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RjDaemonStatus {
+    Stopped = 0,
+    Starting = 1,
+    Running = 2,
+    Stopping = 3,
+    Error = 4,
+}
+
+impl TryFrom<c_int> for RjDaemonStatus {
+    type Error = c_int;
+
+    fn try_from(value: c_int) -> Result<Self, c_int> {
+        match value {
+            0 => Ok(Self::Stopped),
+            1 => Ok(Self::Starting),
+            2 => Ok(Self::Running),
+            3 => Ok(Self::Stopping),
+            4 => Ok(Self::Error),
+            value => Err(value),
+        }
+    }
+}
+
 /// VM creation mode (`rj_vm_mode_t`).
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +109,10 @@ pub struct RjVmCmd {
     pub result: i32,
     /// `[out]` Backing handle for shareable allocations, or -1.
     pub shared_handle: RjHandle,
+    /// `[in/out]` Client-provided fd (e.g. a debugger notifier), or -1.
+    /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
+    /// adoption, clears it to -1 so the caller does not close it.
+    pub in_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -174,7 +210,10 @@ impl RjVmGpuInfo {
     /// matches `rj_vm_gpu_info_t` exactly.
     pub fn as_bytes(&self) -> &[u8] {
         unsafe {
-            std::slice::from_raw_parts(self as *const Self as *const u8, std::mem::size_of::<Self>())
+            std::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                std::mem::size_of::<Self>(),
+            )
         }
     }
 }
@@ -183,6 +222,7 @@ impl RjVmGpuInfo {
 type FnVmCreate = unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
 type FnVmCreateFromString =
     unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
+type FnVmLoadPlugins = unsafe extern "C" fn(*mut RjVm, *const c_char, *const c_char) -> RjStatus;
 type FnVmRun = unsafe extern "C" fn(*mut RjVm, *mut u64) -> RjStatus;
 type FnVmRequestExit = unsafe extern "C" fn(*mut RjVm, *const c_char);
 type FnVmDestroy = unsafe extern "C" fn(*mut RjVm);
@@ -196,6 +236,10 @@ type FnVmGpuInfo = unsafe extern "C" fn(*mut RjVm, *mut RjVmGpuInfo) -> RjStatus
 type FnVmTopologyPath = unsafe extern "C" fn(*mut RjVm, *mut *const c_char) -> RjStatus;
 type FnVmDrmPath = unsafe extern "C" fn(*mut RjVm, *mut *const c_char) -> RjStatus;
 type FnVmGetSharedMemAs = unsafe extern "C" fn(*mut RjVm, u32, i64, *mut RjHandle) -> RjStatus;
+type FnDaemonStart =
+    unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut RjDaemon) -> RjStatus;
+type FnDaemonStop = unsafe extern "C" fn(*mut RjDaemon) -> RjStatus;
+type FnDaemonStatus = unsafe extern "C" fn(*const RjDaemon) -> c_int;
 
 /// A loaded rocjitsu shared library with its `rj_vm_*` entry points
 /// resolved.
@@ -209,6 +253,10 @@ pub struct Lib {
     // so it is kept in `_lib` and dropped last.
     vm_create: FnVmCreate,
     vm_create_from_string: FnVmCreateFromString,
+    // Optional: only present in rocjitsu libraries that ship the runtime
+    // plugin loader. When absent, plugin selection in the config is a no-op
+    // for a C-API host (the daemon), matching an older library.
+    vm_load_plugins: Option<FnVmLoadPlugins>,
     vm_run: FnVmRun,
     vm_request_exit: FnVmRequestExit,
     vm_destroy: FnVmDestroy,
@@ -224,6 +272,9 @@ pub struct Lib {
     vm_topology_path: FnVmTopologyPath,
     vm_drm_path: FnVmDrmPath,
     vm_get_shared_mem_as: FnVmGetSharedMemAs,
+    daemon_start: FnDaemonStart,
+    daemon_stop: FnDaemonStop,
+    daemon_status: FnDaemonStatus,
     _lib: libloading::Library,
 }
 
@@ -250,6 +301,11 @@ impl Lib {
             let vm_create = *lib.get::<FnVmCreate>(b"rj_vm_create\0")?;
             let vm_create_from_string =
                 *lib.get::<FnVmCreateFromString>(b"rj_vm_create_from_string\0")?;
+            // Optional symbol: tolerate older libraries that predate the loader.
+            let vm_load_plugins = lib
+                .get::<FnVmLoadPlugins>(b"rj_vm_load_plugins\0")
+                .map(|s| *s)
+                .ok();
             let vm_run = *lib.get::<FnVmRun>(b"rj_vm_run\0")?;
             let vm_request_exit = *lib.get::<FnVmRequestExit>(b"rj_vm_request_exit\0")?;
             let vm_destroy = *lib.get::<FnVmDestroy>(b"rj_vm_destroy\0")?;
@@ -265,9 +321,13 @@ impl Lib {
             let vm_drm_path = *lib.get::<FnVmDrmPath>(b"rj_vm_drm_path\0")?;
             let vm_get_shared_mem_as =
                 *lib.get::<FnVmGetSharedMemAs>(b"rj_vm_get_shared_mem_as\0")?;
+            let daemon_start = *lib.get::<FnDaemonStart>(b"rj_daemon_start\0")?;
+            let daemon_stop = *lib.get::<FnDaemonStop>(b"rj_daemon_stop\0")?;
+            let daemon_status = *lib.get::<FnDaemonStatus>(b"rj_daemon_status\0")?;
             Ok(Self {
                 vm_create,
                 vm_create_from_string,
+                vm_load_plugins,
                 vm_run,
                 vm_request_exit,
                 vm_destroy,
@@ -281,6 +341,9 @@ impl Lib {
                 vm_topology_path,
                 vm_drm_path,
                 vm_get_shared_mem_as,
+                daemon_start,
+                daemon_stop,
+                daemon_status,
                 _lib: lib,
             })
         }
@@ -310,6 +373,30 @@ impl Lib {
         let mut vm: *mut RjVm = std::ptr::null_mut();
         let status = unsafe { (self.vm_create_from_string)(json.as_ptr(), mode, &mut vm) };
         (status, vm)
+    }
+
+    /// Load and attach the execution plugins declared in `config_json`
+    /// (its `plugins` / `sinks` / `profiled` sections) to `vm`.
+    ///
+    /// `plugin_dir`, when non-empty, is a trusted directory the plugin
+    /// shared objects are loaded from by explicit path — required in
+    /// daemon mode, where the process is not re-`exec`'d and so cannot
+    /// rely on a launcher-populated `LD_LIBRARY_PATH`.
+    ///
+    /// Returns `None` when the loaded library predates the
+    /// `rj_vm_load_plugins` symbol (an older rocjitsu without the runtime
+    /// plugin loader); otherwise the C API status.
+    ///
+    /// # Safety
+    /// `vm` must be a live handle from [`Lib::vm_create`].
+    pub unsafe fn vm_load_plugins(
+        &self,
+        vm: *mut RjVm,
+        config_json: &CStr,
+        plugin_dir: &CStr,
+    ) -> Option<RjStatus> {
+        let load = self.vm_load_plugins?;
+        Some(unsafe { load(vm, config_json.as_ptr(), plugin_dir.as_ptr()) })
     }
 
     /// Run the simulation engine until [`Lib::vm_request_exit`] is
@@ -470,6 +557,42 @@ impl Lib {
         }
         Some(handle)
     }
+
+    /// Start a daemon and return its opaque handle.
+    ///
+    /// # Safety
+    /// `json` and `socket_path` must be valid C strings. A non-null returned
+    /// handle must be released exactly once with [`Lib::daemon_stop`].
+    pub unsafe fn daemon_start(
+        &self,
+        json: &CStr,
+        socket_path: &CStr,
+    ) -> (RjStatus, *mut RjDaemon) {
+        let mut daemon = std::ptr::null_mut();
+        let status =
+            unsafe { (self.daemon_start)(json.as_ptr(), socket_path.as_ptr(), &mut daemon) };
+        (status, daemon)
+    }
+
+    /// Stop a daemon and release its handle.
+    ///
+    /// # Safety
+    /// `daemon` must be null or a live handle from [`Lib::daemon_start`] and
+    /// must not be used after this call.
+    pub unsafe fn daemon_stop(&self, daemon: *mut RjDaemon) -> RjStatus {
+        unsafe { (self.daemon_stop)(daemon) }
+    }
+
+    /// Return the current lifecycle state of a daemon.
+    ///
+    /// Returns the unrecognized raw value when an ABI-incompatible library
+    /// produces something other than a valid [`RjDaemonStatus`] discriminant.
+    ///
+    /// # Safety
+    /// `daemon` must be null or remain live for the duration of this call.
+    pub unsafe fn daemon_status(&self, daemon: *const RjDaemon) -> Result<RjDaemonStatus, c_int> {
+        RjDaemonStatus::try_from(unsafe { (self.daemon_status)(daemon) })
+    }
 }
 
 #[cfg(test)]
@@ -483,11 +606,26 @@ mod tests {
     fn struct_sizes_match_c_abi() {
         assert_eq!(std::mem::size_of::<RjVmMap>(), 40);
         assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
-        // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 on 64-bit.
-        assert_eq!(std::mem::size_of::<RjVmCmd>(), 32);
+        // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 + i32 + (pad)
+        // on 64-bit.
+        assert_eq!(std::mem::size_of::<RjVmCmd>(), 40);
         assert_eq!(RjVmMode::Daemon as i32, 2);
         // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the
         // daemon handshake embeds (static_assert in rpc.h).
         assert_eq!(std::mem::size_of::<RjVmGpuInfo>(), 312);
+        assert_eq!(RjDaemonStatus::Stopped as i32, 0);
+        assert_eq!(RjDaemonStatus::Running as i32, 2);
+        assert_eq!(RjDaemonStatus::Error as i32, 4);
+    }
+
+    #[test]
+    fn daemon_status_rejects_unknown_discriminants() {
+        assert_eq!(RjDaemonStatus::try_from(0), Ok(RjDaemonStatus::Stopped));
+        assert_eq!(RjDaemonStatus::try_from(1), Ok(RjDaemonStatus::Starting));
+        assert_eq!(RjDaemonStatus::try_from(2), Ok(RjDaemonStatus::Running));
+        assert_eq!(RjDaemonStatus::try_from(3), Ok(RjDaemonStatus::Stopping));
+        assert_eq!(RjDaemonStatus::try_from(4), Ok(RjDaemonStatus::Error));
+        assert_eq!(RjDaemonStatus::try_from(-1), Err(-1));
+        assert_eq!(RjDaemonStatus::try_from(5), Err(5));
     }
 }

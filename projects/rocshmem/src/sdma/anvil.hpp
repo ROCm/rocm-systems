@@ -41,15 +41,16 @@
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 
-namespace rocshmem {
-namespace anvil {
+namespace sdma_anvil {
+
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent, uint32_t engineId);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
+  SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle() const;
   void dump(std::ofstream& logFile);
 
  private:
@@ -59,6 +60,7 @@ class SdmaQueue {
   void* queueBuffer_;
   HsaQueueResource queue_;
   SdmaQueueDeviceHandle* deviceHandle_;
+  SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle_{nullptr};
 };
 
 class AnvilLib {
@@ -95,20 +97,30 @@ class AnvilLib {
    * 6         5 3 2 4 6 1 0 7
    * 7         3 6 4 2 1 5 7 0
    */
-  std::array<std::array<int, 8>, 8> mi300xOamMap = {{{0, 7, 6, 1, 2, 4, 5, 3},
-                                                     {7, 0, 1, 5, 4, 2, 3, 6},
-                                                     {5, 1, 0, 6, 7, 3, 2, 4},
-                                                     {1, 6, 5, 0, 3, 7, 4, 2},
-                                                     {2, 4, 7, 3, 0, 5, 6, 1},
-                                                     {4, 2, 3, 7, 6, 0, 1, 5},
-                                                     {5, 3, 2, 4, 6, 1, 0, 7},
-                                                     {3, 6, 4, 2, 1, 5, 7, 0}}};
+  static constexpr size_t kMi300xOamMapDim = 8;
+  std::array<std::array<int, kMi300xOamMapDim>, kMi300xOamMapDim> mi300xOamMap = {{
+      {0, 7, 6, 1, 2, 4, 5, 3},
+      {7, 0, 1, 5, 4, 2, 3, 6},
+      {5, 1, 0, 6, 7, 3, 2, 4},
+      {1, 6, 5, 0, 3, 7, 4, 2},
+      {2, 4, 7, 3, 0, 5, 6, 1},
+      {4, 2, 3, 7, 6, 0, 1, 5},
+      {5, 3, 2, 4, 6, 1, 0, 7},
+      {3, 6, 4, 2, 1, 5, 7, 0}}};
 
+  uint32_t numSdmaEngines_{0};
+  uint32_t numSdmaXgmiEngines_{0};
+  uint32_t numSdmaEnginesTotal_{0};
+
+  void buildGpuAgentMap();
+  hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
+  void querySdmaEngineCounts();
   int getOamId(int deviceId);
-
+  int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
   int getSdmaEngineId(int srcDeviceId, int dstDeviceId);
 
   std::once_flag init_flag;
+  std::vector<hsa_agent_t> gpuAgentsByHipDev_;
   std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
 };
 
@@ -127,7 +139,7 @@ inline void checkHipError(hipError_t err, const char* msg, const char* file, int
   }
 }
 
-#define ANVIL_CHECK_HIP_ERROR(cmd) rocshmem::anvil::checkHipError((cmd), #cmd, __FILE__, __LINE__)
+#define ANVIL_CHECK_HIP_ERROR(cmd) sdma_anvil::checkHipError((cmd), #cmd, __FILE__, __LINE__)
 
 // Allow access to peerDeviceId from deviceId
 inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
@@ -146,7 +158,7 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
   }
 }
 
-}  // namespace anvil
-}  // namespace rocshmem
+
+}  // namespace sdma_anvil
 
 #endif  // LIBRARY_SRC_SDMA_ANVIL_HPP_

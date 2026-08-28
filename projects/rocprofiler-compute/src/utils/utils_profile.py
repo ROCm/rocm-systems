@@ -297,9 +297,8 @@ def run_prof(
                         f"skipping rocpd update for {db_name}."
                     )
                     continue
-                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
                 rocpd_data.update_rocpd_pmc_events(
-                    counter_rows,
+                    str(counter_csv),
                     str(db_name),
                 )
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
@@ -581,12 +580,14 @@ def v3_counter_csv_to_v2_csv(
         {"Node_Id": row.get("Node_Id"), "Wave_Front_Size": row.get("Wave_Front_Size")}
         for row in agent_info
     ]
-    result = csv_ops.merge_rows(
-        result,
-        agent_info_subset,
-        left_on="Agent_Id",
-        right_on="Node_Id",
-        how="left",
+    result = list(
+        csv_ops.merge_rows(
+            result,
+            agent_info_subset,
+            left_on="Agent_Id",
+            right_on="Node_Id",
+            how="left",
+        )
     )
 
     # Create GPU ID mapping from agent info
@@ -675,29 +676,22 @@ def v3_counter_csv_to_v2_csv(
 
 
 def convert_native_counter_collection_csv(workload_dir: str) -> None:
+    """Convert native counter CSVs to rocprofiler-sdk format.
+
+    Joins native counter data with kernel trace data and writes
+    counter_collection CSVs for further processing to pmc_perf.csv.
     """
-    Use native counter collection csv and rocprofiler-sdk kernel
-    trace to write counter collection csv in rocprofiler-sdk format
-    for further processing to pmc_perf.csv file
-    """
+    groupby_columns = ["dispatch_id", "counter_name"]
+
     for native_path in (Path(workload_dir) / "out/pmc_1").glob(
         "*_native_counter_collection.csv"
     ):
-        counter_data, _ = csv_ops.read_csv_as_dicts(str(native_path))
-        # Group by on dispatch_id and counter_id and sum the counter_value,
-        # Other rows in group have the same value, so take the first one
-        groupby_cols = ["dispatch_id", "counter_name"]
-        if counter_data:
-            agg_dict = {
-                col: "first"
-                for col in counter_data[0].keys()
-                if col not in groupby_cols
-            }
-        else:
-            agg_dict = {}
-        # Overwrite counter_value aggregation to sum
-        agg_dict["counter_value"] = "sum"
-        counter_data = csv_ops.groupby_aggregate(counter_data, groupby_cols, agg_dict)
+        # Sum counter_value across rows sharing a (dispatch_id, counter_name)
+        aggregated_counters = csv_ops.groupby_aggregate(
+            csv_ops.iter_csv_dicts(str(native_path)),
+            groupby_columns,
+            {"counter_value": "sum"},
+        )
 
         pid = native_path.stem.split("_")[0]
         kernel_data_filename = str(
@@ -705,53 +699,51 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
         kernel_data, _ = csv_ops.read_csv_as_dicts(kernel_data_filename)
 
-        # Merge counter_data with kernel_data on dispatch_id
-        merged_data = csv_ops.merge_rows(
-            counter_data,
+        merged_rows = csv_ops.merge_rows(
+            aggregated_counters,
             kernel_data,
             left_on="dispatch_id",
             right_on="Dispatch_Id",
-            how="inner",
         )
-
-        # Build new rows with calculated columns
-        rocprofv3_counter_data = []
-        for row in merged_data:
-            new_row = {
-                "Correlation_Id": row.get("Correlation_Id"),
-                "Dispatch_Id": row.get("dispatch_id"),
-                "Agent_Id": row.get("Agent_Id"),
-                "Queue_Id": row.get("Queue_Id"),
-                "Process_Id": row.get("Thread_Id"),
-                "Thread_Id": row.get("Thread_Id"),
-                "Grid_Size": (
-                    int(row.get("Grid_Size_X", 1))
-                    * int(row.get("Grid_Size_Y", 1))
-                    * int(row.get("Grid_Size_Z", 1))
-                ),
-                "Kernel_Id": row.get("Kernel_Id"),
-                "Kernel_Name": row.get("Kernel_Name"),
-                "Workgroup_Size": (
-                    int(row.get("Workgroup_Size_X", 1))
-                    * int(row.get("Workgroup_Size_Y", 1))
-                    * int(row.get("Workgroup_Size_Z", 1))
-                ),
-                "LDS_Block_Size": row.get("LDS_Block_Size"),
-                "Scratch_Size": row.get("Scratch_Size"),
-                "VGPR_Count": row.get("VGPR_Count"),
-                "Accum_VGPR_Count": row.get("Accum_VGPR_Count"),
-                "SGPR_Count": row.get("SGPR_Count"),
-                "Counter_Name": row.get("counter_name"),
-                "Counter_Value": row.get("counter_value"),
-                "Start_Timestamp": row.get("Start_Timestamp"),
-                "End_Timestamp": row.get("End_Timestamp"),
-            }
-            rocprofv3_counter_data.append(new_row)
+        rocprofv3_counter_data = [_build_rocprofv3_counter_row(m) for m in merged_rows]
 
         csv_ops.write_csv_from_dicts(
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
             rocprofv3_counter_data,
         )
+
+
+def _build_rocprofv3_counter_row(merged: dict) -> dict:
+    """Transform a merged counter+kernel row into rocprofiler-sdk schema."""
+    return {
+        "Correlation_Id": merged.get("Correlation_Id"),
+        "Dispatch_Id": merged.get("dispatch_id"),
+        "Agent_Id": merged.get("Agent_Id"),
+        "Queue_Id": merged.get("Queue_Id"),
+        "Process_Id": merged.get("Thread_Id"),
+        "Thread_Id": merged.get("Thread_Id"),
+        "Grid_Size": (
+            int(merged.get("Grid_Size_X", 1))
+            * int(merged.get("Grid_Size_Y", 1))
+            * int(merged.get("Grid_Size_Z", 1))
+        ),
+        "Kernel_Id": merged.get("Kernel_Id"),
+        "Kernel_Name": merged.get("Kernel_Name"),
+        "Workgroup_Size": (
+            int(merged.get("Workgroup_Size_X", 1))
+            * int(merged.get("Workgroup_Size_Y", 1))
+            * int(merged.get("Workgroup_Size_Z", 1))
+        ),
+        "LDS_Block_Size": merged.get("LDS_Block_Size"),
+        "Scratch_Size": merged.get("Scratch_Size"),
+        "VGPR_Count": merged.get("VGPR_Count"),
+        "Accum_VGPR_Count": merged.get("Accum_VGPR_Count"),
+        "SGPR_Count": merged.get("SGPR_Count"),
+        "Counter_Name": merged.get("counter_name"),
+        "Counter_Value": merged.get("counter_value"),
+        "Start_Timestamp": merged.get("Start_Timestamp"),
+        "End_Timestamp": merged.get("End_Timestamp"),
+    }
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:

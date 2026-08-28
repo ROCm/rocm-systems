@@ -27,8 +27,8 @@ THE SOFTWARE.
 // Defines a series of global address space pointers.  Casting to these
 // pointers in hot code paths should improve performance since global
 // aperture vector instrutions like global_store_dwordx4 can be used.
-// These are cheaper than flat loads and stores.  
-// Verify the intended effect by inspecting assembly.  If you see 
+// These are cheaper than flat loads and stores.
+// Verify the intended effect by inspecting assembly.  If you see
 // flat in the name of the emitted instruction, something is wrong.
 using u64_gptr = __attribute__((address_space(1))) uint64_t*;
 using u32_gptr = __attribute__((address_space(1))) uint32_t*;
@@ -36,12 +36,13 @@ using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
 #ifdef __HIP_DEVICE_COMPILE__
-#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && \
+  __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 1
-//#pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950"
+// #pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950"
 #else
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
-//#pragma message "RCCL DWORDX4 Builtins Disabled on GFX942/GFX950"
+// #pragma message "RCCL DWORDX4 Builtins Disabled on GFX942/GFX950"
 #endif
 #else
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0

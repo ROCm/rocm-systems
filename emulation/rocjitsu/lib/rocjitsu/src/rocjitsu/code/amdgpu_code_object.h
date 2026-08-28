@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -60,6 +61,18 @@ public:
   const std::string &target_triple() const { return target_triple_; }
 
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
+
+  /// @brief Smallest per-wavefront SGPR allocation across this object's kernels.
+  ///
+  /// @details Decodes each kernel descriptor's `GRANULATED_WAVEFRONT_SGPR_COUNT`
+  /// and returns the minimum, or nullopt when no readable kernel descriptor is
+  /// present.
+  ///
+  /// Mirrors the command processor's decode: when the descriptor encodes the
+  /// count (granulated != 0, or a CDNA target) the value is `(granulated+1)*8`;
+  /// otherwise the granulated field is an RDNA-style sentinel and the wave owns
+  /// the fixed per-wave SGPR pool. @p arch selects that interpretation.
+  [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
 
 private:
   void load_sections();

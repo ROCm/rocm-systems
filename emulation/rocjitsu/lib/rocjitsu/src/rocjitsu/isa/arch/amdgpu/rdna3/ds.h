@@ -20,6 +20,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsSubU32Ds : public Ds {
@@ -28,6 +30,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsRsubU32Ds : public Ds {
@@ -36,6 +40,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsIncU32Ds : public Ds {
@@ -44,6 +50,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsDecU32Ds : public Ds {
@@ -52,6 +60,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinI32Ds : public Ds {
@@ -60,6 +70,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxI32Ds : public Ds {
@@ -68,6 +80,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinU32Ds : public Ds {
@@ -76,6 +90,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxU32Ds : public Ds {
@@ -84,6 +100,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAndB32Ds : public Ds {
@@ -92,6 +110,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsOrB32Ds : public Ds {
@@ -100,6 +120,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsXorB32Ds : public Ds {
@@ -108,6 +130,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMskorB32Ds : public Ds {
@@ -117,6 +141,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStoreB32Ds : public Ds {
@@ -125,6 +151,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsStore2addrB32Ds : public Ds {
@@ -134,6 +161,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
 };
 
 class DsStore2addrStride64B32Ds : public Ds {
@@ -143,6 +171,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
 };
 
 class DsCmpstoreB32Ds : public Ds {
@@ -152,6 +181,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreF32Ds : public Ds {
@@ -161,6 +192,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinF32Ds : public Ds {
@@ -169,6 +202,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxF32Ds : public Ds {
@@ -177,6 +212,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsNopDs : public Ds {
@@ -191,6 +228,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsGwsSemaReleaseAllDs : public Ds {
@@ -238,6 +277,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsStoreB16Ds : public Ds {
@@ -246,6 +286,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsAddRtnU32Ds : public Ds {
@@ -255,6 +296,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsSubRtnU32Ds : public Ds {
@@ -264,6 +307,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsRsubRtnU32Ds : public Ds {
@@ -273,6 +318,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsIncRtnU32Ds : public Ds {
@@ -282,6 +329,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsDecRtnU32Ds : public Ds {
@@ -291,6 +340,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnI32Ds : public Ds {
@@ -300,6 +351,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnI32Ds : public Ds {
@@ -309,6 +362,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnU32Ds : public Ds {
@@ -318,6 +373,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnU32Ds : public Ds {
@@ -327,6 +384,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAndRtnB32Ds : public Ds {
@@ -336,6 +395,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsOrRtnB32Ds : public Ds {
@@ -345,6 +406,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsXorRtnB32Ds : public Ds {
@@ -354,6 +417,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMskorRtnB32Ds : public Ds {
@@ -364,6 +429,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchgRtnB32Ds : public Ds {
@@ -373,6 +440,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchg2addrRtnB32Ds : public Ds {
@@ -383,6 +452,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchg2addrStride64RtnB32Ds : public Ds {
@@ -393,6 +464,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreRtnB32Ds : public Ds {
@@ -403,6 +476,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreRtnF32Ds : public Ds {
@@ -413,6 +488,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnF32Ds : public Ds {
@@ -422,6 +499,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnF32Ds : public Ds {
@@ -431,6 +510,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsWrapRtnB32Ds : public Ds {
@@ -441,6 +522,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsSwizzleB32Ds : public Ds {
@@ -457,6 +540,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoad2addrB32Ds : public Ds {
@@ -465,6 +549,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoad2addrStride64B32Ds : public Ds {
@@ -473,6 +558,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadI8Ds : public Ds {
@@ -481,6 +567,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadU8Ds : public Ds {
@@ -489,6 +576,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadI16Ds : public Ds {
@@ -497,6 +585,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadU16Ds : public Ds {
@@ -505,6 +594,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsConsumeDs : public Ds {
@@ -512,6 +602,8 @@ public:
   DsConsumeDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAppendDs : public Ds {
@@ -519,6 +611,8 @@ public:
   DsAppendDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsOrderedCountDs : public Ds {
@@ -527,6 +621,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
+  Operand dsmem_in;
+  Operand m0;
 };
 
 class DsAddU64Ds : public Ds {
@@ -535,6 +632,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsSubU64Ds : public Ds {
@@ -543,6 +642,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsRsubU64Ds : public Ds {
@@ -551,6 +652,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsIncU64Ds : public Ds {
@@ -559,6 +662,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsDecU64Ds : public Ds {
@@ -567,6 +672,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinI64Ds : public Ds {
@@ -575,6 +682,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxI64Ds : public Ds {
@@ -583,6 +692,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinU64Ds : public Ds {
@@ -591,6 +702,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxU64Ds : public Ds {
@@ -599,6 +712,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAndB64Ds : public Ds {
@@ -607,6 +722,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsOrB64Ds : public Ds {
@@ -615,6 +732,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsXorB64Ds : public Ds {
@@ -623,6 +742,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMskorB64Ds : public Ds {
@@ -632,6 +753,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStoreB64Ds : public Ds {
@@ -640,6 +763,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsStore2addrB64Ds : public Ds {
@@ -649,6 +773,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
 };
 
 class DsStore2addrStride64B64Ds : public Ds {
@@ -658,6 +783,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
 };
 
 class DsCmpstoreB64Ds : public Ds {
@@ -667,6 +793,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreF64Ds : public Ds {
@@ -676,6 +804,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinF64Ds : public Ds {
@@ -684,6 +814,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxF64Ds : public Ds {
@@ -692,6 +824,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAddRtnU64Ds : public Ds {
@@ -701,6 +835,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsSubRtnU64Ds : public Ds {
@@ -710,6 +846,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsRsubRtnU64Ds : public Ds {
@@ -719,6 +857,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsIncRtnU64Ds : public Ds {
@@ -728,6 +868,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsDecRtnU64Ds : public Ds {
@@ -737,6 +879,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnI64Ds : public Ds {
@@ -746,6 +890,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnI64Ds : public Ds {
@@ -755,6 +901,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnU64Ds : public Ds {
@@ -764,6 +912,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnU64Ds : public Ds {
@@ -773,6 +923,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAndRtnB64Ds : public Ds {
@@ -782,6 +934,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsOrRtnB64Ds : public Ds {
@@ -791,6 +945,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsXorRtnB64Ds : public Ds {
@@ -800,6 +956,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMskorRtnB64Ds : public Ds {
@@ -810,6 +968,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchgRtnB64Ds : public Ds {
@@ -819,6 +979,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchg2addrRtnB64Ds : public Ds {
@@ -829,6 +991,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStorexchg2addrStride64RtnB64Ds : public Ds {
@@ -839,6 +1003,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreRtnB64Ds : public Ds {
@@ -849,6 +1015,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsCmpstoreRtnF64Ds : public Ds {
@@ -859,6 +1027,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMinRtnF64Ds : public Ds {
@@ -868,6 +1038,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsMaxRtnF64Ds : public Ds {
@@ -877,6 +1049,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsLoadB64Ds : public Ds {
@@ -885,6 +1059,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoad2addrB64Ds : public Ds {
@@ -893,6 +1068,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoad2addrStride64B64Ds : public Ds {
@@ -901,6 +1077,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsAddRtnF32Ds : public Ds {
@@ -910,6 +1087,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsAddGsRegRtnDs : public Ds {
@@ -935,6 +1114,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStoreB8D16HiDs : public Ds {
@@ -943,6 +1124,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsStoreB16D16HiDs : public Ds {
@@ -951,6 +1133,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsLoadU8D16Ds : public Ds {
@@ -959,6 +1142,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadU8D16HiDs : public Ds {
@@ -967,6 +1151,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadI8D16Ds : public Ds {
@@ -975,6 +1160,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadI8D16HiDs : public Ds {
@@ -983,6 +1169,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadU16D16Ds : public Ds {
@@ -991,6 +1178,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadU16D16HiDs : public Ds {
@@ -999,6 +1187,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsBvhStackRtnB32Ds : public Ds {
@@ -1009,6 +1198,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsStoreAddtidB32Ds : public Ds {
@@ -1016,6 +1207,8 @@ public:
   DsStoreAddtidB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand data0;
+  Operand dsmem;
+  Operand m0;
 };
 
 class DsLoadAddtidB32Ds : public Ds {
@@ -1023,6 +1216,8 @@ public:
   DsLoadAddtidB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand m0;
 };
 
 class DsPermuteB32Ds : public Ds {
@@ -1049,6 +1244,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsStoreB128Ds : public Ds {
@@ -1057,6 +1253,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
 };
 
 class DsLoadB96Ds : public Ds {
@@ -1065,6 +1262,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 class DsLoadB128Ds : public Ds {
@@ -1073,6 +1271,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
 };
 
 } // namespace rdna3

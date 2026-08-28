@@ -18,6 +18,42 @@
 
 namespace rocrtst {
 
+/// Tracks skipped tests grouped by their skip reason
+class SkippedTestTracker {
+public:
+  /// Get singleton instance
+  static SkippedTestTracker& getInstance();
+
+  /// Record a skipped test with its reason
+  /// \param testName Full test name (e.g., "rocrtstFunc.MemoryAccessTests")
+  /// \param reason The reason the test was skipped
+  void recordSkip(const std::string& testName, const std::string& reason);
+
+  /// Print a summary of all skipped tests, grouped by reason
+  /// \param platformName Name of the current platform for display
+  void printSummary(const std::string& platformName) const;
+
+  /// Clear all recorded skipped tests
+  void clear();
+
+  /// Get total count of skipped tests
+  size_t getTotalCount() const;
+
+  /// Check if any tests were skipped
+  bool hasSkippedTests() const { return getTotalCount() > 0; }
+
+private:
+  SkippedTestTracker() = default;
+  ~SkippedTestTracker() = default;
+
+  // Prevent copying
+  SkippedTestTracker(const SkippedTestTracker&) = delete;
+  SkippedTestTracker& operator=(const SkippedTestTracker&) = delete;
+
+  // Maps reason -> list of test names
+  std::map<std::string, std::vector<std::string>> skippedByReason_;
+};
+
 /// Configuration for a specific platform
 struct PlatformConfig {
   std::vector<std::string> allowed_groups;

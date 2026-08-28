@@ -259,5 +259,18 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   return ret;
 }
 
+uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count) {
+  if (records == nullptr) {
+    return 0;
+  }
+  uint64_t pending = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (AMDSMI_MEM_PAGE_STATUS_PENDING == records[i].status) {
+      ++pending;
+    }
+  }
+  return pending;
+}
+
 }  // namespace rdc
 }  // namespace amd

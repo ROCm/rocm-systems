@@ -74,15 +74,31 @@ def _to_float(tok):
         return None
 
 
+def _is_int(tok):
+    try:
+        int(tok)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def parse_perf_output(text):
     """
     Parse rccl-tests perf table output into structured rows.
 
     rccl-tests prints two performance triplets per size -- out-of-place then
-    in-place -- each ``time algbw busbw #wrong``. Leading columns are
-    ``size count type`` and, for reduction collectives, ``redop root``. We anchor
-    on the trailing 8 numeric columns so the parser works for both reduction and
-    non-reduction collectives regardless of how many label columns precede them.
+    in-place -- each ``time algbw busbw #wrong``. A data row is::
+
+        size count type [redop root] <8 perf columns> [algo proto nchannels]
+
+    The leading label columns are ``size count type`` plus, for reduction
+    collectives, a ``redop root`` pair; some builds also append ``algo proto
+    nchannels`` after the final ``#wrong``. We anchor the 8 perf columns from
+    the FRONT -- immediately after the label columns -- and ignore anything that
+    follows, so the parser is robust to the presence or absence of both the
+    ``redop root`` label pair and the trailing ``algo proto nchannels`` block.
+    Anchoring on the tail would break the moment a build appends trailing
+    columns, shifting non-numeric ``algo``/``proto`` strings into the perf slots.
 
     Returns (rows, avg_busbw) where rows is a list of per-(size, place) dicts and
     avg_busbw is the run's "Avg bus bandwidth" summary line if present.
@@ -103,37 +119,53 @@ def parse_perf_output(text):
             continue
 
         toks = line.split()
-        # Need at least: size count type + 8 trailing perf columns.
+        # Minimum data row: size count type + 8 perf columns.
         if len(toks) < 11:
             continue
         if not toks[0].isdigit() or not toks[1].isdigit():
             continue
 
-        tail = toks[-8:]
-        oop_time, oop_alg, oop_bus = _to_float(tail[0]), _to_float(tail[1]), _to_float(tail[2])
-        ip_time, ip_alg, ip_bus = _to_float(tail[4]), _to_float(tail[5]), _to_float(tail[6])
-        # A real data row has numeric perf columns; header/units lines do not.
+        # Leading label columns: size count type, then an optional redop/root
+        # pair. redop is a non-numeric word (sum/none/prod/...); root is an int
+        # (often -1) that only ever appears immediately after redop.
+        dtype = toks[2]
+        idx = 3
+        redop = None
+        root = None
+        if _to_float(toks[idx]) is None:
+            redop = toks[idx]
+            idx += 1
+            if idx < len(toks) and _is_int(toks[idx]):
+                root = toks[idx]
+                idx += 1
+
+        # The 8 perf columns start right after the labels; trailing columns
+        # (algo proto nchannels), if any, are ignored.
+        if idx + 8 > len(toks):
+            continue
+        perf = toks[idx:idx + 8]
+        oop_time, oop_alg, oop_bus = _to_float(perf[0]), _to_float(perf[1]), _to_float(perf[2])
+        ip_time, ip_alg, ip_bus = _to_float(perf[4]), _to_float(perf[5]), _to_float(perf[6])
+        # A real data row has numeric time/bandwidth columns; header/units lines
+        # do not. #wrong (perf[3]/perf[7]) may be "N/A" when checking is off, so
+        # it is kept as-is rather than required to be numeric.
         if None in (oop_time, oop_alg, oop_bus, ip_time, ip_alg, ip_bus):
             continue
 
         size = int(toks[0])
         count = int(toks[1])
-        dtype = toks[2]
-        mid = toks[3:len(toks) - 8]  # 0..2 of {redop, root}
-        redop = mid[0] if len(mid) >= 1 else None
-        root = mid[1] if len(mid) >= 2 else None
 
         rows.append({
             "size_bytes": size, "count_elements": count, "dtype": dtype,
             "redop": redop, "root": root, "place": "out_of_place",
             "time_us": oop_time, "algbw_gbs": oop_alg, "busbw_gbs": oop_bus,
-            "wrong": tail[3],
+            "wrong": perf[3],
         })
         rows.append({
             "size_bytes": size, "count_elements": count, "dtype": dtype,
             "redop": redop, "root": root, "place": "in_place",
             "time_us": ip_time, "algbw_gbs": ip_alg, "busbw_gbs": ip_bus,
-            "wrong": tail[7],
+            "wrong": perf[7],
         })
 
     return rows, avg_busbw
@@ -400,24 +432,31 @@ class ResultsEmitter:
                               json.dumps(self.manifest["coverage"], indent=2, default=str))
 
             # Bundle captured logs + coverage report into the run dir so the
-            # tarball is self-contained for the dashboard scrape. To minimize
-            # bloat, only failing tests' logs are bundled: drop the per-test log
-            # files of passing/skipped tests (any non-per-test file is kept).
+            # tarball is self-contained for the dashboard scrape. Every
+            # per-test log is kept -- the logs are the raw test/perf evidence
+            # and the fallback source if in-run parsing regresses.
             if log_dir and os.path.isdir(log_dir):
                 dst = os.path.join(run_dir, "logs")
-                drop = set()
-                for t in self.tests:
-                    rel = t.get("log_relpath")
-                    status = (t.get("status") or t.get("result") or "").upper()
-                    if rel and status not in ("FAILED", "TIMEOUT"):
-                        drop.add(os.path.basename(rel))
-                shutil.copytree(
-                    log_dir, dst, dirs_exist_ok=True,
-                    ignore=lambda _dir, names: [n for n in names if n in drop],
-                )
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial log bundle rather than no results.
+                try:
+                    shutil.copytree(log_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some per-test logs could "
+                                "not be bundled: %s", e)
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
-                shutil.copytree(report_dir, dst, dirs_exist_ok=True)
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial report bundle rather than no results.
+                try:
+                    shutil.copytree(report_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some coverage report files "
+                                "could not be bundled: %s", e)
 
             tarball = os.path.join(self.results_dir, f"{self.run_id}.tar.gz")
             tmp_tar = f"{tarball}.tmp"

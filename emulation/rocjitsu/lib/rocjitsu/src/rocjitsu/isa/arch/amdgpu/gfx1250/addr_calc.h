@@ -7,7 +7,7 @@
 /// @file Address calculation helpers for gfx1250 memory instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
 #include <cstdint>
 

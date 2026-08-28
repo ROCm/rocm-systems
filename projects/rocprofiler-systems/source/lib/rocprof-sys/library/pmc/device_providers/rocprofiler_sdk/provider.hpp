@@ -10,6 +10,7 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -22,7 +23,17 @@
 namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
+// Contract required of the factory type passed to provider<BackendFactory>: it must
+// produce a backend satisfying collectors::gpu_perf_counter::backend_contract.
 template <typename BackendFactory>
+concept backend_factory_contract = requires {
+    typename BackendFactory::backend_t;
+    {
+        BackendFactory::create_backend()
+    } -> std::same_as<std::shared_ptr<typename BackendFactory::backend_t>>;
+} && collectors::gpu_perf_counter::backend_contract<typename BackendFactory::backend_t>;
+
+template <backend_factory_contract BackendFactory>
 class provider
 {
 public:
@@ -35,6 +46,16 @@ public:
     {
         configure_agents(agent_list, enabled);
     }
+
+    // &m_profile_configs is passed as void* user_data to the SDK callback.
+    // Moving this object after configure_agents() would relocate the map and
+    // dangle that pointer. Delete copy/move operations to make this constraint
+    // a compile-time guarantee rather than a comment.
+    provider(const provider&)            = delete;
+    provider& operator=(const provider&) = delete;
+    provider(provider&&)                 = delete;
+    provider& operator=(provider&&)      = delete;
+    ~provider()                          = default;
 
     void start()
     {
@@ -89,7 +110,7 @@ private:
             auto profile = typename backend_t::counter_config_id_t{};
             auto status  = m_backend_api->create_counter_config(
                 agent_id, filtered_ids.data(), filtered_ids.size(), &profile);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING("Failed to create profile config for agent {} (status={})",
                             gpu_agent->handle, static_cast<int>(status));
@@ -100,7 +121,7 @@ private:
 
             typename backend_t::context_id_t counter_context{};
             status = m_backend_api->create_context(&counter_context);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING("Failed to create context for agent {} (status={})",
                             gpu_agent->handle, static_cast<int>(status));
@@ -120,7 +141,7 @@ private:
                     if(iter != configs->end()) set_config(ctx, iter->second);
                 },
                 &m_profile_configs);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING(
                     "Failed to configure device counting for agent {} (status={})",
@@ -143,13 +164,13 @@ private:
             auto* out =
                 static_cast<std::vector<typename backend_t::counter_id_t>*>(user_data);
             out->insert(out->end(), counters, counters + num_counters);
-            return ROCPROFILER_STATUS_SUCCESS;
+            return backend_t::status_success;
         };
 
         auto       result = std::vector<typename backend_t::counter_id_t>{};
         const auto status = m_backend_api->iterate_agent_supported_counters(
             agent_id, collect_counters, &result);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        if(status != backend_t::status_success)
         {
             LOG_DEBUG("No counters found for agent {} (status={})", agent_id.handle,
                       static_cast<int>(status));

@@ -48,6 +48,7 @@ class VInterpP2F16F32Vinterp : public Vinterp {
 public:
   VInterpP2F16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -68,6 +69,7 @@ class VInterpP2RtzF16F32Vinterp : public Vinterp {
 public:
   VInterpP2RtzF16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;

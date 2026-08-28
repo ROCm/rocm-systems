@@ -37,7 +37,7 @@ namespace amd::dbgapi
 displaced_stepping_t::displaced_stepping_t (
   amd_dbgapi_displaced_stepping_id_t displaced_stepping_id, queue_t &queue,
   instruction_t original_instruction, agent_address_t from,
-  std::optional<compute_queue_t::displaced_instruction_ptr_t> to)
+  std::optional<queue_t::displaced_instruction_ptr_t> to)
   : handle_object (displaced_stepping_id),
     m_original_instruction (std::move (original_instruction)), m_from (from),
     m_to (std::move (to)), m_queue (queue)

@@ -29,7 +29,8 @@ NCCL_PARAM(SocketMaxSendBuff, "SOCKET_SNDBUF", -1);
 RCCL_PARAM(SocketReuseAddr, "SOCKET_REUSEADDR", 0);
 RCCL_PARAM(SocketLinger, "SOCKET_LINGER", -1);
 
-static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* pclosed = NULL) {
+static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset,
+                                   int* pclosed = NULL) {
   int closed;
   NCCLCHECK(ncclOsSocketProgressOpt(op, sock, ptr, size, offset, 0 /*block*/, &closed));
   if (closed) {
@@ -37,9 +38,9 @@ static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, i
       *pclosed = closed;
       return ncclSuccess;
     } else {
-      char line[SOCKET_NAME_MAXLEN+1];
+      char line[SOCKET_NAME_MAXLEN + 1];
       WARN("socketProgress: Connection closed by remote peer %s",
-           ncclSocketToString(&sock->addr, line, /*numericHostForm*/0));
+           ncclSocketToString(&sock->addr, line, /*numericHostForm*/ 0));
       return ncclRemoteError;
     }
   }
@@ -58,7 +59,7 @@ static ncclResult_t socketWait(int op, struct ncclSocket* sock, void* ptr, int s
   return ncclSuccess;
 }
 
-uint16_t ncclSocketToPort(union ncclSocketAddress *addr) {
+uint16_t ncclSocketToPort(union ncclSocketAddress* addr) {
   return ntohs(addr->sa.sa_family == AF_INET ? addr->sin.sin_port : addr->sin6.sin6_port);
 }
 
@@ -89,7 +90,6 @@ ncclResult_t ncclSocketSetFd(ncclSocketDescriptor socketDescriptor, struct ncclS
   sock->socketDescriptor = socketDescriptor;
   return ncclSuccess;
 }
-
 
 ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
   if (sock == NULL) {
@@ -125,8 +125,8 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
   SYSCHECK(getsockname(sock->socketDescriptor, &sock->addr.sa, &size), "getsockname");
 
 #ifdef ENABLE_TRACE
-  char line[SOCKET_NAME_MAXLEN+1];
-  TRACE(NCCL_INIT|NCCL_NET,"Listening on socket %s", ncclSocketToString(&sock->addr, line));
+  char line[SOCKET_NAME_MAXLEN + 1];
+  TRACE(NCCL_INIT | NCCL_NET, "Listening on socket %s", ncclSocketToString(&sock->addr, line));
 #endif
 
   SYSCHECK(listen(sock->socketDescriptor, 16384), "listen");
@@ -141,8 +141,8 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
  *
  * Output: "IPv4/IPv6 address<port>"
  */
-const char *ncclSocketToString(const union ncclSocketAddress *addr, char *buf, const int numericHostForm /*= 1*/) {
-  const struct sockaddr *saddr = &addr->sa;
+const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, const int numericHostForm /*= 1*/) {
+  const struct sockaddr* saddr = &addr->sa;
   char host[NI_MAXHOST], service[NI_MAXSERV];
   int flag = NI_NUMERICSERV | (numericHostForm ? NI_NUMERICHOST : 0);
   if (buf == NULL || addr == NULL) goto fail;
@@ -154,8 +154,7 @@ const char *ncclSocketToString(const union ncclSocketAddress *addr, char *buf, c
   sprintf(buf, "%s<%s>", host, service);
   return buf;
 fail:
-  if (buf)
-    buf[0] = '\0';
+  if (buf) buf[0] = '\0';
   return buf;
 }
 
@@ -163,20 +162,17 @@ fail:
 int ncclEnvSocketFamily(void) {
   int family = -1; // Family selection is not forced, will use first one found
   const char* env = ncclGetEnv("NCCL_SOCKET_FAMILY");
-  if (env == NULL)
-    return family;
+  if (env == NULL) return family;
 
   INFO(NCCL_ENV, "NCCL_SOCKET_FAMILY set by environment to %s", env);
 
-  if (strcmp(env, "AF_INET") == 0)
-    family = AF_INET;  // IPv4
-  else if (strcmp(env, "AF_INET6") == 0)
-    family = AF_INET6; // IPv6
+  if (strcmp(env, "AF_INET") == 0) family = AF_INET;  // IPv4
+  else if (strcmp(env, "AF_INET6") == 0) family = AF_INET6; // IPv6
   return family;
 }
 
-ncclResult_t ncclFindInterfaces(char* ifNames, union ncclSocketAddress *ifAddrs, int ifNameMaxSize, int maxIfs,
-  int* nIfs) {
+ncclResult_t ncclFindInterfaces(char* ifNames, union ncclSocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
+                                int* nIfs) {
   static int shownIfName = 0;
   // Allow user to force the INET socket family selection
   int sock_family = ncclEnvSocketFamily();
@@ -204,11 +200,14 @@ ncclResult_t ncclFindInterfaces(char* ifNames, union ncclSocketAddress *ifAddrs,
       }
     }
     // Then look for anything else (but not docker,lo, or virtual)
-    if (*nIfs == 0) NCCLCHECK(ncclOsFindInterfaces("^docker,lo,virbr", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
+    if (*nIfs == 0)
+      NCCLCHECK(ncclOsFindInterfaces("^docker,lo,virbr", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
     // Finally look for docker, then lo.
-    if (*nIfs == 0) NCCLCHECK(ncclOsFindInterfaces("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
+    if (*nIfs == 0)
+      NCCLCHECK(ncclOsFindInterfaces("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
     if (*nIfs == 0) NCCLCHECK(ncclOsFindInterfaces("lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
-    if (*nIfs == 0) NCCLCHECK(ncclOsFindInterfaces("virbr", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
+    if (*nIfs == 0)
+      NCCLCHECK(ncclOsFindInterfaces("virbr", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs, nIfs));
   }
   return ncclSuccess;
 }
@@ -235,7 +234,7 @@ ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ( (rv = getaddrinfo(ni.prefix, NULL, &hints, &p)) != 0) {
+    if ((rv = getaddrinfo(ni.prefix, NULL, &hints, &p)) != 0) {
       WARN("Net : error encountered when getting address info : %s", gai_strerror(rv));
       return ncclInvalidArgument;
     }
@@ -245,7 +244,7 @@ ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char
       struct sockaddr_in& sin = ua->sin;
       memcpy(&sin, p->ai_addr, sizeof(struct sockaddr_in));
       sin.sin_family = AF_INET;                        // IPv4
-      //inet_pton(AF_INET, ni.prefix, &(sin.sin_addr));  // IP address
+      // inet_pton(AF_INET, ni.prefix, &(sin.sin_addr));  // IP address
       sin.sin_port = htons(ni.port);                   // port
     } else if (p->ai_family == AF_INET6) {
       struct sockaddr_in6& sin6 = ua->sin6;
@@ -278,17 +277,17 @@ ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char
     memset(ip_str, '\0', sizeof(ip_str));
     memset(port_str, '\0', sizeof(port_str));
     memset(if_name, '\0', sizeof(if_name));
-    strncpy(ip_str, ip_port_pair+1, global_scope ? i-1 : j-1);
-    strncpy(port_str, ip_port_pair+i+2, len-i-1);
+    strncpy(ip_str, ip_port_pair + 1, global_scope ? i - 1 : j - 1);
+    strncpy(port_str, ip_port_pair + i + 2, len - i - 1);
     int port = atoi(port_str);
-    if (!global_scope) strncpy(if_name, ip_port_pair+j+1, i-j-1); // If not global scope, we need the intf name
+    if (!global_scope) strncpy(if_name, ip_port_pair + j + 1, i - j - 1); // If not global scope, we need the intf name
 
     struct sockaddr_in6& sin6 = ua->sin6;
-    sin6.sin6_family = AF_INET6;                       // IPv6
-    inet_pton(AF_INET6, ip_str, &(sin6.sin6_addr));    // IP address
-    sin6.sin6_port = htons(port);                      // port
-    sin6.sin6_flowinfo = 0;                            // needed by IPv6, but possibly obsolete
-    sin6.sin6_scope_id = global_scope ? 0 : if_nametoindex(if_name);  // 0 if global scope; intf index if link scope
+    sin6.sin6_family = AF_INET6; // IPv6
+    inet_pton(AF_INET6, ip_str, &(sin6.sin6_addr)); // IP address
+    sin6.sin6_port = htons(port); // port
+    sin6.sin6_flowinfo = 0; // needed by IPv6, but possibly obsolete
+    sin6.sin6_scope_id = global_scope ? 0 : if_nametoindex(if_name); // 0 if global scope; intf index if link scope
   }
   return ncclSuccess;
 }
@@ -307,7 +306,7 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
   uint64_t magic;
   enum ncclSocketType type;
   int received;
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
   // once accepted, linux sockets do NOT inherit file status flags such as O_NONBLOCK (BSD ones do)
   NCCLCHECK(ncclOsSocketSetFlags(sock));
 
@@ -349,7 +348,7 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
   }
   if (type != sock->type) {
     WARN("socketFinalizeAccept from %s: wrong type %d != %d", ncclSocketToString(&sock->addr, line), type, sock->type);
-    (void) ncclSocketClose(sock);
+    (void)ncclSocketClose(sock);
     sock->state = ncclSocketStateError;
     return ncclInternalError;
   } else {
@@ -415,7 +414,7 @@ static ncclResult_t socketProgressState(struct ncclSocket* sock) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclSocketReady(struct ncclSocket* sock, int *running) {
+ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running) {
   if (sock == NULL) {
     *running = 0;
     return ncclSuccess;
@@ -434,7 +433,7 @@ ncclResult_t ncclSocketReady(struct ncclSocket* sock, int *running) {
 
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
 #ifdef ENABLE_TRACE
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   if (sock == NULL) {
     WARN("ncclSocketConnect: pass NULL socket");
@@ -450,31 +449,30 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
     if (sock->state == ncclSocketStateError) return ncclRemoteError;
     return ncclInternalError;
   }
-  TRACE(NCCL_INIT|NCCL_NET,"Connecting to socket %s", ncclSocketToString(&sock->addr, line));
+  TRACE(NCCL_INIT | NCCL_NET, "Connecting to socket %s", ncclSocketToString(&sock->addr, line));
 
   sock->state = ncclSocketStateConnecting;
   sock->finalizeCounter = 0;
   do {
     NCCLCHECK(socketProgressState(sock));
   } while (sock->asyncFlag == 0 &&
-      (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
-      (sock->state == ncclSocketStateConnecting ||
-       sock->state == ncclSocketStateConnectPolling ||
-       sock->state == ncclSocketStateConnected));
+           (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
+           (sock->state == ncclSocketStateConnecting || sock->state == ncclSocketStateConnectPolling ||
+            sock->state == ncclSocketStateConnected));
 
   if (sock->abortFlag && COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire)) return ncclInternalError;
 
   switch (sock->state) {
-    case ncclSocketStateConnecting:
-    case ncclSocketStateConnectPolling:
-    case ncclSocketStateConnected:
-    case ncclSocketStateReady:
-      return ncclSuccess;
-    case ncclSocketStateError:
-      return ncclSystemError;
-    default:
-      WARN("ncclSocketConnect: wrong socket state %d", sock->state);
-      return ncclInternalError;
+  case ncclSocketStateConnecting:
+  case ncclSocketStateConnectPolling:
+  case ncclSocketStateConnected:
+  case ncclSocketStateReady:
+    return ncclSuccess;
+  case ncclSocketStateError:
+    return ncclSystemError;
+  default:
+    WARN("ncclSocketConnect: wrong socket state %d", sock->state);
+    return ncclInternalError;
   }
 }
 
@@ -488,10 +486,8 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
   }
   if (listenSock->state != ncclSocketStateReady) {
     WARN("ncclSocketAccept: wrong socket state %d", listenSock->state);
-    if (listenSock->state == ncclSocketStateError)
-      ret = ncclSystemError;
-    else
-      ret = ncclInternalError;
+    if (listenSock->state == ncclSocketStateError) ret = ncclSystemError;
+    else ret = ncclInternalError;
     goto exit;
   }
 
@@ -508,33 +504,33 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
       sock->state = ncclSocketStateAccepting;
     }
   } while (sock->asyncFlag == 0 &&
-      (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
-      (sock->state == ncclSocketStateAccepting ||
-       sock->state == ncclSocketStateAccepted));
+           (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
+           (sock->state == ncclSocketStateAccepting || sock->state == ncclSocketStateAccepted));
 
   if (sock->abortFlag && COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire)) return ncclInternalError;
 
   switch (sock->state) {
-    case ncclSocketStateAccepting:
-    case ncclSocketStateAccepted:
-    case ncclSocketStateReady:
-    case ncclSocketStateBadMagic:
-      ret = ncclSuccess;
-      break;
-    case ncclSocketStateError:
-      ret = ncclSystemError;
-      break;
-    default:
-      WARN("ncclSocketAccept: wrong socket state %d", sock->state);
-      ret = ncclInternalError;
-      break;
+  case ncclSocketStateAccepting:
+  case ncclSocketStateAccepted:
+  case ncclSocketStateReady:
+  case ncclSocketStateBadMagic:
+    ret = ncclSuccess;
+    break;
+  case ncclSocketStateError:
+    ret = ncclSystemError;
+    break;
+  default:
+    WARN("ncclSocketAccept: wrong socket state %d", sock->state);
+    ret = ncclInternalError;
+    break;
   }
 
 exit:
   return ret;
 }
 
-ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic, enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int customRetry) {
+ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
+                            enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int customRetry) {
   ncclResult_t ret = ncclSuccess;
 
   if (sock == NULL) goto exit;
@@ -557,9 +553,9 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
     memcpy(&sock->addr, addr, sizeof(union ncclSocketAddress));
     family = sock->addr.sa.sa_family;
     if (family != AF_INET && family != AF_INET6) {
-      char line[SOCKET_NAME_MAXLEN+1];
+      char line[SOCKET_NAME_MAXLEN + 1];
       WARN("ncclSocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)",
-          ncclSocketToString(&sock->addr, line), family, AF_INET, AF_INET6);
+           ncclSocketToString(&sock->addr, line), family, AF_INET, AF_INET6);
       ret = ncclInternalError;
       goto exit;
     }
@@ -570,12 +566,14 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
     // [RCCL] Runtime socket options
     if (rcclParamSocketReuseAddr()) {
       int opt = 1;
-      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt", ret, fail);
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt", ret,
+                   fail);
     }
     int lingerParam = (int)rcclParamSocketLinger();
     if (lingerParam > -1) {
-      linger linger_opt = { 1, lingerParam };
-      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt)), "setsockopt", ret, fail);
+      linger linger_opt = {1, lingerParam};
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt)),
+                   "setsockopt", ret, fail);
     }
   } else {
     memset(&sock->addr, 0, sizeof(union ncclSocketAddress));
@@ -583,7 +581,7 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
 exit:
   return ret;
 fail:
-  (void) ncclSocketClose(sock);
+  (void)ncclSocketClose(sock);
   goto exit;
 }
 
@@ -633,7 +631,8 @@ ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int sendSize, struct ncclSocket* recvSock, void* recvPtr, int recvSize) {
+ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int sendSize, struct ncclSocket* recvSock,
+                                void* recvPtr, int recvSize) {
   int sendOffset = 0, recvOffset = 0;
   if (sendSock == NULL || recvSock == NULL) {
     WARN("ncclSocketSendRecv: invalid socket %p/%p", sendSock, recvSock);
@@ -690,7 +689,6 @@ ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
   return ncclSuccess;
 }
 
-
 // Receive or detect connection closed
 ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking) {
   int offset = 0;
@@ -715,7 +713,7 @@ ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int
         NCCLCHECK(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, sock, ptr, size, &offset, 0, closed));
         if (*closed) return ncclSuccess;
       }
-    // No bytes were received, return ncclInProgress
+      // No bytes were received, return ncclInProgress
     } else {
       return ncclInProgress;
     }

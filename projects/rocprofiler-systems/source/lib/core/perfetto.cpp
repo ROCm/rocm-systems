@@ -3,6 +3,7 @@
 
 #include "perfetto.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
@@ -277,7 +278,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     if(dmp::rank() == 0 &&
        config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        auto _output_folder = filepath::dirname(_filename);
+        auto _output_folder = path::parent_path(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
         auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 

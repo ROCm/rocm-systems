@@ -70,7 +70,7 @@ std::queue<int> frame_indices_q;
 uint8_t* frame_buffers[frame_buffers_size] = {0};
 
 void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool convert_to_rgb, Dim *p_resize_dim, OutputSurfaceInfo **surf_info, OutputSurfaceInfo **res_surf_info,
-        OutputFormatEnum e_output_format, uint8_t *p_rgb_dev_mem, uint8_t *p_resize_dev_mem, bool dump_output_frames,
+        OutputFormatEnum e_output_format, uint8_t *&p_rgb_dev_mem, uint8_t *&p_resize_dev_mem, bool dump_output_frames,
         std::string &output_file_path, RocVideoDecoder &viddec, VideoPostProcess &post_proc, MD5Generator *md5_gen_handle, bool b_generate_md5, int device_id, hipStream_t hip_stream, int col_standard) {
 
     size_t rgb_image_size, resize_image_size;
@@ -167,6 +167,7 @@ int main(int argc, char **argv) {
     std::fstream ref_md5_file;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     bool dump_output_frames = false;
     bool convert_to_rgb = false;
     int device_id = 0;
@@ -300,9 +301,9 @@ int main(int argc, char **argv) {
         rocDecVideoCodec rocdec_codec_id = AVCodec2RocDecVideoCodec(demuxer.GetCodecID());
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, false, p_crop_rect, b_extract_sei_messages, disp_delay);
         if(!viddec.CodecSupported(device_id, rocdec_codec_id, demuxer.GetBitDepth())) {
-            std::cerr << "GPU doesn't support codec!" << std::endl;
-            return 0;
-        }  
+            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+            return 1;
+        }
         VideoPostProcess post_process;
         MD5Generator *md5_generator = nullptr;
 
@@ -429,6 +430,10 @@ int main(int argc, char **argv) {
         }
 
         std::cout << "info: Total frame decoded: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::string info_message = "info: avg decoding time per frame (ms): ";
             if (convert_to_rgb) {
@@ -469,6 +474,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string << std::endl;
                 ref_md5_file.close();
@@ -480,5 +486,5 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

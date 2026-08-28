@@ -20,6 +20,8 @@
 
 #include <assert.h>
 #include <string.h>
+#include <algorithm>
+#include <new>
 #include <set>
 
 #if defined(__clang__)
@@ -30,6 +32,7 @@
 
 namespace amd {
 
+#ifndef USE_NEW_HOSTCALL_IMPL
 PacketHeader* HostcallBuffer::getHeader(uint64_t ptr) const {
   return headers_ + (ptr & index_mask_);
 }
@@ -45,6 +48,7 @@ static uint32_t setControlField(uint32_t control, uint8_t offset, uint8_t width,
 static uint32_t resetReadyFlag(uint32_t control) {
   return setControlField(control, CONTROL_OFFSET_READY_FLAG, CONTROL_WIDTH_READY_FLAG, 0);
 }
+#endif  // !USE_NEW_HOSTCALL_IMPL
 
 /** \brief Signature for pointer accepted by the function call service.
  *  \param output Pointer to output arguments.
@@ -94,9 +98,21 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
         if (buf) {
           if (buf->create()) {
             device::Memory* dm = buf->getDeviceMemory(dev);
+#ifdef USE_NEW_HOSTCALL_IMPL
+            if (dm != nullptr) {
+              va = dm->virtualAddress();
+            }
+            if (va != 0) {
+              amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
+              const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
+            } else {
+              buf->release();
+            }
+#else  // !USE_NEW_HOSTCALL_IMPL
             va = dm->virtualAddress();
             amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
             const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
+#endif  // USE_NEW_HOSTCALL_IMPL
           } else {
             buf->release();
           }
@@ -111,6 +127,104 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
   }
 }
 
+uint32_t getHostcallBufferAlignment() { return alignof(Payload); }
+
+#ifdef USE_NEW_HOSTCALL_IMPL
+static uintptr_t getDevicePhaseOffset() {
+  return amd::alignUp(sizeof(HostcallBuffer), alignof(uint32_t));
+}
+
+static uintptr_t getHostPhaseOffset(uint32_t num_packets) {
+  return amd::alignUp(getDevicePhaseOffset() + num_packets * sizeof(uint32_t), alignof(uint32_t));
+}
+
+static uintptr_t getHeaderOffset(uint32_t num_packets) {
+  return amd::alignUp(getHostPhaseOffset(num_packets) + num_packets * sizeof(uint32_t),
+                      alignof(PacketHeader));
+}
+
+static uintptr_t getPayloadOffset(uint32_t num_packets) {
+  return amd::alignUp(getHeaderOffset(num_packets) + num_packets * sizeof(PacketHeader),
+                      alignof(Payload));
+}
+
+size_t getHostcallBufferSize(uint32_t num_packets) {
+  return getPayloadOffset(num_packets) + num_packets * sizeof(Payload);
+}
+
+bool HostcallBuffer::initialize(uint32_t num_packets, amd::Memory* occupied_mem) {
+  if (occupied_mem == nullptr || device_ == nullptr) {
+    return false;
+  }
+
+  device::Memory* dm = occupied_mem->getDeviceMemory(*device_);
+  if (dm == nullptr || dm->virtualAddress() == 0) {
+    return false;
+  }
+
+  auto base = reinterpret_cast<uint8_t*>(this);
+  device_phase_ = reinterpret_cast<std::atomic<uint32_t>*>(base + getDevicePhaseOffset());
+  host_phase_ = reinterpret_cast<std::atomic<uint32_t>*>(base + getHostPhaseOffset(num_packets));
+  occupied_ = static_cast<uintptr_t>(dm->virtualAddress());
+  headers_ = reinterpret_cast<PacketHeader*>(base + getHeaderOffset(num_packets));
+  payloads_ = reinterpret_cast<Payload*>(base + getPayloadOffset(num_packets));
+  doorbell_ = nullptr;
+  num_packets_ = num_packets;
+  occupied_mem_ = occupied_mem;
+  scan_limit_ = num_packets;
+
+  for (uint32_t i = 0; i < num_packets; ++i) {
+    new (&device_phase_[i]) std::atomic<uint32_t>(0);
+    new (&host_phase_[i]) std::atomic<uint32_t>(0);
+  }
+  return true;
+}
+
+ProcessResult HostcallBuffer::processPackets(MessageHandler& messages) {
+  uint32_t new_limit = 0;
+  for (uint32_t i = 0; i < scan_limit_; ++i) {
+    uint32_t dp = device_phase_[i].load(std::memory_order_relaxed);
+    uint32_t hp = host_phase_[i].load(std::memory_order_relaxed);
+
+    if (dp == hp) {
+      continue;
+    }
+
+    new_limit = i + 1;
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    auto* header = &headers_[i];
+    auto* payload = &payloads_[i];
+    auto service = header->service_;
+    auto activemask = header->activemask_;
+
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+    if (service == SERVICE_SANITIZER) {
+      handleSanitizerService(payload, activemask, device_, uri_locator);
+      // activemask zeroed to avoid subsequent handling for each work-item.
+      activemask = 0;
+    }
+#endif
+#endif
+    while (activemask) {
+      auto wi = amd::leastBitSet(activemask);
+      activemask ^= static_cast<decltype(activemask)>(1) << wi;
+      auto slot = payload->slots[wi];
+      handlePayload(messages, service, slot, *device_);
+    }
+
+    std::atomic_thread_fence(std::memory_order_release);
+    host_phase_[i].store(hp ^ 1, std::memory_order_relaxed);
+  }
+
+  if (new_limit > 0) {
+    scan_limit_ = new_limit;
+    return ProcessResult::kProcessed;
+  }
+  return scan_limit_ < num_packets_ ? ProcessResult::kIdleNarrow : ProcessResult::kIdleFull;
+}
+#else  // !USE_NEW_HOSTCALL_IMPL
 void HostcallBuffer::processPackets(MessageHandler& messages) {
   // Grab the entire ready stack and set the top to 0. New requests from the
   // device will continue pushing on the stack while we process the packets that
@@ -171,8 +285,6 @@ size_t getHostcallBufferSize(uint32_t num_packets) {
   return buffer_size;
 }
 
-uint32_t getHostcallBufferAlignment() { return alignof(Payload); }
-
 static uint64_t getIndexMask(uint32_t num_packets) {
   // The number of packets is at least equal to the maximum number of waves
   // supported by the device. That means we do not need to account for the
@@ -205,6 +317,7 @@ void HostcallBuffer::initialize(uint32_t num_packets) {
   free_stack_ = next;
   ready_stack_ = 0;
 }
+#endif  // USE_NEW_HOSTCALL_IMPL
 
 /** \brief Manage a unique listener thread and its associated buffers.
  */
@@ -263,8 +376,13 @@ HostcallListener* hostcallListener = nullptr;
 extern amd::Monitor listenerLock;
 
 static bool listenerTerminating = false;
+#ifdef USE_NEW_HOSTCALL_IMPL
+constexpr static uint32_t kYieldSpins = 128;
+constexpr static uint64_t kSignalTimeout = K * K;
+#else  // !USE_NEW_HOSTCALL_IMPL
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
+#endif  // USE_NEW_HOSTCALL_IMPL
 static struct Init {
   enum class State { kDefault = 0, kInit, kDestroy, kExit };
   volatile State state = State::kDefault;
@@ -279,6 +397,51 @@ static struct Init {
     }
   }
 } kHostThreadActive;
+#ifdef USE_NEW_HOSTCALL_IMPL
+void HostcallListener::consumePackets() {
+  uint64_t signal_value = SIGNAL_INIT;
+  kHostThreadActive.state = Init::State::kInit;
+  uint32_t yield_spins = 0;
+
+  while (true) {
+    if (kHostThreadActive.state == Init::State::kDestroy) {
+      kHostThreadActive.state = Init::State::kExit;
+      return;
+    }
+
+    ProcessResult result = ProcessResult::kIdleFull;
+    {
+      amd::ScopedLock lock{listenerLock};
+      for (auto buf : buffers_) {
+        result = std::min(result, buf->processPackets(messages_));
+      }
+      if (result == ProcessResult::kIdleNarrow) {
+        for (auto buf : buffers_) {
+          buf->resetScanLimit();
+        }
+      }
+    }
+
+    if (result != ProcessResult::kIdleFull) {
+      if (++yield_spins >= kYieldSpins) {
+        yield_spins = 0;
+        amd::Os::yield();
+      }
+      continue;
+    }
+
+    yield_spins = 0;
+    uint64_t new_value =
+        doorbell_->Wait(signal_value, device::Signal::Condition::Ne, kSignalTimeout);
+    if (new_value != signal_value) {
+      signal_value = new_value;
+    }
+    if (signal_value == SIGNAL_DONE) {
+      return;
+    }
+  }
+}
+#else  // !USE_NEW_HOSTCALL_IMPL
 void HostcallListener::consumePackets() {
   uint64_t timeout = kTimeoutFloor;
   uint64_t signal_value = SIGNAL_INIT;
@@ -317,6 +480,7 @@ void HostcallListener::consumePackets() {
 
   return;
 }
+#endif  // USE_NEW_HOSTCALL_IMPL
 
 void HostcallListener::terminate() {
   if (thread_.state() >= Thread::FINISHED || amd::Os::isThreadAlive(thread_)) {
@@ -356,7 +520,16 @@ void HostcallListener::removeBuffer(HostcallBuffer* buffer) {
 
 bool HostcallListener::initSignal(const amd::Device& dev) {
   doorbell_ = dev.createSignal();
+#ifdef USE_NEW_HOSTCALL_IMPL
+  if (doorbell_ == nullptr || !initDevice(dev)) {
+    delete doorbell_;
+    doorbell_ = nullptr;
+    devices_.clear();
+    return false;
+  }
+#else  // !USE_NEW_HOSTCALL_IMPL
   initDevice(dev);
+#endif  // USE_NEW_HOSTCALL_IMPL
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   urilocator = dev.createUriLocator();
@@ -366,10 +539,16 @@ bool HostcallListener::initSignal(const amd::Device& dev) {
   // everything up and bail out.
   if (thread_.state() < Thread::INITIALIZED) {
     delete doorbell_;
+#ifdef USE_NEW_HOSTCALL_IMPL
+    doorbell_ = nullptr;
+#endif  // USE_NEW_HOSTCALL_IMPL
     devices_.clear();
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
     delete urilocator;
+#ifdef USE_NEW_HOSTCALL_IMPL
+    urilocator = nullptr;
+#endif  // USE_NEW_HOSTCALL_IMPL
 #endif
 #endif
     return false;
@@ -395,10 +574,22 @@ bool HostcallListener::initDevice(const amd::Device& dev) {
   return true;
 }
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets,
+                     amd::Memory* occupiedMem) {
+  auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
+  buffer->setDevice(&dev);
+  if (!buffer->initialize(numPackets, occupiedMem)) {
+    ClPrint(amd::LOG_ERROR, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
+            "Failed to initialize hostcall buffer");
+    return false;
+  }
+#else  // !USE_NEW_HOSTCALL_IMPL
 bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
   buffer->initialize(numPackets);
   buffer->setDevice(&dev);
+#endif  // USE_NEW_HOSTCALL_IMPL
 
   amd::ScopedLock lock(listenerLock);
   
@@ -434,6 +625,37 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   return true;
 }
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+void disableHostcalls(void* bfr) {
+  assert(bfr && "expected a hostcall buffer");
+  auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
+  HostcallListener* listenerToTerminate = nullptr;
+  {
+    amd::ScopedLock lock(listenerLock);
+    if (!hostcallListener) {
+      buffer->getOccupiedMem()->release();
+      return;
+    }
+    hostcallListener->removeBuffer(buffer);
+    if (hostcallListener->idle()) {
+      listenerToTerminate = hostcallListener;
+      hostcallListener = nullptr;
+      listenerTerminating = true;
+    }
+  }
+  buffer->getOccupiedMem()->release();
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+    delete listenerToTerminate;
+    {
+      amd::ScopedLock lock(listenerLock);
+      listenerTerminating = false;
+      listenerLock.notifyAll();
+    }
+  }
+}
+#else  // !USE_NEW_HOSTCALL_IMPL
 void disableHostcalls(void* bfr) {
   HostcallListener* listenerToTerminate = nullptr;
   {
@@ -459,4 +681,5 @@ void disableHostcalls(void* bfr) {
     }
   }
 }
+#endif  // USE_NEW_HOSTCALL_IMPL
 }  // namespace amd

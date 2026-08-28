@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -72,11 +73,11 @@ using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encodin
 
 /// @brief One source instruction trace event emitted by BinaryTranslator.
 ///
-/// @details Offsets are .text-relative in the relocated output. When
-/// emitted_in_cave is true, target_offset points into the current kernel's
-/// private local cave inside the rewritten .text. source_words and target_words
-/// are only valid for the duration of the callback; callers that need to retain
-/// them must copy the spans.
+/// @details Offsets are .text-relative in the relocated output. The
+/// emitted_in_cave flag is kept for older tooling but cursor-based relocation
+/// emits expanded instructions inline, so new translations leave it false.
+/// source_words and target_words are only valid for the duration of the
+/// callback; callers that need to retain them must copy the spans.
 struct TranslationTraceEvent {
   uint64_t source_offset = 0;
   uint32_t source_size = 0;
@@ -94,6 +95,18 @@ using TranslationTraceCallback = std::function<void(const TranslationTraceEvent 
 
 /// @brief Optional controls for DBT translation.
 struct BinaryTranslatorOptions {
+  /// @brief Input silicon revision used to determine translation direction.
+  ///
+  /// @details The command-line translation tool requires this when the input
+  /// architecture is gfx1250. Other architectures leave it unspecified.
+  ProcessorRevision input_revision = ProcessorRevision::Unspecified;
+
+  /// @brief Output silicon revision used to determine translation direction.
+  ///
+  /// @details The command-line translation tool requires this when the output
+  /// architecture is gfx1250. Other architectures leave it unspecified.
+  ProcessorRevision output_revision = ProcessorRevision::Unspecified;
+
   /// @brief Force liveness-based VGPR scratch allocation above a debug floor.
   ///
   /// @details This debug mode leaves normal liveness dataflow untouched, but
@@ -110,6 +123,15 @@ struct BinaryTranslatorOptions {
   /// because the partially translated text is only useful for finding failures,
   /// not for execution.
   bool debug_continue_after_failure = false;
+
+  /// @brief Preserve a failed kernel body and keep translating independent kernels.
+  ///
+  /// @details This is intended for load-time DBT of large code objects where not
+  /// every kernel symbol is necessarily dispatched. A failed kernel is replaced
+  /// by a minimal target-ISA `s_endpgm` stub, while the diagnostic is reported as a
+  /// skipped-kernel warning. The symbol remains loadable so other kernels in the
+  /// same code object are not blocked by one untranslated kernel.
+  bool skip_failed_kernels = false;
 };
 
 /// @brief Result of translating a code object.
@@ -118,7 +140,21 @@ struct TranslatedCodeObject {
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
 
+  /// @brief True if translation produced no error diagnostics.
+  ///
+  /// @details Note that ok() can be true while the artifact is NOT dispatchable:
+  /// skip_failed_kernels reports a KernelSkipped *warning*, not an error. Use
+  /// dispatchable() before emitting or executing the ELF.
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
+
+  /// @brief True if the artifact is safe to emit for execution.
+  ///
+  /// @details False when any kernel was replaced by a non-dispatchable no-op stub
+  /// (has_skipped_kernel). A skipped kernel's `s_endpgm` stub completes normally
+  /// without producing the kernel's outputs and would silently produce wrong results if
+  /// dispatched, so code-object output paths and the CLI must refuse it, matching
+  /// the HSA hook that rejects such a load.
+  [[nodiscard]] bool dispatchable() const { return ok() && !has_skipped_kernel(diagnostics); }
 };
 
 /// @brief Top-level dynamic binary translator.
@@ -131,17 +167,17 @@ struct TranslatedCodeObject {
 ///
 /// DBT relocates each kernel into a fresh .text layout instead of appending a
 /// global `.rj_translations` cave. Each descriptor entry gets a private emitted
-/// body plus a local cave immediately after that body. Since explicit branches
-/// may move by a different delta than their targets, direct PC-relative branch
-/// immediates are patched through the kernel-local source-to-target block
-/// placement map. Fallthrough is preserved by emitting reachable blocks in
-/// original .text order.
+/// body whose translated instruction sizes may differ from the source sizes.
+/// Since explicit branches may move by a different delta than their targets,
+/// direct PC-relative branch immediates and recovered indirect transfer windows
+/// are patched through the kernel-local source-to-target block placement map.
+/// Fallthrough is preserved by emitting reachable blocks in original .text order.
 class BinaryTranslator {
 public:
   /// @brief Construct a translator for the given (guest, host) ISA pair.
   /// @param guest_arch    Source ISA architecture.
   /// @param host_arch     Target ISA architecture.
-  /// @param target_mach   EF_AMDGPU_MACH value for the target GPU stepping.
+  /// @param target_mach   EF_AMDGPU_MACH value for the target processor.
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
   BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0,
                    BinaryTranslatorOptions options = {});
@@ -156,56 +192,35 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
-  /// @brief Apply a single semantic replacement to the translated text.
-  ///
-  /// @details If the replacement fits within the source byte range, writes
-  /// in-place and pads any leftover source words. If it expands, writes a
-  /// branch stub in-place and appends the replacement body + return branch to
-  /// the current kernel's local cave.
-  ///
-  /// @param repl                 The semantic replacement to apply.
-  /// @param text                 The relocated .text buffer under construction.
-  /// @param layout               Current kernel layout for local cave accounting.
-  /// @param orig_text            Original guest .text used to classify fallthrough padding.
-  /// @param source_return_offset Original .text offset reached after the replaced instruction.
-  /// @returns true if the replacement was applied safely; false if an expanding
-  ///          replacement could not be branched to/from the code cave.
-  [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
-                                    std::vector<uint8_t> &text, KernelTextLayout &layout,
-                                    std::span<const uint8_t> orig_text,
-                                    uint64_t source_return_offset);
+  /// @brief Return the generated or revision-specific legalization for an instruction.
+  [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
   /// @details Extracts raw encoding words, calls the per-pair encoding translate
-  /// function, and writes the result into the translated text at the given offset.
+  /// function, and appends the result to the translated text cursor.
   /// Falls back to copying the original encoding if translation produces no output.
   ///
   /// @param inst       The decoded guest instruction.
   /// @param offset     Source byte offset of the instruction within original .text.
-  /// @param target_offset Relocated byte offset of the instruction in output .text.
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
-  /// @param layout     Current kernel layout for local cave accounting.
   /// @param orig_text   The original .text bytes used to preserve trailing literals.
-  /// @returns true if the instruction was translated or copied safely; false if
-  ///          the translated encoding expanded and could not be branched through
-  ///          the code cave.
+  /// @returns true if the instruction was translated or copied safely.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
-                                     uint64_t target_offset, std::vector<uint8_t> &text,
-                                     uint16_t dst_opcode, KernelTextLayout &layout,
-                                     std::span<const uint8_t> orig_text,
-                                     const InstructionLegalization *leg);
+                                     std::vector<uint8_t> &text, uint16_t dst_opcode,
+                                     std::span<const uint8_t> orig_text, bool collect_trace_words,
+                                     bool &copied_original, bool &changed,
+                                     std::vector<uint32_t> &target_words);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.
-  uint32_t target_mach_;                                    ///< ELF MACH flag for target stepping.
+  uint32_t target_mach_;                                    ///< ELF MACH flag for target processor.
   TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
   BinaryTranslatorOptions options_;                         ///< Optional translation controls.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
-  std::vector<TranslationDiagnostic> *diagnostics_ = nullptr; ///< Active result diagnostics.
 };
 
 } // namespace rocjitsu

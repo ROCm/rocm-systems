@@ -127,14 +127,14 @@ inline constexpr const char* CPU_FREQ_ENABLED = "ROCPROFSYS_CPU_FREQ_ENABLED";
 inline constexpr const char* CPU_METRICS      = "ROCPROFSYS_CPU_METRICS";
 
 // --- Domains: Parallel runtimes ---
-inline constexpr const char* USE_MPI     = "ROCPROFSYS_USE_MPI";
-inline constexpr const char* USE_MPIP    = "ROCPROFSYS_USE_MPIP";
-inline constexpr const char* USE_OMPT    = "ROCPROFSYS_USE_OMPT";
-inline constexpr const char* USE_KOKKOSP = "ROCPROFSYS_USE_KOKKOSP";
-inline constexpr const char* USE_RCCLP   = "ROCPROFSYS_USE_RCCLP";
-inline constexpr const char* USE_AINIC   = "ROCPROFSYS_USE_AINIC";
-inline constexpr const char* USE_SHMEM   = "ROCPROFSYS_USE_SHMEM";
-inline constexpr const char* USE_UCX     = "ROCPROFSYS_USE_UCX";
+inline constexpr const char* USE_MPI       = "ROCPROFSYS_USE_MPI";
+inline constexpr const char* USE_MPIP      = "ROCPROFSYS_USE_MPIP";
+inline constexpr const char* USE_OMPT      = "ROCPROFSYS_USE_OMPT";
+inline constexpr const char* USE_KOKKOSP   = "ROCPROFSYS_USE_KOKKOSP";
+inline constexpr const char* USE_RCCLP     = "ROCPROFSYS_USE_RCCLP";
+inline constexpr const char* USE_AINIC     = "ROCPROFSYS_USE_AINIC";
+inline constexpr const char* USE_OPENSHMEM = "ROCPROFSYS_USE_OPENSHMEM";
+inline constexpr const char* USE_UCX       = "ROCPROFSYS_USE_UCX";
 
 // --- Domains: Shmem ---
 inline constexpr const char* SHMEM_PERMIT_LIST = "ROCPROFSYS_SHMEM_PERMIT_LIST";
@@ -292,6 +292,8 @@ inline constexpr const char* IGNORE_DYNINST_TRAMPOLINE =
     "ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE";
 inline constexpr const char* DEFAULT_MIN_INSTRUCTIONS =
     "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS";
+inline constexpr const char* DEFAULT_MAX_LIBRARY_FUNCTIONS =
+    "ROCPROFSYS_DEFAULT_MAX_LIBRARY_FUNCTIONS";
 
 // --- Runtime / launcher (set by instrumenter / read by the loaded library) ---
 inline constexpr const char* PATH                   = "ROCPROFSYS_PATH";
@@ -345,6 +347,8 @@ inline constexpr const char* NETWORK_INTERFACE     = "ROCPROFSYS_NETWORK_INTERFA
 // replacement (TRACE for USE_PERFETTO, PROFILE for USE_TIMEMORY).
 inline constexpr const char* USE_PERFETTO = "ROCPROFSYS_USE_PERFETTO";
 inline constexpr const char* USE_TIMEMORY = "ROCPROFSYS_USE_TIMEMORY";
+inline constexpr const char* USE_SHMEM =
+    "ROCPROFSYS_USE_SHMEM";  // deprecated: use USE_OPENSHMEM
 
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept

@@ -157,6 +157,9 @@ module:
   Unit_hipModuleLoad_Negative_Parameters:
     <<: *level_2
     tags: [load]
+  Unit_hipModuleLoad_Negative_MalformedFatBinaryBounds:
+    <<: *level_2
+    tags: [load]
   Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -305,6 +308,9 @@ module:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipExtModuleLaunchKernel_AnyOrder:
+    <<: *level_2
     tags: [launch]
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2

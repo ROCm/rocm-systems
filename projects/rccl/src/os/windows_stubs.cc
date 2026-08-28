@@ -60,8 +60,7 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 }
 
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) {
-  if (comm->ncclNet && comm->netContext)
-    NCCLCHECK(comm->ncclNet->finalize(comm->netContext));
+  if (comm->ncclNet && comm->netContext) NCCLCHECK(comm->ncclNet->finalize(comm->netContext));
   return ncclSuccess;
 }
 
@@ -126,7 +125,7 @@ ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
 
 /* GIN requirement/create stubs (implemented in gin_barrier.cc and gin_scratch.cc on Linux only) */
 ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers,
-                                            ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) {
+                                             ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) {
   (void)comm;
   (void)team;
   (void)nBarriers;
@@ -135,8 +134,8 @@ ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, i
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinOutboxCreateRequirement(int nBlocks, int size_log2,
-                                            ncclGinOutboxHandle* outHandle, ncclDevResourceRequirements_t* outReq) {
+ncclResult_t ncclGinOutboxCreateRequirement(int nBlocks, int size_log2, ncclGinOutboxHandle* outHandle,
+                                            ncclDevResourceRequirements_t* outReq) {
   (void)nBlocks;
   (void)size_log2;
   (void)outHandle;
@@ -165,7 +164,8 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs, struct ncclDevComm* devComm) {
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm) {
   (void)comm;
   (void)reqs;
   (void)devComm;
@@ -180,8 +180,8 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags,
-                             bool multiSegment, int memType) {
+                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
+                             int memType) {
   (void)comm;
   (void)address;
   (void)size;
@@ -240,9 +240,8 @@ int64_t ncclParamGinEnable(void) {
 /* --------------------------------------------------------------------------
  * Profiler plugin stubs and globals
  * -------------------------------------------------------------------------- */
-thread_local ncclProfilerApiState_t ncclProfilerApiState = {
-  0, 0, ncclProfilerGroupApiStartStateReset, nullptr, nullptr, nullptr
-};
+thread_local ncclProfilerApiState_t ncclProfilerApiState = {0,       0,       ncclProfilerGroupApiStartStateReset,
+                                                            nullptr, nullptr, nullptr};
 
 int ncclProfilerEventMask = 0;
 
@@ -396,7 +395,8 @@ ncclResult_t ncclProfilerRecordProxyOpEventState(int sub, struct ncclProxyArgs* 
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerRecordProxyStepEventState(int sub, struct ncclProxyArgs* args, int stepId, ncclProfilerEventState_t eState) {
+ncclResult_t ncclProfilerRecordProxyStepEventState(int sub, struct ncclProxyArgs* args, int stepId,
+                                                   ncclProfilerEventState_t eState) {
   (void)sub;
   (void)args;
   (void)stepId;
@@ -432,7 +432,8 @@ ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCol
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream, void** ceSyncHandle) {
+ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream,
+                                          void** ceSyncHandle) {
   (void)comm;
   (void)args;
   (void)stream;
@@ -447,7 +448,9 @@ ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm* comm, void* ceSyncHand
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, struct ncclCeBatchOpsParams* params, cudaStream_t stream, void** ceBatchHandle) {
+ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm* comm, struct ncclCeCollArgs* args,
+                                           struct ncclCeBatchOpsParams* params, cudaStream_t stream,
+                                           void** ceBatchHandle) {
   (void)comm;
   (void)args;
   (void)params;

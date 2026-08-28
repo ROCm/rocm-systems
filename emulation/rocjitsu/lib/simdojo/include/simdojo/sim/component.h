@@ -127,20 +127,14 @@ public:
   /// @brief Called once after simulation ends. Override to release resources.
   virtual void shutdown() {}
 
-  /// @brief Execute one functional step.
+  /// @brief Execute one unit of component-specific work.
   ///
-  /// Components that participate in functional simulation override this.
-  /// The default run() loops `while (step()) {}`.
-  /// @retval true Component is still active (continue stepping).
-  /// @retval false Component has halted (no more work).
+  /// What constitutes a "step" is defined by each component: one instruction
+  /// for a compute unit, one packet for a command processor, etc. The engine
+  /// does not call this — it is a domain-level API for use on concrete types.
+  /// @retval true Component has more work.
+  /// @retval false Component is idle.
   virtual bool step() { return false; }
-
-  /// @brief Run the component until halted.
-  ///
-  /// The default implementation loops step() until it returns false.
-  /// Concrete components (e.g., SoC, CommandProcessor) override
-  /// this with their own lifecycle logic (doorbell waits, driver commands).
-  virtual void run();
 
   /// @brief Return the list of ports owned by this component.
   /// @returns Const reference to the port vector.
@@ -209,19 +203,6 @@ public:
 
   /// @brief This is a composite component.
   bool is_composite() const override { return true; }
-
-  /// @brief Run all children until they halt.
-  ///
-  /// Default composite behavior: delegates to each child's run().
-  /// Subclasses (e.g., SoC) override for custom lifecycle.
-  void run() override;
-
-  /// @brief Step all children once.
-  ///
-  /// Default composite behavior: calls step() on each child.
-  /// @retval true At least one child is still active.
-  /// @retval false All children have halted.
-  bool step() override;
 
   /// @brief Add a child component. Sets the child's parent and depth.
   /// @param[in] child The child to add (ownership transferred).

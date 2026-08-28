@@ -25,7 +25,7 @@
 /* Declare the template with a generic implementation */
 template <typename T>
 __device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem,
+                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems,
                                   [[maybe_unused]] int pe_root) {
   return;
 }
@@ -35,8 +35,8 @@ __device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_u
   template <>                                                                 \
   __device__ void wg_team_broadcast<T>(                                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelem, int pe_root) {                                               \
-    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelem,       \
+      int nelems, int pe_root) {                                              \
+    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelems,      \
                                          pe_root);                            \
   }
 
@@ -85,7 +85,7 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
     wg_team_broadcast<T1>(ctx, teams[wg_id],
                           dest_buf,         // T* dest
                           source_buf,       // const T* source
-                          size,             // int nelement
+                          size,             // int nelems
                           0);               // int PE_root
   }
 

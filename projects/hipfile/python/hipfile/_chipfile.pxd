@@ -19,6 +19,7 @@ cdef extern from "hip/hip_runtime_api.h":
         hipSuccess = 0
 
     hipError_t hipPeekAtLastError() nogil
+    ctypedef void *hipStream_t  # opaque CUDA/HIP stream handle
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,27 @@ cdef extern from "hipfile.h":
     ssize_t hipFileWrite(hipFileHandle_t fh, const void *buffer_base,
                          size_t size, hoff_t file_offset,
                          hoff_t buffer_offset) nogil
+
+    # Asynchronous (stream-attached) I/O. The size/file_off/buf_off
+    # pointers are in/out and ``bytes_done_p`` receives the transferred
+    # byte count once the async op completes on ``stream``; the caller
+    # must keep all four storage slots alive and sync on the stream
+    # before reading them (see AsyncIOHandle in _hipfile.pyx).
+    hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base,
+                                    size_t *size_p, hoff_t *file_offset_p,
+                                    hoff_t *buffer_offset_p,
+                                    ssize_t *bytes_read_p,
+                                    hipStream_t stream) nogil
+    hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base,
+                                     size_t *size_p, hoff_t *file_offset_p,
+                                     hoff_t *buffer_offset_p,
+                                     ssize_t *bytes_written_p,
+                                     hipStream_t stream) nogil
+
+    # Stream registration — required before any *Async call on a stream.
+    hipFileError_t hipFileStreamRegister(hipStream_t stream,
+                                         unsigned flags) nogil
+    hipFileError_t hipFileStreamDeregister(hipStream_t stream) nogil
 
     # Driver lifecycle
     hipFileError_t hipFileDriverOpen() nogil

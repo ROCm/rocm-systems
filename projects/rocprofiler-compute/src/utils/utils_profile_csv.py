@@ -16,6 +16,7 @@ This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 
 import csv
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 
@@ -37,6 +38,18 @@ def read_csv_as_dicts(csv_file: str) -> tuple[list[dict], list[str]]:
         raise FileNotFoundError(f"CSV file not found: {csv_file}")
     except (csv.Error, UnicodeDecodeError) as e:
         raise ValueError(f"Error reading CSV file {csv_file}: {e}") from e
+
+
+def iter_csv_dicts(csv_file: str) -> Iterator[dict]:
+    """Yield rows from a CSV file without loading it into memory.
+
+    Raises ValueError if the file has no header row.
+    """
+    with open(csv_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"CSV file {csv_file} has no header row")
+        yield from reader
 
 
 def write_csv_from_dicts(
@@ -162,12 +175,15 @@ def assign_group_ids(
 
 
 def groupby_aggregate(
-    rows: list[dict], group_by_columns: list[str], agg_dict: dict[str, str]
+    rows: Iterable[dict], group_by_columns: list[str], agg_dict: dict[str, str]
 ) -> list[dict]:
     """
     Group rows by columns and aggregate using specified functions.
 
     Equivalent to: df.groupby(group_by_columns).agg(agg_dict)
+
+    Accepts any iterable of rows, so a streaming source (e.g.
+    iter_csv_dicts) can be passed without materializing the whole file.
 
     Example:
         rows = [
@@ -303,54 +319,43 @@ def pivot_table(
 
 
 def merge_rows(
-    left_rows: list[dict],
-    right_rows: list[dict],
+    left_rows: Iterable[dict],
+    right_rows: Iterable[dict],
     left_on: str,
     right_on: str,
     how: str = "inner",
-) -> list[dict]:
+) -> Iterator[dict]:
     """
-    Merge two lists of rows based on key columns.
+    Lazily merge two row sources based on key columns.
 
     Equivalent to: pd.merge(left_df, right_df, left_on=left_on,
                             right_on=right_on, how=how)
 
+    Right side is materialized into a lookup dict; left side and output
+    are streamed. Wrap in list() when the result must be re-iterated.
     """
     if how not in ("inner", "left", "right", "outer"):
         raise ValueError(f"Unsupported join type: {how}")
 
-    # Build lookup from right side (O(m))
-    right_lookup = {}
+    right_lookup: dict[Any, list[dict]] = {}
     for row in right_rows:
         key = row.get(right_on)
-        # Note: None keys are treated as valid join keys (matches pandas behavior)
-        if key not in right_lookup:
-            right_lookup[key] = []
-        right_lookup[key].append(row)
+        right_lookup.setdefault(key, []).append(row)
 
-    merged = []
-    matched_left_keys = set()
+    matched_left_keys: set[Any] = set()
 
-    # Merge left side (O(n) with O(1) lookups)
     for left_row in left_rows:
         key = left_row.get(left_on)
         matched_left_keys.add(key)
 
         if key in right_lookup:
-            # Match found - create merged rows
             for right_row in right_lookup[key]:
-                # Right values overwrite left values for same column names
-                merged_row = {**left_row, **right_row}
-                merged.append(merged_row)
+                yield {**left_row, **right_row}
         elif how in ("left", "outer"):
-            # No match but left join - include left row
-            merged.append(left_row.copy())
+            yield left_row.copy()
 
-    # Handle right/outer join - add unmatched right rows
     if how in ("right", "outer"):
         for key, right_row_list in right_lookup.items():
             if key not in matched_left_keys:
                 for right_row in right_row_list:
-                    merged.append(right_row.copy())
-
-    return merged
+                    yield right_row.copy()

@@ -21,11 +21,16 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding *>(inst),
              make_exec_fn<LdsParamLoadLdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
+      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &attr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
 }
 
 void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
@@ -35,10 +40,15 @@ void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
              make_exec_fn<LdsDirectLoadLdsdir>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
-  num_src_ = 0;
+  src_operands_[0] = &dsmem;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
 }
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {

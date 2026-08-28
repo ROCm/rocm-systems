@@ -157,6 +157,64 @@ TEST_F(help_system_test, compact_help_uses_tool_name)
     EXPECT_NE(oss_sample.str().find("rocprof-sys-sample"), std::string::npos);
 }
 
+TEST_F(help_system_test, compact_help_lists_tool_specific_topics)
+{
+    std::ostringstream oss_run, oss_sample;
+    print_compact_help("run", oss_run);
+    print_compact_help("sample", oss_sample);
+    const auto run_out    = oss_run.str();
+    const auto sample_out = oss_sample.str();
+
+    // The 'execution' topic ([EXECUTION OPTIONS]) is gated behind --fork and
+    // only exists for rocprof-sys-run.
+    // (Blurb text is matched to avoid colliding with flag names.)
+    EXPECT_NE(run_out.find("Execution control options"), std::string::npos);
+    EXPECT_EQ(sample_out.find("Execution control options"), std::string::npos);
+
+    // A tool-agnostic topic (empty 'tools' list) is advertised for both tools.
+    EXPECT_NE(run_out.find("Output format selection"), std::string::npos);
+    EXPECT_NE(sample_out.find("Output format selection"), std::string::npos);
+}
+
+// ============================================================================
+// Topic listing tests
+// ----------------------------------------------------------------------------
+// print_topic_listing() is the single source of truth for the "Group
+// topics"/"Domain topics" listing rendered by both the compact --help screen
+// and the unknown-topic fallback in dispatch_help(). It must be tool-aware
+// ============================================================================
+
+TEST_F(help_system_test, topic_listing_is_tool_aware)
+{
+    std::ostringstream oss_run, oss_sample;
+    print_topic_listing("run", oss_run);
+    print_topic_listing("sample", oss_sample);
+    const auto run_out    = oss_run.str();
+    const auto sample_out = oss_sample.str();
+
+    // 'execution' is a run-only group topic: listed for run, hidden for sample.
+    // (Blurb text is matched to avoid colliding with flag names.)
+    EXPECT_NE(run_out.find("Execution control options"), std::string::npos);
+    EXPECT_EQ(sample_out.find("Execution control options"), std::string::npos);
+
+    // Tool-agnostic group topics are advertised for both tools.
+    EXPECT_NE(run_out.find("Output format selection"), std::string::npos);
+    EXPECT_NE(sample_out.find("Output format selection"), std::string::npos);
+}
+
+TEST_F(help_system_test, topic_listing_lists_synthetic_and_domain_topics)
+{
+    std::ostringstream oss;
+    print_topic_listing("sample", oss);
+    const auto out = oss.str();
+
+    // The synthetic 'all' entry and every (tool-agnostic) domain topic appear.
+    EXPECT_NE(out.find("all"), std::string::npos);
+    EXPECT_NE(out.find("Full help output"), std::string::npos);
+    for(const auto* domain : { "gpu", "cpu", "rocm", "parallel" })
+        EXPECT_NE(out.find(domain), std::string::npos);
+}
+
 // ============================================================================
 // Topic-based help extraction tests
 // ============================================================================

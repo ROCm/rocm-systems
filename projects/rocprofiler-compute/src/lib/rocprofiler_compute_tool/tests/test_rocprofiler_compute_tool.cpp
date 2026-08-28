@@ -6,8 +6,29 @@
 #include "rocprofiler_compute_tool.h"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
+
+#include <filesystem>
+#include <string>
+#include <string_view>
 
 using namespace rocprofiler_compute_tool;
+
+namespace
+{
+std::filesystem::path expected_output_path(std::string_view output_path, std::string_view suffix)
+{
+    const auto filename = std::to_string(getpid()) + std::string{suffix};
+    return std::filesystem::path{std::string{output_path}} / filename;
+}
+
+std::filesystem::path expected_output_directory(std::string_view output_path,
+                                                std::string_view directory_name)
+{
+    return std::filesystem::path{std::string{output_path}} /
+           std::filesystem::path{std::string{directory_name}};
+}
+}  // namespace
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
 {
@@ -15,19 +36,22 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
-                std::string::npos);
-    EXPECT_TRUE(tool_data->output_filename.find(
-                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+    EXPECT_EQ(tool_data->output_filename,
+              expected_output_path(EnvInputParameters::kDefaultOutputPath, "_native_counter_collection.csv")
+                  .string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
 {
+    m_input_parameters->set_output_path("out");
     m_input_parameters->set_pc_sampling_method("host_trap");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_TRUE(tool_data->pc_sampling.enabled());
     EXPECT_EQ(tool_data->pc_sampling.mode(), PcSamplingMode::HostTrap);
+    EXPECT_EQ(tool_data->pc_sampling.code_object_info_path(),
+              expected_output_path("out", "_code_obj_info.json"));
+    EXPECT_EQ(tool_data->pc_sampling.source_snapshot_path(), expected_output_directory("out", "src"));
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)
@@ -67,10 +91,9 @@ TEST_F(TestRocprofilerComputeTool, ProvidedUnsetOutputPath_UsesDefault)
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
-                std::string::npos);
-    EXPECT_TRUE(tool_data->output_filename.find(
-                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+    EXPECT_EQ(tool_data->output_filename,
+              expected_output_path(EnvInputParameters::kDefaultOutputPath, "_native_counter_collection.csv")
+                  .string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
@@ -110,12 +133,11 @@ TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterRange_UsesDefault)
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
+    m_input_parameters->set_output_path("out");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) !=
-                std::string::npos);
-    EXPECT_TRUE(tool_data->output_filename.find(
-                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+    EXPECT_EQ(tool_data->output_filename,
+              expected_output_path("out", "_native_counter_collection.csv").string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)

@@ -254,17 +254,14 @@ The thread trace service asynchronously delivers raw trace data via a dedicated 
 .. code-block:: cpp
 
     void
-    shader_data_callback(rocprofiler_agent_id_t agent,
-                         int64_t shader_engine_id,
-                         void* data,
-                         size_t data_size,
+    shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                          rocprofiler_user_data_t userdata)
     {
         // Process shader callback data using the Trace Decoder.
         auto status = rocprofiler_trace_decode(decoder_handle,
                                                trace_decoder_callback,
-                                               data,
-                                               data_size,
+                                               shader_data.data,
+                                               shader_data.data_size,
                                                userdata);
     }
 

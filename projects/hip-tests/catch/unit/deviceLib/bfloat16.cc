@@ -155,6 +155,48 @@ __global__ void bf16_compare(float* val, unsigned* res, size_t size) {
   }
 }
 
+// Order of predicates written by bf16_compare_nan(); the host uses the same
+// indices to label failures and look up the expected result.
+enum Bf16NanPredicate {
+  kHeq, kHne, kHlt, kHle, kHgt, kHge,        // ordered scalar   -> false for NaN
+  kHequ, kHneu, kHltu, kHleu, kHgtu, kHgeu,  // unordered scalar -> true for NaN
+  kHbeq2, kHbne2,                            // ordered bool2    -> false for NaN
+  kBf16NanPredicateCount
+};
+
+// Test NaN comparison semantics: for inputs where at least one operand is NaN the
+// ordered predicates (no 'u' suffix) must return false and the unordered predicates
+// ('u' suffix) must return true. Each thread writes one slot per predicate so the
+// host can identify exactly which intrinsic misbehaved. Each a[i]/b[i] pair must
+// have at least one NaN.
+__global__ void bf16_compare_nan(const float* a, const float* b, unsigned* res, size_t size) {
+  auto i = threadIdx.x;
+  if (i < size) {
+    const __hip_bfloat16 x = __float2bfloat16(a[i]);
+    const __hip_bfloat16 y = __float2bfloat16(b[i]);
+    const __hip_bfloat162 x2{x, x};
+    const __hip_bfloat162 y2{y, y};
+    unsigned* out = res + i * kBf16NanPredicateCount;
+
+    out[kHeq] = bool_to_unsigned(__heq(x, y));
+    out[kHne] = bool_to_unsigned(__hne(x, y));
+    out[kHlt] = bool_to_unsigned(__hlt(x, y));
+    out[kHle] = bool_to_unsigned(__hle(x, y));
+    out[kHgt] = bool_to_unsigned(__hgt(x, y));
+    out[kHge] = bool_to_unsigned(__hge(x, y));
+
+    out[kHequ] = bool_to_unsigned(__hequ(x, y));
+    out[kHneu] = bool_to_unsigned(__hneu(x, y));
+    out[kHltu] = bool_to_unsigned(__hltu(x, y));
+    out[kHleu] = bool_to_unsigned(__hleu(x, y));
+    out[kHgtu] = bool_to_unsigned(__hgtu(x, y));
+    out[kHgeu] = bool_to_unsigned(__hgeu(x, y));
+
+    out[kHbeq2] = bool_to_unsigned(__hbeq2(x2, y2));
+    out[kHbne2] = bool_to_unsigned(__hbne2(x2, y2));
+  }
+}
+
 // Convert to bits
 __global__ void bf16_conv_bits(float* val, unsigned short* res, size_t size) {
   auto i = threadIdx.x;
@@ -316,6 +358,52 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     }
 
     HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_res));
+  }
+
+  SECTION("NaN comparison semantics") {
+    struct PredicateCase {
+      const char* name;
+      unsigned expected;
+    };
+    // Indexed by Bf16NanPredicate; drives both the failure label and the
+    // expected result so the two cannot drift out of alignment.
+    static const PredicateCase kPredicates[kBf16NanPredicateCount] = {
+        {"__heq", 0}, {"__hne", 0}, {"__hlt", 0}, {"__hle", 0},
+        {"__hgt", 0}, {"__hge", 0},
+        {"__hequ", 1}, {"__hneu", 1}, {"__hltu", 1}, {"__hleu", 1},
+        {"__hgtu", 1}, {"__hgeu", 1},
+        {"__hbeq2", 0}, {"__hbne2", 0}};
+
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    constexpr size_t size = 6;
+    // Each pair has at least one NaN.
+    float a[size] = {qnan, qnan, 1.0f, qnan, -2.0f, qnan};
+    float b[size] = {qnan, 1.0f, qnan, -3.0f, qnan, 0.0f};
+    float *d_a, *d_b;
+    unsigned* d_res;
+    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_b, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size * kBf16NanPredicateCount));
+
+    HIP_CHECK(hipMemcpy(d_a, a, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_b, b, sizeof(float) * size, hipMemcpyHostToDevice));
+
+    bf16_compare_nan<<<1, size>>>(d_a, d_b, d_res, size);
+
+    std::vector<unsigned> res(size * kBf16NanPredicateCount, 0);
+    HIP_CHECK(hipMemcpy(res.data(), d_res,
+                        sizeof(unsigned) * res.size(), hipMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < size; i++) {
+      for (int p = 0; p < kBf16NanPredicateCount; p++) {
+        CAPTURE(i, a[i], b[i], kPredicates[p].name);
+        CHECK(res[i * kBf16NanPredicateCount + p] == kPredicates[p].expected);
+      }
+    }
+
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
     HIP_CHECK(hipFree(d_res));
   }
 

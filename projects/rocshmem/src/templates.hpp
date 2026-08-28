@@ -420,7 +420,7 @@ __device__ int rocshmem_test(T *ivars, int cmp, T val);
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
                            heap.
- * @param[in] nelement     Size of the buffer to participate in the broadcast.
+ * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
                            active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
@@ -434,7 +434,7 @@ __device__ int rocshmem_test(T *ivars, int cmp, T val);
  */
 template <typename T>
 __device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx, T *dest,
-                                       const T *source, int nelement,
+                                       const T *source, int nelems,
                                        int PE_root, int PE_start,
                                        int logPE_stride, int PE_size,
                                        long *pSync);

@@ -8,16 +8,16 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/mproc.hpp"
 #include "core/timemory.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/join.hpp>
 
 #include <algorithm>
 #include <array>
@@ -43,7 +43,6 @@ namespace env_vars  = rocprofsys::env_vars;
 namespace utils     = rocprofsys::common_utils;
 using settings      = ::rocprofsys::settings;
 using parser_data_t = rocprofsys::argparse::parser_data;
-using namespace ::timemory::join;
 
 namespace
 {
@@ -374,10 +373,9 @@ tool_runner::prepare_command(const char* exe)
 
     if(!injected)
     {
-        throw std::runtime_error(
-            join("", "Unable to match launcher \"", data.out.launcher,
-                 "\" to any arguments on the command line: \"",
-                 join(array_config{ " ", "", "" }, data.out.command), "\""));
+        throw std::runtime_error(fmt::format(
+            R"(Unable to match launcher "{}" to any arguments on the command line: "{}")",
+            data.out.launcher, fmt::join(data.out.command, " ")));
     }
 
     data.out.command = std::move(new_argv);

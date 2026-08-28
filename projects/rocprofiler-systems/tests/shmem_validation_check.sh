@@ -8,7 +8,7 @@
 #   Exit 77  → SHMEM unavailable / runtime failure / output mismatch (test skipped in CI).
 #   Other    → real test logic failure (rare).
 #
-# Expected output (e.g. oshrun -np 2 ./shmem_hello):
+# Expected output (e.g. oshrun -np 2 ./shmem-hello):
 #   Hello from PE 0 of 2
 #   PE 0 received value 1 from PE 1
 #   Hello from PE 1 of 2
@@ -36,7 +36,7 @@ fi
 
 # Always print ldd output at the beginning for diagnostics (pass or fail)
 if [[ -n "$PINGPONG" ]]; then
-    echo "--- ldd shmem_pingpong ---"
+    echo "--- ldd shmem-pingpong ---"
     ldd "$PINGPONG" 2>&1 || true
     echo "--- end ldd ---"
 fi

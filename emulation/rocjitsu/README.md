@@ -26,7 +26,7 @@ real hardware. Supports three execution strategies:
 | RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
 | RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
 | gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
-| RISC-V | RV32IMAFDC | RV | Experimental | &mdash; | &mdash; |
+| RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->
 
@@ -87,6 +87,34 @@ rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
 
+## VGPR observation limitations
+
+Execution plugins can observe instruction-level VGPR destination writes. The
+current hook is precise for ordinary vector destinations, including 64-bit and
+packed 16-bit destinations, but precise observation is not yet supported for:
+
+- DPP instructions, whose architectural destination lane mask may be narrower
+  than EXEC because of row masks, bank masks, or `BOUND_CTRL`.
+- Sub-dword SDWA destinations using `UNUSED_PRESERVE`, whose architectural byte
+  mask may be narrower than a full VGPR dword.
+
+The executor emits one conservative semantic write callback for these
+destinations, while internal restoration uses raw storage and emits no callback.
+DPP source staging can also report the full source wave, and partial SDWA source
+staging can report lanes or bytes beyond the architectural source effect.
+
+Plugins that require exact hazard results must classify DPP and partial SDWA
+instructions in the before-execute callback and ignore their VGPR read and write
+callbacks. This filtering is the plugin's responsibility; it is not automatic.
+Ignoring the callbacks intentionally produces false negatives for these
+instructions rather than false-positive race reports. A follow-up execution
+refactor will apply architectural register effects directly and remove the
+staging-and-restoration limitation.
+
+Memory-pipeline completions and internal destination-preservation merges use raw
+VGPR storage and do not emit instruction read or write callbacks. See
+[docs/plugins.md](docs/plugins.md) for the plugin contract.
+
 ## Running PyTorch
 
 ```bash
@@ -118,6 +146,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
+| [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 
 ### Reference
 

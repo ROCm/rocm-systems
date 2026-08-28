@@ -24,4 +24,11 @@ rj_add_object_library(rocjitsu_isa_rdna1
     vop3.cpp
     vop3p.cpp
     vopc.cpp
+    target_provider.cpp
+)
+
+rj_add_isa_target_provider(
+    rocjitsu_isa_rdna1
+    HEADER rocjitsu/isa/arch/amdgpu/rdna1/target_provider.h
+    BUILTIN
 )

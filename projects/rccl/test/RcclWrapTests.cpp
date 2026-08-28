@@ -16,6 +16,7 @@
 #include "debug.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "rccl_common.h"
 #include "rocmwrap.h"
 
 namespace RcclUnitTesting
@@ -1543,5 +1544,354 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
 }
+
+#ifdef ENABLE_WARP_SPEED
+
+// ---------------------------------------------------------------------------
+// WarpSpeed enablement / channel-math helpers (rccl_wrap.cc)
+//
+// These exercise the pure decision/tuning helpers that gate WarpSpeed:
+//   - rcclCanUseWarpSpeedAuto     (arch/node/env eligibility)
+//   - rcclGetMaxWarpsPerBlock     (warps-per-block multiplier)
+//   - rcclWarpSpeedComputeNChannels (connect.cc channel math)
+//   - rcclWarpSpeedAdjustChannels   (enqueue.cc per-collective channel adj.)
+// ---------------------------------------------------------------------------
+
+// rcclCanUseWarpSpeedAuto: gfx950 single-node with auto mode on -> eligible.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
+{
+    // Auto mode defaults to 1; if the environment forces it off, the eligibility
+    // result would legitimately be false, so skip to keep the test deterministic.
+    if(rcclParamWarpSpeedAutoMode() == 0)
+    {
+        GTEST_SKIP() << "RCCL_WARP_SPEED_AUTO=0 in environment";
+    }
+
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->cuCount = 256; // SPX mode (256 CU on gfx950); auto mode requires cuCount > 128
+
+    EXPECT_TRUE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    comm->cuCount = 128; // Not SPX mode (128 CU on gfx950); auto mode requires cuCount > 128
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: non-gfx950 arch is never eligible.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_NonGfx950_False)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: multi-node is never eligible (auto mode is single-node).
+TEST(Rcclwrap, CanUseWarpSpeedAuto_MultiNode_False)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/2));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: RCCL_WARP_SPEED_AUTO=0 disables eligibility even on
+// gfx950 single-node. Isolated so the cached RCCL_PARAM value doesn't leak.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_AutoModeDisabled_False)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CanUseWarpSpeedAuto_AutoModeDisabled_False",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->cuCount = 256; // ensure only RCCL_WARP_SPEED_AUTO=0 makes this ineligible
+
+            EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_WARP_SPEED_AUTO", "0"}}
+    );
+}
+
+// rcclGetMaxWarpsPerBlock: single node -> RCCL_SINGLE_NODE_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_SingleNode)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes   = 1;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_SINGLE_NODE_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// rcclGetMaxWarpsPerBlock: multi-node gfx950 -> RCCL_GFX950_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeGfx950)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+    comm->nNodes   = 2;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_GFX950_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// rcclGetMaxWarpsPerBlock: multi-node non-gfx950 -> RCCL_DEFAULT_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeOtherArch)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/16);
+    comm->nNodes   = 2;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_DEFAULT_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// Documents a latent issue: rcclGetMaxWarpsPerBlock branches on single-node vs
+// multi-node (and arch), and the single-node comment claims "half the number of
+// threads", but RCCL_SINGLE_NODE_MAX_NTHREADS == RCCL_GFX950_MAX_NTHREADS ==
+// RCCL_DEFAULT_MAX_NTHREADS (all 256), so every branch returns the same value and
+// the intended single-node halving is currently a no-op. If the constants are ever
+// differentiated (as the comment intends), this test should be updated.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->WarpSize = 64;
+
+    comm->nNodes    = 1;
+    const int single = rcclGetMaxWarpsPerBlock(comm);
+    comm->nNodes    = 2;
+    const int multi  = rcclGetMaxWarpsPerBlock(comm);
+
+    EXPECT_EQ(single, multi)
+        << "Single-node is documented to use half the threads, but the MAX_NTHREADS "
+           "constants are identical so the branch has no effect.";
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: single-node, no user override, gfx950 8-rank ->
+// nc*nChannels*mult, then halved for the gfx950 single-node 8-rank special case.
+TEST(Rcclwrap, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // maxNchannels = nc(2) * nChannels(2) * mult(4) = 16; single-node keeps 16;
+    // gfx950 && single-node && nRanks==8 -> nc /= 2 -> 8.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 8);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: single-node, non-8-rank -> no halving.
+TEST(Rcclwrap, ComputeNChannels_SingleNode_4Ranks_NoHalving)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/4);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 16); // 2*2*4, no halving
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: multi-node, no user override -> capped by maxChannels,
+// no halving (halving is single-node only).
+TEST(Rcclwrap, ComputeNChannels_MultiNode_CappedByMaxChannels)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 2;
+    comm->nChannels = 2;
+
+    // maxNchannels = 2*2*4 = 16; multi-node -> min(16, maxChannels=8) = 8; no halving.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/8, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 8);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: user override path uses adjustedMaxNchannels*mult
+// (never halved), below the MAXCHANNELS clamp.
+TEST(Rcclwrap, ComputeNChannels_UserOverride_NoClamp)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // userUpdated -> nc = min(adjusted(10) * mult(4), MAXCHANNELS) = 40; no halving.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/10,
+                                                 /*userUpdatedMaxChannels=*/true);
+    EXPECT_EQ(nc, 40);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: user override clamps to MAXCHANNELS (512 with WS).
+TEST(Rcclwrap, ComputeNChannels_UserOverride_ClampedToMaxChannels)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // adjusted(200) * mult(4) = 800, clamped to MAXCHANNELS.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/200,
+                                                 /*userUpdatedMaxChannels=*/true);
+    EXPECT_EQ(nc, MAXCHANNELS);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: disabled -> nc unchanged.
+TEST(Rcclwrap, AdjustChannels_Disabled_NoChange)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->topo->warpSpeedEnabled     = false;
+    comm->warpSpeedChannelMultiplier = 4;
+
+    ncclTaskColl info = {};
+    info.func         = ncclFuncAllReduce;
+
+    EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 32);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: enabled -> nc divided by the channel multiplier.
+// Non-gfx950 arch avoids the single-node 8-rank doubling special case.
+TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+    comm->topo->warpSpeedEnabled     = true;
+    comm->warpSpeedChannelMultiplier = 4;
+
+    ncclTaskColl info = {};
+    info.func         = ncclFuncAllReduce;
+
+    EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 8); // 32/4
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, non-(AR/AG/RS) collective
+// -> divided then doubled (the "reduced CU usage" special case).
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
+{
+    // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
+    // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast; // not AR/AG/RS
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 16); // 32/4=8, *2=16
+
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, main collective
+// (AllReduce) -> divided only, not doubled.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncAllReduce; // main collective, excluded from doubling
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 8); // 32/4, no doubling
+
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+#endif // ENABLE_WARP_SPEED
 
 } // namespace RcclUnitTesting

@@ -13,29 +13,20 @@
 #include "impl/gin_barrier__types.h"
 
 #if __CUDACC__
-template<typename Coop>
+template <typename Coop>
 struct ncclBarrierSession_internal;
 
-template<typename Coop>
-struct ncclBarrierSession: ncclBarrierSession_internal<Coop> {
+template <typename Coop>
+struct ncclBarrierSession : ncclBarrierSession_internal<Coop> {
   // Full featured constructor:
-  NCCL_DEVICE_INLINE ncclBarrierSession(
-    Coop, ncclTeam innerTeam, ncclTeam outerTeam, ncclGin,
-    ncclLsaBarrierHandle innerBarHandle,
-    ncclGinBarrierHandle outerBarHandle,
-    uint32_t index,
-    bool multimem=false, ncclMultimemHandle innerMmHandle={}
-  );
+  NCCL_DEVICE_INLINE ncclBarrierSession(Coop, ncclTeam innerTeam, ncclTeam outerTeam, ncclGin,
+                                        ncclLsaBarrierHandle innerBarHandle, ncclGinBarrierHandle outerBarHandle,
+                                        uint32_t index, bool multimem = false, ncclMultimemHandle innerMmHandle = {});
   // Convenience constructors for baked in teams:
-  NCCL_DEVICE_INLINE ncclBarrierSession(
-    Coop, ncclTeamTagWorld, ncclGin, uint32_t index, bool multimem=false
-  );
-  NCCL_DEVICE_INLINE ncclBarrierSession(
-    Coop, ncclTeamTagLsa, ncclDevComm const&, uint32_t index, bool multimem=false
-  );
-  NCCL_DEVICE_INLINE ncclBarrierSession(
-    Coop, ncclTeamTagRail, ncclGin, uint32_t index
-  );
+  NCCL_DEVICE_INLINE ncclBarrierSession(Coop, ncclTeamTagWorld, ncclGin, uint32_t index, bool multimem = false);
+  NCCL_DEVICE_INLINE ncclBarrierSession(Coop, ncclTeamTagLsa, ncclDevComm const&, uint32_t index,
+                                        bool multimem = false);
+  NCCL_DEVICE_INLINE ncclBarrierSession(Coop, ncclTeamTagRail, ncclGin, uint32_t index);
 
   ncclBarrierSession(ncclBarrierSession const&) = delete; // Sessions are not copyable
 

@@ -89,11 +89,11 @@ size_t ncclOsGetPageSize() {
 }
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
-    return aligned_alloc(alignment, size);
+  return aligned_alloc(alignment, size);
 }
 
 void ncclOsAlignedFree(void* ptr) {
-    free(ptr);
+  free(ptr);
 }
 
 void ncclOsSetEnv(const char* name, const char* value) {
@@ -105,7 +105,7 @@ char* ncclOsRealpath(const char* path, char* resolved_path) {
 }
 
 // The default Linux stack size (8MB) is safe.
-#define SAFE_STACK_SIZE (8192*1024)
+#define SAFE_STACK_SIZE (8192 * 1024)
 
 static ncclResult_t setCpuStackSize() {
   // Query the stack size used for newly launched threads.
@@ -122,12 +122,10 @@ static ncclResult_t setCpuStackSize() {
     struct rlimit stackLimit;
     char buf[30];
     SYSCHECK(getrlimit(RLIMIT_STACK, &stackLimit), "getrlimit");
-    if (stackLimit.rlim_cur == RLIM_INFINITY)
-      strcpy(buf, "unlimited");
-    else
-      snprintf(buf, sizeof(buf), "%ldKB", stackLimit.rlim_cur / 1024);
-    INFO(NCCL_INIT | NCCL_ENV, "Stack size limit (%s) is unsafe; will use %dKB for newly launched threads",
-         buf, SAFE_STACK_SIZE / 1024);
+    if (stackLimit.rlim_cur == RLIM_INFINITY) strcpy(buf, "unlimited");
+    else snprintf(buf, sizeof(buf), "%ldKB", stackLimit.rlim_cur / 1024);
+    INFO(NCCL_INIT | NCCL_ENV, "Stack size limit (%s) is unsafe; will use %dKB for newly launched threads", buf,
+         SAFE_STACK_SIZE / 1024);
 
     // Change the default pthread stack size (via a nonportable API as the feature is not available in std::thread)
     PTHREADCHECK(pthread_attr_setstacksize(&attr, SAFE_STACK_SIZE), "pthread_attr_setstacksize");
@@ -171,7 +169,7 @@ void ncclOsPollSocket(int socketDescriptor, int op) {
   memset(&pfd, 0, sizeof(struct pollfd));
   pfd.fd = socketDescriptor;
   pfd.events = (op == NCCL_SOCKET_RECV) ? POLLIN : POLLOUT;
-  (void) poll(&pfd, 1, ncclParamPollTimeOut());
+  (void)poll(&pfd, 1, ncclParamPollTimeOut());
 }
 
 extern long int ncclParamRetryCnt();
@@ -181,16 +179,16 @@ ncclResult_t ncclOsSocketTryAccept(struct ncclSocket* sock) {
   sock->socketDescriptor = accept(sock->acceptSocketDescriptor, (struct sockaddr*)&sock->addr, &socklen);
   if (ncclOsSocketIsValid(sock)) {
     sock->state = ncclSocketStateAccepted;
-  } else if (errno == ENETDOWN || errno == EPROTO || errno == ENOPROTOOPT || errno == EHOSTDOWN ||
-             errno == ENONET || errno == EHOSTUNREACH || errno == EOPNOTSUPP || errno == ENETUNREACH ||
-             errno == EINTR) {
+  } else if (errno == ENETDOWN || errno == EPROTO || errno == ENOPROTOOPT || errno == EHOSTDOWN || errno == ENONET ||
+             errno == EHOSTUNREACH || errno == EOPNOTSUPP || errno == ENETUNREACH || errno == EINTR) {
     /* per accept's man page, for linux sockets, the following errors might be already pending errors
      * and should be considered as EAGAIN. To avoid infinite loop in case of errors, we use the retry count*/
     if (++sock->errorRetries == ncclParamRetryCnt()) {
-      WARN("ncclOsSocketTryAccept: exceeded error retry count after %d attempts, %s", sock->errorRetries, strerror(errno));
+      WARN("ncclOsSocketTryAccept: exceeded error retry count after %d attempts, %s", sock->errorRetries,
+           strerror(errno));
       return ncclSystemError;
     }
-    INFO(NCCL_NET|NCCL_INIT, "Call to accept returned %s, retrying", strerror(errno));
+    INFO(NCCL_NET | NCCL_INIT, "Call to accept returned %s, retrying", strerror(errno));
   } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
     WARN("ncclOsSocketTryAccept: Accept failed: %s", strerror(errno));
     return ncclSystemError;
@@ -216,12 +214,17 @@ ncclResult_t ncclOsSocketSetFlags(struct ncclSocket* sock) {
     SYSCHECKGOTO(flags = fcntl(sock->socketDescriptor, F_GETFL), "fcntl", ret, fail);
     SYSCHECKGOTO(fcntl(sock->socketDescriptor, F_SETFL, flags | O_NONBLOCK), "fcntl", ret, fail);
   }
-  SYSCHECKGOTO(setsockopt(sock->socketDescriptor, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)), "setsockopt TCP NODELAY", ret, fail);
+  SYSCHECKGOTO(setsockopt(sock->socketDescriptor, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)),
+               "setsockopt TCP NODELAY", ret, fail);
   // setsockopt should not fail even if the sizes are too large, do not change the default if unset by the user (=-1)
   rcvBuf = ncclParamSocketMaxRecvBuff();
   sndBuf = ncclParamSocketMaxSendBuff();
-  if (sndBuf > 0) SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_SNDBUF, (char*)&sndBuf, sizeof(int)), "setsockopt SO_SNDBUF", ret, fail);
-  if (rcvBuf > 0) SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_RCVBUF, (char*)&rcvBuf, sizeof(int)), "setsockopt SO_RCVBUF", ret, fail);
+  if (sndBuf > 0)
+    SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_SNDBUF, (char*)&sndBuf, sizeof(int)),
+                 "setsockopt SO_SNDBUF", ret, fail);
+  if (rcvBuf > 0)
+    SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_RCVBUF, (char*)&rcvBuf, sizeof(int)),
+                 "setsockopt SO_RCVBUF", ret, fail);
 exit:
   return ret;
 fail:
@@ -229,8 +232,8 @@ fail:
 }
 
 void ncclOsSocketResetAccept(struct ncclSocket* sock) {
-  char line[SOCKET_NAME_MAXLEN+1];
-  INFO(NCCL_NET|NCCL_INIT, "socketFinalizeAccept: didn't receive a valid magic from %s",
+  char line[SOCKET_NAME_MAXLEN + 1];
+  INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: didn't receive a valid magic from %s",
        ncclSocketToString(&sock->addr, line));
   // Ignore spurious connection and accept again
   (void)close(sock->socketDescriptor);
@@ -262,7 +265,7 @@ cleanup:
 }
 
 static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, const char funcName[]) {
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
   if (errCode == 0) {
     sock->state = ncclSocketStateConnected;
   } else if (errCode == EINPROGRESS) {
@@ -272,14 +275,14 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
     if (sock->customRetry == 0) {
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
-        WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts",
-             funcName, ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries);
+        WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
+             ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
-      INFO(NCCL_NET|NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec",
-           funcName, ncclSocketToString(&sock->addr, line), strerror(errCode),
-           sock->errorRetries, ncclParamRetryCnt(), sleepTime);
+      INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
+           ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries, ncclParamRetryCnt(),
+           sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
@@ -302,7 +305,7 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
   struct pollfd pfd;
   int timeout = 1, ret;
   socklen_t rlen = sizeof(int);
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
 
   memset(&pfd, 0, sizeof(struct pollfd));
   pfd.fd = sock->socketDescriptor;
@@ -321,15 +324,19 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
   return socketConnectCheck(sock, ret, __func__);
 }
 
-ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int block, int* closed) {
+ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int block,
+                                     int* closed) {
   int bytes = 0;
   *closed = 0;
   char* data = (char*)ptr;
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
   if (sock->asyncFlag || sock->abortFlag) block = 0;
   do {
-    if (op == NCCL_SOCKET_RECV) bytes = recv(sock->socketDescriptor, data+(*offset), size-(*offset), block ? 0 : MSG_DONTWAIT);
-    if (op == NCCL_SOCKET_SEND) bytes = send(sock->socketDescriptor, data+(*offset), size-(*offset), block ? MSG_NOSIGNAL : MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (op == NCCL_SOCKET_RECV)
+      bytes = recv(sock->socketDescriptor, data + (*offset), size - (*offset), block ? 0 : MSG_DONTWAIT);
+    if (op == NCCL_SOCKET_SEND)
+      bytes = send(sock->socketDescriptor, data + (*offset), size - (*offset),
+                   block ? MSG_NOSIGNAL : MSG_DONTWAIT | MSG_NOSIGNAL);
     if (op == NCCL_SOCKET_RECV && bytes == 0) {
       *closed = 1;
       return ncclSuccess;
@@ -341,14 +348,15 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       }
       if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %s", (op == NCCL_SOCKET_RECV ? "recv from" : "send to"),
-              ncclSocketToString(&sock->addr, line), strerror(errno));
+             ncclSocketToString(&sock->addr, line), strerror(errno));
         return ncclRemoteError;
       } else {
         bytes = 0;
       }
     }
     (*offset) += bytes;
-    if (sock->abortFlag && std::atomic_load_explicit((std::atomic<uint32_t>*)sock->abortFlag, std::memory_order_acquire)) {
+    if (sock->abortFlag &&
+        std::atomic_load_explicit((std::atomic<uint32_t>*)sock->abortFlag, std::memory_order_acquire)) {
       INFO(NCCL_NET, "ncclOsSocketProgressOpt: abort called");
       return ncclInternalError;
     }
@@ -356,10 +364,10 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
   return ncclSuccess;
 }
 
-ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncclSocketAddress *addrs, int sock_family,
-  int maxIfNameSize, int maxIfs, int* found) {
+ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncclSocketAddress* addrs, int sock_family,
+                                  int maxIfNameSize, int maxIfs, int* found) {
 #ifdef ENABLE_TRACE
-  char line[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   struct netIf userIfs[MAX_IFS];
   bool searchNot = prefixList && prefixList[0] == '^';
@@ -376,17 +384,16 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
 
     /* We only support IPv4 & IPv6 */
     int family = interface->ifa_addr->sa_family;
-    if (family != AF_INET && family != AF_INET6)
-      continue;
+    if (family != AF_INET && family != AF_INET6) continue;
 
     /* Only consider running interfaces, i.e. UP and physically attached. */
     if (!(interface->ifa_flags & IFF_RUNNING)) continue;
 
-    TRACE(NCCL_INIT|NCCL_NET,"Found interface %s:%s", interface->ifa_name, ncclSocketToString((union ncclSocketAddress *) interface->ifa_addr, line));
+    TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", interface->ifa_name,
+          ncclSocketToString((union ncclSocketAddress*)interface->ifa_addr, line));
 
     /* Allow the caller to force the socket family type */
-    if (sock_family != -1 && family != sock_family)
-      continue;
+    if (sock_family != -1 && family != sock_family) continue;
 
     /* We also need to skip IPv6 loopback interfaces */
     if (family == AF_INET6) {
@@ -403,12 +410,15 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
     // getifaddrs() normal order appears to be; IPv4, IPv6 Global, IPv6 Link
     bool duplicate = false;
     for (int i = 0; i < *found; i++) {
-      if (strcmp(interface->ifa_name, names+i*maxIfNameSize) == 0) { duplicate = true; break; }
+      if (strcmp(interface->ifa_name, names + i * maxIfNameSize) == 0) {
+        duplicate = true;
+        break;
+      }
     }
 
     if (!duplicate) {
       // Store the interface name
-      strncpy(names + (*found)*maxIfNameSize, interface->ifa_name, maxIfNameSize);
+      strncpy(names + (*found) * maxIfNameSize, interface->ifa_name, maxIfNameSize);
       // Store the IP address
       int salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
       memset(addrs + *found, '\0', sizeof(*addrs));
@@ -443,8 +453,8 @@ static bool matchSubnet(struct ifaddrs local_if, union ncclSocketAddress* remote
     struct in6_addr& mask_in6 = mask->sin6_addr;
     struct in6_addr& remote_in6 = remote_addr.sin6_addr;
     bool same = true;
-    int len = 16;  //IPv6 address is 16 unsigned char
-    for (int c = 0; c < len; c++) {  //Network byte order is big-endian
+    int len = 16;  // IPv6 address is 16 unsigned char
+    for (int c = 0; c < len; c++) {  // Network byte order is big-endian
       char c1 = local_in6.s6_addr[c] & mask_in6.s6_addr[c];
       char c2 = remote_in6.s6_addr[c] & mask_in6.s6_addr[c];
       if (c1 ^ c2) {
@@ -466,8 +476,8 @@ static bool matchSubnet(struct ifaddrs local_if, union ncclSocketAddress* remote
 ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress* localAddr,
                                           union ncclSocketAddress* remoteAddr, int ifNameMaxSize, int* found) {
 #ifdef ENABLE_TRACE
-  char line[SOCKET_NAME_MAXLEN+1];
-  char line_a[SOCKET_NAME_MAXLEN+1];
+  char line[SOCKET_NAME_MAXLEN + 1];
+  char line_a[SOCKET_NAME_MAXLEN + 1];
 #endif
   *found = 0;
   struct ifaddrs *interfaces, *interface;
@@ -477,8 +487,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
 
     /* We only support IPv4 & IPv6 */
     int family = interface->ifa_addr->sa_family;
-    if (family != AF_INET && family != AF_INET6)
-      continue;
+    if (family != AF_INET && family != AF_INET6) continue;
 
     // check against user specified interfaces
     if (!matchSubnet(*interface, remoteAddr)) {
@@ -492,7 +501,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
     // Store the interface name
     strncpy(ifName, interface->ifa_name, ifNameMaxSize);
 
-    TRACE(NCCL_INIT|NCCL_NET,"NET : Found interface %s:%s in the same subnet as remote address %s",
+    TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s",
           interface->ifa_name, ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
     *found = 1;
   }
@@ -525,7 +534,7 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
   return ncclSuccess;
 }
 
-void ncclOsSetMutexCondShared(std::mutex &mutex, std::condition_variable &cond) {
+void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond) {
   pthread_mutexattr_t mutexAttr;
   pthread_mutexattr_init(&mutexAttr);
   pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED);
@@ -598,7 +607,6 @@ ncclResult_t ncclOsNvmlOpen(ncclOsLibraryHandle* handle) {
   return ncclSuccess;
 }
 
-
 // Shared memory implementation for Linux
 #include "comm.h"
 #include <sys/stat.h>
@@ -608,9 +616,8 @@ ncclResult_t ncclOsNvmlOpen(ncclOsLibraryHandle* handle) {
 #include <string.h>
 #include <stdlib.h>
 
-void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSize, size_t realShmSize,
-                         char* hptr, void* dptr, bool create,
-                         struct ncclShmHandleInternal* handle) {
+void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSize, size_t realShmSize, char* hptr,
+                         void* dptr, bool create, struct ncclShmHandleInternal* handle) {
   handle->shmDesc = shmDesc;
   handle->shmPtr = hptr;
   handle->devShmPtr = dptr;
@@ -627,9 +634,8 @@ void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSiz
   }
 }
 
-ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize,
-                           void** shmPtr, void** devShmPtr, int refcount,
-                           struct ncclShmHandleInternal** handle) {
+ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void** shmPtr, void** devShmPtr,
+                           int refcount, struct ncclShmHandleInternal** handle) {
   int fd = -1;
   char* hptr = NULL;
   void* dptr = NULL;
@@ -641,7 +647,8 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize,
 
   *handle = NULL;
   *shmPtr = NULL;
-  EQCHECKGOTO(tmphandle = (struct ncclShmHandleInternal*)calloc(1, sizeof(struct ncclShmHandleInternal)), NULL, ret, fail);
+  EQCHECKGOTO(tmphandle = (struct ncclShmHandleInternal*)calloc(1, sizeof(struct ncclShmHandleInternal)), NULL, ret,
+              fail);
 
   if (create) {
     if (shmPath[0] == '\0') {
@@ -664,7 +671,8 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize,
   retry_fallocate:
     if (fallocate(fd, 0, 0, realShmSize) != 0) {
       if (errno == EINTR) {
-        INFO(NCCL_ALL, "fallocate: Failed to extend %s to %ld bytes, error: %s (%d) - retrying", shmPath, realShmSize, strerror(errno), errno);
+        INFO(NCCL_ALL, "fallocate: Failed to extend %s to %ld bytes, error: %s (%d) - retrying", shmPath, realShmSize,
+             strerror(errno), errno);
         goto retry_fallocate;
       }
       WARN("Error: failed to extend %s to %ld bytes, error: %s (%d)", shmPath, realShmSize, strerror(errno), errno);
@@ -696,13 +704,18 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize,
   }
 
   if (devShmPtr) {
-    INFO(NCCL_ALLOC, "SHM legacy: sharing buffer with GPU via cudaHostRegister + cudaHostGetDevicePointer (host %p size %ld)", (void*)hptr, (long)realShmSize);
+    INFO(NCCL_ALLOC,
+         "SHM legacy: sharing buffer with GPU via cudaHostRegister + cudaHostGetDevicePointer (host %p size %ld)",
+         (void*)hptr, (long)realShmSize);
     cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
 #if defined(HIP_HOST_UNCACHED_MEMORY)
-    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached), ret, fail);
+    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize,
+                                   cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached),
+                  ret, fail);
 #else
-    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped), ret, fail);
+    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped), ret,
+                  fail);
 #endif
     CUDACHECKGOTO(cudaHostGetDevicePointer(&dptr, (void*)hptr, 0), ret, fail);
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
@@ -744,7 +757,8 @@ ncclResult_t ncclOsShmClose(struct ncclShmHandleInternal* handle) {
     if (handle->shmPtr) {
       if (handle->devShmPtr) CUDACHECK(cudaHostUnregister(handle->shmPtr));
       if (munmap(handle->shmPtr, handle->realShmSize) != 0) {
-        WARN("munmap of shared memory %p size %ld failed, error: %s (%d)", handle->shmPtr, handle->realShmSize, strerror(errno), errno);
+        WARN("munmap of shared memory %p size %ld failed, error: %s (%d)", handle->shmPtr, handle->realShmSize,
+             strerror(errno), errno);
         ret = ncclSystemError;
       }
     }

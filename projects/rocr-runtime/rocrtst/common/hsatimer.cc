@@ -44,8 +44,11 @@
  */
 
 #include "common/hsatimer.h"
+#if defined(__x86_64__) || defined(__i386)
 #include <x86intrin.h>
-
+#elif defined(__powerpc64__) || defined(__PPC64__)
+#include <sys/platform/ppc.h>
+#endif
 namespace rocrtst {
 
 static const uint64_t kNanosecondsPerSecond = 1000000000;
@@ -167,6 +170,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
+#if defined(__x86_64__) || defined(__i386__)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
@@ -184,6 +188,12 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
   uint64_t coarseIntervalNs = (coarseEndUs - coarseBeginUs) * 1000;
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
+#elif defined(__powerpc64__) || defined(__PPC64__)
+  // Frequency in units of 100 MHz
+  return __ppc_get_timebase_freq() / 100000000;
+#else
+#error "Unsupported architecture"
+#endif
 }
 
 }  // namespace rocrtst

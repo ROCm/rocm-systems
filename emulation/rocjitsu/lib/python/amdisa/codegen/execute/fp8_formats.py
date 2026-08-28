@@ -18,6 +18,10 @@ _FNUZ_HELPER_NAMES = {
     'util::f32_to_bf8_e5m2_rne': 'util::f32_to_bf8_e5m2_fnuz_rne',
     'util::f32_to_fp8_e4m3_sr': 'util::f32_to_fp8_e4m3_fnuz_sr',
     'util::f32_to_bf8_e5m2_sr': 'util::f32_to_bf8_e5m2_fnuz_sr',
+    'util::f32_to_fp8_e4m3_rne_mode': 'util::f32_to_fp8_e4m3_fnuz_rne_mode',
+    'util::f32_to_bf8_e5m2_rne_mode': 'util::f32_to_bf8_e5m2_fnuz_rne_mode',
+    'util::f32_to_fp8_e4m3_sr_mode': 'util::f32_to_fp8_e4m3_fnuz_sr_mode',
+    'util::f32_to_bf8_e5m2_sr_mode': 'util::f32_to_bf8_e5m2_fnuz_sr_mode',
 }
 
 

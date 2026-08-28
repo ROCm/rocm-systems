@@ -21,8 +21,11 @@
 // SOFTWARE.
 
 #include "gfx11wave.h"
+
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -148,7 +151,11 @@ enum EINST
     einst_final
 };
 
-static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static const instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,               {WaveInstCategory::SALU, 1}            },
     {(int) EINST::smem_rd,            {WaveInstCategory::SMEM, 1}            },
     {(int) EINST::smem_wr,            {WaveInstCategory::SMEM, 1}            },
@@ -260,6 +267,7 @@ static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::vmem_other_simd_11, {WaveInstCategory::VMEM_OTHER_SIMD, 11}},
     {(int) EINST::vmem_other_simd_12, {WaveInstCategory::VMEM_OTHER_SIMD, 12}}
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {

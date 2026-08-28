@@ -825,6 +825,10 @@ graph:
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphBatchMemOpNode_WriteAndWait:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_2
     tags: [node]
@@ -1289,7 +1293,7 @@ graph:
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
-    tags: [query]
+    tags: [query, image]
   Unit_hipGraphDebugDotPrint_Argument_Check:
     <<: *level_2
     tags: [query]
@@ -1434,6 +1438,9 @@ graph:
     <<: *level_2
     tags: [lifecycle]
   Unit_hipGraph_BasicCyclic5:
+    <<: *level_2
+    tags: [lifecycle]
+  Unit_hipGraph_CyclicChildInstantiation:
     <<: *level_2
     tags: [lifecycle]
   Unit_hipGraph_PerfCheck_MemcpyKernelMixCall:

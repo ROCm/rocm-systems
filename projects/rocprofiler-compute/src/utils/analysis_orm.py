@@ -12,6 +12,8 @@ then re-export the .png via draw.io.
 """
 
 import csv
+import json
+import math
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -25,6 +27,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     func,
     select,
@@ -39,7 +42,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "2.0.0"
 
 
 Base = declarative_base()
@@ -67,10 +70,14 @@ class Workload(Base):
     workload_roofline_data_points = relationship(
         "WorkloadRooflineData", back_populates="workload"
     )
+    # Workload can have multiple code objects
+    code_object_stores = relationship("CodeObjectStore", back_populates="workload")
 
 
 class MetricDefinition(Base):
     __tablename__ = f"{PREFIX}metric_definition"
+    # One definition per metric per workload.
+    __table_args__ = (UniqueConstraint("workload_id", "metric_id"),)
 
     metric_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -97,8 +104,9 @@ class KernelRooflineData(Base):
     __tablename__ = f"{PREFIX}kernel_roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
+    # One roofline data point per kernel.
     kernel_uuid = Column(
-        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False, unique=True
     )
     total_flops = Column(Float)
     l0_cache_data = Column(Float)
@@ -113,6 +121,8 @@ class KernelRooflineData(Base):
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
+    # dispatch_id is unique within a kernel.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "dispatch_id"),)
 
     dispatch_uuid = Column(Integer, primary_key=True)
     kernel_uuid = Column(
@@ -129,6 +139,8 @@ class Dispatch(Base):
 
 class Kernel(Base):
     __tablename__ = f"{PREFIX}kernel"
+    # One kernel row per name per workload.
+    __table_args__ = (UniqueConstraint("workload_id", "kernel_name"),)
 
     kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -144,31 +156,165 @@ class Kernel(Base):
     metric_values = relationship("KernelMetricValue", back_populates="kernel")
     # Kernel can have multiple roofline data points
     roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
-    # Kernel can have multiple pc_sampling values
-    pc_sampling_values = relationship("PCsampling", back_populates="kernel")
+    # Kernel can have multiple sampled instruction lines
+    instruction_lines = relationship("InstructionLine", back_populates="kernel")
 
 
-class PCsampling(Base):
-    __tablename__ = f"{PREFIX}pcsampling"
+class CodeObjectStore(Base):
+    __tablename__ = f"{PREFIX}code_object_store"
+    # code_object_id is only unique per process, so pid disambiguates it.
+    __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
-    pc_sampling_uuid = Column(Integer, primary_key=True)
+    code_object_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    pid = Column(Integer)
+    code_object_id = Column(Integer)
+    load_base = Column(Integer, nullable=True)
+
+    # Code object belongs to one workload
+    workload = relationship("Workload", back_populates="code_object_stores")
+    # One code object owns many instruction lines
+    instruction_lines = relationship(
+        "InstructionLine", back_populates="code_object_store"
+    )
+
+
+class InstructionLine(Base):
+    __tablename__ = f"{PREFIX}instruction_line"
+    # A shared code object samples one offset under several kernels.
+    __table_args__ = (
+        UniqueConstraint("code_object_uuid", "code_object_offset", "kernel_uuid"),
+    )
+
+    instruction_uuid = Column(Integer, primary_key=True)
+    code_object_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}code_object_store.code_object_uuid"),
+        nullable=False,
+    )
+    # Attributed per-sample to its dispatch's kernel via dispatch correlation.
     kernel_uuid = Column(
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
-    source = Column(String)
-    instruction = Column(String)
-    count = Column(Integer)
-    offset = Column(Integer)
-    count_issue = Column(Integer)
-    count_stall = Column(Integer)
-    stall_reason = Column(JSON)
+    code_object_offset = Column(Integer)
+    comment = Column(Text)
+    instruction = Column(Text)
 
-    # PCsampling can have one kernel
-    kernel = relationship("Kernel", back_populates="pc_sampling_values")
+    # Instruction line belongs to one code object
+    code_object_store = relationship(
+        "CodeObjectStore", back_populates="instruction_lines"
+    )
+    # Instruction line is attributed to one kernel
+    kernel = relationship("Kernel", back_populates="instruction_lines")
+    # An instruction line has at most one sampled state
+    pc_sample_state = relationship(
+        "PCSampleState", back_populates="instruction_line", uselist=False
+    )
+
+
+class PCSampleState(Base):
+    __tablename__ = f"{PREFIX}pc_sample_state"
+
+    pc_sample_state_uuid = Column(Integer, primary_key=True)
+    instruction_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_line.instruction_uuid"),
+        nullable=False,
+    )
+    total_count = Column(Integer)
+    issue_count = Column(Integer, nullable=True)
+    stall_count = Column(Integer, nullable=True)
+
+    # State belongs to one instruction line
+    instruction_line = relationship("InstructionLine", back_populates="pc_sample_state")
+    # State has many stall-reason counts
+    stall_reasons = relationship(
+        "PCSampleStallReason", back_populates="pc_sample_state"
+    )
+    # State has many instruction-sample-type counts
+    instruction_samples = relationship(
+        "InstructionSample", back_populates="pc_sample_state"
+    )
+
+
+class PCSampleStallReasonLookup(Base):
+    __tablename__ = f"{PREFIX}pc_sample_stall_reason_lookup"
+
+    pc_sample_stall_reason_lookup_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct stall-reason string.
+    text = Column(String, unique=True)
+
+    stall_reasons = relationship(
+        "PCSampleStallReason", back_populates="stall_reason_lookup"
+    )
+
+
+class PCSampleStallReason(Base):
+    __tablename__ = f"{PREFIX}pc_sample_stall_reason"
+
+    pc_sample_stall_reason_uuid = Column(Integer, primary_key=True)
+    pc_sample_state_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
+        nullable=False,
+    )
+    pc_sample_stall_reason_lookup_uuid = Column(
+        Integer,
+        ForeignKey(
+            f"{PREFIX}pc_sample_stall_reason_lookup.pc_sample_stall_reason_lookup_uuid"
+        ),
+        nullable=False,
+    )
+    count = Column(Integer)
+
+    pc_sample_state = relationship("PCSampleState", back_populates="stall_reasons")
+    stall_reason_lookup = relationship(
+        "PCSampleStallReasonLookup", back_populates="stall_reasons"
+    )
+
+
+class InstructionSampleLookup(Base):
+    __tablename__ = f"{PREFIX}instruction_sample_lookup"
+
+    instruction_sample_lookup_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct instruction-type string.
+    text = Column(String, unique=True)
+
+    instruction_samples = relationship(
+        "InstructionSample", back_populates="instruction_sample_lookup"
+    )
+
+
+class InstructionSample(Base):
+    __tablename__ = f"{PREFIX}instruction_sample"
+
+    instruction_sample_uuid = Column(Integer, primary_key=True)
+    pc_sample_state_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
+        nullable=False,
+    )
+    instruction_sample_lookup_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_sample_lookup.instruction_sample_lookup_uuid"),
+        nullable=False,
+    )
+    count = Column(Integer)
+
+    pc_sample_state = relationship(
+        "PCSampleState", back_populates="instruction_samples"
+    )
+    instruction_sample_lookup = relationship(
+        "InstructionSampleLookup", back_populates="instruction_samples"
+    )
 
 
 class KernelMetricValue(Base):
     __tablename__ = f"{PREFIX}kernel_metric_value"
+    # One value per (kernel, metric, value_name e.g. min/max/avg).
+    __table_args__ = (UniqueConstraint("kernel_uuid", "metric_uuid", "value_name"),)
 
     value_uuid = Column(Integer, primary_key=True)
     metric_uuid = Column(
@@ -188,6 +334,8 @@ class KernelMetricValue(Base):
 
 class WorkloadMetricValue(Base):
     __tablename__ = f"{PREFIX}workload_metric_value"
+    # One value per (workload, metric, value_name e.g. min/max/avg).
+    __table_args__ = (UniqueConstraint("workload_id", "metric_uuid", "value_name"),)
 
     value_uuid = Column(Integer, primary_key=True)
     metric_uuid = Column(
@@ -208,8 +356,12 @@ class WorkloadRooflineData(Base):
     __tablename__ = f"{PREFIX}workload_roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
+    # One roofline data point per workload.
     workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+        Integer,
+        ForeignKey(f"{PREFIX}workload.workload_id"),
+        nullable=False,
+        unique=True,
     )
     total_flops = Column(Float)
     l0_cache_data = Column(Float)
@@ -236,6 +388,7 @@ class Database:
     _engine: Optional[Engine] = None
     _db_name: Optional[str] = None
     _view_sql_cache: Optional[dict[str, str]] = None
+    _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
 
     @classmethod
     def init(cls, db_name: str) -> str:
@@ -245,10 +398,14 @@ class Database:
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
+            json_serializer=lambda value: json.dumps(
+                cls._json_sanitize(value), allow_nan=False
+            ),
         )
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
         cls._db_name = db_name
+        cls._type_cache = {}
         # Compile views eagerly so a broken definition fails at init time.
         cls._view_sql_cache = cls._compile_view_sql()
         console_debug("SQLite database initialized in memory")
@@ -257,6 +414,19 @@ class Database:
     @classmethod
     def get_session(cls) -> Optional[Session]:
         return cls._session
+
+    @classmethod
+    def get_or_create_type(cls, orm_class: type[Base], text: str) -> Base:
+        """Return a de-duplicated lookup-table row for the text, creating it once.
+
+        Deduplicates DB-wide across workloads. orm_class must be a lookup table
+        with a unique text column.
+        """
+        key = (orm_class, text)
+        if key not in cls._type_cache:
+            cls._type_cache[key] = orm_class(text=text)
+            cls._session.add(cls._type_cache[key])
+        return cls._type_cache[key]
 
     @classmethod
     def commit(cls) -> None:
@@ -330,6 +500,17 @@ class Database:
         return dict(cls._view_sql_cache)
 
     @staticmethod
+    def _json_sanitize(value: object) -> object:
+        """Recursively replace non-finite floats (NaN, Inf) with None for valid JSON."""
+        if isinstance(value, dict):
+            return {key: Database._json_sanitize(v) for key, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Database._json_sanitize(item) for item in value]
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+
+    @staticmethod
     def _compile_view_sql() -> dict[str, str]:
         """Build and compile the analysis views to SQLite SQL strings."""
         median_sort_subquery = (
@@ -363,6 +544,22 @@ class Database:
                 ])
             )
             .group_by(median_sort_subquery.c.kernel_uuid)
+        ).subquery()
+
+        stall_reason_json_subquery = (
+            select(
+                PCSampleStallReason.pc_sample_state_uuid,
+                func.json_group_object(
+                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
+                ).label("stall_reason"),
+            )
+            .select_from(PCSampleStallReason)
+            .join(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .group_by(PCSampleStallReason.pc_sample_state_uuid)
         ).subquery()
 
         definitions: dict[str, Select[Any]] = {
@@ -441,6 +638,34 @@ class Database:
             .join(
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
+            ),
+            "pc_sampling": select(
+                CodeObjectStore.workload_id.label("workload_id"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.kernel_name,
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction,
+                InstructionLine.comment.label("source"),
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count.label("count_issue"),
+                PCSampleState.stall_count.label("count_stall"),
+                stall_reason_json_subquery.c.stall_reason,
+            )
+            .select_from(PCSampleState)
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            # host_trap samples have no stall reasons, so the subquery is empty.
+            .outerjoin(
+                stall_reason_json_subquery,
+                PCSampleState.pc_sample_state_uuid
+                == stall_reason_json_subquery.c.pc_sample_state_uuid,
             ),
         }
 

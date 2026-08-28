@@ -1520,8 +1520,8 @@ typedef struct {
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;                         // new in v1
-  uint32_t mem_activity_acc;                         // new in v1
+  uint64_t gfx_activity_acc;                         // new in v1
+  uint64_t mem_activity_acc;                         // new in v1
   uint16_t temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
 
   /*
@@ -1589,10 +1589,10 @@ typedef struct {
   uint16_t jpeg_activity[RSMI_MAX_NUM_JPEG_ENGS];
 
   // PCIE NAK sent accumulated count
-  uint32_t pcie_nak_sent_count_acc;
+  uint64_t pcie_nak_sent_count_acc;
 
   // PCIE NAK received accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;
+  uint64_t pcie_nak_rcvd_count_acc;
 
   /*
    * v1.6 additions
@@ -1646,7 +1646,7 @@ typedef struct {
   struct amdgpu_xcp_metrics_t xcp_stats[RSMI_MAX_NUM_XCP];
 
   /* PCIE other end recovery counter */
-  uint32_t pcie_lc_perf_other_end_recovery;
+  uint64_t pcie_lc_perf_other_end_recovery;
 
   /*
    * v1.7 additions
@@ -5852,15 +5852,16 @@ rsmi_status_t rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool* enabled);
  *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
- *  Use rsmi_set_gpu_ptl_enable_with_formats()
+ *  Use rsmi_set_gpu_ptl_formats()
  *  for more control over the preferred data formats when enabling.
  *
- *  @param[in] processor_handle Device to configure
+ *  @param[in] dv_ind a device index
  *
- *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  @param[in] enabled Boolean flag: true to enable PTL with default formats,
  *  false to disable PTL
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  */
 rsmi_status_t rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
 

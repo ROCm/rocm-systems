@@ -25,7 +25,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 

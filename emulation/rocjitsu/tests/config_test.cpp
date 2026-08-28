@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
+#include "scoped_temp.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -26,14 +29,23 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
-
+#include <string_view>
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
+
+test::ScopedTempFile write_temp_config(std::string_view json) {
+  test::ScopedTempFile file("rocjitsu-config-");
+  file.write(json);
+  return file;
+}
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
@@ -75,7 +87,10 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                                         rdna4.device.revision_id),
             0x51u);
   EXPECT_EQ(kmd::gfx_target_name(rdna4.device.gfx_target_version), "gfx1201");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
   EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
   EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
@@ -87,7 +102,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
@@ -121,7 +136,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
@@ -155,7 +170,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
@@ -307,6 +322,322 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
   EXPECT_EQ(loaded.device.debug_prop, 3119u);
 }
 
+TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "host_gpu_id": 8716,
+        "log_level": 2,
+        "signal_backtrace": true,
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "vendor_id": 4098,
+          "device_id": 30112,
+          "family_id": 160,
+          "unique_id": 5929628898254127105,
+          "marketing_name": "AMD Instinct MI350X",
+          "drm_render_minor": 191,
+          "simd_count": 64,
+          "num_shader_engines": 4,
+          "num_shader_arrays_per_engine": 2,
+          "num_cu_per_sh": 4,
+          "local_mem_size": 309237645312
+        }
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(dbt.log_level, 2);
+  EXPECT_TRUE(dbt.signal_backtrace);
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
+  EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
+  EXPECT_EQ(dbt.guest_device.simd_count, dbt.guest_device.num_shader_engines *
+                                             dbt.guest_device.num_cu_per_sh *
+                                             dbt.guest_device.simd_per_cu);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  // Revisions default to Unspecified when the config omits them.
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
+  // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
+  // select the B0-to-A0 translation profile.
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx1250",
+        "host_isa": "gfx1250",
+        "guest_revision": "gfx1250_b0",
+        "host_revision": "gfx1250_a0"
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
+}
+
+TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "simd_count": 1024,
+          "num_shader_engines": 4,
+          "num_cu_per_sh": 4,
+          "simd_per_cu": 4
+        }
+      }
+    })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
+  std::ifstream base(CONFIG_DIR_PATH + "/gfx1201_r9700.json");
+  ASSERT_TRUE(base.is_open());
+  std::string json((std::istreambuf_iterator<char>(base)), std::istreambuf_iterator<char>());
+  const size_t insert_pos = json.find('{');
+  ASSERT_NE(insert_pos, std::string::npos);
+  json.insert(insert_pos + 1, R"(
+    "dbt_guest": {
+      "enabled": true,
+      "guest_isa": "gfx950",
+      "host_isa": "gfx1201",
+      "host_gpu_id": 8716,
+      "log_level": 2,
+      "signal_backtrace": true,
+      "guest_device": {
+        "gpu_id": 38144,
+        "gfx_target_version": 90500,
+        "vendor_id": 4098,
+        "device_id": 30112,
+        "family_id": 160,
+        "unique_id": 5929628898254127105,
+        "marketing_name": "AMD Instinct MI350X",
+        "drm_render_minor": 191,
+        "simd_count": 64,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 4,
+        "local_mem_size": 309237645312
+      }
+    },
+  )");
+
+  const auto file = write_temp_config(json);
+  auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
+
+  EXPECT_TRUE(loaded.dbt_guest.enabled);
+  EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
+  EXPECT_EQ(loaded.dbt_guest.host.isa, "gfx1201");
+  EXPECT_EQ(loaded.dbt_guest.host.gpu_id, 8716u);
+  EXPECT_EQ(loaded.dbt_guest.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(loaded.dbt_guest.log_level, 2);
+  EXPECT_TRUE(loaded.dbt_guest.signal_backtrace);
+  ASSERT_TRUE(loaded.dbt_guest.guest_device.present);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.marketing_name, "AMD Instinct MI350X");
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
+  const auto file = write_temp_config("{}");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_FALSE(dbt.enabled);
+  EXPECT_TRUE(dbt.guest_isa.empty());
+  EXPECT_TRUE(dbt.host.isa.empty());
+  EXPECT_EQ(dbt.host.gpu_id, 0u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(dbt.log_level, 0);
+  EXPECT_FALSE(dbt.signal_backtrace);
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx1201"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
+  const auto file = write_temp_config(R"({ "dbt_guest": )");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
+  const auto external_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
+  const auto self_contained_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator"
+        }
+      })");
+
+  auto external = config::load_dbt_guest_config_from_file(external_file.path());
+  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_file.path());
+
+  EXPECT_EQ(external.host.isa, "gfx942");
+  EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_EQ(external.host.simulator_config_path, "gfx942_cdna3_kmd.json");
+  EXPECT_EQ(self_contained.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_TRUE(self_contained.host.simulator_config_path.empty());
+}
+
+TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+}
+
+TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": ""
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backed": "simulator"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
+  config::DbtGuestConfig guest;
+  guest.enabled = true;
+  guest.host.backend = config::DbtExecutionBackend::Simulator;
+  guest.guest_device.present = true;
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 32;
+  guest.guest_device.max_waves_per_simd = 8;
+  guest.guest_device.wave_front_size = 64;
+
+  config::KfdDeviceConfig simulator;
+  simulator.present = true;
+  simulator.lds_size_kb = 64;
+  simulator.max_slots_scratch_cu = 32;
+  simulator.max_waves_per_simd = 8;
+  simulator.wave_front_size = 64;
+
+  EXPECT_NO_THROW(config::validate_dbt_simulator_device_limits(guest, simulator));
+  guest.guest_device.lds_size_kb = 65;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 33;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
+  const auto simulator_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "simulator"
+        }
+      })");
+  const auto hardware_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware",
+          "simulator_config": "ignored.json"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_file.path()));
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_file.path()));
+}
+
+TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", ""), "/a/b/dbt.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "sim.json"), "/a/b/sim.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "/abs/sim.json"),
+            "/abs/sim.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "../c/./sim.json"),
+            "/a/c/sim.json");
+}
+
+TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "magic"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
+  const auto file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
     "vm":{"arch":"gfx1250"},
@@ -371,7 +702,11 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
   loaded.wire_links(engine.topology());
-  engine.build();
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
+  soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
   using namespace rocr::llvm::amdhsa;
@@ -394,12 +729,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   engine.step();
 
-  // After one step, the doorbell event dispatched wavefronts to CUs
-  // (allocated but not yet executed). Verify round-robin distribution.
+  // After one step, the doorbell event dispatched wavefronts to CUs. Count them
+  // via the dispatch hook (fired at placement) so the check is independent of when
+  // waves execute and free themselves. Verify round-robin distribution.
   EXPECT_EQ(xcd->command_processor()->dispatched_count(), 1u);
   auto *se = soc->xcd(0)->shader_engine(0);
-  EXPECT_EQ(se->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(se->compute_unit(1)->num_wfs(), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
@@ -437,15 +773,13 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   soc->memory()->write32(0x1000, 0xDEADBEEF);
   soc->memory()->write64(0x2000, 0x0123456789ABCDEFULL);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint.bin";
-  config::save_checkpoint(path, *soc, 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
+  auto restored = config::restore_checkpoint(checkpoint.path());
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
-
-  std::filesystem::remove(path);
 }
 
 TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
@@ -488,11 +822,11 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
   cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint_accvgpr.bin";
-  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
+  auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
   ASSERT_NE(restored_vm, nullptr);
   auto *restored_cu = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0);
@@ -505,8 +839,114 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
+}
 
-  std::filesystem::remove(path);
+TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"rdna4"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"128"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec_raw(0xDEADBEEF0000000FULL);
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->exec(), 0xFULL);
+  EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+}
+
+TEST(CheckpointTest, SaveAndRestoreHwregState) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"gfx1250"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kStatus = 0xA5A55A5Au;
+  constexpr uint32_t kWaveSchedMode = 0x5A5AA5A5u;
+  wf->set_status_raw(kStatus);
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  wf->set_wave_sched_mode_raw(kWaveSchedMode);
+  ASSERT_TRUE(wf->fp16_ovfl());
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->status_raw(), kStatus);
+  EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
+  EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
@@ -541,6 +981,27 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
+  test::ScopedTempDirectory sink_dir("rocjitsu-plugin-lifecycle-");
+  const std::filesystem::path sink_path(sink_dir.path());
+
+  rj_vm_t *handle = nullptr;
+  ASSERT_EQ(
+      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
+      ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  const std::string plugin_config = std::format(
+      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_path.string());
+  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(handle);
+
+  std::ifstream profile(sink_path / "profile.log");
+  const std::string output{std::istreambuf_iterator<char>(profile),
+                           std::istreambuf_iterator<char>()};
+  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
 }
 
 TEST(CApiTest, InvalidArguments) {

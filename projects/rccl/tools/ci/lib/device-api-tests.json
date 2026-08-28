@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Device-API benchmark matrix for run-device-api-ci.sh.",
+    "Add a mode by appending a suites entry. Each suite runs every bin as:",
+    "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ./build/<bin> $bench_args <args>",
+    "bench_args: common bench flags | base_env: -x on every run",
+    "debug_env:  -x added only when RCCL_CI_DEBUG=1",
+    "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
+    "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout.",
+    "suites:     [ { name, bins:[...], args, env:[...] (optional) } ]",
+    "Switched from YAML to JSON because PyYAML is not installed on the CI hosts."
+  ],
+
+  "bench_args": "-b 8 -e 1G -f 2 -g 1",
+
+  "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1"],
+
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
+
+  "suites": [
+    {
+      "name": "symmetric",
+      "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
+      "args": "-R 2"
+    },
+    {
+      "name": "lsa-d1",
+      "bins": ["all_reduce_perf"],
+      "args": "-R 2 -D 1"
+    },
+    {
+      "name": "lsa-d2",
+      "bins": ["all_reduce_perf"],
+      "args": "-R 2 -D 2"
+    },
+    {
+      "name": "gin-d3",
+      "bins": ["alltoall_perf"],
+      "args": "-R 2 -D 3",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
+      "name": "gin-d4",
+      "bins": ["alltoall_perf"],
+      "args": "-R 2 -D 4",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    }
+  ]
+}

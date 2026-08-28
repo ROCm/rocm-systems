@@ -32,6 +32,9 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+// Count how many of the retired/bad-page records are pending retirement.
+// Returns 0 when records is null or count is 0.
+uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count);
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,

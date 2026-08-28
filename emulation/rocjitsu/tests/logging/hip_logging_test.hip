@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// End-to-end test for the kernel logging plugin (RJ_LOG=1).
+// End-to-end test for the config-selected kernel logging plugin.
 // Launches a simple kernel and verifies the log output contains
 // expected dispatch information.
 

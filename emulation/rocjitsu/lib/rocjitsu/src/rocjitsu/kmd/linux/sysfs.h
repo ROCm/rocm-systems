@@ -7,6 +7,8 @@
 #ifndef ROCJITSU_KMD_LINUX_SYSFS_H_
 #define ROCJITSU_KMD_LINUX_SYSFS_H_
 
+#include "rocjitsu/config/kfd_device_config.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -114,6 +116,9 @@ public:
   /// @brief Remove the generated directories.
   void cleanup();
 
+  /// @brief Drop ownership of inherited paths without removing them.
+  void release_after_fork();
+
 private:
   std::string topology_dir_;
   std::string drm_dir_;
@@ -128,6 +133,9 @@ private:
                       uint32_t total_gpus);
   void write_drm_tree(const std::vector<GpuInfo> &gpus);
 };
+
+/// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
 
 } // namespace rocjitsu
 

@@ -27,7 +27,7 @@
 #include "lib/common/stringize_arg.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>

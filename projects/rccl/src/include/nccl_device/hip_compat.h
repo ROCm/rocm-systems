@@ -21,13 +21,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
-  #define NCCL_HIP_PLATFORM 1
-  #define NCCL_DEVICE_COMPILE 1
+#define NCCL_HIP_PLATFORM 1
+#define NCCL_DEVICE_COMPILE 1
 #elif defined(__CUDACC__)
-  #define NCCL_CUDA_PLATFORM 1
-  #define NCCL_DEVICE_COMPILE 1
+#define NCCL_CUDA_PLATFORM 1
+#define NCCL_DEVICE_COMPILE 1
 #else
-  #define NCCL_DEVICE_COMPILE 0
+#define NCCL_DEVICE_COMPILE 0
 #endif
 
 // Backward-compat aliases for the IR bitcode binding layer (PR #6435).
@@ -53,7 +53,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
-  #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -61,17 +61,17 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #if NCCL_DEVICE_COMPILE
-  #define NCCL_DEVICE_INLINE __device__ __forceinline__
-  #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
+#define NCCL_DEVICE_INLINE __device__ __forceinline__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 #else
-  #ifndef __host__
-    #define __host__
-  #endif
-  #ifndef __device__
-    #define __device__
-  #endif
-  #define NCCL_DEVICE_INLINE
-  #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#ifndef __host__
+#define __host__
+#endif
+#ifndef __device__
+#define __device__
+#endif
+#define NCCL_DEVICE_INLINE
+#define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -82,30 +82,30 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #if defined(__CUDA_ARCH__)
-  #define NCCL_DEVICE_ARCH __CUDA_ARCH__
+#define NCCL_DEVICE_ARCH __CUDA_ARCH__
 #elif defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__
   // Map HIP GFX versions to a comparable value
   // MI200 (gfx90a) and MI300 (gfx942) are roughly Hopper-class
-  #if defined(__gfx942__) || defined(__gfx950__)
-    #define NCCL_DEVICE_ARCH 942  // MI300 class
-  #elif defined(__gfx90a__)
-    #define NCCL_DEVICE_ARCH 90   // MI200 class
-  #elif defined(__gfx908__)
-    #define NCCL_DEVICE_ARCH 80   // MI100 class
-  #else
-    #define NCCL_DEVICE_ARCH 70   // Generic GCN
-  #endif
+#if defined(__gfx942__) || defined(__gfx950__)
+#define NCCL_DEVICE_ARCH 942  // MI300 class
+#elif defined(__gfx90a__)
+#define NCCL_DEVICE_ARCH 90   // MI200 class
+#elif defined(__gfx908__)
+#define NCCL_DEVICE_ARCH 80   // MI100 class
 #else
-  #define NCCL_DEVICE_ARCH 0
+#define NCCL_DEVICE_ARCH 70   // Generic GCN
+#endif
+#else
+#define NCCL_DEVICE_ARCH 0
 #endif
 
 #define NCCL_CHECK_CUDA_ARCH NCCL_DEVICE_ARCH
 
 // Hopper+ features (multimem, etc.) - NVIDIA only
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-  #define NCCL_ARCH_HAS_MULTIMEM 1
+#define NCCL_ARCH_HAS_MULTIMEM 1
 #else
-  #define NCCL_ARCH_HAS_MULTIMEM 0
+#define NCCL_ARCH_HAS_MULTIMEM 0
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -114,14 +114,14 @@
 
 #if defined(NCCL_HIP_PLATFORM)
   // AMD GPUs use 64-wide waves (or 32 in wave32 mode)
-  #if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || \
-      defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__)
-    #define NCCL_WARP_SIZE 32
-  #else
-    #define NCCL_WARP_SIZE 64
-  #endif
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || defined(__gfx1101__) || \
+  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__)
+#define NCCL_WARP_SIZE 32
 #else
-  #define NCCL_WARP_SIZE 32
+#define NCCL_WARP_SIZE 64
+#endif
+#else
+#define NCCL_WARP_SIZE 32
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,20 +147,25 @@ enum memory_order {
 
 // Thread scope enumeration
 enum thread_scope {
-  thread_scope_thread   = 0,
-  thread_scope_block    = 1,
-  thread_scope_device   = 2,
-  thread_scope_system   = 3
+  thread_scope_thread = 0,
+  thread_scope_block = 1,
+  thread_scope_device = 2,
+  thread_scope_system = 3
 };
 
 // Map thread_scope to HIP memory scope
 NCCL_DEVICE_INLINE constexpr int toHipMemoryScope(thread_scope scope) {
   switch (scope) {
-    case thread_scope_thread: return __HIP_MEMORY_SCOPE_SINGLETHREAD;
-    case thread_scope_block:  return __HIP_MEMORY_SCOPE_WORKGROUP;
-    case thread_scope_device: return __HIP_MEMORY_SCOPE_AGENT;
-    case thread_scope_system: return __HIP_MEMORY_SCOPE_SYSTEM;
-    default:                  return __HIP_MEMORY_SCOPE_SYSTEM;
+  case thread_scope_thread:
+    return __HIP_MEMORY_SCOPE_SINGLETHREAD;
+  case thread_scope_block:
+    return __HIP_MEMORY_SCOPE_WORKGROUP;
+  case thread_scope_device:
+    return __HIP_MEMORY_SCOPE_AGENT;
+  case thread_scope_system:
+    return __HIP_MEMORY_SCOPE_SYSTEM;
+  default:
+    return __HIP_MEMORY_SCOPE_SYSTEM;
   }
 }
 
@@ -170,7 +175,7 @@ NCCL_DEVICE_INLINE constexpr int toHipMemoryScope(thread_scope scope) {
 // Provides cuda::atomic_ref-compatible interface using HIP atomics
 ////////////////////////////////////////////////////////////////////////////////
 
-template<typename T, thread_scope Scope = thread_scope_system>
+template <typename T, thread_scope Scope = thread_scope_system>
 struct atomic_ref {
   T* ptr;
 
@@ -178,12 +183,10 @@ struct atomic_ref {
 
   NCCL_DEVICE_INLINE void store(T val, memory_order order = memory_order_seq_cst) const {
     if constexpr (sizeof(T) == 4) {
-      __hip_atomic_store(reinterpret_cast<unsigned int*>(ptr),
-                         *reinterpret_cast<unsigned int*>(&val),
-                         order, toHipMemoryScope(Scope));
+      __hip_atomic_store(reinterpret_cast<unsigned int*>(ptr), *reinterpret_cast<unsigned int*>(&val), order,
+                         toHipMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
-      __hip_atomic_store(reinterpret_cast<unsigned long long*>(ptr),
-                         *reinterpret_cast<unsigned long long*>(&val),
+      __hip_atomic_store(reinterpret_cast<unsigned long long*>(ptr), *reinterpret_cast<unsigned long long*>(&val),
                          order, toHipMemoryScope(Scope));
     } else {
       __atomic_store_n(ptr, val, order);
@@ -193,12 +196,11 @@ struct atomic_ref {
   NCCL_DEVICE_INLINE T load(memory_order order = memory_order_seq_cst) const {
     T result;
     if constexpr (sizeof(T) == 4) {
-      unsigned int tmp = __hip_atomic_load(reinterpret_cast<unsigned int*>(ptr),
-                                           order, toHipMemoryScope(Scope));
+      unsigned int tmp = __hip_atomic_load(reinterpret_cast<unsigned int*>(ptr), order, toHipMemoryScope(Scope));
       result = *reinterpret_cast<T*>(&tmp);
     } else if constexpr (sizeof(T) == 8) {
-      unsigned long long tmp = __hip_atomic_load(reinterpret_cast<unsigned long long*>(ptr),
-                                                  order, toHipMemoryScope(Scope));
+      unsigned long long tmp =
+        __hip_atomic_load(reinterpret_cast<unsigned long long*>(ptr), order, toHipMemoryScope(Scope));
       result = *reinterpret_cast<T*>(&tmp);
     } else {
       result = __atomic_load_n(ptr, order);
@@ -219,22 +221,42 @@ struct atomic_ref {
 
 // __builtin_amdgcn_fence requires compile-time constant arguments, so we
 // dispatch order x scope with a helper macro instead of a runtime switch.
-#define NCCL_HIP_FENCE_SCOPE(ORD, scope) do { \
+#define NCCL_HIP_FENCE_SCOPE(ORD, scope) \
+  do { \
     switch (scope) { \
-      case thread_scope_thread:  __atomic_signal_fence(ORD); break; \
-      case thread_scope_block:   __builtin_amdgcn_fence(ORD, "workgroup"); break; \
-      case thread_scope_device:  __builtin_amdgcn_fence(ORD, "agent"); break; \
-      case thread_scope_system: default: __builtin_amdgcn_fence(ORD, ""); break; \
+    case thread_scope_thread: \
+      __atomic_signal_fence(ORD); \
+      break; \
+    case thread_scope_block: \
+      __builtin_amdgcn_fence(ORD, "workgroup"); \
+      break; \
+    case thread_scope_device: \
+      __builtin_amdgcn_fence(ORD, "agent"); \
+      break; \
+    case thread_scope_system: \
+    default: \
+      __builtin_amdgcn_fence(ORD, ""); \
+      break; \
     } \
-  } while(0)
+  } while (0)
 
 NCCL_DEVICE_INLINE void atomic_thread_fence(memory_order order, thread_scope scope = thread_scope_device) {
   switch (order) {
-    case memory_order_relaxed: break;
-    case memory_order_acquire: NCCL_HIP_FENCE_SCOPE(__ATOMIC_ACQUIRE, scope); break;
-    case memory_order_release: NCCL_HIP_FENCE_SCOPE(__ATOMIC_RELEASE, scope); break;
-    case memory_order_acq_rel: NCCL_HIP_FENCE_SCOPE(__ATOMIC_ACQ_REL, scope); break;
-    case memory_order_seq_cst: default: NCCL_HIP_FENCE_SCOPE(__ATOMIC_SEQ_CST, scope); break;
+  case memory_order_relaxed:
+    break;
+  case memory_order_acquire:
+    NCCL_HIP_FENCE_SCOPE(__ATOMIC_ACQUIRE, scope);
+    break;
+  case memory_order_release:
+    NCCL_HIP_FENCE_SCOPE(__ATOMIC_RELEASE, scope);
+    break;
+  case memory_order_acq_rel:
+    NCCL_HIP_FENCE_SCOPE(__ATOMIC_ACQ_REL, scope);
+    break;
+  case memory_order_seq_cst:
+  default:
+    NCCL_HIP_FENCE_SCOPE(__ATOMIC_SEQ_CST, scope);
+    break;
   }
 }
 
@@ -244,20 +266,20 @@ NCCL_DEVICE_INLINE void atomic_thread_fence(memory_order order, thread_scope sco
 
 // Bring into cuda namespace for source compatibility
 namespace cuda {
-  using nccl_hip::memory_order;
-  using nccl_hip::memory_order_relaxed;
-  using nccl_hip::memory_order_acquire;
-  using nccl_hip::memory_order_release;
-  using nccl_hip::memory_order_acq_rel;
-  using nccl_hip::memory_order_seq_cst;
-  using nccl_hip::thread_scope;
-  using nccl_hip::thread_scope_thread;
-  using nccl_hip::thread_scope_block;
-  using nccl_hip::thread_scope_device;
-  using nccl_hip::thread_scope_system;
-  using nccl_hip::atomic_ref;
-  using nccl_hip::atomic_thread_fence;
-}
+using nccl_hip::memory_order;
+using nccl_hip::memory_order_relaxed;
+using nccl_hip::memory_order_acquire;
+using nccl_hip::memory_order_release;
+using nccl_hip::memory_order_acq_rel;
+using nccl_hip::memory_order_seq_cst;
+using nccl_hip::thread_scope;
+using nccl_hip::thread_scope_thread;
+using nccl_hip::thread_scope_block;
+using nccl_hip::thread_scope_device;
+using nccl_hip::thread_scope_system;
+using nccl_hip::atomic_ref;
+using nccl_hip::atomic_thread_fence;
+} // namespace cuda
 
 #else // CUDA platform
 
@@ -286,12 +308,12 @@ NCCL_DEVICE_INLINE int nccl_lane_id() {
 // A 64-bit variant would be needed for full wave64 cooperative groups.
 NCCL_DEVICE_INLINE unsigned int nccl_lanemask_lt() {
   int lane = __lane_id();
-  #if NCCL_WARP_SIZE == 64
-    if (lane >= 32) return 0xFFFFFFFFu;
-    return (1u << lane) - 1;
-  #else
-    return (1u << lane) - 1;
-  #endif
+#if NCCL_WARP_SIZE == 64
+  if (lane >= 32) return 0xFFFFFFFFu;
+  return (1u << lane) - 1;
+#else
+  return (1u << lane) - 1;
+#endif
 }
 
 // Warp sync - AMD CDNA waves execute in lockstep (no divergence-convergence
@@ -340,7 +362,8 @@ NCCL_DEVICE_INLINE int __shfl_sync(unsigned int mask, int val, int srcLane, int 
   (void)mask;
   return __shfl(val, srcLane, width);
 }
-NCCL_DEVICE_INLINE unsigned int __shfl_sync(unsigned int mask, unsigned int val, int srcLane, int width = NCCL_WARP_SIZE) {
+NCCL_DEVICE_INLINE unsigned int __shfl_sync(unsigned int mask, unsigned int val, int srcLane,
+                                            int width = NCCL_WARP_SIZE) {
   (void)mask;
   return __shfl(val, srcLane, width);
 }
@@ -366,7 +389,8 @@ NCCL_DEVICE_INLINE void __syncwarp(unsigned int mask) {
 
 // __barrier_sync_count — CUDA named barrier; HIP only has s_barrier.
 NCCL_DEVICE_INLINE void __barrier_sync_count(int id, int count) {
-  (void)id; (void)count;
+  (void)id;
+  (void)count;
   __syncthreads();
 }
 
@@ -458,7 +482,7 @@ inline uint64_t nccl_umul64hi(uint64_t a, uint64_t b) {
 
 // Load through constant cache (ldg) - HIP doesn't have direct equivalent
 // Just use regular load
-template<typename T>
+template <typename T>
 NCCL_DEVICE_INLINE T nccl_ldg(const T* ptr) {
   return *ptr;
 }
@@ -468,45 +492,56 @@ NCCL_DEVICE_INLINE T nccl_ldg(const T* ptr) {
 // DWORDX4 detection replicated from rccl_ptr.h (hip_compat.h must be
 // self-contained and cannot include rccl_ptr.h).
 #if defined(__HIP_DEVICE_COMPILE__)
-  #if (defined(__gfx942__) || defined(__gfx950__)) \
-      && __has_builtin(__builtin_amdgcn_global_load_b128) \
-      && __has_builtin(__builtin_amdgcn_global_store_b128) \
-      && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
-    #define NCCL_COMPAT_HAVE_DWORDX4 1
-  #else
-    #define NCCL_COMPAT_HAVE_DWORDX4 0
-  #endif
+#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && \
+  __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#define NCCL_COMPAT_HAVE_DWORDX4 1
 #else
-  #define NCCL_COMPAT_HAVE_DWORDX4 0
+#define NCCL_COMPAT_HAVE_DWORDX4 0
+#endif
+#else
+#define NCCL_COMPAT_HAVE_DWORDX4 0
 #endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int nccl_compat_v4u;
 typedef __attribute__((address_space(1))) nccl_compat_v4u* nccl_compat_v4u_gptr;
 
 NCCL_DEVICE_INLINE void nccl_st_volatile_v4_u32(void* ptr, uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3) {
-  union { nccl_compat_v4u vec; uint32_t u32[4]; } u;
-  u.u32[0] = v0; u.u32[1] = v1; u.u32[2] = v2; u.u32[3] = v3;
-  #if NCCL_COMPAT_HAVE_DWORDX4
-    __builtin_amdgcn_global_store_b128((nccl_compat_v4u_gptr)ptr, u.vec, "");
-  #else
-    typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;
-    uint64_t* p64 = reinterpret_cast<uint64_t*>(ptr);
-    __builtin_nontemporal_store(*reinterpret_cast<uint64_t*>(&u.u32[0]), (u64_gptr_t)p64);
-    __builtin_nontemporal_store(*reinterpret_cast<uint64_t*>(&u.u32[2]), (u64_gptr_t)(p64 + 1));
-  #endif
+  union {
+    nccl_compat_v4u vec;
+    uint32_t u32[4];
+  } u;
+  u.u32[0] = v0;
+  u.u32[1] = v1;
+  u.u32[2] = v2;
+  u.u32[3] = v3;
+#if NCCL_COMPAT_HAVE_DWORDX4
+  __builtin_amdgcn_global_store_b128((nccl_compat_v4u_gptr)ptr, u.vec, "");
+#else
+  typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;
+  uint64_t* p64 = reinterpret_cast<uint64_t*>(ptr);
+  __builtin_nontemporal_store(*reinterpret_cast<uint64_t*>(&u.u32[0]), (u64_gptr_t)p64);
+  __builtin_nontemporal_store(*reinterpret_cast<uint64_t*>(&u.u32[2]), (u64_gptr_t)(p64 + 1));
+#endif
 }
 
-NCCL_DEVICE_INLINE void nccl_ld_volatile_v4_u32(const void* ptr, uint32_t& v0, uint32_t& v1, uint32_t& v2, uint32_t& v3) {
-  union { nccl_compat_v4u vec; uint32_t u32[4]; } u;
-  #if NCCL_COMPAT_HAVE_DWORDX4
-    u.vec = __builtin_amdgcn_global_load_b128((nccl_compat_v4u_gptr)ptr, "");
-  #else
-    typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;
-    const uint64_t* p64 = reinterpret_cast<const uint64_t*>(ptr);
-    *reinterpret_cast<uint64_t*>(&u.u32[0]) = __builtin_nontemporal_load((u64_gptr_t)p64);
-    *reinterpret_cast<uint64_t*>(&u.u32[2]) = __builtin_nontemporal_load((u64_gptr_t)(p64 + 1));
-  #endif
-  v0 = u.u32[0]; v1 = u.u32[1]; v2 = u.u32[2]; v3 = u.u32[3];
+NCCL_DEVICE_INLINE void nccl_ld_volatile_v4_u32(const void* ptr, uint32_t& v0, uint32_t& v1, uint32_t& v2,
+                                                uint32_t& v3) {
+  union {
+    nccl_compat_v4u vec;
+    uint32_t u32[4];
+  } u;
+#if NCCL_COMPAT_HAVE_DWORDX4
+  u.vec = __builtin_amdgcn_global_load_b128((nccl_compat_v4u_gptr)ptr, "");
+#else
+  typedef __attribute__((address_space(1))) uint64_t* u64_gptr_t;
+  const uint64_t* p64 = reinterpret_cast<const uint64_t*>(ptr);
+  *reinterpret_cast<uint64_t*>(&u.u32[0]) = __builtin_nontemporal_load((u64_gptr_t)p64);
+  *reinterpret_cast<uint64_t*>(&u.u32[2]) = __builtin_nontemporal_load((u64_gptr_t)(p64 + 1));
+#endif
+  v0 = u.u32[0];
+  v1 = u.u32[1];
+  v2 = u.u32[2];
+  v3 = u.u32[3];
 }
 
 // GPU-scope (agent) acquire fence
@@ -533,20 +568,18 @@ NCCL_DEVICE_INLINE void nccl_multimem_red_relaxed_add_u32(void* ptr) {
 
 #else // CUDA platform
 
-template<typename T>
+template <typename T>
 NCCL_DEVICE_INLINE T nccl_ldg(const T* ptr) {
   return __ldg(ptr);
 }
 
 NCCL_DEVICE_INLINE void nccl_st_volatile_v4_u32(void* ptr, uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3) {
-  asm volatile("st.volatile.v4.u32 [%0],{%1,%2,%3,%4};" ::
-    "l"(ptr), "r"(v0), "r"(v1), "r"(v2), "r"(v3));
+  asm volatile("st.volatile.v4.u32 [%0],{%1,%2,%3,%4};" ::"l"(ptr), "r"(v0), "r"(v1), "r"(v2), "r"(v3));
 }
 
-NCCL_DEVICE_INLINE void nccl_ld_volatile_v4_u32(const void* ptr, uint32_t& v0, uint32_t& v1, uint32_t& v2, uint32_t& v3) {
-  asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];"
-    : "=r"(v0), "=r"(v1), "=r"(v2), "=r"(v3)
-    : "l"(ptr));
+NCCL_DEVICE_INLINE void nccl_ld_volatile_v4_u32(const void* ptr, uint32_t& v0, uint32_t& v1, uint32_t& v2,
+                                                uint32_t& v3) {
+  asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];" : "=r"(v0), "=r"(v1), "=r"(v2), "=r"(v3) : "l"(ptr));
 }
 
 NCCL_DEVICE_INLINE void nccl_fence_acq_gpu() {
@@ -561,19 +594,19 @@ NCCL_DEVICE_INLINE void nccl_fence_rel_gpu() {
 }
 
 NCCL_DEVICE_INLINE void nccl_multimem_red_release_add_u32(void* ptr) {
-  #if __CUDA_ARCH__ >= 900
-    asm volatile("multimem.red.release.sys.add.u32 [%0],1;" :: "l"(ptr));
-  #else
-    (void)ptr;
-  #endif
+#if __CUDA_ARCH__ >= 900
+  asm volatile("multimem.red.release.sys.add.u32 [%0],1;" ::"l"(ptr));
+#else
+  (void)ptr;
+#endif
 }
 
 NCCL_DEVICE_INLINE void nccl_multimem_red_relaxed_add_u32(void* ptr) {
-  #if __CUDA_ARCH__ >= 900
-    asm volatile("multimem.red.relaxed.sys.add.u32 [%0],1;" :: "l"(ptr));
-  #else
-    (void)ptr;
-  #endif
+#if __CUDA_ARCH__ >= 900
+  asm volatile("multimem.red.relaxed.sys.add.u32 [%0],1;" ::"l"(ptr));
+#else
+  (void)ptr;
+#endif
 }
 
 #endif // NCCL_HIP_PLATFORM
@@ -586,15 +619,21 @@ NCCL_DEVICE_INLINE void nccl_multimem_red_relaxed_add_u32(void* ptr) {
 
 #if defined(NCCL_HIP_PLATFORM) && NCCL_DEVICE_COMPILE
   // Mark features that are not yet implemented for HIP
-  #define NCCL_HIP_NYI(feature) \
-    do { /* NYI: feature */ } while(0)
+#define NCCL_HIP_NYI(feature) \
+  do { /* NYI: feature */ \
+  } while (0)
 
   // Warning for features that have no HIP equivalent
-  #define NCCL_HIP_NO_EQUIVALENT(feature) \
-    do { /* NO HIP EQUIVALENT: feature */ } while(0)
+#define NCCL_HIP_NO_EQUIVALENT(feature) \
+  do { /* NO HIP EQUIVALENT: feature */ \
+  } while (0)
 #else
-  #define NCCL_HIP_NYI(feature) do {} while(0)
-  #define NCCL_HIP_NO_EQUIVALENT(feature) do {} while(0)
+#define NCCL_HIP_NYI(feature) \
+  do { \
+  } while (0)
+#define NCCL_HIP_NO_EQUIVALENT(feature) \
+  do { \
+  } while (0)
 #endif
 
 #endif // _NCCL_DEVICE_HIP_COMPAT_H_

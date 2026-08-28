@@ -21,7 +21,7 @@ unset(_RJ_ROCM_PATH_EXPLICIT)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.2.0)
+project(rocm_jit_suite VERSION 0.3.0)
 
 include(rj_version)
 
@@ -75,11 +75,29 @@ include(rj_log)
 # Install directory variables are used by subdirectories that add install rules.
 include(GNUInstallDirs)
 
+include(rj_sanitizers)
+
 # Sanitizer and static analysis options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
+set(RJ_SANITIZER_RUNTIME
+    "AUTO"
+    CACHE STRING
+    "Sanitizer runtime linkage policy (AUTO, SHARED, or STATIC)"
+)
+set_property(CACHE RJ_SANITIZER_RUNTIME PROPERTY STRINGS AUTO SHARED STATIC)
+string(TOUPPER "${RJ_SANITIZER_RUNTIME}" RJ_SANITIZER_RUNTIME)
+set(_rj_sanitizer_runtime_values AUTO SHARED STATIC)
+if(NOT RJ_SANITIZER_RUNTIME IN_LIST _rj_sanitizer_runtime_values)
+    message(
+        FATAL_ERROR
+        "RJ_SANITIZER_RUNTIME must be AUTO, SHARED, or STATIC; got "
+        "'${RJ_SANITIZER_RUNTIME}'."
+    )
+endif()
+unset(_rj_sanitizer_runtime_values)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
@@ -107,6 +125,7 @@ if(RJ_ENABLE_MSAN)
     list(APPEND _rj_sanitizer_kinds memory)
 endif()
 list(LENGTH _rj_sanitizer_kinds _rj_sanitizer_count)
+set(RJ_SANITIZER_USE_SHARED OFF)
 
 if(LTO)
     if(_rj_sanitizer_count GREATER 0)
@@ -149,10 +168,16 @@ if(LTO)
 endif()
 
 if(_rj_sanitizer_count GREATER 0)
-    if(thread IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+    if(
+        thread IN_LIST _rj_sanitizer_kinds
+        AND (
+            address IN_LIST _rj_sanitizer_kinds
+            OR memory IN_LIST _rj_sanitizer_kinds
+        )
+    )
         message(
             FATAL_ERROR
-            "ThreadSanitizer cannot be combined with other sanitizers"
+            "ThreadSanitizer can not be combined with address or memory sanitizers"
         )
     endif()
     if(memory IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
@@ -164,6 +189,9 @@ if(_rj_sanitizer_count GREATER 0)
     list(JOIN _rj_sanitizer_kinds "," _rj_sanitizer_arg)
     set(RJ_SANITIZER_COMPILE_OPTIONS)
     set(RJ_SANITIZER_LINK_OPTIONS)
+    set(RJ_SANITIZER_SHARED_LIBRARIES)
+    set(RJ_ASAN_SHARED_LIBRARY "")
+    set(RJ_TSAN_SHARED_LIBRARY "")
     message(STATUS "Sanitizer enabled: ${_rj_sanitizer_arg}")
     if(MSVC)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
@@ -176,6 +204,32 @@ if(_rj_sanitizer_count GREATER 0)
             message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        if(
+            memory IN_LIST _rj_sanitizer_kinds
+            AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        )
+            message(FATAL_ERROR "MemorySanitizer requires Clang.")
+        endif()
+        if(RJ_SANITIZER_RUNTIME STREQUAL "SHARED")
+            if(memory IN_LIST _rj_sanitizer_kinds)
+                message(
+                    FATAL_ERROR
+                    "MemorySanitizer has no supported shared runtime; use "
+                    "RJ_SANITIZER_RUNTIME=AUTO or STATIC."
+                )
+            endif()
+            set(RJ_SANITIZER_USE_SHARED ON)
+        elseif(
+            RJ_SANITIZER_RUNTIME STREQUAL "AUTO"
+            AND NOT memory IN_LIST _rj_sanitizer_kinds
+        )
+            set(RJ_SANITIZER_USE_SHARED ON)
+        endif()
+        if(RJ_SANITIZER_USE_SHARED)
+            message(STATUS "Sanitizer runtime linkage: shared")
+        else()
+            message(STATUS "Sanitizer runtime linkage: static")
+        endif()
         list(APPEND RJ_SANITIZER_COMPILE_OPTIONS "-fno-sanitize-recover=all")
         list(
             APPEND RJ_SANITIZER_COMPILE_OPTIONS
@@ -189,8 +243,6 @@ if(_rj_sanitizer_count GREATER 0)
         )
             list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-omit-frame-pointer)
         endif()
-        add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
-        add_link_options(${RJ_SANITIZER_LINK_OPTIONS})
         if(address IN_LIST _rj_sanitizer_kinds)
             # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
             # when ASAN is enabled. Suppress to avoid -Werror failures.
@@ -198,6 +250,43 @@ if(_rj_sanitizer_count GREATER 0)
                 add_compile_options(-Wno-maybe-uninitialized)
             endif()
         endif()
+        if(RJ_SANITIZER_USE_SHARED)
+            rj_find_sanitizer_shared_libraries(
+                RJ_SANITIZER_SHARED_LIBRARIES
+                RJ_ASAN_SHARED_LIBRARY
+                RJ_TSAN_SHARED_LIBRARY
+                COMPILER ${CMAKE_CXX_COMPILER}
+                COMPILER_ARG1 "${CMAKE_CXX_COMPILER_ARG1}"
+                COMPILER_ID "${CMAKE_CXX_COMPILER_ID}"
+                SYSTEM_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}"
+                SANITIZERS ${_rj_sanitizer_kinds}
+            )
+            foreach(
+                _rj_sanitizer_shared_library
+                IN
+                LISTS RJ_SANITIZER_SHARED_LIBRARIES
+            )
+                message(
+                    STATUS
+                    "Sanitizer shared runtime: ${_rj_sanitizer_shared_library}"
+                )
+            endforeach()
+        endif()
+        rj_sanitizer_runtime_link_options(
+            _rj_sanitizer_runtime_link_options
+            COMPILER_ID "${CMAKE_CXX_COMPILER_ID}"
+            SHARED "${RJ_SANITIZER_USE_SHARED}"
+            SHARED_LIBRARIES ${RJ_SANITIZER_SHARED_LIBRARIES}
+            SANITIZERS ${_rj_sanitizer_kinds}
+        )
+        list(
+            APPEND RJ_SANITIZER_LINK_OPTIONS
+            ${_rj_sanitizer_runtime_link_options}
+        )
+        add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
+        add_link_options(${RJ_SANITIZER_LINK_OPTIONS})
+        unset(_rj_sanitizer_shared_library)
+        unset(_rj_sanitizer_runtime_link_options)
     else()
         message(
             FATAL_ERROR
@@ -270,26 +359,18 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
-        rocjitsu_isa_risc_v
+        rocjitsu_isa_registry
         simdojo
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        # Host-side plugin loader. The logging/race plugins are no longer
+        # linked in statically; they are separate librocjitsu_plugin_<name>.so
+        # modules discovered and dlopen()ed at runtime.
+        rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
@@ -345,6 +426,12 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(
+        TARGETS hsa_hotswap_rocjitsu
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

@@ -6,11 +6,50 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
 
+### Added
+
+- hipFILE (GPU-direct storage) API tracing. Add `hipfile_api` to
+  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.5 or later.
+
+- `--exe-only` flag for `rocprof-sys-instrument`: shorthand for excluding every shared
+  library from instrumentation, leaving only the main executable.
+
+- `--exclude-internal-lib-paths` flag for `rocprof-sys-instrument`: by default, each
+  internal library is excluded only at the path linked at startup; when enabled, every
+  on-disk path matching an internal library's filename is excluded.
+
+- `--max-library-functions` option for `rocprof-sys-instrument`: skips shared libraries
+  whose procedure count exceeds the given threshold, keeping instrumentation overhead
+  manageable. The target executable is never gated by this, and the check is bypassed by
+  the module include/restrict (`--module-include`/`-MI`, `--module-restrict`/`-MR`) and
+  function include/restrict (`--function-include`/`-I`, `--function-restrict`/`-R`)
+  regexes.
+
+- rocSHMEM host-stream API tracing via `ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`.
+  ROCm Systems Profiler now captures the nine host-stream rocSHMEM API calls
+  (`putmem_on_stream`, `getmem_on_stream`, `putmem_signal_on_stream`,
+  `signal_wait_until_on_stream`, `broadcastmem_on_stream`, `alltoallmem_on_stream`,
+  `barrier_all_on_stream`, `sync_all_on_stream`, `quiet_on_stream`) as
+  `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
+  rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 7.15).
+  As of rocSHMEM 3.6.0, `USE_ROCPROFILER_REGISTER` defaults to `ON`, so
+  package installations automatically include this support. A `rocshmem` example
+  demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
+
+### Changed
+
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
+- Introduced the new `profiler-hub` writer backend for trace persistence, as a
+  replacement for the existing SQLite3/rocpd backend.
+
 ### Removed
 
 - Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
   an already running process. Use the `rocprof-sys-attach` executable instead, which
   attaches to and profiles running processes via the rocprofiler-sdk rocattach API.
+
+- Removed `--parse-all-modules` from `rocprof-sys-instrument`. The tool iterates through objects and modules to extract the functions by default.
 
 ## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
 
@@ -84,7 +123,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
-- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 
@@ -187,7 +225,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 - SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
 - `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via ROCprofiler-SDK rocattach API (experimental).
-- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
+- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_OPENSHMEM=ON` configuration setting.
 
 ### Changed
 

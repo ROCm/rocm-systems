@@ -239,6 +239,7 @@ impl Engine {
     ///
     /// The container is named and given a matching hostname so peers can
     /// resolve it by name on the shared network.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_argv(
         provider: &str,
         name: &str,

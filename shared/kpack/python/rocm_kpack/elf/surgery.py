@@ -34,7 +34,8 @@ from .types import (
     SHT_SYMTAB,
     SHT_DYNSYM,
     SHF_ALLOC,
-    R_X86_64_RELATIVE,
+    ArchConfig,
+    get_arch_config,
     get_section_name,
 )
 
@@ -247,6 +248,16 @@ class ElfSurgery:
     def modifications(self) -> list[Modification]:
         """List of modifications made."""
         return self._modifications
+
+    @property
+    def arch_config(self) -> ArchConfig:
+        """Architecture-specific constants (page size, relocation types)."""
+        return get_arch_config(self._ehdr.e_machine)
+
+    @property
+    def page_size(self) -> int:
+        """OS page size for this binary's target architecture."""
+        return self.arch_config.page_size
 
     @property
     def is_pie_or_shared(self) -> bool:

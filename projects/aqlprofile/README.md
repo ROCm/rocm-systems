@@ -1,3 +1,16 @@
+> [!WARNING]
+> This copy of `aqlprofile` is deprecated
+>
+> The sources under `projects/aqlprofile/` have been migrated into the `projects/rocprofiler-sdk` source tree and are **no longer the source of truth**.
+>
+> All ongoing development now happens in the embedded copy:
+>
+> ```
+> projects/rocprofiler-sdk/source/lib/aqlprofile/
+> ```
+>
+> This standalone copy is being retired. Please direct any changes, bug fixes, and new features to the embedded copy above. Pull requests that modify `projects/aqlprofile/` will be flagged and asked to move.
+
 # AQLprofile: Architected Queuing Language Profiling Library
 
 AQLprofile is an open source library that enables advanced GPU profiling and tracing on AMD platforms. It works in conjunction with [rocprofiler-sdk](https://github.com/ROCm/rocprofiler-sdk) to support profiling methods such as performance counters (PMC) and SQ thread trace (SQTT). AQLprofile provides the foundational mechanisms for constructing AQL packets and managing profiling operations across multiple AMD GPU architecture families.

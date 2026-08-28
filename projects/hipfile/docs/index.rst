@@ -26,6 +26,9 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
    .. grid-item-card:: How to
 
+      * :doc:`Set up a local NVMe drive <how-to/setup-local-nvme>`
+      * :doc:`Set up an NVMe-oF disk <how-to/setup-nvmeof>`
+      * :doc:`Set up an NFSoRDMA share <how-to/setup-nfsordma>`
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
       * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
@@ -52,5 +55,6 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
       * :doc:`Troubleshooting <troubleshooting/troubleshooting>`
       * :doc:`Known issues <troubleshooting/known-issues>`
+      * :doc:`Limitations <troubleshooting/limitations>`
 
 Licensing information is in the `LICENSE.md <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/LICENSE.md>`_ file in the repository.

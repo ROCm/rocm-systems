@@ -48,6 +48,7 @@ decltype(roctxRangePush)*      roctxRangePop_fn       = nullptr;
 decltype(rocDecCreateDecoder)* rocDecCreateDecoder_fn = nullptr;
 decltype(rocJpegStreamCreate)* rocJpegStreamCreate_fn = nullptr;
 decltype(hipFileGetVersion)*   hipFileGetVersion_fn   = nullptr;
+decltype(rocshmem_init_mock)*  rocshmem_init_mock_fn  = nullptr;
 
 enum rocp_reg_test_modes : uint8_t
 {
@@ -59,6 +60,7 @@ enum rocp_reg_test_modes : uint8_t
     ROCP_REG_TEST_ROCDECODE = (1 << 4),
     ROCP_REG_TEST_ROCJPEG   = (1 << 5),
     ROCP_REG_TEST_HIPFILE   = (1 << 6),
+    ROCP_REG_TEST_ROCSHMEM  = (1 << 7),
 };
 
 template <uint8_t Idx = ROCP_REG_TEST_NONE>
@@ -109,6 +111,7 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
     void* rocdecode_handle = nullptr;
     void* rocjpeg_handle   = nullptr;
     void* hipfile_handle   = nullptr;
+    void* rocshmem_handle  = nullptr;
 
     if constexpr((Idx & ROCP_REG_TEST_HIP) == ROCP_REG_TEST_HIP)
     {
@@ -160,6 +163,13 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
         hipFileGetVersion_fn = hipFileGetVersion;
         if(!hipFileGetVersion_fn) _resolve_dlopen(hipfile_handle, "libhipfile.so");
         _resolve_dlsym(hipFileGetVersion_fn, hipfile_handle, "hipFileGetVersion");
+    }
+
+    if constexpr((Idx & ROCP_REG_TEST_ROCSHMEM) == ROCP_REG_TEST_ROCSHMEM)
+    {
+        rocshmem_init_mock_fn = rocshmem_init_mock;
+        if(!rocshmem_init_mock_fn) _resolve_dlopen(rocshmem_handle, "librocshmem.so");
+        _resolve_dlsym(rocshmem_init_mock_fn, rocshmem_handle, "rocshmem_init_mock");
     }
 }
 }  // namespace

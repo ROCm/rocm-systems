@@ -428,6 +428,35 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION
         "--selected-regions and --att-consecutive-kernels are mutually exclusive")
 
+set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-no-intercept
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_INTERCEPT_OUT_DIR}
+        --att-no-intercept --kernel-include-regex looping_lds_kernel --output-format json
+        --log-level env -o out -- $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    LABELS "integration-tests;thread-trace"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-no-intercept)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-no-intercept
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_att_no_intercept_target_kernel
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
+    ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 
 rocprofiler_add_integration_execute_test(

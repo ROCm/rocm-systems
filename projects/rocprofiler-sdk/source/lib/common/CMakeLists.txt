@@ -66,7 +66,6 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-atomic>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>)

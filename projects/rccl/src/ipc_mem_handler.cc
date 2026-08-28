@@ -14,11 +14,8 @@
 #include <cuda_runtime.h>
 
 ncclIpcMemHandler::ncclIpcMemHandler(void* bootstrap, int rank, int nranks)
-    : bootstrap_(bootstrap),
-      rank_(rank),
-      nranks_(nranks),
-      memPtrs_(static_cast<size_t>(nranks), nullptr),
-      exchanged_(false) {}
+  : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), memPtrs_(static_cast<size_t>(nranks), nullptr),
+    exchanged_(false) {}
 
 ncclIpcMemHandler::~ncclIpcMemHandler() {
   if (!exchanged_) {
@@ -56,10 +53,7 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
     if (i == rank_) {
       continue;
     }
-    CUDACHECK(cudaIpcOpenMemHandle(
-        &memPtrs_[static_cast<size_t>(i)],
-        ipcHandles[i],
-        cudaIpcMemLazyEnablePeerAccess));
+    CUDACHECK(cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], ipcHandles[i], cudaIpcMemLazyEnablePeerAccess));
   }
   exchanged_ = true;
   return ncclSuccess;

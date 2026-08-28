@@ -202,6 +202,7 @@ class VMadMixloF16Vop3p : public Vop3p {
 public:
   VMadMixloF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -212,6 +213,7 @@ class VMadMixhiF16Vop3p : public Vop3p {
 public:
   VMadMixhiF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;

@@ -3,6 +3,16 @@
 
 #pragma once
 
+// Defines RCCL_API_TRACE_VERSION_PATCH. Must precede api_args.h, where this
+// macro gates the newer RCCL arg union members (e.g. ncclAlltoAll). api_args.h
+// from the SDK headers does not define it itself, so without this include the
+// macro defaults to 0 and those members silently disappear.
+//
+// This header (not rccl.hpp) is the one the unit tests include.
+// Keeping the include here makes the header self-contained so the test TU sees
+// the same api_args.h layout as production and avoids an ODR mismatch.
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
+
 #include <rocprofiler-sdk/rccl/api_args.h>
 
 #include <cstddef>

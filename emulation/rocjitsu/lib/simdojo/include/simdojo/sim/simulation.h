@@ -96,9 +96,9 @@ private:
 ///   4. Arrive at barrier (completion function computes new global_lbts)
 ///
 /// Components participate in the simulation by scheduling events during
-/// initialize() or startup(). Untimed (functional) components use the
+/// startup(). Untimed (functional) components use the
 /// Functional\<Base\> CRTP mixin, which self-schedules a timer callback and
-/// re-enqueues after each step(). If no events are ever scheduled and no
+/// re-enqueues after each advance(). If no events are ever scheduled and no
 /// primaries are registered, the simulation terminates via quiescence. If
 /// primaries are registered, the engine blocks until async events arrive or
 /// all primaries signal completion.
@@ -107,7 +107,7 @@ private:
 /// @code
 ///   SimulationEngine engine(config);
 ///   engine.topology().set_root(std::move(my_model));
-///   engine.build(); // partitions, initializes components
+///   engine.create(); // partitions, initializes components
 ///   // (user enqueues work via CP)
 ///   auto exit = engine.run(); // starts up components, runs to completion
 ///   // OR: while (engine.step()) {} // starts up on first call, one tick per call
@@ -125,7 +125,7 @@ public:
                                   ///< engine alive while waiting for external stimuli (doorbells).
   };
 
-  /// @brief Construct with config. Caller populates topology(), then calls build().
+  /// @brief Construct with config. Caller populates topology(), then calls create().
   /// @param config Engine configuration parameters.
   explicit SimulationEngine(Config config);
 
@@ -141,19 +141,21 @@ public:
   /// @details Required after the Config-only constructor once the topology is
   /// populated. Also used to rebuild after shutdown(). Calls
   /// initialize_components() so that components can set up ports and handlers
-  /// before run() or step() starts them.
-  void build();
+  /// before run() or step() starts them. Event self-scheduling is deferred: the
+  /// Clocked/Functional mixins enqueue their first event in startup() (invoked by the
+  /// first run()/step() call), not here, so no events exist until execution begins.
+  void create();
 
   /// @brief Tear down engine state (shutdown components, join workers).
   ///
-  /// @details After shutdown(), the engine can be rebuilt with a new build() call.
+  /// @details After shutdown(), the engine can be rebuilt with a new create() call.
   /// Called automatically by the destructor if still built.
   void shutdown();
 
-  /// @brief Return whether the engine has been built and is ready for execution.
-  /// @retval true Engine is built and ready for run() or step().
-  /// @retval false Engine has not been built or has been shut down.
-  bool is_built() const { return built_; }
+  /// @brief Return whether the engine has been created and is ready for execution.
+  /// @retval true Engine is created and ready for run() or step().
+  /// @retval false Engine has not been created or has been shut down.
+  bool is_created() const { return created_; }
 
   /// @brief Access the topology for model setup (add components, links, clock domains).
   ///
@@ -168,17 +170,19 @@ public:
 
   /// @brief Run the simulation to completion.
   ///
-  /// @details Starts all components (initialization happens in build()),
+  /// @details Starts all components (initialization happens in create()),
   /// then enters the PDES epoch loop. Components are shut down on return.
   /// @returns An ExitStatus describing why the simulation stopped.
   ExitStatus run();
 
-  /// @brief Advance the simulation by one tick (single-threaded only).
+  /// @brief Process all events at the next event time (single-threaded only).
   ///
   /// @details On the first call, starts all components (initialization
-  /// happens in build()). Each subsequent call processes all events at the
-  /// next timestamp, then returns. If the queue is empty but primaries are
-  /// registered, returns true so the caller can poll for async events.
+  /// happens in create()). Each subsequent call advances to the next event
+  /// time and processes all events at that timestamp, then returns.
+  /// Ticks without scheduled events are skipped. If the queue is empty
+  /// but primaries are registered, returns true so the caller can poll
+  /// for async events.
   /// @retval true Simulation can continue.
   /// @retval false Simulation is done (query last_exit() for details).
   bool step();
@@ -365,7 +369,7 @@ private:
   std::atomic<uint32_t> active_primaries_{0};
   std::atomic<bool> has_primaries_{false}; ///< Set on first register_as_primary().
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
-  bool built_ = false;   ///< Whether build() has completed (components initialized).
+  bool created_ = false; ///< Whether create() has completed (components initialized).
   bool running_ = false; ///< True while running; also guards step() first-call startup.
 
   /// @brief Global lower bound on time stamp, updated by barrier completion.
@@ -380,6 +384,7 @@ private:
   struct AsyncQueue {
     std::mutex mutex;
     std::vector<EventQueueEntry> events;
+    std::atomic<bool> pending{false}; ///< Set by producer, checked before locking.
   };
   std::vector<std::unique_ptr<AsyncQueue>> async_queues_; ///< One per partition.
 

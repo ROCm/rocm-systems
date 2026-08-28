@@ -1211,7 +1211,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "inventory",
- "libc",
  "mirage_builtin",
  "mirage_core",
  "rocjitsu_sys",

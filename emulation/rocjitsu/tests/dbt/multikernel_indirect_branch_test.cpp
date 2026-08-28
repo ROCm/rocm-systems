@@ -222,9 +222,12 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
 
   // Kernels A-E all call the same noinline helper, and kernel A calls it twice.
   // Those shared-helper edges are compiler-emitted `s_swappc_b64` instructions.
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_swappc_b64"), 6u);
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_setpc_b64"), 3u);
-  EXPECT_GE(count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64"), 3u);
+  const size_t source_swappc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_swappc_b64");
+  const size_t source_setpc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_setpc_b64");
+  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  EXPECT_GE(source_swappc, 6u);
+  EXPECT_GE(source_setpc, 3u);
+  EXPECT_GE(source_call, 3u);
 
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(*co);
@@ -244,9 +247,11 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_e"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_setpc"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_scall"), 0u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_swappc_b64"), 6u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_setpc_b64"), 3u);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_call_b64"), 3u);
+  EXPECT_EQ(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_swappc_b64"), 0u)
+      << "in-range recovered swappc targets should patch to direct s_call_b64 windows";
+  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_setpc_b64"), source_setpc);
+  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_call_b64"),
+            source_call + source_swappc);
 
   ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
   const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
@@ -283,7 +288,7 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
 
   size_t recovered_swappc_blocks = 0;
   size_t recovered_setpc_blocks = 0;
-  size_t direct_scall_blocks = 0;
+  std::vector<uint64_t> direct_scall_offsets;
   for (const auto &block : blocks) {
     const auto *term = block->terminator();
     if (term == nullptr)
@@ -304,21 +309,27 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
       EXPECT_FALSE(has_successor_start(*block, block->end_offset()))
           << "indirect branches must not keep a fallthrough edge";
     } else if (mnemonic == "s_call_b64") {
-      ++direct_scall_blocks;
+      direct_scall_offsets.push_back(term->src_loc());
       const auto branch_delta = term->branch_offset_bytes();
       ASSERT_TRUE(branch_delta.has_value());
       const int64_t target =
           static_cast<int64_t>(block->end_offset()) + static_cast<int64_t>(*branch_delta);
       ASSERT_GE(target, 0);
       EXPECT_TRUE(has_successor_start(*block, static_cast<uint64_t>(target)));
-      EXPECT_TRUE(has_successor_start(*block, block->end_offset()))
-          << "direct calls must retain the return/fallthrough edge";
+      EXPECT_TRUE(block->call_edges().empty()) << "fixture s_call sites are tail transfers";
+      EXPECT_FALSE(has_successor_start(*block, block->end_offset()))
+          << "tail transfers must drop their unreachable fallthrough edge";
     }
   }
 
+  std::ranges::sort(direct_scall_offsets);
+  // These are the three RJ_STATIC_SCALL_ISLAND sites in the checked-in
+  // fixture. Each target jumps to the join instead of returning, so its
+  // syntactic s_branch continuation is dead.
+  const std::vector<uint64_t> expected_direct_scall_offsets{0xbacu, 0xbdcu, 0xc10u};
   EXPECT_GE(recovered_swappc_blocks, 6u);
   EXPECT_GE(recovered_setpc_blocks, 3u);
-  EXPECT_GE(direct_scall_blocks, 3u);
+  EXPECT_EQ(direct_scall_offsets, expected_direct_scall_offsets);
 }
 
 TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel) {
@@ -375,11 +386,11 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
       // recovered target block, with the surrounding range-check and final
       // store/end blocks making the exact reachable count below.
       {"multikernel_indirect_branch_setpc", 20},
-      // The s_call kernel has three independent direct-call islands. Each call
-      // block has both the direct call-target edge and the return/fallthrough
-      // edge; the exact count catches accidental extra CFG edges between those
-      // islands or into another kernel entry.
-      {"multikernel_indirect_branch_scall", 23},
+      // The s_call kernel has three independent tail-transfer islands. Each
+      // non-returning call reaches its target but not the dead continuation;
+      // the exact count catches accidental CFG edges between those islands or
+      // into another kernel entry.
+      {"multikernel_indirect_branch_scall", 20},
   };
 
   for (const auto &test_case : expected) {

@@ -9,23 +9,32 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
+#include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/operand.h"
 #include <string>
 
 namespace rocjitsu {
 namespace gfx1250 {
 
-class Operand : public AmdgpuIsaOperand<Isa> {
+class Operand : public IsaOperand<Isa> {
 public:
-  Operand(int size_bits, OperandType opr_type, int encoding_value,
-          bool packed_16bit_source = false);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
+          bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
-          bool packed_16bit_source);
+          bool packed_16bit_source, bool packed_16bit_dst = false);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
+          bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  /// @brief Return the immutable full-simulator operand table.
+  static const void *full_execution_backend();
+  /// @brief Validate that every full-simulator operand callback is present.
+  static bool full_execution_backend_complete();
   bool simd_capable() const override;
+
+private:
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
@@ -38,11 +47,80 @@ public:
   void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
   uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
+  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
+  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
+  amdgpu::ConstVgprStoragePair64
+  simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const override;
+  void simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                             uint8_t byte_mask) const override;
+  void simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                 uint8_t byte_mask) const override;
+  void simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                               uint8_t byte_mask) const override;
+  void simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                   uint8_t byte_mask) const override;
+  /// Same-image dispatch table populated by the execution TU before decode.
+  /// This is not a registration ABI between independently loaded DSOs.
+  struct ExecutionBackend {
+    bool (Operand::*simd_capable)() const = nullptr;
+    void (Operand::*read_lane_chunk)(const amdgpu::Wavefront &, uint32_t, uint32_t,
+                                     uint32_t *) const = nullptr;
+    void (Operand::*write_lane_chunk)(amdgpu::Wavefront &, uint32_t, uint32_t, const uint32_t *,
+                                      uint64_t) const = nullptr;
+    uint32_t (Operand::*read_scalar)(const amdgpu::Wavefront &) const = nullptr;
+    uint32_t (Operand::*read_lane)(const amdgpu::Wavefront &, uint32_t) const = nullptr;
+    void (Operand::*write_scalar)(amdgpu::Wavefront &, uint32_t) const = nullptr;
+    void (Operand::*write_lane)(amdgpu::Wavefront &, uint32_t, uint32_t) const = nullptr;
+    uint64_t (Operand::*read_lane64)(const amdgpu::Wavefront &, uint32_t) const = nullptr;
+    void (Operand::*write_lane64)(amdgpu::Wavefront &, uint32_t, uint64_t) const = nullptr;
+    uint64_t (Operand::*read_scalar64)(const amdgpu::Wavefront &) const = nullptr;
+    void (Operand::*write_scalar64)(amdgpu::Wavefront &, uint64_t) const = nullptr;
+    std::optional<uint32_t> (Operand::*simd_vgpr_base)(const amdgpu::Wavefront &) const = nullptr;
+    const amdgpu::VgprStorage *(Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const =
+        nullptr;
+    amdgpu::VgprStorage *(Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;
+    amdgpu::ConstVgprStoragePair64 (Operand::*simd_vgpr_storage64)(
+        const amdgpu::Wavefront &) const = nullptr;
+    amdgpu::VgprStoragePair64 (Operand::*simd_vgpr_storage64_mut)(amdgpu::Wavefront &) const =
+        nullptr;
+    void (Operand::*simd_notify_read)(const amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;
+    void (Operand::*simd_notify_read_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;
+    void (Operand::*simd_notify_read64)(const amdgpu::Wavefront &, uint64_t,
+                                        uint8_t) const = nullptr;
+    void (Operand::*simd_notify_read64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;
+  };
+  const ExecutionBackend *execution_backend_ = nullptr;
+  bool simd_capable_exec() const;
+  void read_lane_chunk_exec(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t *) const;
+  void write_lane_chunk_exec(amdgpu::Wavefront &, uint32_t, uint32_t, const uint32_t *,
+                             uint64_t) const;
+  uint32_t read_scalar_exec(const amdgpu::Wavefront &) const;
+  uint32_t read_lane_exec(const amdgpu::Wavefront &, uint32_t) const;
+  void write_scalar_exec(amdgpu::Wavefront &, uint32_t) const;
+  void write_lane_exec(amdgpu::Wavefront &, uint32_t, uint32_t) const;
+  uint64_t read_lane64_exec(const amdgpu::Wavefront &, uint32_t) const;
+  void write_lane64_exec(amdgpu::Wavefront &, uint32_t, uint64_t) const;
+  uint64_t read_scalar64_exec(const amdgpu::Wavefront &) const;
+  void write_scalar64_exec(amdgpu::Wavefront &, uint64_t) const;
+  std::optional<uint32_t> simd_vgpr_base_exec(const amdgpu::Wavefront &) const;
+  const amdgpu::VgprStorage *simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;
+  amdgpu::VgprStorage *simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;
+  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_exec(const amdgpu::Wavefront &) const;
+  amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_exec(amdgpu::Wavefront &) const;
+  void simd_notify_read_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;
+  void simd_notify_read_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
+  void simd_notify_read64_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;
+  void simd_notify_read64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
 
 private:
+  uint16_t literal16_display_value_ = 0;
+  bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
   bool packed_16bit_source_ = false;
+  bool packed_16bit_dst_ = false;
 };
 
 } // namespace gfx1250

@@ -41,7 +41,7 @@ requires_host_amo_runtime = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
-# Coverage matrix — every (type, op) we expect the pybind layer to expose.
+# Coverage matrix — every (type, op) we expect the binding layer to expose.
 # ---------------------------------------------------------------------------
 
 INTEGER_TYPES = ["int", "long", "uint32", "uint64", "size", "ptrdiff"]

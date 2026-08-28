@@ -9,6 +9,7 @@
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/devhcmessages.hpp"
+#include <atomic>
 #include <cstddef>
 
 #if defined(__clang__)
@@ -25,7 +26,7 @@ namespace amd {
  *  on the device, for some predefined service provided by the
  *  host. The life-cycle of a hostcall is as follows:
  *
- *  1. A workitem in the some kernel dispatch submits a request as a
+ *  1. A workitem in some kernel dispatch submits a request as a
  *     "packet" in a "hostcall buffer". The workitem blocks until it
  *     receives a response from the host.
  *
@@ -71,7 +72,12 @@ size_t getHostcallBufferSize(uint32_t num_packets);
  */
 uint32_t getHostcallBufferAlignment(void);
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets,
+                     amd::Memory* occupiedMem);
+#else  // !USE_NEW_HOSTCALL_IMPL
 bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
+#endif  // USE_NEW_HOSTCALL_IMPL
 void disableHostcalls(void* buffer);
 
 enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
@@ -80,7 +86,7 @@ enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
  *
  *  Contains 64 slots of 8 ulongs each, one for each workitem in the
  *  wave. A slot with index \c i contains valid data if the
- *  corresponding bit in PacketHeader::activemask is set.
+ *  corresponding bit in PacketHeader::activemask_ is set.
  */
 struct Payload {
   uint64_t slots[64][8];
@@ -88,6 +94,12 @@ struct Payload {
 
 /** Packet header */
 struct PacketHeader {
+#ifdef USE_NEW_HOSTCALL_IMPL
+  /** Bitmask that represents payload slots with valid data */
+  uint64_t activemask_;
+  /** Service ID requested by the wave */
+  uint32_t service_;
+#else  // !USE_NEW_HOSTCALL_IMPL
   /** Tagged pointer to the next packet in an intrusive stack */
   uint64_t next_;
   /** Bitmask that represents payload slots with valid data */
@@ -98,11 +110,13 @@ struct PacketHeader {
    *  \li 0: \c READY flag. Indicates packet awaiting a host response.
    */
   std::atomic<uint32_t> control_;
+#endif  // USE_NEW_HOSTCALL_IMPL
 };
 
 static_assert(std::is_standard_layout<PacketHeader>::value,
               "the hostcall packet must be useable from other languages");
 
+#ifndef USE_NEW_HOSTCALL_IMPL
 /** Field offsets in the packet control field */
 enum ControlOffset {
   CONTROL_OFFSET_READY_FLAG = 0,
@@ -114,7 +128,74 @@ enum ControlWidth {
   CONTROL_WIDTH_READY_FLAG = 1,
   CONTROL_WIDTH_RESERVED0 = 31,
 };
+#endif  // !USE_NEW_HOSTCALL_IMPL
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+/** \brief Outcome of a processPackets() pass, ordered so std::min() reduces
+ *  across buffers (kProcessed < kIdleNarrow < kIdleFull).
+ */
+enum class ProcessResult {
+  kProcessed,   //!< Handled at least one packet; more work may be arriving.
+  kIdleNarrow,  //!< No work, but the scan window is narrowed; widen and rescan.
+  kIdleFull,    //!< No work at full scan width; safe to sleep.
+};
+
+/** \brief Shared buffer for submitting hostcall requests.
+ *
+ *  Holds hostcall packets requested by all kernels executing on the
+ *  same device queue. Each hostcall buffer is associated with at most
+ *  one device queue.
+ *
+ *  Packet ownership is determined by comparing per-packet phase values. The
+ *  device_phase array is written only by the device; the host_phase array is
+ *  written only by the host. When both match, the device owns the packet. When
+ *  they differ, the host owns it.
+ *
+ *  The occupied bitfield lives in device-local memory and tracks which packets
+ *  are currently in use by a wave. It is referenced by device virtual address
+ *  from this struct.
+ *
+ *  Ordering contract: the device publishes a request with a store-release to
+ *  device_phase_[i] after writing the packet header/payload; the host completes
+ *  it with a store-release to host_phase_[i] after writing the response. Each
+ *  side reads the other's phase with acquire ordering, so the payload writes are
+ *  visible before they are consumed. The device-side definition of this buffer
+ *  (struct buffer_t) lives in the ROCm device library, ockl/src/hostcall_impl.cl.
+ */
+class HostcallBuffer {
+  // Shared prefix: field order, types, and sizes must match struct buffer_t in
+  // the device library (ockl/src/hostcall_impl.cl).
+  /** Per-packet phase toggled by the device on submission */
+  std::atomic<uint32_t>* device_phase_;
+  /** Per-packet phase toggled by the host on completion */
+  std::atomic<uint32_t>* host_phase_;
+  /** Device virtual address of the occupied bitfield */
+  uintptr_t occupied_;
+  /** Array of packet headers */
+  PacketHeader* headers_;
+  /** Array of packet payloads */
+  Payload* payloads_;
+  /** Signal used by kernels to indicate new work */
+  void* doorbell_;
+  /** Number of packets in the buffer */
+  uint32_t num_packets_;
+
+  // Host-only fields.
+  /** Some services need a device */
+  const amd::Device* device_;
+  /** Owner of the device-local occupied allocation */
+  amd::Memory* occupied_mem_;
+  /** Adaptive upper bound on packets to scan */
+  uint32_t scan_limit_;
+
+ public:
+  ProcessResult processPackets(MessageHandler& messages);
+  bool initialize(uint32_t num_packets, amd::Memory* occupied_mem);
+  void resetScanLimit() { scan_limit_ = num_packets_; }
+  void setDoorbell(void* doorbell) { doorbell_ = doorbell; }
+  void setDevice(const amd::Device* dptr) { device_ = dptr; }
+  amd::Memory* getOccupiedMem() const { return occupied_mem_; }
+#else  // !USE_NEW_HOSTCALL_IMPL
 /** \brief Shared buffer submitting hostcall requests.
  *
  *  Holds hostcall packets requested by all kernels executing on the
@@ -151,6 +232,7 @@ class HostcallBuffer {
   void initialize(uint32_t num_packets);
   void setDoorbell(void* doorbell) { doorbell_ = doorbell; };
   void setDevice(const amd::Device* dptr) { device_ = dptr; };
+#endif  // USE_NEW_HOSTCALL_IMPL
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -166,4 +248,9 @@ class HostcallBuffer {
 static_assert(std::is_standard_layout<HostcallBuffer>::value,
               "the hostcall buffer must be useable from other languages");
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t) &&
+                  alignof(std::atomic<uint32_t>) == alignof(uint32_t),
+              "std::atomic<uint32_t> must have the same size and alignment as uint32_t");
+#endif  // USE_NEW_HOSTCALL_IMPL
 }  // namespace amd

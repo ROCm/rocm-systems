@@ -32,6 +32,7 @@ option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
+option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -123,7 +124,9 @@ if(NOT DEFINED THEROCK_SANITIZER)
 endif()
 
 set(ASAN_CONFIG_DEF)
+set(HIP_TESTS_ASAN_ENABLED OFF)
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  set(HIP_TESTS_ASAN_ENABLED ON)
   message(STATUS "Building catch tests with Address Sanitizer options")
   # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
   # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
@@ -310,10 +313,19 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
 separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
+# -fsanitize=address does not work with SPIR-V targets so keep a SPIR-V-specific
+# copy of the device build flags.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fsanitize=address")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fno-omit-frame-pointer")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-shared-libasan")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=address")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
+endif()
+
+# ASan is not supported by SPIR-V, so ASan-related device flags must be dropped in those cases.
+if(ENABLE_SPIRV)
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV})
 endif()
 
 # get hip-tests commit short hash

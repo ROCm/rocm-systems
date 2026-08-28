@@ -54,31 +54,28 @@ env["GTEST_TOTAL_SHARDS"] = str(TOTAL_SHARDS)
 # -----------------------------
 # Test filtering
 # -----------------------------
-# If quick mode is enabled, run minimal suite (only dynamic metric tests)
+# If quick mode is enabled, run the minimal test suite (C++ unit suite).
 test_type = os.getenv("TEST_TYPE", "full")
 
 if test_type == "quick":
-    logging.info("Running quick tests only for amdsmitst")
-    test_filter = ["--gtest_filter=AmdSmiDynamicMetricTest.*"]
+    logging.info("Running quick (C++ unit tests only) for amdsmitst")
+    test_filter = ["--gtest_filter=*Unit*"]
 else:
-    # Full test mode: run whitelist and explicitly exclude known failing tests
+    # Full test mode: run broad suites and explicitly exclude known failing tests
     logging.info("Running full amdsmitst test suite (include + exclude filter)")
 
     include_tests = [
-        "amdsmitstReadOnly.*",
-        "amdsmitstReadWrite.FanReadWrite",
-        "amdsmitstReadWrite.TestOverdriveReadWrite",
-        "amdsmitstReadWrite.TestPciReadWrite",
-        "amdsmitstReadWrite.TestPowerReadWrite",
-        "amdsmitstReadWrite.TestPerfCntrReadWrite",
-        "amdsmitstReadWrite.TestEvtNotifReadWrite",
-        "AmdSmiDynamicMetricTest.*",
+        "*FunctionalReadOnly.*",
+        "*FunctionalReadWrite.*",
+        "*Unit*",
     ]
 
+    # Explicitly exclude known failing tests, so that we can catch regressions in the future
+    # ie. Don't silently skip or ignore runnable tests not shown in the exclude_tests list
     exclude_tests = [
-        "amdsmitstReadOnly.TempRead",
-        "amdsmitstReadOnly.TestFrequenciesRead",
-        "amdsmitstReadWrite.TestPowerReadWrite",
+        "GpuFunctionalReadOnly.TempRead",
+        "GpuFunctionalReadOnly.TestFrequenciesRead",
+        "GpuFunctionalReadWrite.TestPowerReadWrite",
     ]
 
     gtest_filter = f"{':'.join(include_tests)}:-{':'.join(exclude_tests)}"

@@ -42,8 +42,8 @@ namespace hipFile
 {
 struct hipFileDispatchTable
 {
-    uint64_t                          size                       = 0;
-    decltype(::hipFileGetVersion)*    pfn_hipfile_get_version    = nullptr;
+    uint64_t                       size                    = 0;
+    decltype(::hipFileGetVersion)* pfn_hipfile_get_version = nullptr;
 };
 
 hipFileError_t

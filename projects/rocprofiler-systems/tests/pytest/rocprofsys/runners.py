@@ -546,9 +546,14 @@ class BinaryRewriteRunner(BaseRunner):
         if self.cleanup_on_success and run_result.success:
             run_result.cleanup_instrumented_binaries()
 
-        # Combine rewrite and run output
+        # Combine rewrite and run output. Surface the rewrite command (the
+        # rocprof-sys-instrument invocation that produces the .inst) too, since
+        # the reported result only carries the run-phase command.
+        rewrite_cmd = " ".join(str(c) for c in rewrite_result.command)
         run_result.test_output = (
-            f"=== REWRITE PHASE ===\n{rewrite_result.test_output}\n"
+            f"=== REWRITE PHASE ===\n"
+            f"Command: {rewrite_cmd}\n\n"
+            f"{rewrite_result.test_output}\n"
             f"=== RUN PHASE ===\n{run_result.test_output}"
         )
         run_result.duration = rewrite_result.duration + run_result.duration

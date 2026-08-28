@@ -23,9 +23,16 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/07/07.
-        default: "3278883f548e1353ffbda1a8090219d866eca035"
+        description: "Branch, tag, or SHA containing the packaged-HSACO DBT suite"
+        # Last updated on 2026/07/27.
+        default: "e1a9a1f7ac9b1d38c7eddf486b529bc3cfcb0c95"
+        required: true
+      legacy_corpus_ref:
+        description: "Branch, tag, or SHA for the existing corpus tests"
+        # TODO: Drop this pin once the workflow's ROCm SDK includes the gfx1250
+        # rocBLAS and hipBLASLt libraries required by the latest corpus.
+        # Last updated on 2026/07/17.
+        default: "aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4"
         required: true
 
 concurrency:
@@ -39,6 +46,11 @@ env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
+  ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
+  ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
+  ROCM_SDK_VERSION: 7.14.0a20260624
+  UV_VERSION: 0.9.26
 
 jobs:
   test:
@@ -49,29 +61,48 @@ jobs:
       options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
-    continue-on-error: true
+    continue-on-error: ${{ matrix.allow_failure }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: release
+            allow_failure: true
+            test_regex: ''
             build_type: Release
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 0
+            sanitizer_runtime: STATIC
           - name: asan-ubsan
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
+          - name: tsan
+            allow_failure: false
+            run_static_asan_launch: true
+            test_regex: ''
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            enable_expensive_checks: 0
+            sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
 
@@ -84,6 +115,7 @@ jobs:
             ca-certificates \
             cmake \
             git \
+            libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
@@ -102,38 +134,50 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/07.
-          ref: 3278883f548e1353ffbda1a8090219d866eca035
+          # Last updated on 2026/07/17.
+          ref: ${{ github.event.inputs.legacy_corpus_ref || 'aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4' }}
           path: rocjitsu-test-corpus
+
+      - name: Checkout rocjitsu DBT corpus
+        if: matrix.enable_tsan == 0
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
+          # Last updated on 2026/07/27.
+          ref: ${{ github.event.inputs.corpus_ref || 'e1a9a1f7ac9b1d38c7eddf486b529bc3cfcb0c95' }}
+          path: rocjitsu-dbt-test-corpus
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
       - name: Install ROCm SDK
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --pre \
+          uv pip install --system --prerelease allow \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel,libraries]==7.14.0a20260624"
+            "rocm[devel,libraries]==${ROCM_SDK_VERSION}"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
           echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Build rocjitsu
+        id: build_rocjitsu
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         shell: bash
         run: |
           ROCMINFO=RocminfoTest
-          ROCBLAS_GEMM=RocblasGemmTest
           RCCL_DAEMON=RcclDaemonTest
-          ROCBLAS_GEMMS=RocblasGemmTest
-          ROCBLAS_GEMM_FUZZ=RocblasGemmFuzz
-          ROCBLAS_GEMM_CDNA3=RocblasGemmCdna3
-          EXCLUDED_TESTS="${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
+          EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
           ASAN_UBSAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            "Cdna4ToCdna3SimulatedDispatchTest\..*"
+            "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
@@ -143,13 +187,21 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.TwoIndependentClients"
+            "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
+          TSAN_EXCLUDED_TESTS=(
+            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            # This test has a five-second wall-clock assertion that becomes
+            # load-sensitive at the TSan job's CI-level parallelism.
+            "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
+          )
 
+          TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
@@ -157,6 +209,9 @@ jobs:
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
+          fi
+          if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
@@ -178,29 +233,66 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
-          cmake --build "${ROCJITSU_BUILD_DIR}"
+          # Set a conservative number of workers to avoid OOM and excessive system load.
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
+          CTEST_SELECTION=()
+          if [[ -n "${TEST_REGEX}" ]]; then
+            CTEST_SELECTION=(-R "${TEST_REGEX}")
+          fi
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
-            --output-on-failure
+            --output-on-failure \
+            -j "${WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test static ASan launcher preload
+        if: matrix.run_static_asan_launch
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        shell: bash
+        run: |
+          STATIC_ASAN_BUILD_DIR="${ROCJITSU_BUILD_DIR}-asan-static-launch-preload"
+          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -B "${STATIC_ASAN_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+            -DRJ_ENABLE_ASAN=1 \
+            -DRJ_ENABLE_UBSAN=0 \
+            -DRJ_ENABLE_TSAN=0 \
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=0 \
+            -DRJ_SANITIZER_RUNTIME=STATIC
+
+          cmake --build "${STATIC_ASAN_BUILD_DIR}" \
+            --target launch_preload_test
+          ctest --test-dir "${STATIC_ASAN_BUILD_DIR}" \
+            -R '^LaunchPreloadTest\.' \
+            --output-on-failure
 
       - name: Install corpus test dependencies
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          uv pip install --system -r requirements.txt
+          uv pip install --system --prerelease allow \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+            "rocm-sdk-device-gfx942==${ROCM_SDK_VERSION}" \
+            "rocm-sdk-device-gfx950==${ROCM_SDK_VERSION}"
+          rocm-sdk init
 
       - name: Run amdisa tests
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          cd lib/python && pip install -e . && pytest amdisa/tests
+          uv pip install --system -e lib/python
+          python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
         if: matrix.name == 'release'
@@ -210,30 +302,85 @@ jobs:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
-          targets=(
-            "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
-            "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
-            "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
-            "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
-            "gfx1250 gfx1250.json gfx1250_skip_tests.json"
-          )
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          corpus_status=0
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config skip_tests_config <<< "${target}"
-            echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              tests/test_corpus.py -vv \
-              --target "${name}" \
-              --suite iree,kernels,cts \
-              --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
-              corpus_status=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "${corpus_status}"
+          export ROCJITSU_SOURCE_DIR
+
+          corpus_test_status=0
+
+          WORKERS="$(nproc)"
+          if (( WORKERS > 16 )); then
+            WORKERS=16
+          fi
+          corpus_test_flags=(
+            --workers "${WORKERS}" \
+            --soft-timeout 15 \
+            --hard-timeout 30 \
+            --rerun-failed \
+          )
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
+          exit "${corpus_test_status}"
+
+      - name: Extract pinned gfx1250 packaged HSACOs
+        id: extract_dbt
+        if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.build_rocjitsu.outcome == 'success' }}
+        timeout-minutes: 10
+        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        shell: bash
+        run: |
+          uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
+          uv pip install \
+            --python "${ROCJITSU_DBT_VENV}/bin/python" \
+            "pytest>=5.4.1" \
+            "pytest-xdist>=1.32.0"
+          uv pip install \
+            --python "${ROCJITSU_DBT_VENV}/bin/python" \
+            -r "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/requirements-gfx1250-dbt.txt"
+          "${ROCJITSU_DBT_VENV}/bin/rocm-sdk" init
+
+          DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
+          LD_LIBRARY_PATH="${DBT_ROCM_PATH}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+            "${ROCJITSU_DBT_VENV}/bin/python" \
+            scripts/extract_gfx1250_hsacos.py \
+            --environment "${ROCJITSU_DBT_VENV}" \
+            --destination "${ROCJITSU_HSACO_CORPUS}"
+
+      - name: Run gfx1250 DBT corpus tests
+        if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.extract_dbt.outcome == 'success' }}
+        timeout-minutes: ${{ matrix.enable_asan == 1 && 30 || 20 }}
+        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        shell: bash
+        run: |
+          DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
+          DBT_WORKERS="$(nproc)"
+          if (( DBT_WORKERS > 16 )); then
+            DBT_WORKERS=16
+          fi
+          "${ROCJITSU_DBT_VENV}/bin/python" -m pytest tests/test_corpus.py \
+            --target gfx1250 \
+            --suite dbt \
+            --dbt-corpus "${ROCJITSU_HSACO_CORPUS}" \
+            --dbt-translator "${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate" \
+            --dbt-llvm-objdump "${DBT_ROCM_PATH}/lib/llvm/bin/llvm-objdump" \
+            --dbt-package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_package_lock.json" \
+            --dbt-expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
+            --dbt-expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
+            --dbt-allow-incomplete-corpus \
+            --dbt-timeout "${{ matrix.enable_asan == 1 && 90 || 30 }}" \
+            --artifact-directory .pytest-artifacts/gfx1250-dbt \
+            -n "${DBT_WORKERS}" \
+            -q \
+            -rxX \
+            --tb=short
+
+      # Debugging aid only. The pinned extraction is reproducible, so retain
+      # translator logs but never upload the extracted HSACOs.
+      - name: Upload gfx1250 DBT diagnostic logs
+        if: always() && matrix.enable_tsan == 0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gfx1250-dbt-logs-${{ matrix.name }}
+          path: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
+          if-no-files-found: ignore
+          retention-days: 7

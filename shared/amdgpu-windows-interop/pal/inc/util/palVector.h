@@ -149,7 +149,7 @@ public:
     /// Increases maximum capacity to the number of elements in the vector, plus the specified increment amount.
     /// Equivalent to this->Reserve(this->NumElements() + amount);
     ///
-    /// @param [in] amount Number of items beyond the current element count to increase the capacity to.
+    /// @param [in] amount Number of items beyond the current element count to increas the capacity to.
     ///
     /// @returns Result ErrorOutOfMemory if the operation failed.
     Result Grow(uint32 amount) { return Reserve(NumElements() + amount); }
@@ -439,16 +439,29 @@ Vector<T, defaultCapacity, Allocator>::Vector(
                 PAL_PLACEMENT_NEW(m_pData + idx) T(Move(vector.m_pData[idx]));
             }
         }
+
+        // Leave moved-from vector in the same valid empty state as default construction (inline buffer, full
+        // capacity). Without this, source retains a non-zero element count and/or moved-from objects, and
+        // subsequent PushBack / Clear on the source can corrupt state or leak.
+        if (!std::is_trivial<T>::value)
+        {
+            for (uint32 idx = 0; idx < m_numElements; ++idx)
+            {
+                vector.m_pData[idx].~T();
+            }
+        }
+        vector.m_numElements = 0;
     }
     else // Heap allocation
     {
         // Steal heap allocation from dying vector.
         m_pData = vector.m_pData;
 
-        // After the allocation has been stolen, dying vector is just an empty shell.
-        vector.m_pData = nullptr;
-        vector.m_numElements = 0;
-        vector.m_maxCapacity = 0;
+        // Reset source to default-constructed invariants. Setting m_pData to nullptr / m_maxCapacity to 0 left the
+        // moved-from vector unusable: PushBack would call Reserve(0), never allocate, then placement-new at null.
+        vector.m_pData         = reinterpret_cast<T*>(vector.m_data);
+        vector.m_numElements   = 0;
+        vector.m_maxCapacity   = defaultCapacity;
     }
 }
 

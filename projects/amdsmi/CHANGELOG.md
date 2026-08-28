@@ -4,6 +4,54 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.15.0
+
+### Changed
+
+- **Bumped the library major version to 27.0.0** (breaking).  
+  - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
+
+- **Restructured AMD SMI C++ tests into unit and functional suites**.  
+  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
+
+- **Widened five `amdsmi_gpu_metrics_t` accumulator counters from 32-bit to 64-bit** (breaking).  
+  - `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc`, and `pcie_lc_perf_other_end_recovery` are now `uint64_t` to match the amdgpu pmfw metrics header. Recompile callers that read these fields; the struct layout and field offsets have changed.
+
+### Fixed
+
+- **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
+  - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
+
+### Optimized
+
+- **Optimized `amdsmi_get_gpu_process_list()` to skip redundant KFD topology discovery**.  
+  - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
+  - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
+
+### Resolved Issues
+
+- **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
+  - The set path wrote `"1"`/`"0"` to the `ptl/ptl_enable` sysfs node, which only accepts `"enabled"`/`"disabled"`; the driver ignored the numeric write while the API still reported success. The state now changes as expected, and a rejected write returns a real error instead of a generic success.
+
+- **Fixed `amd-smi process` hiding compute processes owned by other users**.  
+  - A caller without permission to read another process's `/proc/<pid>/fd` was misdetected as running in a separate PID namespace, which caused the whole compute-process list to come back empty. Such processes are now listed with a redacted (`N/A`) name instead of being dropped.
+
+- **Fixed CU%/SDMA column alignment in the `amd-smi` process table**.  
+  - The `SDMA` header no longer sits a column left of its values, and valid `CU %`/`SDMA` values are no longer truncated.
+
+- **Fixed compute processes being reported on every GPU**.  
+  - A process was attributed to a GPU whenever it had a KFD context on that GPU, so a job with queues on a single GPU appeared under every GPU. Attribution now uses the process's active KFD queues plus any GPU where it holds a non-zero VRAM allocation, so a process is listed only against the GPUs it actually uses.
+
+- **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
+  - `amdsmi_init()` (and every CLI command) opened a per-GPU IFoE/UALoE fabric session up front, so it blocked indefinitely when the Broadcom IFoE driver was unresponsive, even for queries that never use fabric data.
+  - The fabric session is now opened only on the first fabric query, so initialization and non-fabric queries no longer touch the IFoE driver.
+
+- **Fixed ctypes `DeprecationWarning` from `amdsmi_wrapper.py` on Python 3.14**.  
+  - Python 3.14 deprecates the implicit ctypes structure layout when `_pack_` is set (slated to become an error in 3.19). Each packed structure/union in the generated wrapper now sets `_layout_ = 'ms'`, preserving the existing MSVC-compatible layout (no ABI change) while silencing the warning.
+
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
@@ -71,6 +119,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added PID-grouped process listing across GPUs**.  
   - `amd-smi process --sort-by-pid` and `amd-smi monitor --sort-by-pid` group output by PID, merging each PID's per-GPU usage into one row.
   - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
+
+- **Added `amdsmi_get_vcn_busy_percent` API**.  
+  - Navi devices were incorrectly displaying N/A for vcn_busy in their metrics output due to a difference in design. This API was added to allow users to properly obtain the vcn_busy metric from Navi and other similar devices.
 
 ### Changed
 
@@ -144,6 +195,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed fabric telemetry APIs returning the wrong status on non-IFoE systems**.  
   - `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, and `amdsmi_free_fabric_telemetry()` now return `AMDSMI_STATUS_NOT_SUPPORTED` on systems without fabric hardware, consistent with `amdsmi_get_gpu_fabric_info()`.
+
+- **Fixed incorrect N/A output for vcn_busy field in `amd-smi metric --usage`**.  
+  - On devices without XCP partitions (e.g. Navi), the CLI now reads `vcn_busy_percent` via the new `amdsmi_get_vcn_busy_percent()` sysfs API.
 
 ## amd_smi_lib for ROCm 7.13.0
 
@@ -332,7 +386,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
   - *This change is purely cosmetic and does not affect any functionality.*
 
-- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs (ROCM-21057)**.
+- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs**.  
   - `get_frequencies()` in the rsmi backend no longer discards a parsed `pp_dpm_*` DPM table with `STATUS_UNEXPECTED_DATA` when the kernel omits the `*` current-level marker (which happens whenever the SMU power-gates the domain at idle). The supported frequency table is now returned and `current` is reported as `-1` (unknown) until the marker reappears, so `amdsmi_get_clk_freq()` and all callers see the table at idle as well as under load.
 
 ## amd_smi_lib for ROCm 7.12.0

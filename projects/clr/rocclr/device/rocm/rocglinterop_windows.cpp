@@ -122,13 +122,19 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
+bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext,
+                 bool validateOnly) {
   static_cast<void>(flags); // unused
 
   if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
   if (!glCanInterop(device, GLplatformContext, GLdeviceContext)) {
     return false;
+  }
+
+  // validateOnly: compatibility confirmed, skip starting a real interop session.
+  if (validateOnly) {
+    return true;
   }
 
   return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
@@ -183,12 +189,8 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
   *resHandle = reinterpret_cast<hsa_handle_t>(glResourceData.mbResHandle);
   *offset = static_cast<int>(glResourceData.offset);
-  if (image_srd_size >= glResourceData.textureSRDSize) {
+  if (image_srd && image_srd_size >= glResourceData.textureSRDSize) {
     std::memcpy(image_srd, glResourceData.textureSRD, glResourceData.textureSRDSize);
-  } else {
-    LogPrintfError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
-                   glResourceData.textureSRDSize);
-    return false;
   }
   return true;
 }

@@ -1,0 +1,262 @@
+name: RCCL suite
+
+# Generic single-node launcher for an RCCL cluster test suite. Reusable (called
+# by rccl-ci.yml; also runnable via workflow_dispatch). The `suite` input drives
+# everything suite-specific: it selects lib/<suite>.sbatch, the .ci-out/<suite>-logs
+# dir, and the rccl-<suite>-* scheduler stream, so gin and device-API share this
+# one workflow.
+#
+# Per leg: checkout sources, provision ROCm on the head node (lib/fetch-rocm.sh),
+# then `sbatch --wait` the compute-node script and dump its logs. ROCm/OpenMPI are
+# version-keyed on the cluster-local cache (cache_root); RCCL/rccl-tests rebuild
+# each run. `runs_on`, `cache_root`, and `partition` select the cluster, so a
+# self-contained suite can run on any runner.
+on:
+  workflow_call:
+    inputs:
+      suite:
+        description: 'Suite to run; selects lib/<suite>.sbatch (e.g. "gin", "device-api").'
+        type: string
+        required: true
+      runs_on:
+        description: 'Runner label(s) as a JSON array string; lets a suite target a specific cluster.'
+        type: string
+        required: false
+        default: '["ruby-linux-slurm-scale-runner"]'
+      cache_root:
+        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
+        type: string
+        required: false
+        default: '/apps/rccl-ci'
+      partition:
+        description: 'SLURM partition for the compute-node job.'
+        type: string
+        required: false
+        default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the compute-node job to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
+      rocm_release:
+        description: 'ROCm version prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available.'
+        type: string
+        required: false
+        default: '7.14'
+      rocm_amdgpu_family:
+        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+      non_gating:
+        description: 'If true, a suite failure does not fail the workflow (continue-on-error).'
+        type: boolean
+        required: false
+        default: false
+      timeout_minutes:
+        description: 'Job timeout in minutes.'
+        type: number
+        required: false
+        default: 240
+    outputs:
+      build_failed:
+        # true for a build/infra failure, false for a test-only failure. Lets the
+        # caller gate builds while keeping tests non-gating. AICOMRCCL-1478.
+        description: 'true if a build/infra step failed (not a test-only failure).'
+        value: ${{ jobs.suite.outputs.build_failed }}
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Suite to run; selects lib/<suite>.sbatch.'
+        type: choice
+        required: true
+        options:
+          - device-api
+          - gin
+      runs_on:
+        description: 'Runner label(s) as a JSON array string.'
+        type: string
+        required: false
+        default: '["ruby-linux-slurm-scale-runner"]'
+      cache_root:
+        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
+        type: string
+        required: false
+        default: '/apps/rccl-ci'
+      partition:
+        description: 'SLURM partition for the compute-node job.'
+        type: string
+        required: false
+        default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the compute-node job to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
+      rocm_release:
+        description: 'ROCm version prefix (e.g. "7.14"; "7.14.0rc1" pins exactly). Empty = newest available. Cascades release -> prerelease -> nightly, multiarch-first.'
+        type: string
+        required: false
+        default: '7.14'
+      rocm_amdgpu_family:
+        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+      non_gating:
+        description: 'If true, a suite failure does not fail the workflow.'
+        type: boolean
+        required: false
+        default: false
+      timeout_minutes:
+        # workflow_dispatch has no number type; job timeout-minutes coerces it.
+        description: 'Job timeout in minutes.'
+        type: string
+        required: false
+        default: '240'
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: Single node ${{ inputs.suite }} testing
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    continue-on-error: ${{ inputs.non_gating }}
+    outputs:
+      build_failed: ${{ steps.classify.outputs.build_failed }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SUITE: ${{ inputs.suite }}
+      # Cluster-local ROCm/OpenMPI cache root.
+      RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
+      # SLURM partition for this cluster's compute-node job.
+      RCCL_SLURM_PARTITION: ${{ inputs.partition }}
+      # Optional SLURM reservation (e.g. dedicated CI nodes); empty = none.
+      RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
+      RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
+      # ROCM_RELEASE is a version prefix (e.g. "7.14"); empty => newest available.
+      ROCM_RELEASE: ${{ inputs.rocm_release }}
+      # Stability-first cascade used by fetch-rocm.sh (no token needed).
+      RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+      # Add the test matrix's debug_env (NCCL_DEBUG=INFO, ...) to every run.
+      RCCL_CI_DEBUG: '1'
+      # Per-(run, attempt) checkout+build dir so parallel legs on the shared NFS
+      # _work never collide.
+      CI_SUBDIR: _ci/${{ inputs.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: ${{ env.CI_SUBDIR }}
+          # Sources built by the compute-node script (rocSHMEM only used by gin).
+          sparse-checkout: |
+            projects/rccl
+            projects/rccl-tests
+            projects/rocshmem
+
+      - name: Provision ROCm (${{ inputs.rocm_release || 'latest' }}) on the head node
+        id: provision
+        run: |
+          set -euo pipefail
+          export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
+          # Shared, version-keyed ROCm/OpenMPI cache on /apps NFS (safe to share).
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Workdir: ${RCCL_DEVICE_API_WORKDIR}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads}; then
+            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
+            exit 1
+          fi
+          "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+
+      - name: Submit ${{ inputs.suite }} build+test to SLURM
+        id: submit
+        run: |
+          set -euo pipefail
+          export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          ci_lib="${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib"
+          # submit_slurm_job.py does sbatch --wait + sacct cross-check (a bare
+          # --wait exits 0 even for scheduler-killed jobs).
+          python3 "${ci_lib}/submit_slurm_job.py" \
+            --script "${ci_lib}/${SUITE}.sbatch" \
+            --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
+            --partition "${RCCL_SLURM_PARTITION}" \
+            --reservation "${RCCL_SLURM_RESERVATION}" \
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
+
+      - name: Dump compute-node logs
+        if: always()
+        run: |
+          logs_dir="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs"
+          shopt -s nullglob
+          # One collapsible group per log; rccl-<suite>-* is SLURM's whole-job
+          # stream, kept last as a fallback for early/killed jobs.
+          dump() {
+            local title="$1"; shift
+            for f in "$@"; do
+              echo "::group::${title}: $(basename "${f}")"
+              cat "${f}" || true
+              echo "::endgroup::"
+            done
+          }
+          dump "build"      "${logs_dir}"/build-*.out "${logs_dir}"/build-*.err
+          dump "test"       "${logs_dir}"/test-*.out  "${logs_dir}"/test-*.err
+          dump "scheduler"  "${logs_dir}"/rccl-${SUITE}-*.out "${logs_dir}"/rccl-${SUITE}-*.err
+          # Verbose per-rank NCCL debug logs (RCCL_CI_DEBUG=1); noisy, kept last.
+          dump "nccl-debug" "${logs_dir}"/nccl-debug/nccl-debug.*.log
+
+      # Test-only failure (sbatch drops a `tests-failed` sentinel, exits 0): turn
+      # this job red here, where the logs are. AICOMRCCL-1478.
+      - name: Fail on test failures
+        if: always()
+        run: |
+          sentinel="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/tests-failed"
+          if [[ ! -f "${sentinel}" ]]; then
+            echo "${SUITE}: no test failures."
+            exit 0
+          fi
+          # Surface the failed/skipped list on the job Summary tab, not just the log.
+          {
+            echo "### ${SUITE}: tests failed"
+            echo ""
+            echo '```'
+            cat "${sentinel}"
+            echo '```'
+            echo ""
+            echo "_Full per-test output: the \`test\` log group of this job. Per-rank NCCL logs: the \`nccl-debug\` group._"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::error::${SUITE} tests failed. See this job's Summary tab for the failed-test list."
+          exit 1
+
+      # Tell the caller whether this was a build/infra failure (gating) or a
+      # test-only failure (non-gating for gin). AICOMRCCL-1478.
+      - name: Classify failure
+        id: classify
+        if: always()
+        run: |
+          if [[ "${{ steps.provision.outcome }}" == "failure" || "${{ steps.submit.outcome }}" == "failure" ]]; then
+            echo "build_failed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "build_failed=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"

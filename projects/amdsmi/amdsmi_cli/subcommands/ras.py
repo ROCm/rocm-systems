@@ -241,7 +241,7 @@ class RasCommands:
             if partition_id != 0 and primary_partition_gpu_id is not None:
                 primary_partition_gpu_ids.add(primary_partition_gpu_id)
 
-        if partition_warning_flag:
+        if partition_warning_flag and not self.logger.is_json_format():
             # Create a list of the primary partitions
             primary_partitions_str = " ".join(
                 f"GPU{gpu_id}" for gpu_id in primary_partition_gpu_ids
@@ -289,9 +289,9 @@ class RasCommands:
                     cper_counter=cper_counter,
                 )
                 all_json_rows.extend(rows)
-            if is_json and all_json_rows:
+            if is_json and (all_json_rows or not args.follow):
                 self.logger.multiple_device_output = all_json_rows
-                self.logger.print_output(multiple_device_enabled=True)
+                self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
             if not args.follow:
                 break
             time.sleep(1)

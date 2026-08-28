@@ -894,7 +894,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "GFX Activity Accumulator", "Accumulator for GFX activity percentage",
              details::AMDGpuMetricAttributeId_t::GFX_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -903,7 +903,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Memory Activity Accumulator", "Accumulator for memory activity percentage",
              details::AMDGpuMetricAttributeId_t::MEM_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -957,7 +957,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Sent Count Accumulator", "Accumulator for PCIe NAK sent count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_SENT_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -966,7 +966,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Received Count Accumulator", "Accumulator for PCIe NAK received count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_RCVD_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -1061,7 +1061,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe LC Perf Other End Recovery", "PCIe link control performance other end recovery",
              details::AMDGpuMetricAttributeId_t::PCIE_LC_PERF_OTHER_END_RECOVERY,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 

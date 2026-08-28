@@ -1124,11 +1124,18 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             details.append(f"#### {stage}\n\n" + _fenced(content))
             print(f"FAILED: {stage}")
 
-    # 2. amd-smi command test logs -- logged but non-fatal
+    # 2. amd-smi command test logs -- logged but non-fatal. The workflow
+    # appends "Error code: <rc>" (space + digit, same line) only on a real
+    # non-zero exit. The CLI's debug logging also prints an unsupported-feature
+    # status code, but wrapped onto the next line ("Error code:\n\t2 | ..."),
+    # so restrict the match to a same-line digit to skip that benign noise.
+    import re as _re
+
+    err_code_re = _re.compile(r"Error code:[ \t]*\d")
     cmd_fails: List[str] = []
     for log in sorted(results_dir.glob("amd-smi_*.log")):
         log_text = log.read_text(encoding="utf-8", errors="replace")
-        if any(token in log_text for token in ("Traceback", "AmdSmiException", "Error code:")):
+        if "Traceback" in log_text or "AmdSmiException" in log_text or err_code_re.search(log_text):
             cmd_fails.append(log.stem.replace("amd-smi_", ""))
     if cmd_fails:
         joined = " ".join(cmd_fails)
@@ -1146,8 +1153,6 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             )
 
     # 4. Python test outputs
-    import re as _re
-
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
     for test_file in ("integration_test_output.txt", "unit_test_output.txt", "perf_test_output.txt"):
         full = results_dir / test_file

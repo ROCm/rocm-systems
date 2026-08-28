@@ -4,6 +4,8 @@
 #include "avail.hpp"
 #include "common.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
+#include "common/environment.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -11,6 +13,7 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
+#include <spdlog/fmt/fmt.h>
 
 #include "hw_counter_query.hpp"
 
@@ -131,19 +134,19 @@ main(int argc, char** argv)
     std::set<std::string> _category_options = component_categories{}();
     {
         auto _settings = tim::settings::shared_instance();
-        for(const auto& itr : *_settings)
+        for(const auto& setting : *_settings)
         {
-            if(exclude_setting(itr.second->get_env_name())) continue;
-            auto _categories = itr.second->get_categories();
+            if(exclude_setting(setting.second->get_env_name())) continue;
+            auto _categories = setting.second->get_categories();
             if(_categories.find("native") != _categories.end())
             {
                 _categories.erase("native");
                 _categories.emplace("timemory");
-                itr.second->set_categories(_categories);
+                setting.second->set_categories(_categories);
             }
-            for(const auto& eitr : itr.second->get_categories())
+            for(const auto& category : setting.second->get_categories())
             {
-                _category_options.emplace(TIMEMORY_JOIN("::", "settings", eitr));
+                _category_options.emplace(fmt::format("settings::{}", category));
             }
         }
     }
@@ -372,7 +375,7 @@ main(int argc, char** argv)
                         if(!is_selected(itr.key)) continue;
                         if(_show && !is_selected(itr.value)) continue;
                         _msg << "| " << std::setw(std::get<0>(_w) + 2)
-                             << TIMEMORY_JOIN("", "`", itr.key, "`");
+                             << fmt::format("`{}`", itr.key);
                         if(_show)
                             _msg << " | " << std::setw(std::get<1>(_w)) << itr.value;
                         _msg << " | " << std::setw(std::get<2>(_w)) << itr.description
@@ -519,7 +522,10 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(get_bool(_config_file, false) && !_out.empty()) _config_file = _out;
+                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                {
+                    _config_file = _out;
+                }
             }
         });
     parser.add_argument({ "-F", "--config-format" }, "Configuration file format")
@@ -784,12 +790,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                                        if(itr.name().find(nitr) != std::string::npos)
                                            return true;
                                    }
-                                   auto _categories = tim::delimit(
-                                       itr.categories(), ", ", [](const string_t& _v) {
-                                           return "component::" + _v;
-                                       });
-                                   for(const auto& citr : _categories)
-                                       if(category_view.count(citr) > 0) return false;
+                                   auto _categories =
+                                       rocprofsys::delimit(itr.categories(), ", ");
+                                   for(auto& _v : _categories)
+                                   {
+                                       _v = fmt::format("component::{}", _v);
+                                       if(category_view.count(_v) > 0) return false;
+                                   }
                                    return true;
                                }),
                 _info.end());
@@ -1007,12 +1014,14 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         if(sitr != _settings->end())
         {
             str_set_t _categories{};
-            for(const auto& citr : sitr->second->get_categories())
-                _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
-            bool _found = false;
-            for(const auto& citr : _categories)
+            for(const auto& category : sitr->second->get_categories())
             {
-                if(category_view.count(citr) > 0) _found = true;
+                _categories.emplace(fmt::format("settings::{}", category));
+            }
+            bool _found = false;
+            for(const auto& category : _categories)
+            {
+                if(category_view.count(category) > 0) _found = true;
             }
             if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
             {

@@ -30,7 +30,7 @@
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <dlfcn.h>
 #include <elf.h>

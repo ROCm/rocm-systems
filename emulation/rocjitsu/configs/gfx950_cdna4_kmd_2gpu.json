@@ -1,5 +1,5 @@
 {
-  "max_ticks": 100000,
+  "max_ticks": 0,
   "num_threads": 1,
   "exec_mode": "functional",
   "vm": {

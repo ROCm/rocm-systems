@@ -183,7 +183,7 @@ def update_normal_unit_string(equation: str, normal_unit: str) -> str:
         r"\((?P<PREFIX>\w*)\s+\+\s+(\$normUnit\))",
         rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
-    ).capitalize()
+    )
 
 
 def gen_counter_list(formula: str) -> tuple[bool, list[str]]:

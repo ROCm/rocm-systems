@@ -6,6 +6,8 @@
 #include "common/env_vars.hpp"
 #include "embedded_presets.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -32,16 +34,14 @@ find_preset_directory()
     auto root = common::path::get_rocprofsys_root();
     if(!root.empty())
     {
-        auto candidate =
-            common::join('/', root, "share", "rocprofiler-systems", "presets");
+        auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", root);
         if(common::path::exists(candidate)) return candidate;
     }
 
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
-        auto candidate = common::join('/', std::string{ rocm_path }, "share",
-                                      "rocprofiler-systems", "presets");
+        auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
         if(common::path::exists(candidate)) return candidate;
     }
 
@@ -183,7 +183,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     // Bare preset name — resolve within the preset directory
     if(m_directory.empty()) return {};
 
-    auto filepath  = common::join('/', m_directory, name_or_path + ".json");
+    auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
     auto resolved  = common::path::realpath(filepath);
     auto canon_dir = common::path::realpath(m_directory);
     if(resolved.empty() || canon_dir.empty() ||
@@ -253,7 +253,7 @@ preset_registry::ensure_all_loaded()
         // Skip if preset is already cached (e.g. from embedded presets)
         if(m_presets.count(preset_name) > 0) continue;
 
-        const auto filepath = common::join('/', m_directory, std::string{ filename });
+        const auto filepath = fmt::format("{}/{}", m_directory, filename);
         if(auto info = load_file(filepath)) m_presets[preset_name] = std::move(*info);
 
         errno = 0;

@@ -230,7 +230,7 @@ def omniarg_parser(
 ---------------------------------------------------------------------------------
 Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
@@ -419,8 +419,9 @@ Examples:
             "(e.g. 12, 12.1, 12.1.1).\n"
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
-            "\t\t\tAlternatively, specify block alias(es) for filtering "
-            "(e.g. lds, l1i, sl1d).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
+            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
         ),

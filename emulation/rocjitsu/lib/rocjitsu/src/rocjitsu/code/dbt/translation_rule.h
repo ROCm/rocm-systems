@@ -22,8 +22,12 @@
 
 #pragma once
 
+#include "util/bit.h"
+
 #include <compare>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -34,23 +38,24 @@ namespace rocjitsu {
 class Instruction;
 class LivenessAnalysis;
 
-/// @brief Per-kernel register resource state shared by semantic lowerings.
+/// @brief Architecture-neutral resource accounting shared by semantic lowerings.
 ///
-/// @details TranslationContext is created once per kernel from the current
-/// target kernel descriptor translation, then passed through every semantic
-/// EXPAND rule for that kernel. The `num_*` fields describe the descriptor
-/// state the lowering started from. The `required_*` fields are feedback from
-/// lowerings that allocated scratch registers beyond those descriptor counts.
+/// @details This state is created once per kernel from the current target kernel
+/// descriptor translation, then passed through every semantic EXPAND rule for
+/// that kernel. The `num_*` fields describe the descriptor state the lowering
+/// started from. The `required_*` fields are feedback from lowerings that
+/// allocated scratch registers beyond those descriptor counts. Feature-specific
+/// lowering state belongs in a separate context component.
 ///
 /// Descriptor translation happens before instruction translation, but semantic
 /// lowerings only know their actual scratch choices after liveness has been
 /// computed. Each kernel is lowered once while recording the highest SGPR/VGPR
-/// count required by those lowerings here; BinaryTranslator then recomputes the
+/// and private-memory requirements here; BinaryTranslator then recomputes the
 /// affected descriptor translations with those larger minimums before patching
 /// descriptors into the output image. A second instruction pass is only needed
 /// if a future lowering depends on descriptor-derived register numbers that can
 /// change during that recomputation.
-struct TranslationContext {
+struct KernelResourceRequirements {
   /// @brief Initial target ordinary VGPR count from descriptor translation.
   uint32_t num_vgprs = 0;
 
@@ -79,25 +84,42 @@ struct TranslationContext {
   /// plus one.
   uint32_t required_sgpr_count = 0;
 
-  /// @brief Construct an empty context for tests or call sites without descriptor feedback.
-  TranslationContext() = default;
+  /// @brief Initial per-lane private segment size from descriptor translation.
+  uint32_t private_segment_fixed_size = 0;
 
-  /// @brief Construct a context for kernels that only need VGPR/SGPR descriptor state.
+  /// @brief Minimum per-lane private segment size required after spill-backed lowerings.
+  uint32_t required_private_segment_fixed_size = 0;
+
+  /// @brief End of persistent semantic spill storage before reusable temp slots.
   ///
+  /// @details Persistent spill storage must not overlap the reusable
+  /// per-instruction spill window. Virtual LDS uses this when a descriptor-full
+  /// kernel has to save the backing-buffer pointer in private memory before the
+  /// guest body is allowed to clobber the dispatch/kernarg pointer SGPRs.
+  uint32_t semantic_spill_persistent_end = 0;
+
+  /// @brief Construct an empty context component for tests or call sites without
+  /// descriptor feedback.
+  KernelResourceRequirements() = default;
+
+  /// @brief Construct resource accounting for kernels that only need VGPR/SGPR
+  /// descriptor state.
   /// @param vgprs Initial target ordinary VGPR count.
   /// @param sgprs Initial target SGPR count.
-  TranslationContext(uint32_t vgprs, uint32_t sgprs)
-      : num_vgprs(vgprs), num_sgprs(sgprs), required_vgpr_count(0), required_sgpr_count(0) {}
+  KernelResourceRequirements(uint32_t vgprs, uint32_t sgprs) : num_vgprs(vgprs), num_sgprs(sgprs) {}
 
-  /// @brief Construct a full context from target kernel descriptor translation.
-  ///
+  /// @brief Construct full resource accounting from target descriptor translation.
   /// @param vgprs Initial target ordinary VGPR count.
   /// @param agprs Initial target AccVGPR count.
   /// @param accum_base Initial target AccVGPR base.
   /// @param sgprs Initial target SGPR count.
-  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs)
+  /// @param private_bytes Initial per-lane private segment size.
+  KernelResourceRequirements(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
+                             uint32_t private_bytes = 0)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
-        required_vgpr_count(0), required_sgpr_count(0) {}
+        private_segment_fixed_size(private_bytes),
+        required_private_segment_fixed_size(private_bytes),
+        semantic_spill_persistent_end(private_bytes) {}
 
   /// @brief Record that semantic lowering requires at least @p count ordinary VGPRs.
   ///
@@ -116,6 +138,129 @@ struct TranslationContext {
     if (required_sgpr_count < count)
       required_sgpr_count = count;
   }
+
+  /// @brief Record a minimum per-lane private segment size.
+  ///
+  /// @details SemanticSpillFrame calls this as anonymous transient spill slots
+  /// are allocated. Keeping the high-water update here leaves descriptor
+  /// feedback independent of the target instructions used to access the slots.
+  void require_private_segment_bytes(uint32_t bytes) {
+    if (required_private_segment_fixed_size < bytes)
+      required_private_segment_fixed_size = bytes;
+  }
+
+  /// @brief Reserve @p dwords persistent 32-bit per-lane spill slots.
+  ///
+  /// @details Persistent semantic spill slots hold values across multiple
+  /// replacement sequences. They are allocated before the reusable temp window
+  /// so later per-instruction spills cannot overwrite them.
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt if
+  /// aligning/extending the private segment would exceed the 32-bit private-size
+  /// field. The private segment is initialized from the guest descriptor's
+  /// private size, which can be near UINT32_MAX, so unchecked 32-bit arithmetic
+  /// here could wrap to a low offset and corrupt guest scratch. Callers must
+  /// treat nullopt as a kernel translation failure.
+  [[nodiscard]] std::optional<uint32_t> reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    semantic_spill_persistent_end = reservation->second;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
+  }
+
+  /// @brief Reserve @p dwords reusable 32-bit per-lane spill slots.
+  ///
+  /// @details Semantic spill slots are appended after the kernel's original
+  /// private segment and any persistent semantic spill storage at a 16-byte
+  /// boundary, matching the patch-layer spill manager's flat-scratch layout.
+  /// They are scratch temporaries for a single replacement sequence, not
+  /// persistent virtual registers, so every lowering site in the kernel can
+  /// reuse the same slot range. Descriptor recomputation later raises
+  /// private_segment_fixed_size to cover the largest reservation.
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt on
+  /// 32-bit overflow (see reserve_persistent_semantic_spill_dwords). Unlike the
+  /// persistent variant this does not advance semantic_spill_persistent_end.
+  [[nodiscard]] std::optional<uint32_t> reserve_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
+  }
+
+private:
+  /// @brief Compute the aligned base and one-past-end for a spill reservation.
+  ///
+  /// @returns {base_byte_offset, end_byte_offset} using checked 64-bit math, or
+  /// std::nullopt if either would exceed the 32-bit private-size field.
+  [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
+  semantic_spill_reservation(uint32_t dwords) const {
+    constexpr uint64_t kSpillAlignment = 16;
+    constexpr uint64_t kMax = std::numeric_limits<uint32_t>::max();
+    const uint64_t base =
+        util::align_up(static_cast<uint64_t>(semantic_spill_persistent_end), kSpillAlignment);
+    const uint64_t end = base + static_cast<uint64_t>(dwords) * 4u;
+    if (base > kMax || end > kMax)
+      return std::nullopt;
+    return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(base), static_cast<uint32_t>(end)};
+  }
+};
+
+/// @brief State owned by the virtual-LDS feature while lowering one kernel.
+struct VirtualLdsTranslationState {
+  /// @brief True when this kernel's LDS accesses target a global-memory backing buffer.
+  ///
+  /// @details Descriptor translation sets hardware LDS to zero in this mode, so
+  /// any real LDS read/write instruction in the source body must be rewritten.
+  /// Cross-lane DS instructions that do not access LDS storage, such as
+  /// bpermute, may still use the DS unit directly.
+  bool virtualize_lds = false;
+
+  /// @brief 64-bit SGPR-pair base address for the virtual-LDS backing buffer.
+  ///
+  /// @details CDNA3 flat/global addressing uses this SGPR pair plus the source
+  /// DS address VGPR and folded DS immediate offset. The runtime/prologue path
+  /// is responsible for loading this pair before the rewritten body executes.
+  uint16_t virtual_lds_base_sgpr = 0;
+
+  /// @brief True when the virtual-LDS base SGPR pair is borrowed per DS use.
+  ///
+  /// @details Some kernels already allocate and touch every ordinary SGPR pair.
+  /// For those kernels, DBT preserves the selected pair around each lowered LDS
+  /// memory operation instead of permanently clobbering it in the entry
+  /// prologue.
+  bool virtual_lds_base_sgpr_spill_per_use = false;
+
+  /// @brief True when the runtime backing pointer was spilled at entry.
+  bool virtual_lds_base_pointer_spilled = false;
+
+  /// @brief Private scratch offset of the spilled virtual-LDS backing pointer.
+  uint32_t virtual_lds_base_pointer_spill_offset = 0;
+
+  /// @brief Target kernarg segment pointer SGPR pair used by entry-only wrapper loads.
+  uint16_t virtual_lds_kernarg_segment_ptr_sgpr = 0;
+
+  /// @brief Kernarg-wrapper byte offset of the runtime virtual-LDS state.
+  uint32_t virtual_lds_kernarg_pointer_offset = 0;
+};
+
+/// @brief Per-kernel state passed through semantic translation rules.
+///
+/// @details Inheritance preserves the compact field access used by existing
+/// rules while making the ownership split explicit. Generic DBT/DBI resource
+/// helpers can consume KernelResourceRequirements without depending on virtual
+/// LDS, and pair-specific lowerings can consume VirtualLdsTranslationState.
+struct TranslationContext : KernelResourceRequirements, VirtualLdsTranslationState {
+  TranslationContext() = default;
+
+  TranslationContext(uint32_t vgprs, uint32_t sgprs) : KernelResourceRequirements(vgprs, sgprs) {}
+
+  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
+                     uint32_t private_bytes = 0)
+      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes) {}
 };
 
 /// @brief Status returned by a semantic EXPAND rule lookup or expansion.
@@ -245,11 +390,14 @@ struct LaneLayout;
 /// @param inst          The decoded guest instruction to expand.
 /// @param arch          Target ISA architecture.
 /// @param offset        Byte offset of the instruction in .text.
+/// @param source_text   Full source .text bytes, used when trailing modifier/literal words are
+///                      not retained by the decoded Instruction object.
 /// @param liveness      Kernel-scoped live-before data for safe scratch register allocation.
 /// @param guest_layout  Source matrix lane layout (nullptr if not a matrix op).
 /// @param host_layout   Target matrix lane layout (nullptr if not a matrix op).
 /// @returns Structured expansion status and replacement words.
 using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
+                                  std::span<const uint8_t> source_text,
                                   const LivenessAnalysis &liveness, TranslationContext &context,
                                   const LaneLayout *guest_layout, const LaneLayout *host_layout);
 
@@ -272,6 +420,7 @@ struct TranslationRule {
   ExpandFn expand_fn;             ///< Expansion generator (for Expand).
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
+  bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)

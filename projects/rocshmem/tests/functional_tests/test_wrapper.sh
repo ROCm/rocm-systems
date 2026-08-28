@@ -203,6 +203,16 @@ if [[ "$BACKEND" == "ro" ]]; then
     esac
 fi
 
+# AIROCSHMEM-418: wave tests not supported on RO
+if [[ "$BACKEND" == "ro" ]]; then
+    case "$TEST_NAME" in
+        *_wave)
+            echo "Skip: $TEST_NAME (AIROCSHMEM-409: wave tests not supported on RO)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
+
 # Check GPU availability
 if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null; then
     NUM_GPUS=$(amd-smi list | grep GPU | wc -l)

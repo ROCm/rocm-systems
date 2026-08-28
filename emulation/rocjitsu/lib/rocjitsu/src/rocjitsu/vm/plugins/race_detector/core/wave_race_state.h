@@ -69,6 +69,9 @@ public:
   /// Check a full VGPR read for races. Calls the RaceHandler on violation.
   void checkVgprRead(int reg, int lane, uint8_t byteMask) const;
 
+  /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
+  void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
+
   /// Check all lanes of a VGPR for races (used by bulk register reads).
   void checkVgprReadAllLanes(int reg) const;
 

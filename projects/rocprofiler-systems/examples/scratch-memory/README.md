@@ -53,8 +53,7 @@ rocprof-sys-run -- ./scratch-memory
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_api,hsa_api,kernel_dispatch,scratch_memory \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./scratch-memory
+ROCPROFSYS_ROCM_DOMAINS=hip_api,hsa_api,kernel_dispatch,scratch_memory \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./scratch-memory
 ```

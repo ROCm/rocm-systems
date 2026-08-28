@@ -247,8 +247,8 @@ int main(int argc, char **argv) {
             }
 
             if (!dec->CodecSupported(v_device_id[i], rocdec_codec_id, demuxer->GetBitDepth())) {
-                std::cerr << "Codec not supported on GPU, skipping this file!" << std::endl;
-                continue;
+                std::cerr << "Error: Codec not supported on GPU!" << std::endl;
+                return 1;
             }
             v_demuxer.push_back(std::move(demuxer));
             v_viddec.push_back(std::move(dec));
@@ -292,6 +292,10 @@ int main(int argc, char **argv) {
 
         std::cout << "info: Total pictures decoded: " << n_total_dec  << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_total  << std::endl;
+        if (n_total == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         std::cout << "info: avg decoding time per picture: " << 1000 / total_fps_dec << " ms" << std::endl;
         std::cout << "info: avg decode FPS: " << total_fps_dec  << std::endl;
         std::cout << "info: avg output/display time per frame: " << 1000 / total_fps << " ms" << std::endl;

@@ -115,7 +115,7 @@ class TestScalarBinopValidation:
 class TestScalarCmpValidation:
     @pytest.mark.parametrize('op', ['eq', 'ne', 'lt', 'gt', 'le', 'ge'])
     def test_scalar_cmp_writes_scc(self, op):
-        sem = _FakeSem(f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32')
+        sem = _FakeSem(f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32', 'compare')
         old = gen_scalar_cmp(['ssrc0', 'ssrc1'], op, 'u32')
         new = _new_output(sem, ['ssrc0', 'ssrc1'], [], 'u32')
         assert 'write_scc' in old
@@ -208,7 +208,7 @@ class TestVop3ModifierValidation:
 
 class TestSaveexecValidation:
     def test_saveexec_writes_exec(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         old = gen_scalar_saveexec(['sdst'], ['ssrc0'], 'and')
         new = _new_output(sem, ['ssrc0'], ['sdst'])
         assert 'set_exec' in old or 'set_exec' in old
@@ -216,12 +216,12 @@ class TestSaveexecValidation:
         assert 'write_scc' in new
 
     def test_saveexec_b32_uses_32_bit_operand_access(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B32', 'scalar_saveexec', 'and', 'b32')
+        sem = _FakeSem('S_AND_SAVEEXEC_B32', 'scalar_saveexec', 'and', 'b32', 'nonzero')
         new = _new_output(sem, ['ssrc0'], ['sdst'], 'b32')
-        assert 'ssrc0.read_scalar(wf)' in new
-        assert 'ssrc0.read_scalar64(wf)' not in new
-        assert 'sdst.write_scalar(wf' in new
-        assert 'sdst.write_scalar64(wf' not in new
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' in new
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' not in new
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(sdst,' in new
+        assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst,' not in new
         assert '0xffffffffULL' in new
 
 
@@ -232,8 +232,27 @@ class TestAllClassesLowerWithOperandMap:
         from amdisa.sema_derive import _DERIVE_REGISTRY
 
         errors = []
+        scc_modes = {
+            'scalar_addk': 'overflow',
+            'scalar_bfe': 'nonzero',
+            'scalar_bitcmp': 'compare',
+            'scalar_cmp': 'compare',
+            'scalar_cmpk': 'compare',
+            'scalar_saveexec': 'nonzero',
+            'scalar_wrexec': 'nonzero',
+        }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
-            sem = _FakeSem(f'TEST_{cls_name.upper()}', cls_name, 'add', 'f32')
+            operation = {
+                'scalar_saveexec': 'and',
+                'scalar_wrexec': 'andn1',
+            }.get(cls_name, 'add')
+            sem = _FakeSem(
+                f'TEST_{cls_name.upper()}',
+                cls_name,
+                operation,
+                'f32',
+                scc_modes.get(cls_name),
+            )
             sem.elem_size = 4
             sem.num_elems = 1
             sem.sign_extend = False

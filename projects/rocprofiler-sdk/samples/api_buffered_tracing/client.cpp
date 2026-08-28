@@ -81,6 +81,14 @@ rocprofiler_buffer_id_t       client_buffer    = {};
 buffer_name_info              client_name_info = {};
 kernel_symbol_map_t           client_kernels   = {};
 
+// The call_stack_t (tool_data) vector is shared by callbacks that run on different
+// threads concurrently: tool_tracing_callback executes on the rocprofiler buffer
+// callback thread, while thread_precreate/thread_postcreate are invoked from the
+// internal-thread-creation notifier on whichever thread triggers creation of an SDK
+// internal thread (e.g. the async signal handler task group created on the first
+// kernel doorbell). Guard all mutations to avoid a data race / heap corruption.
+std::mutex call_stack_mutex;
+
 template <typename Tp>
 std::string
 as_hex(Tp _v, size_t _width = 16)
@@ -149,6 +157,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 {
     assert(user_data != nullptr);
     assert(drop_count == 0 && "drop count should be zero for lossless policy");
+
+    auto _call_stack_lk = std::unique_lock<std::mutex>{call_stack_mutex};
 
     if(num_headers == 0)
         throw std::runtime_error{
@@ -350,6 +360,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 void
 thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
 {
+    auto _call_stack_lk = std::unique_lock<std::mutex>{call_stack_mutex};
     static_cast<call_stack_t*>(tool_data)->emplace_back(
         source_location{__FUNCTION__,
                         __FILE__,
@@ -361,6 +372,7 @@ thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
 void
 thread_postcreate(rocprofiler_runtime_library_t lib, void* tool_data)
 {
+    auto _call_stack_lk = std::unique_lock<std::mutex>{call_stack_mutex};
     static_cast<call_stack_t*>(tool_data)->emplace_back(
         source_location{__FUNCTION__,
                         __FILE__,

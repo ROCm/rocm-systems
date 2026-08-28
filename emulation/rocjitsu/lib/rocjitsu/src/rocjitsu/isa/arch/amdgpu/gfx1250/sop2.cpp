@@ -5,2178 +5,2099 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
 
 namespace rocjitsu {
 namespace gfx1250 {
 
 SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
-    : Sop2("s_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAddCoU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAddCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_u32_sop2(*this, wf);
-}
-
-SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
-    : Sop2("s_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSubCoU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SSubCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_u32_sop2(*this, wf);
-}
-
-SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
-    : Sop2("s_add_co_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAddCoI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAddCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_i32_sop2(*this, wf);
-}
-
-SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
-    : Sop2("s_sub_co_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSubCoI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SSubCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_i32_sop2(*this, wf);
-}
-
-SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
-    : Sop2("s_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAddCoCiU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAddCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_ci_u32_sop2(*this, wf);
-}
-
-SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
-    : Sop2("s_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSubCoCiU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SSubCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_ci_u32_sop2(*this, wf);
-}
-
-SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
-    : Sop2("s_absdiff_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAbsdiffI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_absdiff_i32_sop2(*this, wf);
-}
-
-SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
-    : Sop2("s_lshl_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshlB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshlB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl_b32_sop2(*this, wf);
-}
-
-SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
-    : Sop2("s_lshl_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshlB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshlB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl_b64_sop2(*this, wf);
-}
-
-SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
-    : Sop2("s_lshr_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshrB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshr_b32_sop2(*this, wf);
-}
-
-SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
-    : Sop2("s_lshr_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshrB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshrB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshr_b64_sop2(*this, wf);
-}
-
-SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
-    : Sop2("s_ashr_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAshrI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAshrI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ashr_i32_sop2(*this, wf);
-}
-
-SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
-    : Sop2("s_ashr_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAshrI64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAshrI64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ashr_i64_sop2(*this, wf);
-}
-
-SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
-    : Sop2("s_lshl1_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLshl1AddU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshl1AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl1_add_u32_sop2(*this, wf);
-}
-
-SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
-    : Sop2("s_lshl2_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLshl2AddU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshl2AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl2_add_u32_sop2(*this, wf);
-}
-
-SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
-    : Sop2("s_lshl3_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLshl3AddU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshl3AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl3_add_u32_sop2(*this, wf);
-}
-
-SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
-    : Sop2("s_lshl4_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLshl4AddU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SLshl4AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl4_add_u32_sop2(*this, wf);
-}
-
-SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
-    : Sop2("s_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMinI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMinI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_min_i32_sop2(*this, wf); }
-
-SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
-    : Sop2("s_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMinU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMinU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_min_u32_sop2(*this, wf); }
-
-SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
-    : Sop2("s_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMaxI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMaxI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_max_i32_sop2(*this, wf); }
-
-SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
-    : Sop2("s_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMaxU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMaxU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_max_u32_sop2(*this, wf); }
-
-SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
-    : Sop2("s_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAndB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_and_b32_sop2(*this, wf); }
-
-SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
-    : Sop2("s_and_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAndB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAndB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_and_b64_sop2(*this, wf); }
-
-SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
-    : Sop2("s_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SOrB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b32_sop2(*this, wf); }
-
-SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
-    : Sop2("s_or_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SOrB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b64_sop2(*this, wf); }
-
-SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
-    : Sop2("s_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXorB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_xor_b32_sop2(*this, wf); }
-
-SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
-    : Sop2("s_xor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXorB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SXorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_xor_b64_sop2(*this, wf); }
-
-SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
-    : Sop2("s_nand_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNandB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SNandB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_b32_sop2(*this, wf);
-}
-
-SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
-    : Sop2("s_nand_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNandB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SNandB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_b64_sop2(*this, wf);
-}
-
-SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
-    : Sop2("s_nor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNorB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nor_b32_sop2(*this, wf); }
-
-SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
-    : Sop2("s_nor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNorB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SNorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nor_b64_sop2(*this, wf); }
-
-SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
-    : Sop2("s_xnor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXnorB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SXnorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_b32_sop2(*this, wf);
-}
-
-SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
-    : Sop2("s_xnor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXnorB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SXnorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_b64_sop2(*this, wf);
-}
-
-SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
-    : Sop2("s_and_not1_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1B32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAndNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_b32_sop2(*this, wf);
-}
-
-SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
-    : Sop2("s_and_not1_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1B64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAndNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_b64_sop2(*this, wf);
-}
-
-SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
-    : Sop2("s_or_not1_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot1B32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SOrNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_b32_sop2(*this, wf);
-}
-
-SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
-    : Sop2("s_or_not1_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot1B64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SOrNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_b64_sop2(*this, wf);
-}
-
-SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
-    : Sop2("s_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfeU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u32_sop2(*this, wf); }
-
-SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
-    : Sop2("s_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfeI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i32_sop2(*this, wf); }
-
-SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
-    : Sop2("s_bfe_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeU64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u64_sop2(*this, wf); }
-
-SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
-    : Sop2("s_bfe_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeI64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i64_sop2(*this, wf); }
-
-SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
-    : Sop2("s_bfm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfmB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfm_b32_sop2(*this, wf); }
-
-SBfmB64Sop2::SBfmB64Sop2(const MachineInst *inst)
-    : Sop2("s_bfm_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfmB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SBfmB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfm_b64_sop2(*this, wf); }
-
-SMulI32Sop2::SMulI32Sop2(const MachineInst *inst)
-    : Sop2("s_mul_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMulI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_i32_sop2(*this, wf); }
-
-SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
-    : Sop2("s_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMulHiU32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mul_hi_u32_sop2(*this, wf);
-}
-
-SMulHiI32Sop2::SMulHiI32Sop2(const MachineInst *inst)
-    : Sop2("s_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMulHiI32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMulHiI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mul_hi_i32_sop2(*this, wf);
-}
-
-SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
-    : Sop2("s_cselect_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCselectB32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SCselectB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cselect_b32_sop2(*this, wf);
-}
-
-SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
-    : Sop2("s_cselect_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCselectB64Sop2>()),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SCselectB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cselect_b64_sop2(*this, wf);
-}
-
-SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
-    : Sop2("s_pack_ll_b32_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SPackLlB32B16Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SPackLlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_ll_b32_b16_sop2(*this, wf);
-}
-
-SPackLhB32B16Sop2::SPackLhB32B16Sop2(const MachineInst *inst)
-    : Sop2("s_pack_lh_b32_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SPackLhB32B16Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SPackLhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_lh_b32_b16_sop2(*this, wf);
-}
-
-SPackHhB32B16Sop2::SPackHhB32B16Sop2(const MachineInst *inst)
-    : Sop2("s_pack_hh_b32_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SPackHhB32B16Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SPackHhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_hh_b32_b16_sop2(*this, wf);
-}
-
-SPackHlB32B16Sop2::SPackHlB32B16Sop2(const MachineInst *inst)
-    : Sop2("s_pack_hl_b32_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SPackHlB32B16Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_hl_b32_b16_sop2(*this, wf);
-}
-
-SAddF32Sop2::SAddF32Sop2(const MachineInst *inst)
-    : Sop2("s_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAddF32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f32_sop2(*this, wf); }
-
-SSubF32Sop2::SSubF32Sop2(const MachineInst *inst)
-    : Sop2("s_sub_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSubF32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f32_sop2(*this, wf); }
-
-SMinNumF32Sop2::SMinNumF32Sop2(const MachineInst *inst)
-    : Sop2("s_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMinNumF32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMinNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f32_sop2(*this, wf);
-}
-
-SMaxNumF32Sop2::SMaxNumF32Sop2(const MachineInst *inst)
-    : Sop2("s_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMaxNumF32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f32_sop2(*this, wf);
-}
-
-SMulF32Sop2::SMulF32Sop2(const MachineInst *inst)
-    : Sop2("s_mul_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulF32Sop2>()),
-      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
-  dst_operands_[0] = &sdst;
-  src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
-}
-
-void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
-
-SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
-    : Sop2("s_fmaak_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFmaakF32Sop2>()),
+    : Sop2("s_add_co_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(189)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      literal(32, OperandType::OPR_SIMM32, 0), src2(32, OperandType::OPR_SIMM32, 0) {
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
+    : Sop2("s_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(190)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
+    : Sop2("s_add_co_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(191)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
+    : Sop2("s_sub_co_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(192)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
+    : Sop2("s_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(193)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  src_operands_[2] = &scc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+  scc_in.apply_fieldless_caps(false, false, false);
+}
+
+SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
+    : Sop2("s_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(194)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  src_operands_[2] = &scc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+  scc_in.apply_fieldless_caps(false, false, false);
+}
+
+SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
+    : Sop2("s_absdiff_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(195)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
+    : Sop2("s_lshl_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(196)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
+    : Sop2("s_lshl_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(197)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
+    : Sop2("s_lshr_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(198)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
+    : Sop2("s_lshr_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(199)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
+    : Sop2("s_ashr_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(200)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
+    : Sop2("s_ashr_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(201)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
+    : Sop2("s_lshl1_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(202)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
+    : Sop2("s_lshl2_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(203)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
+    : Sop2("s_lshl3_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(204)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
+    : Sop2("s_lshl4_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(205)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
+    : Sop2("s_min_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(206)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
+    : Sop2("s_min_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(207)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
+    : Sop2("s_max_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(208)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
+    : Sop2("s_max_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(209)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
+    : Sop2("s_and_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(210)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
+    : Sop2("s_and_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(211)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
+    : Sop2("s_or_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(212)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
+    : Sop2("s_or_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(213)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
+    : Sop2("s_xor_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(214)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
+    : Sop2("s_xor_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(215)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
+    : Sop2("s_nand_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(216)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
+    : Sop2("s_nand_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(217)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
+    : Sop2("s_nor_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(218)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
+    : Sop2("s_nor_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(219)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
+    : Sop2("s_xnor_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(220)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
+    : Sop2("s_xnor_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(221)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
+    : Sop2("s_and_not1_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(222)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
+    : Sop2("s_and_not1_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(223)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
+    : Sop2("s_or_not1_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(224)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
+    : Sop2("s_or_not1_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(225)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
+    : Sop2("s_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(226)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
+    : Sop2("s_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(227)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
+    : Sop2("s_bfe_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(228)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
+    : Sop2("s_bfe_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(229)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  num_src_ = 2;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
+    : Sop2("s_bfm_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(230)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SBfmB64Sop2::SBfmB64Sop2(const MachineInst *inst)
+    : Sop2("s_bfm_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(231)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMulI32Sop2::SMulI32Sop2(const MachineInst *inst)
+    : Sop2("s_mul_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(232)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
+    : Sop2("s_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(233)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMulHiI32Sop2::SMulHiI32Sop2(const MachineInst *inst)
+    : Sop2("s_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(234)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
+    : Sop2("s_cselect_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(235)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  src_operands_[2] = &scc;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
+    : Sop2("s_cselect_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(236)),
+      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  src_operands_[2] = &scc;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  scc.apply_fieldless_caps(false, false, false);
+}
+
+SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
+    : Sop2("s_pack_ll_b32_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(237)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SPackLhB32B16Sop2::SPackLhB32B16Sop2(const MachineInst *inst)
+    : Sop2("s_pack_lh_b32_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(238)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SPackHhB32B16Sop2::SPackHhB32B16Sop2(const MachineInst *inst)
+    : Sop2("s_pack_hh_b32_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(239)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SPackHlB32B16Sop2::SPackHlB32B16Sop2(const MachineInst *inst)
+    : Sop2("s_pack_hl_b32_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(240)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SAddF32Sop2::SAddF32Sop2(const MachineInst *inst)
+    : Sop2("s_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(241)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SSubF32Sop2::SSubF32Sop2(const MachineInst *inst)
+    : Sop2("s_sub_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(242)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMinNumF32Sop2::SMinNumF32Sop2(const MachineInst *inst)
+    : Sop2("s_min_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(243)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMaxNumF32Sop2::SMaxNumF32Sop2(const MachineInst *inst)
+    : Sop2("s_max_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(244)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SMulF32Sop2::SMulF32Sop2(const MachineInst *inst)
+    : Sop2("s_mul_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(245)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  src_operands_[1] = &ssrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+}
+
+SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
+    : Sop2("s_fmaak_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(246)),
+      sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      literal(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
   src_operands_[2] = &literal;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -2203,32 +2124,19 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
   literal =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  src2 =
-      Operand(32, OperandType::OPR_SIMM32,
-              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(literal.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
-    : Sop2("s_fmamk_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFmamkF32Sop2>()),
+    : Sop2("s_fmamk_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(247)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       literal(32, OperandType::OPR_SIMM32, 0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      src2(32, OperandType::OPR_SIMM32, 0) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &literal;
   src_operands_[2] = &ssrc1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -2255,20 +2163,10 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  src2 =
-      Operand(32, OperandType::OPR_SIMM32,
-              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(literal.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
-    : Sop2("s_fmac_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SFmacF32Sop2>()),
+    : Sop2("s_fmac_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(248)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2300,18 +2198,11 @@ SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-}
-
-void SFmacF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(sdst.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
     : Sop2("s_cvt_pk_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCvtPkRtzF16F32Sop2>()),
+           selected_exec_fn(249)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2344,16 +2235,8 @@ SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
   }
 }
 
-void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar(
-      wf,
-      (static_cast<uint32_t>(util::f32_to_f16_rtz(std::bit_cast<float>(ssrc0.read_scalar(wf)))) |
-       (static_cast<uint32_t>(util::f32_to_f16_rtz(std::bit_cast<float>(ssrc1.read_scalar(wf))))
-        << 16)));
-}
-
 SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
-    : Sop2("s_add_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAddF16Sop2>()),
+    : Sop2("s_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(250)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2363,9 +2246,10 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2374,9 +2258,10 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2386,10 +2271,14 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
   }
 }
 
-void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
+void SAddF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
 
 SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
-    : Sop2("s_sub_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSubF16Sop2>()),
+    : Sop2("s_sub_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(251)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2399,9 +2288,10 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2410,9 +2300,10 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2422,11 +2313,14 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
   }
 }
 
-void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
+void SSubF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
 
 SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
-    : Sop2("s_min_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMinNumF16Sop2>()),
+    : Sop2("s_min_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(252)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2436,9 +2330,10 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2447,9 +2342,10 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2459,13 +2355,14 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
   }
 }
 
-void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f16_sop2(*this, wf);
+void SMinNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
-    : Sop2("s_max_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMaxNumF16Sop2>()),
+    : Sop2("s_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(253)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2475,9 +2372,10 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2486,9 +2384,10 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2498,12 +2397,14 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
   }
 }
 
-void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f16_sop2(*this, wf);
+void SMaxNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
-    : Sop2("s_mul_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulF16Sop2>()),
+    : Sop2("s_mul_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(254)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2513,9 +2414,10 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2524,9 +2426,10 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2536,10 +2439,14 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
   }
 }
 
-void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
+void SMulF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
 
 SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
-    : Sop2("s_fmac_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SFmacF16Sop2>()),
+    : Sop2("s_fmac_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(255)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2550,9 +2457,10 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2561,9 +2469,10 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2573,16 +2482,14 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
   }
 }
 
-void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
-                          util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))),
-                          util::f16_to_f32(static_cast<uint16_t>(sdst.read_scalar(wf))));
-  sdst.write_scalar(wf, util::f32_to_f16(result));
+void SFmacF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)
-    : Sop2("s_minimum_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMinimumF32Sop2>()),
+    : Sop2("s_minimum_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(256)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2613,15 +2520,10 @@ SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-}
-
-void SMinimumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f32_sop2(*this, wf);
 }
 
 SMaximumF32Sop2::SMaximumF32Sop2(const MachineInst *inst)
-    : Sop2("s_maximum_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMaximumF32Sop2>()),
+    : Sop2("s_maximum_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(257)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2654,13 +2556,8 @@ SMaximumF32Sop2::SMaximumF32Sop2(const MachineInst *inst)
   }
 }
 
-void SMaximumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f32_sop2(*this, wf);
-}
-
 SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
-    : Sop2("s_minimum_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMinimumF16Sop2>()),
+    : Sop2("s_minimum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(258)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2670,9 +2567,10 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2681,9 +2579,10 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2693,13 +2592,14 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
   }
 }
 
-void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f16_sop2(*this, wf);
+void SMinimumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
-    : Sop2("s_maximum_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMaximumF16Sop2>()),
+    : Sop2("s_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(259)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2709,9 +2609,10 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2720,9 +2621,10 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+    ssrc1 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -2732,13 +2634,14 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
   }
 }
 
-void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f16_sop2(*this, wf);
+void SMaximumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)
-    : Sop2("s_add_nc_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAddNcU64Sop2>()),
+    : Sop2("s_add_nc_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(260)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2769,15 +2672,10 @@ SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-}
-
-void SAddNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_nc_u64_sop2(*this, wf);
 }
 
 SSubNcU64Sop2::SSubNcU64Sop2(const MachineInst *inst)
-    : Sop2("s_sub_nc_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSubNcU64Sop2>()),
+    : Sop2("s_sub_nc_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(261)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2808,14 +2706,10 @@ SSubNcU64Sop2::SSubNcU64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-}
-
-void SSubNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_nc_u64_sop2(*this, wf);
 }
 
 SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
-    : Sop2("s_mul_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulU64Sop2>()),
+    : Sop2("s_mul_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(262)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
@@ -2847,8 +2741,6 @@ SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
 }
-
-void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_u64_sop2(*this, wf); }
 
 } // namespace gfx1250
 } // namespace rocjitsu

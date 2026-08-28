@@ -108,6 +108,11 @@ include(rocprofiler_formatting) # formatting
 include(rocprofiler_linting) # clang-tidy
 include(rocprofiler_config_interfaces) # configure interface libraries
 
+if(ROCPROFILER_BUILD_TESTS)
+    # Source-level unit tests are configured before tests/common sets test GPU targets.
+    include("${PROJECT_SOURCE_DIR}/tests/cmake/rocprofiler_test_gpu_targets.cmake")
+endif()
+
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")

@@ -79,11 +79,11 @@ ElfInfo::ElfInfo(std::string _fname)
 bool
 ElfInfo::has_symbol(const std::function<bool(std::string_view)>& _checker) const
 {
-    ROCP_INFO << fmt::format("{} has {} symbols ({} .dynsym + {} .symtab)",
-                             filename,
-                             dynamic_symbol_entries.size() + symbol_entries.size(),
-                             dynamic_symbol_entries.size(),
-                             symbol_entries.size());
+    ROCP_TRACE << fmt::format("{} has {} symbols ({} .dynsym + {} .symtab)",
+                              filename,
+                              dynamic_symbol_entries.size() + symbol_entries.size(),
+                              dynamic_symbol_entries.size(),
+                              symbol_entries.size());
 
     // Search publicly visible symbols first
     for(const auto& itr : dynamic_symbol_entries)
@@ -266,10 +266,10 @@ read(const std::string& _inp, bool optimize_for_visible_symbols)
         {
             if(optimize_for_visible_symbols)
             {
-                ROCP_INFO_IF(psec->get_type() == ELFIO::SHT_REL) << fmt::format(
-                    "[{}] Skipping loading of .rel since optimize_for_visible_symbols=true", _inp);
-                ROCP_INFO_IF(psec->get_type() == ELFIO::SHT_RELA) << fmt::format(
-                    "[{}] Skipping loading of .rela since optimize_for_visible_symbols=true", _inp);
+                ROCP_TRACE << fmt::format(
+                    "[{}] Skipping loading of {} since optimize_for_visible_symbols=true",
+                    _inp,
+                    psec->get_name());
                 continue;
             }
             const ELFIO::relocation_section_accessor reloc{reader, psec};

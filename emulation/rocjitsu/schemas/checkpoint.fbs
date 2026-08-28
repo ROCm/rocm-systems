@@ -20,6 +20,8 @@ table WavefrontState {
   status: uint32;
   sgprs: [uint32]; // Scalar register file (NUM_SGPRS entries).
   vgprs: [ubyte];  // Vector register file (raw bytes).
+  mode: uint32;     // MODE register.
+  wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
 }
 
 /// Serialized state of a compute unit.

@@ -433,6 +433,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsI8Mubuf : public Mubuf {
@@ -442,6 +443,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsU16Mubuf : public Mubuf {
@@ -451,6 +453,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsI16Mubuf : public Mubuf {
@@ -460,6 +463,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsB32Mubuf : public Mubuf {
@@ -469,6 +473,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsFormatXMubuf : public Mubuf {
@@ -478,6 +483,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferAtomicSwapB32Mubuf : public Mubuf {
@@ -495,6 +501,7 @@ public:
   BufferAtomicCmpswapB32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
@@ -635,6 +642,7 @@ public:
   BufferAtomicCmpswapB64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
@@ -755,6 +763,7 @@ public:
   BufferAtomicCmpswapF32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;

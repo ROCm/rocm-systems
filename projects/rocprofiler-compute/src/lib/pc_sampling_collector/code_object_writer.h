@@ -5,6 +5,7 @@
 #include "nlohmann/json.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,8 @@ namespace rocprofiler_compute_tool
 class code_object_writer_t
 {
 public:
+    using ptr = std::shared_ptr<code_object_writer_t>;
+
     virtual ~code_object_writer_t()                                  = default;
     virtual void        start_code_obj(size_t obj_id)                = 0;
     virtual void        end_code_obj()                               = 0;
@@ -21,6 +24,7 @@ public:
     virtual void        write_instruction(const instruction_t& inst) = 0;
     virtual std::string get_result()                                 = 0;
     virtual void        flush(const std::filesystem::path& string)   = 0;
+    virtual bool        empty() const                                = 0;
 };
 
 class code_object_writer_json_t : public code_object_writer_t
@@ -33,7 +37,7 @@ public:
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
     void        flush(const std::filesystem::path& output_file_path) override;
-    bool        empty() const;
+    bool        empty() const override;
 
 private:
     static void create_parent_dir(const std::filesystem::path& output_file_path);

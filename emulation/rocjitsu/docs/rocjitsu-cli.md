@@ -280,7 +280,7 @@ kernel 6.12.59+ and 6.15+.
 | `rpc.h` | Protocol types, send/recv helpers |
 | `transport.h/.cpp` | Abstract transport + Unix socket implementation |
 | `remote_driver.h/.cpp` | Client-side RPC stub |
-| `simulated_driver.h/.cpp` | KFD ioctl dispatch, allocation table, events |
+| `simulated_kfd.h/.cpp` | KFD ioctl dispatch, allocation table, events |
 | `interposer.cpp` | LD_PRELOAD syscall intercepts |
 | `events.h/.cpp` | KFD event subsystem (create, set, wait, destroy) |
 | `tools/rocjitsu/main.cpp` | CLI entry point, RPC dispatch loop (daemon mode) |

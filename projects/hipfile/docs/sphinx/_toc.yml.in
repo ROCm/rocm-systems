@@ -10,6 +10,12 @@ subtrees:
         title: Install Python bindings
   - caption: How to
     entries:
+      - file: how-to/setup-local-nvme
+        title: Set up a local NVMe drive
+      - file: how-to/setup-nvmeof
+        title: Set up an NVMe-oF disk
+      - file: how-to/setup-nfsordma
+        title: Set up an NFSoRDMA share
       - file: how-to/register-file-and-buffer
         title: Register a file and buffer
       - file: how-to/use-with-fio
@@ -59,6 +65,8 @@ subtrees:
         title: Troubleshooting
       - file: troubleshooting/known-issues
         title: Known issues
+      - file: troubleshooting/limitations
+        title: Limitations
   - caption: About
     entries:
       - file: license.rst

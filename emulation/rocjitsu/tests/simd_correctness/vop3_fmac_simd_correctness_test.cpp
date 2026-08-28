@@ -279,4 +279,33 @@ TEST(Vop3FmacSimdCorrectness, PartialExec) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
+TEST(Vop3FmacSimdCorrectness, VMacF16LowDstZeroesHighHalf) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(/*op=*/291, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/257, /*abs=*/0, /*neg=*/0,
+                /*omod=*/0, /*clamp=*/0, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_mac_f16_vop3 decode failed";
+    auto out = fx.run(inst, Kind::F16, /*rot=*/0, /*exec=*/~0ULL);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    EXPECT_EQ(scalar_out[lane], simd_out[lane]) << "lane " << lane;
+    EXPECT_EQ(simd_out[lane] & 0xffff0000u, 0u)
+        << "lane " << lane << ": low-half v_mac_f16_vop3 must clear stale high-half bits";
+  }
+}
+
 } // namespace

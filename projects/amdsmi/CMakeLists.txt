@@ -259,65 +259,50 @@ set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-    # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-5.2.1.1")
+    # Pin to an immutable commit hash so the sources can't be swapped by a moved tag.
+    set(ESMI_GIT_HASH "d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef")
+    set(ESMI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library")
 
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
-        # TODO: use ExternalProject_Add instead or a submodule
-        message(STATUS "Adding esmi_ib_library...")
+    # Drop an existing checkout pinned to a different commit so a hash bump
+    # re-fetches instead of silently building stale sources.
+    if(EXISTS "${ESMI_SOURCE_DIR}/.git")
         execute_process(
-            COMMAND
-                git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                ${PROJECT_SOURCE_DIR}/esmi_ib_library
-        )
-    else()
-        message(STATUS "esmi_ib_library already installed, checking version...")
-
-        # Grab latest commit and get the tag
-        execute_process(
-            COMMAND git rev-list --tags --max-count=1
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_commit
+            COMMAND git rev-parse HEAD
+            WORKING_DIRECTORY "${ESMI_SOURCE_DIR}"
+            OUTPUT_VARIABLE esmi_current_hash
             OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
         )
-        execute_process(
-            COMMAND git describe --tags ${latest_commit} --match "*pkg*"
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-
-        # Update to latest tags if not matched
-        if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
-            message(STATUS "Updating esmi_ib_library...")
-            execute_process(
-                COMMAND
-                    git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                    ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
-                RESULT_VARIABLE clone_result
-            )
-            if(clone_result EQUAL 0)
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                message(STATUS "Successfully cloned updated esmi_ib_library")
-            else()
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp)
-                message(FATAL_ERROR "Failed to clone updated esmi_ib_library")
-            endif()
-        else()
-            message(STATUS "esmi_ib_library is the latest version: ${current_esmi_tag}...")
+        if(NOT esmi_current_hash STREQUAL ESMI_GIT_HASH)
+            message(STATUS "esmi_ib_library pin changed, re-fetching...")
+            file(REMOVE_RECURSE "${ESMI_SOURCE_DIR}")
         endif()
     endif()
 
+    # Reuse existing sources when present (offline-safe); only fetch when absent.
+    if(NOT EXISTS "${ESMI_SOURCE_DIR}/src/e_smi.c")
+        include(FetchContent)
+        FetchContent_Declare(
+            esmi_ib_library
+            GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
+            GIT_TAG ${ESMI_GIT_HASH}
+            # No GIT_SHALLOW: a shallow clone can't check out an arbitrary commit.
+            SOURCE_DIR
+            ${ESMI_SOURCE_DIR}
+            # Download only: point SOURCE_SUBDIR at a dir with no CMakeLists.txt
+            # so the sources are compiled into amd_smi, not add_subdirectory'd.
+            SOURCE_SUBDIR
+            __download_only__
+        )
+        FetchContent_MakeAvailable(esmi_ib_library)
+    endif()
+
     # Make sure to update the amd_hsmp.h file with the corresponding esmi version
-    file(
-        COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-        DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm"
-    )
+    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h" DESTINATION "${ESMI_SOURCE_DIR}/include/asm")
 
     add_definitions("-DENABLE_ESMI_LIB=1")
-    set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
-    set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
+    set(ESMI_INC_DIR "${ESMI_SOURCE_DIR}/include")
+    set(ESMI_SRC_DIR "${ESMI_SOURCE_DIR}/src")
     # esmi has a lot of write-strings warnings - silence them
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
@@ -385,9 +370,8 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
-    add_subdirectory("tests/python_unittest")
+    add_subdirectory("tests/python")
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries

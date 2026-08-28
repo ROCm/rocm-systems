@@ -7,21 +7,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
-    rocjitsu_isa_cdna1
-    rocjitsu_isa_cdna2
-    rocjitsu_isa_cdna3
-    rocjitsu_isa_cdna4
-    rocjitsu_isa_rdna1
-    rocjitsu_isa_rdna2
-    rocjitsu_isa_rdna3
-    rocjitsu_isa_rdna3_5
-    rocjitsu_isa_rdna4
-    rocjitsu_isa_gfx1250
-    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
-    # The DBT tool only needs generated AMDGPU decoders/disassemblers, but
-    # those object files currently also contain instruction execute methods.
-    # Until generated ISA decode/disassembly is split from VM execution, the
-    # linker needs the AMDGPU VM support referenced by those execute methods.
+    rocjitsu_amdgpu_isa_registry
     simdojo
     rocjitsu_vm_amdgpu
 )

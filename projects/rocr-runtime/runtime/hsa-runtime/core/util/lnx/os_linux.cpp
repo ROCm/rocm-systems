@@ -58,6 +58,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <semaphore.h>
 #include "core/inc/runtime.h"
@@ -261,7 +262,6 @@ class os_thread {
 static_assert(sizeof(LibHandle) == sizeof(void*), "OS abstraction size mismatch");
 static_assert(sizeof(Semaphore) == sizeof(sem_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Mutex) == sizeof(pthread_mutex_t*), "OS abstraction size mismatch");
-static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
@@ -345,7 +345,8 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    */
 
   if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
-    if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
+    std::string_view name(info->dlpi_name);
+    if (name.find("vdso64.so") != std::string_view::npos || name.find("vdso.so") != std::string_view::npos) return 0;
 
     /*
      * Iterate through the program headers of the loaded lib and check for PT_DYNAMIC program
@@ -419,6 +420,15 @@ std::string GetLibraryName(LibHandle lib) {
   if(dlinfo(lib, RTLD_DI_LINKMAP, &map)!=0)
     return "";
   return map->l_name;
+}
+
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename) {
+  Dl_info info = {};
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) return {};
+
+  const std::string path(info.dli_fname);
+  const auto slash = path.find_last_of('/');
+  return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1) + filename;
 }
 
 Semaphore CreateSemaphore() {
@@ -725,74 +735,6 @@ uint64_t AccurateClockFrequency() {
   return 1000000000ull / uint64_t(time.tv_nsec);
 }
 
-SharedMutex CreateSharedMutex() {
-  pthread_rwlockattr_t attrib;
-  int err = pthread_rwlockattr_init(&attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock attribute init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-#ifdef HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP
-  err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-  if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
-    return nullptr;
-  }
-#endif
-
-  std::unique_ptr<pthread_rwlock_t> lock(new pthread_rwlock_t);
-  err = pthread_rwlock_init(lock.get(), &attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-  pthread_rwlockattr_destroy(&attrib);
-  return lock.release();
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_trywrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_wrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_tryrdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_rdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  pthread_rwlock_destroy(*(pthread_rwlock_t**)&lock);
-  delete *(pthread_rwlock_t**)&lock;
-}
-
 static uint64_t sys_clock_period_ = 0;
 
 uint64_t ReadSystemClock() {
@@ -890,6 +832,15 @@ hsa_status_t DmaBufClose(int* dmabuf) {
   /* Set to -1 even on close failure: the fd is no longer valid regardless of errno. */
   *dmabuf = -1;
   return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  if (dmabuf < 0) return -1;
+  int dup_fd = ::dup(dmabuf);
+  if (dup_fd < 0) {
+    return -1;
+  }
+  return dup_fd;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {

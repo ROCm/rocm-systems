@@ -1,10 +1,12 @@
 /*
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
- * Python bindings for rocSHMEM via pybind11.
+ *
+ * Python bindings for rocSHMEM via nanobind.  Framework-independent rocSHMEM
+ * glue lives in rocshmem4py_common.hpp; this file is the thin nanobind
+ * registration layer.  The compiled module name (_rocshmem4py), function
+ * names, argument behavior, and return types are the stable public contract.
  */
-
-#include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
+#include <nanobind/nanobind.h>
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
 #include <cstdint>
@@ -12,33 +14,15 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace py = pybind11;
+#include "rocshmem4py_common.hpp"
+
+// Single binding framework: import nanobind's names directly.  A namespace
+// prefix only earns its keep when a second framework shares the file.
+using namespace nanobind;
 using namespace rocshmem;
+using rocshmem4py::resolve_team_handle;
 
-namespace {
-rocshmem_team_t resolve_team_handle(intptr_t team) {
-  // Python sentinels are translated to rocSHMEM ABI handles:
-  //   0   -> host::ROCSHMEM_TEAM_WORLD (runtime pointer set at init)
-  //  -1   -> ROCSHMEM_TEAM_INVALID    (rocSHMEM ABI nullptr)
-  // Anything else is a raw rocshmem_team_t (intptr_t-cast pointer)
-  // returned by a previous successful split and passed back through.
-  if (team == 0)  return ROCSHMEM_TEAM_WORLD;
-  if (team == -1) return ROCSHMEM_TEAM_INVALID;
-  return reinterpret_cast<rocshmem_team_t>(team);
-}
-}  // namespace
-
-#define CHECK_ROCSHMEM(expr)                                                   \
-  do {                                                                         \
-    int status = expr;                                                         \
-    if (status != ROCSHMEM_SUCCESS) {                                          \
-      std::ostringstream err_msg;                                              \
-      err_msg << "ROCSHMEM error in " << __FILE__ << ":" << __LINE__;        \
-      throw std::runtime_error(err_msg.str());                                 \
-    }                                                                          \
-  } while (0)
-
-PYBIND11_MODULE(_rocshmem4py, m) {
+NB_MODULE(_rocshmem4py, m) {
   m.doc() = "Python bindings for ROCSHMEM library";
   // Keep host-facing symbol coverage aligned with
   // python/rocshmem4py/__init__.py:_HOST_API_BINDINGS.
@@ -52,7 +36,7 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     hipStream_t hip_stream = reinterpret_cast<hipStream_t>(stream);
     return rocshmem_hipmodule_init(hip_module, hip_stream);
   }, "Initialize rocSHMEM for HIP module (CUDA graph compatible)",
-     py::arg("module"), py::arg("stream") = 0);
+     arg("module"), arg("stream") = 0);
 
   // PE queries
   m.def("rocshmem_my_pe", []() -> int { return rocshmem_my_pe(); });
@@ -70,11 +54,11 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   // Team queries
   m.def("rocshmem_team_my_pe", [](intptr_t team) -> int {
     return rocshmem_team_my_pe(resolve_team_handle(team));
-  }, "Get PE number within a team", py::arg("team"));
+  }, "Get PE number within a team", arg("team"));
 
   m.def("rocshmem_team_n_pes", [](intptr_t team) -> int {
     return rocshmem_team_n_pes(resolve_team_handle(team));
-  }, "Get number of PEs in a team", py::arg("team"));
+  }, "Get number of PEs in a team", arg("team"));
 
   // Memory management
   m.def("rocshmem_malloc", [](size_t size) -> intptr_t {
@@ -93,7 +77,7 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     }
     return (intptr_t)ptr;
   }, "Collective: allocate count*size zero-initialized bytes on the symmetric heap.",
-     py::arg("count"), py::arg("size"));
+     arg("count"), arg("size"));
 
   m.def("rocshmem_align", [](size_t alignment, size_t size) -> intptr_t {
     void *ptr = rocshmem_align(alignment, size);
@@ -104,19 +88,19 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     return (intptr_t)ptr;
   }, "Collective: allocate size bytes aligned to alignment on the symmetric "
      "heap. alignment must be a power of two and a multiple of sizeof(void*).",
-     py::arg("alignment"), py::arg("size"));
+     arg("alignment"), arg("size"));
 
   m.def("rocshmem_buffer_register", [](intptr_t addr, size_t length) -> int {
     return rocshmem_buffer_register((void *)addr, length);
   }, "Register a non-symmetric user buffer with the active backend. "
      "Returns ROCSHMEM_SUCCESS (0) on success.",
-     py::arg("addr"), py::arg("length"));
+     arg("addr"), arg("length"));
 
   m.def("rocshmem_buffer_unregister", [](intptr_t addr) -> int {
     return rocshmem_buffer_unregister((void *)addr);
   }, "Deregister a previously registered non-symmetric buffer. "
      "Returns ROCSHMEM_SUCCESS (0) on success.",
-     py::arg("addr"));
+     arg("addr"));
 
   m.def("rocshmem_buffer_unregister_all", []() {
     rocshmem_buffer_unregister_all();
@@ -128,43 +112,43 @@ PYBIND11_MODULE(_rocshmem4py, m) {
       return 0;
     }
     return (intptr_t)remote_ptr;
-  }, "Get pointer to remote symmetric memory", 
-     py::arg("dest"), py::arg("pe"));
+  }, "Get pointer to remote symmetric memory",
+     arg("dest"), arg("pe"));
 
   // Synchronization
   m.def("rocshmem_barrier_all", []() { rocshmem_barrier_all(); });
   m.def("rocshmem_barrier", [](intptr_t team) {
     rocshmem_barrier(resolve_team_handle(team));
-  }, "Barrier across all PEs in team.", py::arg("team"));
+  }, "Barrier across all PEs in team.", arg("team"));
 
   m.def("rocshmem_barrier_all_on_stream", [](intptr_t stream) {
     rocshmem_barrier_all_on_stream((hipStream_t)stream);
-  }, "Stream-ordered barrier across all PEs", py::arg("stream"));
+  }, "Stream-ordered barrier across all PEs", arg("stream"));
 
   m.def("rocshmem_barrier_on_stream", [](intptr_t team, intptr_t stream) {
     rocshmem_barrier_on_stream(resolve_team_handle(team), (hipStream_t)stream);
   }, "Stream-ordered barrier across all PEs in team (ROCSHMEM_TEAM_INVALID is a no-op).",
-     py::arg("team"), py::arg("stream"));
+     arg("team"), arg("stream"));
 
   m.def("rocshmem_fence", []() { rocshmem_fence(); });
   m.def("rocshmem_quiet", []() { rocshmem_quiet(); });
 
   // Unique ID
-  m.def("rocshmem_get_uniqueid", []() -> py::bytes {
+  m.def("rocshmem_get_uniqueid", []() -> bytes {
     rocshmem_uniqueid_t uid;
     CHECK_ROCSHMEM(rocshmem_get_uniqueid(&uid));
-    std::string bytes((char *)&uid, sizeof(uid));
-    return py::bytes(bytes);
+    // Construct from (buffer, size) to preserve the exact byte length and any
+    // embedded NUL bytes in the binary unique-id blob.
+    return bytes(reinterpret_cast<const char *>(&uid), sizeof(uid));
   });
 
-  m.def("rocshmem_init_attr", [](int rank, int nranks, py::bytes bytes) {
+  m.def("rocshmem_init_attr", [](int rank, int nranks, bytes uid_bytes) {
     rocshmem_uniqueid_t uid;
-    std::string uid_str = bytes;
-    if (uid_str.size() != sizeof(uid)) {
+    if (uid_bytes.size() != sizeof(uid)) {
       throw std::runtime_error("rocshmem_init_attr: invalid unique ID size");
     }
     rocshmem_init_attr_t init_attr{};
-    memcpy(&uid, uid_str.data(), uid_str.size());
+    memcpy(&uid, uid_bytes.c_str(), uid_bytes.size());
     CHECK_ROCSHMEM(rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &init_attr));
     CHECK_ROCSHMEM(rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &init_attr));
   });
@@ -187,12 +171,12 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   m.def("rocshmem_putmem_on_stream", [](intptr_t dest, intptr_t source, size_t nelems, int pe, intptr_t stream) {
     rocshmem_putmem_on_stream((void *)dest, (const void *)source, nelems, pe, (hipStream_t)stream);
   }, "Stream-ordered put operation",
-     py::arg("dest"), py::arg("source"), py::arg("nelems"), py::arg("pe"), py::arg("stream"));
+     arg("dest"), arg("source"), arg("nelems"), arg("pe"), arg("stream"));
 
   m.def("rocshmem_getmem_on_stream", [](intptr_t dest, intptr_t source, size_t nelems, int pe, intptr_t stream) {
     rocshmem_getmem_on_stream((void *)dest, (const void *)source, nelems, pe, (hipStream_t)stream);
   }, "Stream-ordered get operation",
-     py::arg("dest"), py::arg("source"), py::arg("nelems"), py::arg("pe"), py::arg("stream"));
+     arg("dest"), arg("source"), arg("nelems"), arg("pe"), arg("stream"));
 
   m.def("rocshmem_putmem_signal_on_stream",
     [](intptr_t dest, intptr_t source, size_t nelems, intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t stream) {
@@ -200,42 +184,42 @@ PYBIND11_MODULE(_rocshmem4py, m) {
         (void *)dest, (const void *)source, nelems,
         (uint64_t *)sig_addr, signal, sig_op, pe, (hipStream_t)stream);
     }, "Stream-ordered put with remote signaling",
-    py::arg("dest"), py::arg("source"), py::arg("nelems"),
-    py::arg("sig_addr"), py::arg("signal"), py::arg("sig_op"), py::arg("pe"), py::arg("stream"));
+    arg("dest"), arg("source"), arg("nelems"),
+    arg("sig_addr"), arg("signal"), arg("sig_op"), arg("pe"), arg("stream"));
 
   m.def("rocshmem_signal_wait_until_on_stream",
     [](intptr_t sig_addr, int cmp, uint64_t cmp_value, intptr_t stream) {
       rocshmem_signal_wait_until_on_stream((uint64_t *)sig_addr, cmp, cmp_value, (hipStream_t)stream);
     }, "Stream-ordered wait on signal",
-    py::arg("sig_addr"), py::arg("cmp"), py::arg("cmp_value"), py::arg("stream"));
+    arg("sig_addr"), arg("cmp"), arg("cmp_value"), arg("stream"));
 
   // -------------------------------------------------------------------------
   // Team APIs
   // -------------------------------------------------------------------------
 
-  py::class_<rocshmem_team_config_t>(m, "TeamConfig",
+  class_<rocshmem_team_config_t>(m, "TeamConfig",
       "Configuration record for rocshmem_team_split_strided.")
-    .def(py::init<>())
-    .def_readwrite("num_contexts", &rocshmem_team_config_t::num_contexts);
+    .def(init<>())
+    .def_rw("num_contexts", &rocshmem_team_config_t::num_contexts);
 
   m.def("rocshmem_team_split_strided",
     [](intptr_t parent, int start, int stride, int size,
-       py::object config_obj, long mask) -> py::tuple {
+       object config_obj, long mask) -> tuple {
       rocshmem_team_t new_team = ROCSHMEM_TEAM_INVALID;
       rocshmem_team_config_t cfg{};
       const rocshmem_team_config_t* cfg_ptr = nullptr;
       if (!config_obj.is_none()) {
-        cfg = config_obj.cast<rocshmem_team_config_t>();
+        cfg = cast<rocshmem_team_config_t>(config_obj);
         cfg_ptr = &cfg;
       }
       int status = rocshmem_team_split_strided(
           resolve_team_handle(parent), start, stride, size, cfg_ptr, mask,
           &new_team);
-      return py::make_tuple(status, (intptr_t)new_team);
+      return make_tuple(status, (intptr_t)new_team);
     },
     "Split parent team into a strided sub-team. Returns (status, new_team_handle).",
-    py::arg("parent"), py::arg("start"), py::arg("stride"), py::arg("size"),
-    py::arg("config") = py::none(), py::arg("mask") = 0L);
+    arg("parent"), arg("start"), arg("stride"), arg("size"),
+    arg("config") = none(), arg("mask") = 0L);
 
   m.def("rocshmem_team_destroy", [](intptr_t team) {
     // Both Python sentinels (WORLD=0, INVALID=-1) are no-ops, matching
@@ -245,7 +229,7 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     if (team == 0 || team == -1) return;
     rocshmem_team_destroy(reinterpret_cast<rocshmem_team_t>(team));
   }, "Destroy a team. Silently ignored for INVALID/WORLD/SHARED.",
-     py::arg("team"));
+     arg("team"));
 
   m.def("rocshmem_team_translate_pe",
     [](intptr_t src, int pe, intptr_t dst) -> int {
@@ -253,29 +237,29 @@ PYBIND11_MODULE(_rocshmem4py, m) {
           resolve_team_handle(src), pe, resolve_team_handle(dst));
     },
     "Translate a PE index from src_team to dst_team. Returns -1 if unmappable.",
-    py::arg("src_team"), py::arg("src_pe"), py::arg("dest_team"));
+    arg("src_team"), arg("src_pe"), arg("dest_team"));
 
   // -------------------------------------------------------------------------
   // sync_all (host-side ordering)
   // -------------------------------------------------------------------------
   //
   // TODO: ctx-scoped APIs (rocshmem_ctx_create / _destroy / _fence / _quiet)
-  
+
   m.def("rocshmem_sync_all", []() { rocshmem_sync_all(); },
     "Lighter-weight partner to barrier_all (local-store visibility).");
 
   m.def("rocshmem_team_sync", [](intptr_t team) {
     rocshmem_team_sync(resolve_team_handle(team));
-  }, "Lighter-weight sync across all PEs in team.", py::arg("team"));
+  }, "Lighter-weight sync across all PEs in team.", arg("team"));
 
   m.def("rocshmem_sync_all_on_stream", [](intptr_t stream) {
     rocshmem_sync_all_on_stream((hipStream_t)stream);
-  }, "Stream-ordered sync_all.", py::arg("stream"));
+  }, "Stream-ordered sync_all.", arg("stream"));
 
   m.def("rocshmem_team_sync_on_stream", [](intptr_t team, intptr_t stream) {
     rocshmem_team_sync_on_stream(resolve_team_handle(team), (hipStream_t)stream);
   }, "Stream-ordered lighter-weight sync across all PEs in team (ROCSHMEM_TEAM_INVALID is a no-op).",
-     py::arg("team"), py::arg("stream"));
+     arg("team"), arg("stream"));
 
   // -------------------------------------------------------------------------
   // Full host AMO matrix
@@ -297,62 +281,62 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   m.def("rocshmem_" #Tname "_atomic_fetch",                                    \
     [](intptr_t dest, int pe) -> T {                                           \
       return rocshmem_##Tname##_atomic_fetch((T *)dest, pe);                   \
-    }, py::arg("dest"), py::arg("pe"))
+    }, arg("dest"), arg("pe"))
 
 #define AMO_SET_T(T, Tname)                                                    \
   m.def("rocshmem_" #Tname "_atomic_set",                                      \
     [](intptr_t dest, T value, int pe) {                                       \
       rocshmem_##Tname##_atomic_set((T *)dest, value, pe);                     \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
 #define AMO_CAS_T(T, Tname)                                                    \
   m.def("rocshmem_" #Tname "_atomic_compare_swap",                             \
     [](intptr_t dest, T cond, T value, int pe) -> T {                          \
       return rocshmem_##Tname##_atomic_compare_swap(                           \
           (T *)dest, cond, value, pe);                                         \
-    }, py::arg("dest"), py::arg("cond"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("cond"), arg("value"), arg("pe"))
 
 #define AMO_SWAP_T(T, Tname)                                                   \
   m.def("rocshmem_" #Tname "_atomic_swap",                                     \
     [](intptr_t dest, T value, int pe) -> T {                                  \
       return rocshmem_##Tname##_atomic_swap((T *)dest, value, pe);             \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
 #define AMO_FETCH_ADD_T(T, Tname)                                              \
   m.def("rocshmem_" #Tname "_atomic_fetch_add",                                \
     [](intptr_t dest, T value, int pe) -> T {                                  \
       return rocshmem_##Tname##_atomic_fetch_add((T *)dest, value, pe);        \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
 #define AMO_FETCH_INC_T(T, Tname)                                              \
   m.def("rocshmem_" #Tname "_atomic_fetch_inc",                                \
     [](intptr_t dest, int pe) -> T {                                           \
       return rocshmem_##Tname##_atomic_fetch_inc((T *)dest, pe);               \
-    }, py::arg("dest"), py::arg("pe"))
+    }, arg("dest"), arg("pe"))
 
 #define AMO_ADD_T(T, Tname)                                                    \
   m.def("rocshmem_" #Tname "_atomic_add",                                      \
     [](intptr_t dest, T value, int pe) {                                       \
       rocshmem_##Tname##_atomic_add((T *)dest, value, pe);                     \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
 #define AMO_INC_T(T, Tname)                                                    \
   m.def("rocshmem_" #Tname "_atomic_inc",                                      \
     [](intptr_t dest, int pe) {                                                \
       rocshmem_##Tname##_atomic_inc((T *)dest, pe);                            \
-    }, py::arg("dest"), py::arg("pe"))
+    }, arg("dest"), arg("pe"))
 
 #define AMO_FETCH_BITWISE_T(T, Tname, Op)                                      \
   m.def("rocshmem_" #Tname "_atomic_fetch_" #Op,                               \
     [](intptr_t dest, T value, int pe) -> T {                                  \
       return rocshmem_##Tname##_atomic_fetch_##Op((T *)dest, value, pe);       \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
 #define AMO_BITWISE_T(T, Tname, Op)                                            \
   m.def("rocshmem_" #Tname "_atomic_" #Op,                                     \
     [](intptr_t dest, T value, int pe) {                                       \
       rocshmem_##Tname##_atomic_##Op((T *)dest, value, pe);                    \
-    }, py::arg("dest"), py::arg("value"), py::arg("pe"))
+    }, arg("dest"), arg("value"), arg("pe"))
 
   // ------ fetch / set / cas / swap (full type set) ------
   // Note: numeric types only. CAS is missing on float/double per header.
@@ -463,8 +447,8 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     },
     "Stream-ordered all-to-all over a team. bytes_per_pe is the number of "
     "bytes transferred to each PE in the team.",
-    py::arg("team"), py::arg("dest"), py::arg("source"),
-    py::arg("bytes_per_pe"), py::arg("stream"));
+    arg("team"), arg("dest"), arg("source"),
+    arg("bytes_per_pe"), arg("stream"));
 
   m.def("rocshmem_broadcastmem_on_stream",
     [](intptr_t team, intptr_t dest, intptr_t source, size_t nbytes,
@@ -475,8 +459,8 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     },
     "Stream-ordered broadcast over a team. nbytes is the number of bytes "
     "broadcast. pe_root is in the team's PE space.",
-    py::arg("team"), py::arg("dest"), py::arg("source"), py::arg("nbytes"),
-    py::arg("pe_root"), py::arg("stream"));
+    arg("team"), arg("dest"), arg("source"), arg("nbytes"),
+    arg("pe_root"), arg("stream"));
 
   m.def("rocshmem_query_thread", []() -> int {
     int provided = 0;
@@ -486,7 +470,7 @@ PYBIND11_MODULE(_rocshmem4py, m) {
 
   m.def("rocshmem_global_exit", [](int status) {
     rocshmem_global_exit(status);
-  }, "Emergency abort hook (collective).", py::arg("status"));
+  }, "Emergency abort hook (collective).", arg("status"));
 
   m.def("rocshmem_dump_stats", []() { rocshmem_dump_stats(); },
     "Dump runtime telemetry to stdout.");
@@ -499,15 +483,15 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   }, "Return the default device context as an intptr_t.");
 
   // Constants
-  m.attr("ROCSHMEM_SUCCESS") = py::int_(0);
+  m.attr("ROCSHMEM_SUCCESS") = int_(0);
 
-  m.attr("ROCSHMEM_SIGNAL_SET") = py::int_(static_cast<int>(ROCSHMEM_SIGNAL_SET));
-  m.attr("ROCSHMEM_SIGNAL_ADD") = py::int_(static_cast<int>(ROCSHMEM_SIGNAL_ADD));
+  m.attr("ROCSHMEM_SIGNAL_SET") = int_(static_cast<int>(ROCSHMEM_SIGNAL_SET));
+  m.attr("ROCSHMEM_SIGNAL_ADD") = int_(static_cast<int>(ROCSHMEM_SIGNAL_ADD));
 
-  m.attr("ROCSHMEM_CMP_EQ") = py::int_(static_cast<int>(ROCSHMEM_CMP_EQ));
-  m.attr("ROCSHMEM_CMP_NE") = py::int_(static_cast<int>(ROCSHMEM_CMP_NE));
-  m.attr("ROCSHMEM_CMP_GT") = py::int_(static_cast<int>(ROCSHMEM_CMP_GT));
-  m.attr("ROCSHMEM_CMP_GE") = py::int_(static_cast<int>(ROCSHMEM_CMP_GE));
-  m.attr("ROCSHMEM_CMP_LT") = py::int_(static_cast<int>(ROCSHMEM_CMP_LT));
-  m.attr("ROCSHMEM_CMP_LE") = py::int_(static_cast<int>(ROCSHMEM_CMP_LE));
+  m.attr("ROCSHMEM_CMP_EQ") = int_(static_cast<int>(ROCSHMEM_CMP_EQ));
+  m.attr("ROCSHMEM_CMP_NE") = int_(static_cast<int>(ROCSHMEM_CMP_NE));
+  m.attr("ROCSHMEM_CMP_GT") = int_(static_cast<int>(ROCSHMEM_CMP_GT));
+  m.attr("ROCSHMEM_CMP_GE") = int_(static_cast<int>(ROCSHMEM_CMP_GE));
+  m.attr("ROCSHMEM_CMP_LT") = int_(static_cast<int>(ROCSHMEM_CMP_LT));
+  m.attr("ROCSHMEM_CMP_LE") = int_(static_cast<int>(ROCSHMEM_CMP_LE));
 }

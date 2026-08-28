@@ -31,7 +31,7 @@ Panel Config:
           peak: $FP64Flops_empirical_peak
         GL2 Cache BW:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
-          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128 + GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $L2Bw_empirical_peak * 1e9
         GL1 Cache BW:

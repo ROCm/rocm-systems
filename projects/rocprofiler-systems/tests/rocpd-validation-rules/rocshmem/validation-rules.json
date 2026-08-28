@@ -1,0 +1,74 @@
+{
+    "required_tables": [
+        {
+            "name_prefix": "rocpd_string",
+            "required_columns": [
+                "id",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that rocSHMEM on-stream API name strings are present",
+                    "error_message": "No '*_on_stream' strings found in rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE string LIKE '%\\_on\\_stream' ESCAPE '\\';"
+                }
+            ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name",
+                "category"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify rocSHMEM entries have non-zero start times",
+                    "error_message": "Found rocSHMEM regions with zero start times",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api' AND start = 0"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_rocshmem_api' category appears at least once in regions",
+                    "error_message": "No 'rocm_rocshmem_api' entries found in regions table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify barrier_all_on_stream appears in rocSHMEM regions",
+                    "error_message": "No 'barrier_all_on_stream' entries found in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api' AND name LIKE '%barrier_all_on_stream%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify quiet_on_stream appears in rocSHMEM regions",
+                    "error_message": "No 'quiet_on_stream' entries found in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api' AND name LIKE '%quiet_on_stream%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify putmem_on_stream appears in rocSHMEM regions",
+                    "error_message": "No 'putmem_on_stream' entries found in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api' AND name LIKE '%putmem_on_stream%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify getmem_on_stream appears in rocSHMEM regions",
+                    "error_message": "No 'getmem_on_stream' entries found in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_rocshmem_api' AND name LIKE '%getmem_on_stream%';"
+                }
+            ]
+        }
+    ]
+}

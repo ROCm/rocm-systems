@@ -52,7 +52,7 @@ revision_id=01
 family=0019
 model=0074
 unit_id=0004
-package_core_id=0:0
+package_id=0
 last_update=6980d761
 
 [NIC:0]
@@ -71,7 +71,7 @@ last_update=1753987166
 ```
 
 - **GPU:** `device_node` links the CUID to hardware.
-- **CPU:** `package_core_id` identifies cores (`package_id:core_id`).
+- **CPU:** `package_id` identifies physical CPU package, akin to the socket.
 - **NIC:** `device_node` links to the network device.
 - **PLATFORM:** Only the derived CUID is listed.
 
@@ -121,14 +121,27 @@ The below instructions allow the building of the CUID project and also the insta
 mkdir build
 cd build
 # Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+# Add -DBUILD_DAEMON=ON to also build the daemon (optional)
 cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
+make
 # Use sudo if installing to a system prefix like /opt
 sudo make install
 # Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
 sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
 
-Both static and shared libraries are built.
+Both static and shared libraries are built. The post-install script is a unified entry point: it always provisions the HMAC key required by the library, and automatically configures the `systemd` service and `udev` rules if the daemon was also installed.
+
+If users need to uninstall the CUID project, they can do so with the following instructions:
+
+```sh
+cd build
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_prerm.sh
+sudo make uninstall
+```
+
+The pre-removal script automatically stops and removes the `systemd` service and `udev` rules if the daemon is installed, and skips those steps otherwise. The HMAC key and daemon config in `/etc/amdcuid/` are intentionally preserved so that reinstalls keep the same CUID values. To fully purge all configuration, run `sudo rm -rf /etc/amdcuid` after uninstalling.
 
 Documentation can be built using the following instructions:
 

@@ -4,13 +4,12 @@
 #ifndef ROCJITSU_ISA_ARCH_RISC_V_ISA_H_
 #define ROCJITSU_ISA_ARCH_RISC_V_ISA_H_
 
+#include "rocjitsu/isa/arch/risc_v/decoder.h"
 #include "rocjitsu/isa/arch/risc_v/operand_types.h"
 #include "rocjitsu/vm/risc_v/hart_state.h"
 
 namespace rocjitsu {
 namespace risc_v {
-
-class Decoder;
 
 struct Isa {
   using Context = HartState;

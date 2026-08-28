@@ -25,6 +25,7 @@ set(ROCPROFILER_HEADER_FILES
     dispatch_counting_service.h
     external_correlation.h
     fwd.h
+    hipfile.h
     hip.h
     hsa.h
     intercept_table.h
@@ -36,6 +37,7 @@ set(ROCPROFILER_HEADER_FILES
     registration.h
     rocdecode.h
     rocjpeg.h
+    rocshmem.h
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h
     ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h)
@@ -46,12 +48,14 @@ install(
     COMPONENT development)
 
 add_subdirectory(hip)
+add_subdirectory(hipfile)
 add_subdirectory(hsa)
 add_subdirectory(marker)
 add_subdirectory(ompt)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(rocshmem)
 add_subdirectory(cxx)
 add_subdirectory(kfd)
 add_subdirectory(experimental)

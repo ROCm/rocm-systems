@@ -1,0 +1,16 @@
+# Linker version script for rocjitsu plugin shared objects.
+#
+# A plugin .so carries only its own plugin logic plus the three ABI entry
+# points; it resolves nothing from the simulator at load time. That plugin
+# logic still pulls in C-ABI and weak template symbols with default visibility,
+# which the per-target CXX_VISIBILITY_PRESET=hidden alone cannot keep out of the
+# dynamic symbol table. This script makes the three plugin ABI entry points the
+# ONLY globally visible symbols and forces everything else local.
+{
+  global:
+    rocjitsu_plugin_metadata;
+    rocjitsu_plugin_create;
+    rocjitsu_plugin_destroy;
+  local:
+    *;
+};

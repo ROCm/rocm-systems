@@ -24,7 +24,7 @@
 # If environment variable DRM_DIR or LIBHSAKMT_PATH is set, the script
 # will pick up the corresponding libraries from those pathes.
 
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(KFDTest)
 
@@ -92,51 +92,107 @@ set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 
 find_package(PkgConfig)
 
-list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+# Prepend DRM_DIR to CMAKE_PREFIX_PATH if set
+if(DRM_DIR)
+    list(PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+endif()
 # The module name passed to pkg_check_modules() is determined by the
 # name of file *.pc
 pkg_check_modules(DRM REQUIRED libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED libdrm_amdgpu)
 include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
 
-if( DEFINED ENV{LIBHSAKMT_PATH} )
-    set ( LIBHSAKMT_PATH $ENV{LIBHSAKMT_PATH} )
-    message ( "LIBHSAKMT_PATH environment variable is set" )
+# CMP0074: make find_package() use <PackageName>_ROOT variables (CMake 3.12+)
+# This allows NUMA_ROOT, hsakmt_ROOT, etc. to guide package discovery in both
+# TheRock (via CMake cache variables) and standalone builds (via environment).
+# Without this policy, find_package() ignores _ROOT hints, breaking custom paths.
+cmake_policy( SET CMP0074 NEW )
+
+# Find NUMA library
+# Try CONFIG mode first (TheRock), fall back to manual discovery (standalone)
+find_package(NUMA CONFIG QUIET)
+if(NUMA_FOUND)
+    # Normalize: ensure NUMA::NUMA target exists even if CONFIG only provides variables
+    if(NOT TARGET NUMA::NUMA)
+        add_library(NUMA::NUMA UNKNOWN IMPORTED)
+        set_target_properties(NUMA::NUMA PROPERTIES
+            IMPORTED_LOCATION "${NUMA_LIBRARY}")
+    endif()
 else()
-    if ( ${ROCM_INSTALL_PATH} )
-       set ( ENV{PKG_CONFIG_PATH} ${ROCM_INSTALL_PATH}/share/pkgconfig )
+    find_library(NUMA_LIBRARY NAMES numa PATHS /usr/lib /usr/local/lib)
+    if(NOT NUMA_LIBRARY)
+        message(FATAL_ERROR "Could not find NUMA library")
+    endif()
+    add_library(NUMA::NUMA UNKNOWN IMPORTED)
+    set_target_properties(NUMA::NUMA PROPERTIES
+        IMPORTED_LOCATION "${NUMA_LIBRARY}")
+    message(STATUS "Found NUMA: ${NUMA_LIBRARY}")
+endif()
+
+# Find libhsakmt library
+# Try CONFIG mode first (TheRock), fall back to manual discovery (standalone)
+find_package(hsakmt CONFIG QUIET)
+if(NOT hsakmt_FOUND)
+    # Manual discovery with multiple fallback strategies
+    # kfdtest requires static library for libhsakmt
+    if(LIBHSAKMT_PATH)
+        message(STATUS "Using LIBHSAKMT_PATH: ${LIBHSAKMT_PATH}")
+        find_library(HSAKMT_LIBRARY NAMES libhsakmt.a PATHS "${LIBHSAKMT_PATH}" NO_DEFAULT_PATH)
+        # Find include directory relative to library
+        get_filename_component(HSAKMT_LIB_DIR "${LIBHSAKMT_PATH}" ABSOLUTE)
+        find_path(HSAKMT_INCLUDE_DIR NAMES hsakmt.h
+            PATHS "${HSAKMT_LIB_DIR}/../include" "${HSAKMT_LIB_DIR}/../../include"
+            NO_DEFAULT_PATH)
+    elseif(DEFINED ENV{LIBHSAKMT_PATH})
+        message(STATUS "Using LIBHSAKMT_PATH from environment: $ENV{LIBHSAKMT_PATH}")
+        find_library(HSAKMT_LIBRARY NAMES libhsakmt.a PATHS "$ENV{LIBHSAKMT_PATH}" NO_DEFAULT_PATH)
+        get_filename_component(HSAKMT_LIB_DIR "$ENV{LIBHSAKMT_PATH}" ABSOLUTE)
+        find_path(HSAKMT_INCLUDE_DIR NAMES hsakmt.h
+            PATHS "${HSAKMT_LIB_DIR}/../include" "${HSAKMT_LIB_DIR}/../../include"
+            NO_DEFAULT_PATH)
     else()
-       set ( ENV{PKG_CONFIG_PATH} /opt/rocm/share/pkgconfig )
+        # Try pkg-config
+        if(ROCM_INSTALL_PATH)
+            set(ENV{PKG_CONFIG_PATH} ${ROCM_INSTALL_PATH}/share/pkgconfig)
+        else()
+            set(ENV{PKG_CONFIG_PATH} /opt/rocm/share/pkgconfig)
+        endif()
+
+        pkg_check_modules(HSAKMT libhsakmt QUIET)
+
+        if(HSAKMT_FOUND)
+            find_library(HSAKMT_LIBRARY NAMES libhsakmt.a PATHS ${HSAKMT_LIBRARY_DIRS} NO_DEFAULT_PATH)
+            find_path(HSAKMT_INCLUDE_DIR NAMES hsakmt.h PATHS ${HSAKMT_INCLUDE_DIRS} NO_DEFAULT_PATH)
+        else()
+            # Fall back to standard search paths
+            find_library(HSAKMT_LIBRARY NAMES libhsakmt.a
+                PATHS /opt/rocm/lib /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib)
+            find_path(HSAKMT_INCLUDE_DIR NAMES hsakmt.h
+                PATHS /opt/rocm/include /usr/include /usr/local/include)
+        endif()
     endif()
 
-    pkg_check_modules(HSAKMT libhsakmt)
+    if(NOT HSAKMT_LIBRARY)
+        message(FATAL_ERROR "Could not find libhsakmt. Set LIBHSAKMT_PATH to the directory containing libhsakmt.a")
+    endif()
 
-    if( NOT HSAKMT_FOUND )
-       set ( LIBHSAKMT_PATH $ENV{OUT_DIR} )
+    # Create imported target
+    add_library(hsakmt::hsakmt STATIC IMPORTED)
+    set_target_properties(hsakmt::hsakmt PROPERTIES
+        IMPORTED_LOCATION "${HSAKMT_LIBRARY}")
+
+    # Add include directory if found
+    if(HSAKMT_INCLUDE_DIR)
+        set_target_properties(hsakmt::hsakmt PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${HSAKMT_INCLUDE_DIR}")
+        message(STATUS "Found libhsakmt: ${HSAKMT_LIBRARY} (include: ${HSAKMT_INCLUDE_DIR})")
+    else()
+        message(STATUS "Found libhsakmt: ${HSAKMT_LIBRARY}")
     endif()
 endif()
 
-if( DEFINED LIBHSAKMT_PATH )
-    set ( HSAKMT_LIBRARY_DIRS ${LIBHSAKMT_PATH} )
-    set ( HSAKMT_LIBRARIES hsakmt )
-endif()
-
-message ( "Find libhsakmt at ${HSAKMT_LIBRARY_DIRS}" )
-
-if ( POLICY CMP0074 )
-    cmake_policy( SET CMP0074 NEW )
-endif()
-
-find_path( LIGHTNING_CMAKE_DIR NAMES LLVMConfig.cmake
-    PATHS $ENV{OUT_DIR}/llvm/lib/cmake/llvm NO_CACHE NO_DEFAULT_PATH)
-
-if ( DEFINED LIGHTNING_CMAKE_DIR AND EXISTS ${LIGHTNING_CMAKE_DIR} )
-    set ( LLVM_DIR ${LIGHTNING_CMAKE_DIR} )
-else()
-    message( STATUS "Couldn't find Lightning build in compute directory. "
-        "Searching LLVM_DIR then defaulting to system LLVM install if still not found..." )
-endif()
-
+# Find LLVM library
+# Uses LLVM_DIR (CMake/env variable) or CMAKE_PREFIX_PATH if set, otherwise system paths
 find_package( LLVM REQUIRED CONFIG )
 
 if( ${LLVM_PACKAGE_VERSION} VERSION_LESS "7.0" )
@@ -240,11 +296,6 @@ if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER
     set ( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address" )
 endif ()
 
-# link_directories() has to be put before add_executable()
-# The modules found by pkg_check_modules() in the default pkg config
-# path do not need to use link_directories() here.
-link_directories(${HSAKMT_LIBRARY_DIRS})
-
 add_executable(kfdtest ${SRC_FILES})
 
 # Context-version test support
@@ -256,7 +307,18 @@ if( ${HSAKMT_CTX} )
     endif()
 endif()
 
-target_link_libraries(kfdtest ${HSAKMT_LIBRARIES} ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} ${llvm_libs} pthread m stdc++ rt numa)
+target_link_libraries(kfdtest
+    PRIVATE
+        hsakmt::hsakmt
+        NUMA::NUMA
+        ${DRM_LDFLAGS}
+        ${DRM_AMDGPU_LDFLAGS}
+        ${llvm_libs}
+        pthread
+        m
+        stdc++
+        rt
+        ${CMAKE_DL_LIBS})
 
 configure_file ( scripts/kfdtest.exclude kfdtest.exclude COPYONLY )
 configure_file ( scripts/run_kfdtest.sh run_kfdtest.sh COPYONLY )

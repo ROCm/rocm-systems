@@ -299,6 +299,20 @@ void ROBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
+int ROBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                         [[maybe_unused]] size_t length,
+                                         [[maybe_unused]] void **registered_addr) {
+  LOG_WARN("rocshmem_buffer_register_symmetric is not supported by the RO "
+           "backend");
+  return ROCSHMEM_ERROR;
+}
+
+int ROBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+  LOG_WARN("rocshmem_buffer_unregister_symmetric is not supported by the RO "
+           "backend");
+  return ROCSHMEM_ERROR;
+}
+
 void ROBackend::accumulate_ctx_device_stats() {
   ROCStats tmp;
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {

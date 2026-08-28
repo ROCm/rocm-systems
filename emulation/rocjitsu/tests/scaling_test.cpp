@@ -92,7 +92,7 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
           return 0;
         });
   }
-  engine->build();
+  engine->create();
 
   memory->load_image(reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size(),
                      KD_ADDR);

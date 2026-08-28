@@ -21,7 +21,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_GFX10_CACHE_FLAGS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_GFX10_CACHE_FLAGS_H_
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
 namespace rocjitsu {
 namespace amdgpu {

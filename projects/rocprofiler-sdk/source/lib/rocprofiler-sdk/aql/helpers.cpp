@@ -30,7 +30,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 namespace rocprofiler
 {

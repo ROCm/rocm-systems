@@ -36,7 +36,7 @@ Here's a sample CUID file for your reference:
   family=0019
   model=0074
   unit_id=0004
-  package_core_id=0:0
+  package_id=0
   last_update=6980d761
 
   [NIC:0]
@@ -59,7 +59,7 @@ Depending on the device type, different device attributes (present in the CUID f
 
 - **GPU:** The ``device_node`` links the derived CUID to the hardware.
 
-- **CPU:** The ``package_core_id`` consists of two components: physical ID and core ID, as ``physical_id:core_id``. This helps to identify CPU cores in multi-CPU systems.
+- **CPU:** The ``package_id`` identifies the physical CPU package, which is akin to a socket ID. CPUs will also display a ``device_node`` which represents the representative logical CPU for that package (currently selected as the lowest APIC ID seen for the socket). The derived CUID is associated with the physical CPU package, not the logical CPU core.
 
 - **NIC:** The ``device_node`` links the derived CUID to the network device.
 

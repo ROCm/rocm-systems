@@ -10,6 +10,7 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
@@ -25,6 +26,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
@@ -74,6 +76,7 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
+  ENABLE_HIPFILE_BUILD: "true"
 
 jobs:
   ci_config:
@@ -137,6 +140,7 @@ jobs:
           projects/rocr-runtime
           projects/clr
           projects/hip
+          projects/hipfile
         submodules: false
         set-safe-directory: true
 
@@ -241,6 +245,7 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
+        enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 

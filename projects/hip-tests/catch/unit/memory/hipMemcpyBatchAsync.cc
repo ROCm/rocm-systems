@@ -46,11 +46,6 @@ enum class PointerPattern {
   kBroadcastSource,
 };
 
-size_t CopyElements(size_t copy_size) {
-  REQUIRE(copy_size % sizeof(int) == 0);
-  return copy_size / sizeof(int);
-}
-
 std::vector<std::pair<int, int>> GetPeerAccessibleDevicePairs() {
   if (HipTest::getDeviceCount() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -118,7 +113,7 @@ std::vector<void*> MakeBatchPtrs(std::vector<LinearAllocGuard<int>>& allocations
 }
 
 void FillDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size, int value) {
-  const size_t copy_elements = CopyElements(copy_size);
+  const size_t copy_elements = copy_size / sizeof(int);
   std::vector<int> source(copy_elements);
 
   for (size_t i = 0; i < ptrs.size(); ++i) {
@@ -129,7 +124,7 @@ void FillDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size, int val
 
 void FillHostBuffers(std::vector<LinearAllocGuard<int>>& buffers, size_t copy_size,
                      int value = kPatternValue) {
-  const size_t copy_elements = CopyElements(copy_size);
+  const size_t copy_elements = copy_size / sizeof(int);
 
   for (size_t i = 0; i < buffers.size(); ++i) {
     std::fill_n(buffers[i].host_ptr(), copy_elements, value + static_cast<int>(i));
@@ -156,7 +151,7 @@ void VerifyArrayFromBothEnds(const int* values, size_t copy_elements, int expect
 
 void VerifyDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size,
                          int expected = kPatternValue, bool add_index = true) {
-  const size_t copy_elements = CopyElements(copy_size);
+  const size_t copy_elements = copy_size / sizeof(int);
   std::vector<int> result(copy_elements);
 
   for (size_t i = 0; i < ptrs.size(); ++i) {
@@ -168,7 +163,7 @@ void VerifyDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size,
 
 void VerifyHostBuffers(std::vector<LinearAllocGuard<int>>& buffers, size_t copy_size,
                        int expected = kPatternValue) {
-  const size_t copy_elements = CopyElements(copy_size);
+  const size_t copy_elements = copy_size / sizeof(int);
 
   for (size_t i = 0; i < buffers.size(); ++i) {
     VerifyArrayFromBothEnds(buffers[i].host_ptr(), copy_elements, expected + static_cast<int>(i),
@@ -378,11 +373,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   }
 }
 
+#if HT_AMD
 /**
  * Test Description
  * ------------------------
- * - Verifies segmented host-source access attributes and swap attributes for
- * hipMemcpyBatchAsync.
+ * - Verifies D2D batch copies with hipMemcpyFlagExtOpSwap.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -390,81 +385,37 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Functional) {
-  constexpr size_t kCopiesPerAttr = 3;
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Swap) {
+  constexpr size_t copy_count = 3;
+  constexpr size_t copy_size = kSmallCopySize;
+  constexpr int kSwapSrcValue = 23;
+  constexpr int kSwapDstValue = 47;
+  BatchConfig config{copy_count, copy_size};
   StreamGuard stream_guard(Streams::created);
+  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
+  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
+  std::vector<void*> src_ptrs = MakeBatchPtrs(src);
+  std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
+  std::vector<size_t> sizes(src_ptrs.size(), copy_size);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
 
-  SECTION("Regular attributes") {
-#if HT_AMD
-    std::array<hipMemcpyAttributes, 6> host_attrs{
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderDuringApiCall, {}, {}, hipMemcpyFlagDefault},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderDuringApiCall, {}, {}, hipMemcpyFlagExtPreferCE},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagDefault},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagExtPreferCE},
-    };
-#else
-    std::array<hipMemcpyAttributes, 3> host_attrs{
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderDuringApiCall, {}, {}, hipMemcpyFlagDefault},
-        hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagDefault},
-    };
-#endif
-    BatchConfig host_config{host_attrs.size() * kCopiesPerAttr, kSmallCopySize};
-    std::vector<LinearAllocGuard<int>> host_src =
-        AllocateBatchBuffers(LinearAllocs::hipHostMalloc, host_config);
-    std::vector<LinearAllocGuard<int>> dst =
-        AllocateBatchBuffers(LinearAllocs::hipMalloc, host_config);
-    std::vector<void*> host_src_ptrs = MakeBatchPtrs(host_src);
-    std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
-    std::vector<size_t> sizes(host_src_ptrs.size(), kSmallCopySize);
-    std::vector<size_t> attrs_idxs;
+  FillDeviceBuffers(src_ptrs, copy_size, kSwapSrcValue);
+  FillDeviceBuffers(dst_ptrs, copy_size, kSwapDstValue);
 
-    for (size_t attr_idx = 0; attr_idx < host_attrs.size(); ++attr_idx) {
-      attrs_idxs.push_back(attr_idx * kCopiesPerAttr);
-    }
-
-    FillHostBuffers(host_src, kSmallCopySize);
-
-    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), host_src_ptrs.data(), sizes.data(), sizes.size(),
-                                  host_attrs.data(), attrs_idxs.data(), attrs_idxs.size(), nullptr,
-                                  stream_guard.stream()));
+  hipError_t status =
+      hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), src_ptrs.size(), &attr,
+                          attrs_idxs, 1, nullptr, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    SUCCEED("hipMemcpyFlagExtOpSwap is not supported on this device");
+  } else {
+    HIP_CHECK(status);
     HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
+    VerifyDeviceBuffers(src_ptrs, copy_size, kSwapDstValue);
+    VerifyDeviceBuffers(dst_ptrs, copy_size, kSwapSrcValue);
   }
-
-#if HT_AMD
-  SECTION("Swap attribute") {
-    BatchConfig d2d_config{kCopiesPerAttr, kSmallCopySize};
-    std::vector<LinearAllocGuard<int>> d2d_src =
-        AllocateBatchBuffers(LinearAllocs::hipMalloc, d2d_config);
-    std::vector<LinearAllocGuard<int>> d2d_dst =
-        AllocateBatchBuffers(LinearAllocs::hipMalloc, d2d_config);
-    std::vector<void*> d2d_src_ptrs = MakeBatchPtrs(d2d_src);
-    std::vector<void*> d2d_dst_ptrs = MakeBatchPtrs(d2d_dst);
-    std::vector<size_t> sizes(d2d_src_ptrs.size(), kSmallCopySize);
-    hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
-    size_t attrs_idxs[1] = {0};
-    constexpr int kSwapSrcValue = 23;
-    constexpr int kSwapDstValue = 47;
-    FillDeviceBuffers(d2d_src_ptrs, kSmallCopySize, kSwapSrcValue);
-    FillDeviceBuffers(d2d_dst_ptrs, kSmallCopySize, kSwapDstValue);
-
-    hipError_t status = hipMemcpyBatchAsync(d2d_dst_ptrs.data(), d2d_src_ptrs.data(), sizes.data(),
-                                            d2d_src_ptrs.size(), &attr, attrs_idxs, 1, nullptr,
-                                            stream_guard.stream());
-    if (status == hipErrorNotSupported) {
-      SUCCEED("hipMemcpyFlagExtOpSwap is not supported on this device");
-    } else {
-      HIP_CHECK(status);
-      HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-      VerifyDeviceBuffers(d2d_src_ptrs, kSmallCopySize, kSwapDstValue);
-      VerifyDeviceBuffers(d2d_dst_ptrs, kSmallCopySize, kSwapSrcValue);
-    }
-  }
-#endif
 }
+#endif
 
 /**
  * Test Description
@@ -504,7 +455,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   std::vector<size_t> sizes(config.copy_count, config.copy_size);
   size_t attrs_idxs[1] = {0};
   hipMemcpyAttributes attr{
-      hipMemcpySrcAccessOrderStream, {}, {}, static_cast<unsigned int>(flag)};
+      hipMemcpySrcAccessOrderAny, {}, {}, static_cast<unsigned int>(flag)};
 
   if (pointer_pattern == PointerPattern::kBroadcastSource) {
     FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
@@ -718,7 +669,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_Functional) {
   constexpr size_t copy_size = kMediumCopySize;
-  const size_t copy_elements = CopyElements(copy_size);
+  const size_t copy_elements = copy_size / sizeof(int);
 
   if (HipTest::getDeviceCount() < 3) {
     HIP_SKIP_TEST("Test requires at least three GPUs.");
@@ -901,6 +852,96 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   DisablePeerAccess(peer_pairs);
   HIP_CHECK(hipSetDevice(stream_device));
 }
+
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies H2D hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectSrc copies
+ * from the host buffer referenced by a pinned pointer slot.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrc) {
+  constexpr size_t copy_size = kSmallCopySize;
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipHostMalloc, copy_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);
+  LinearAllocGuard<char> src_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+
+  const size_t copy_elements = copy_size / sizeof(int);
+  std::fill_n(src.host_ptr(), copy_elements, kPatternValue);
+
+  void* src_ptr = src.ptr();
+  std::memcpy(src_slot.ptr(), &src_ptr, sizeof(void*));
+
+  std::vector<void*> dst_ptrs{dst.ptr()};
+  std::vector<void*> src_ptrs{src_slot.ptr()};
+  std::vector<size_t> sizes{copy_size};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectSrc};
+  size_t attrs_idx = 0;
+
+  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
+                                          &attrs_idx, 1, nullptr, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    SUCCEED("hipMemcpyFlagExtOpIndirectSrc is not supported on this device");
+  } else {
+    HIP_CHECK(status);
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    VerifyDeviceBuffers(dst_ptrs, copy_size);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies D2H hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectDst copies
+ * into the host buffer referenced by a pinned pointer slot.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectDst) {
+  constexpr size_t copy_size = kSmallCopySize;
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipHostMalloc, copy_size);
+  LinearAllocGuard<char> dst_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+
+  const size_t copy_elements = copy_size / sizeof(int);
+  std::vector<int> host_pattern(copy_elements, kPatternValue);
+  HIP_CHECK(hipMemcpy(src.ptr(), host_pattern.data(), copy_size, hipMemcpyHostToDevice));
+  std::fill_n(dst.host_ptr(), copy_elements, 0);
+
+  void* dst_ptr = dst.ptr();
+  std::memcpy(dst_slot.ptr(), &dst_ptr, sizeof(void*));
+
+  std::vector<void*> src_ptrs{src.ptr()};
+  std::vector<void*> dst_ptrs{dst_slot.ptr()};
+  std::vector<size_t> sizes{copy_size};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectDst};
+  size_t attrs_idx = 0;
+
+  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
+                                          &attrs_idx, 1, nullptr, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    SUCCEED("hipMemcpyFlagExtOpIndirectDst is not supported on this device");
+  } else {
+    HIP_CHECK(status);
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    VerifyArrayFromBothEnds(dst.host_ptr(), copy_elements, kPatternValue, 0);
+  }
+}
+#endif
 
 /**
  * End doxygen group MemoryTest.

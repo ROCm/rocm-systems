@@ -1,0 +1,19 @@
+# PLACEHOLDER (no-op). Registers this workflow path on the default branch so
+# `workflow_dispatch` becomes selectable in the Actions UI; you can then pick a
+# feature branch to run the real implementation from that branch. The donothing
+# job never executes (`if: false`).
+# See ROCm/TheRock#1740 for the same pattern.
+name: TheRock Code Coverage for rccl
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  donothing:
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: echo "Placeholder - real implementation lives on the feature branch"

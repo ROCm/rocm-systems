@@ -162,13 +162,15 @@ typedef union {
 typedef struct {
   const char* name;
 
-  ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nranks, int rank, ncclDebugLogger_t logfn);
+  ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes,
+                       int nranks, int rank, ncclDebugLogger_t logfn);
 
   ncclResult_t (*startEvent)(void* context, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr);
 
   ncclResult_t (*stopEvent)(void* eHandle);
 
-  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v6_t eState, ncclProfilerEventStateArgs_v6_t* eStateArgs);
+  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v6_t eState,
+                                   ncclProfilerEventStateArgs_v6_t* eStateArgs);
 
   ncclResult_t (*finalize)(void* context);
 } ncclProfiler_v6_t;

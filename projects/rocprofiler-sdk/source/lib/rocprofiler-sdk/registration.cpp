@@ -35,8 +35,10 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -56,6 +58,7 @@
 #include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -1181,6 +1184,8 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
+        rocprofiler::hip::graph::update_table(hip_runtime_api_table);
+
         rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
         // install rocprofiler API wrappers
@@ -1294,11 +1299,18 @@ rocprofiler_set_api_table(const char* name,
                 [](const rocprofiler::context::context* ctx) {
                     return (ctx->dispatch_counter_collection != nullptr ||
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
-                            ctx->dispatch_spm != nullptr);
+                            ctx->dispatch_spm != nullptr ||
+                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            (ctx->device_thread_trace != nullptr &&
+                             ctx->device_thread_trace->requires_queue_intercept()));
+                });
+            auto device_thread_trace_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return ctx->device_thread_trace != nullptr;
                 });
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] counter/ATT/PC-sampling contexts found: {}. The presence of "
+                "[queue-interposition] non-inline contexts found: {}. The presence of "
                 "any of these contexts will prevent inline intercept (for the time being).",
                 non_queue_interposition_contexts.size());
 
@@ -1306,6 +1318,10 @@ rocprofiler_set_api_table(const char* name,
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
+               !rocprofiler::hsa::enable_queue_intercept())
+                enable_queue_interposition = false;
 
             // if ROCPROFILER_QUEUE_INTERPOSITION is explicitly set to true, but there are contexts
             // that require non-inline intercept, print a warning and fall back to non-inline
@@ -1330,6 +1346,10 @@ rocprofiler_set_api_table(const char* name,
                 rocprofiler::hsa::queue_interposition::interposition_init(
                     hsa_api_table->core_, enable_queue_interposition);
         }
+
+        // Replay device thread trace contexts started before hsa_init(). Must run
+        // after queue_controller_init + interposition; starting SQTT earlier hangs the GPU.
+        rocprofiler::thread_trace::start_active_contexts();
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
@@ -1510,6 +1530,50 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_ROCJPEG_TABLE, lib_version, lib_instance, std::make_tuple(rocjpeg_api));
     }
+    else if(std::string_view{name} == "rocshmem")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected rocSHMEM library to pass 1 API table, not " << num_tables;
+
+        auto* rocshmem_api = static_cast<rocshmemApiFuncTable*>(tables[0]);
+
+        // any internal modifications to the rocshmemApiFuncTable need to be done before we make
+        // the copy or else those modifications will be lost when rocSHMEM API tracing is enabled
+        // because the rocSHMEM API tracing invokes the function pointers from the copy below
+        rocprofiler::rocshmem::copy_table(rocshmem_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::rocshmem::update_table(rocshmem_api);
+
+        // Tracing notifications the runtime has initialized
+        rocprofiler::runtime_init::initialize(
+            ROCPROFILER_RUNTIME_INITIALIZATION_ROCSHMEM, lib_version, lib_instance);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_ROCSHMEM_TABLE, lib_version, lib_instance, std::make_tuple(rocshmem_api));
+    }
+    else if(std::string_view{name} == "hipFile")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected hipFILE library to pass 1 API table, not " << num_tables;
+
+        auto* hipfile_api = static_cast<hipFileDispatchTable*>(tables[0]);
+
+        // Save the original table before installing wrappers; wrappers call through the copy.
+        rocprofiler::hipfile::copy_table(hipfile_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::hipfile::update_table(hipfile_api);
+
+        // Tracing notifications the runtime has initialized
+        rocprofiler::runtime_init::initialize(
+            ROCPROFILER_RUNTIME_INITIALIZATION_HIPFILE, lib_version, lib_instance);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_HIPFILE_TABLE, lib_version, lib_instance, std::make_tuple(hipfile_api));
+    }
     else if(std::string_view{name} == "rocattach")
     {
         ROCP_ERROR_IF(num_tables > 1)
@@ -1529,6 +1593,7 @@ rocprofiler_set_api_table(const char* name,
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
 #endif
+        rocprofiler::thread_trace::code_object::initialize(rocattach_api);
     }
     else
     {

@@ -343,29 +343,59 @@ def test_sigquit(*, args, patterns=(), **_):
     wave_seen = False
     timeout_seen = False
 
+    class LineReader:
+        def __init__(self, streams):
+            self._pending_bufs = {s: b"" for s in streams}
+            self._extend_grace_period = 0
+
+        def extend_timeout(self, addend):
+            self._extend_grace_period = self._extend_grace_period + addend
+
+        def readlines(self, timeout):
+            """
+            Read one line from one of the streams.  Throw TimeoutError if a
+            line could not be read in TIMEOUT seconds.
+            """
+            self._extend_grace_period = 0
+            end = time.monotonic() + timeout
+            while time.monotonic() < end + self._extend_grace_period:
+                if not self._pending_bufs:
+                    return
+                # Check if the pending buffers contain a list we could return
+                for st, buf in self._pending_bufs.items():
+                    remaining = buf
+                    while b"\n" in remaining:
+                        l, _, remaining = remaining.partition(b"\n")
+                        self._pending_bufs[st] = remaining
+                        yield (l, st)
+
+                rlist, _, _ = select.select(self._pending_bufs.keys(), [], [], 1)
+                if not rlist:
+                    continue
+
+                # Read up to 4k bytes from the first available stream.
+                buf = os.read(rlist[0].fileno(), 4096)
+                if buf:
+                    # We read some things, append it to the buffer for this
+                    # stream.  Next iteration will try to see if a line can be
+                    # extracted from it.
+                    self._pending_bufs[rlist[0]] += buf
+                else:
+                    # We reached EOF, whatever was in the pending buffer for
+                    # this stream is the last line.
+                    r = (self._pending_bufs[rlist[0]], rlist[0])
+                    # The stream is done, remove it from the list of streams
+                    del self._pending_bufs[rlist[0]]
+                    yield r
+
     consumed_out = []
     consumed_err = []
 
-    deadline = time.monotonic() + LOOP_TIMEOUT
-    streams_to_read = [p.stdout, p.stderr]
-
-    while time.monotonic() < deadline and streams_to_read:
-
-        rlist, _, _ = select.select(streams_to_read, [], [], 1)
-        if not rlist:
-            continue
-
-        for r in rlist:
-            line = r.readline()
-
-            if line == b"":
-                # Reading "" means that we reached EOF on this stream.
-                # Remove it from the streams of interest so every stream
-                # can be fully flushed before we exit the loop.
-                del streams_to_read[streams_to_read.index(r)]
-                continue
-
+    try:
+        reader = LineReader([p.stdout, p.stderr])
+        for line, r in reader.readlines(LOOP_TIMEOUT):
             s = line.decode("utf-8")
+
             if r is p.stdout:
                 consumed_out.append(s)
             else:
@@ -374,23 +404,22 @@ def test_sigquit(*, args, patterns=(), **_):
             if not kernel_started and "Kernel started" in s:
                 kernel_started = True
                 os.kill(p.pid, signal.SIGQUIT)
-                # We give our program LOOP_TIMEOUT secs to start the kernel.
-                # Once we know that the kernel is running, we give it
-                # an extra LOOP_TIMEOUT seconds to process SIGQUIT.
-                deadline = deadline + LOOP_TIMEOUT
 
             if kernel_started:
-                if s.lstrip().startswith(
-                    "Disassembly for function sigquit_kern(int*):"
-                ):
+                if s.lstrip().startswith("Disassembly for function sigquit_kern(int*):"):
                     wave_seen = True
-                    break
+                    reader.extend_timeout(LOOP_TIMEOUT)
+
             if "Timeout reached. Exiting." in s:
                 timeout_seen = True
-        if wave_seen or timeout_seen:
-            break
 
-    p.terminate()
+            if wave_seen or timeout_seen:
+                # We saw everything we need, we do not need to consume anything
+                # more.
+                break
+    finally:
+        p.terminate()
+
     try:
         output, err = p.communicate(timeout=3)
     except TimeoutExpired:

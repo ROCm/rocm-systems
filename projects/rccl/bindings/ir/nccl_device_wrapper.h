@@ -20,11 +20,10 @@
  * Sectioning of this header (mirrored in __impl.h):
  *   [A] Always-on    — APIs whose RCCL prerequisites already exist.
  *   [B] Always-on    — APIs that take ncclCoopAny by value.
- *   [C] Stubbed-out  — APIs whose underlying RCCL primitives (ncclGin*,
- *                      composite ncclBarrierSession, ncclGinFenceLevel)
- *                      do not yet exist in RCCL. Wrapped in `#if 0` and
- *                      ready to enable once those land via a future sync
- *                      with NCCL.
+ *   [C] Always-on    — GIN + composite barrier APIs (ncclGin*,
+ *                      ncclGinBarrierSession, composite ncclBarrierSession,
+ *                      ncclGinFenceLevel). Enabled now that the NCCL
+ *                      v2.29.x GIN sync landed these primitives in RCCL.
  */
 
 #include "nccl_device.h"
@@ -114,7 +113,7 @@ struct ncclLsaBarrierSession_C {
 NCCL_IR_EXPORT void ncclCoopAnyInitThread(ncclCoopAny* coop);
 NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop);
 NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask);
-NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id);
+NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds);
 NCCL_IR_EXPORT void ncclCoopAnyInitCta(ncclCoopAny* coop);
 
 NCCL_IR_EXPORT int  ncclCoopThreadRank(const ncclCoopAny* coop);
@@ -148,19 +147,20 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
 
 
 /* ========================================================================
- * [C] APIs whose RCCL prerequisites do not exist yet
+ * [C] GIN + composite Barrier Session APIs
  *
- * Required but missing in RCCL:
- *   - ncclGin_C, ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
- *     ncclGinFenceLevel  (no GPU-Initiated Networking in RCCL today)
- *   - ncclBarrierSession<Coop>  (composite inner-LSA + outer-GIN barrier)
+ * Underlying RCCL primitives (present since the NCCL v2.29.x GIN sync):
+ *   - ncclGin / ncclGin_C, ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
+ *     ncclGinFenceLevel         (nccl_device/gin.h, gin_barrier.h)
+ *   - ncclBarrierSession<Coop>   (composite inner-LSA + outer-GIN barrier;
+ *                                 nccl_device/barrier.h)
  *
- * Kept here verbatim from NCCL v2.29.2-1 so that a future sync that
- * imports the GIN / composite-barrier infrastructure into RCCL only has
- * to remove the `#if 0` guard (these all need ncclCoopAny, which is
- * unconditionally available).
+ * All of these take ncclCoopAny, which is unconditionally available. The
+ * shared device headers gate these templates on the upstream __CUDACC__,
+ * which hipify rewrites to __HIPCC__ in the staged copy this bitcode build
+ * consumes (true under clang -x hip), so no shared-header change is needed
+ * to enable them here.
  * ======================================================================*/
-#if 0  /* TODO(rccl-ir): enable once RCCL grows ncclGin* / composite Barrier APIs */
 
 /* Struct definitions */
 struct ncclGinBarrierSession_C {
@@ -204,7 +204,5 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclCoopAny coop,
     cuda::memory_order order,
     ncclGinFenceLevel fence);
-
-#endif  /* 0 — GIN / composite Barrier wrappers */
 
 #endif  /* _NCCL_DEVICE_WRAPPER_H_ */

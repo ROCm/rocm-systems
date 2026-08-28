@@ -257,10 +257,89 @@ const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::
     return m_write_counters_args;
 }
 
+void MockCodeObjectWriter::start_code_obj(size_t obj_id)
+{
+    m_empty = false;
+    m_start_code_obj_ids.push_back(obj_id);
+}
+
+void MockCodeObjectWriter::end_code_obj() {}
+
+void MockCodeObjectWriter::start_symbol(const rocprofiler_compute_tool::symbol_t& /*symbol*/)
+{
+    m_empty = false;
+}
+
+void MockCodeObjectWriter::end_symbol() {}
+
+void MockCodeObjectWriter::write_instruction(const rocprofiler_compute_tool::instruction_t& /*inst*/)
+{
+    m_empty = false;
+}
+
+std::string MockCodeObjectWriter::get_result()
+{
+    return {};
+}
+
+void MockCodeObjectWriter::flush(const std::filesystem::path& output_file_path)
+{
+    m_flush_calls.push_back(output_file_path);
+}
+
+bool MockCodeObjectWriter::empty() const
+{
+    return m_empty;
+}
+
+const std::vector<size_t>& MockCodeObjectWriter::get_start_code_obj_ids() const
+{
+    return m_start_code_obj_ids;
+}
+
+const std::vector<std::filesystem::path>& MockCodeObjectWriter::get_flush_calls() const
+{
+    return m_flush_calls;
+}
+
 void MockPcSamplingCollector::on_code_object_load(
     const rocprofiler_callback_tracing_code_object_load_data_t& /*info*/)
 {
     ++load_count;
 }
 
-void MockPcSamplingCollector::write(rocprofiler_compute_tool::code_object_writer_t& /*writer*/) {}
+void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer)
+{
+    ++finalize_count;
+    if (!m_has_code_objects)
+        return;
+
+    writer.start_code_obj(1);
+    writer.end_code_obj();
+}
+
+void MockPcSamplingCollector::set_has_code_objects(bool has_code_objects)
+{
+    m_has_code_objects = has_code_objects;
+}
+
+const std::set<std::filesystem::path>& MockPcSamplingCollector::get_source_paths() const
+{
+    return m_source_paths;
+}
+
+void MockPcSamplingCollector::set_source_paths(const std::set<std::filesystem::path>& source_paths)
+{
+    m_source_paths = source_paths;
+}
+
+void MockSourceSnapshotter::snapshot(const std::set<std::filesystem::path>& source_paths,
+                                     const std::filesystem::path&           destination_root)
+{
+    m_snapshot_calls.push_back({source_paths, destination_root});
+}
+
+const std::vector<MockSourceSnapshotter::snapshot_call_t>& MockSourceSnapshotter::get_snapshot_calls() const
+{
+    return m_snapshot_calls;
+}

@@ -195,7 +195,7 @@ fn session_start_detach_exec_then_stop() {
     );
     // stop the session
     env.mirage()
-        .args(["session", "stop", "s1", "-f"])
+        .args(["session", "stop", "s1"])
         .assert()
         .success();
     // verify the session dir is gone
@@ -219,7 +219,7 @@ fn stopped_session_stays_gone_past_heartbeat() {
         .assert()
         .success();
     env.mirage()
-        .args(["session", "stop", "s9", "-f"])
+        .args(["session", "stop", "s9"])
         .assert()
         .success();
     // Wait well past the host's heartbeat interval (2s): a live orphan
@@ -288,7 +288,7 @@ fn attach_to_long_running_exec_then_signal() {
     }
     assert!(ended, "exec did not end after SIGKILL");
     env.mirage()
-        .args(["session", "stop", "s2", "-f"])
+        .args(["session", "stop", "s2"])
         .assert()
         .success();
 }
@@ -345,7 +345,7 @@ fn duplicate_session_id_fails() {
         .assert()
         .failure();
     env.mirage()
-        .args(["session", "stop", "dup", "-f"])
+        .args(["session", "stop", "dup"])
         .assert()
         .success();
 }

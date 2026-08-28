@@ -35,6 +35,7 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
+        "hipfile_api",
         "counter_collection",
         "scratch_memory",
     ),
@@ -49,6 +50,8 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
         "ompt": ("openmp", "ompt"),
@@ -121,6 +124,8 @@ def test_otf2_data(
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
         "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
     }
 
     # make sure they specified valid categories
@@ -247,7 +252,7 @@ def test_rocpd_data(
         "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
         "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
         "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
-        "ompt": ("ompt", ("OMPT",)),
+        "hipfile_api": ("hipfile_api", ("HIPFILE_API")),
     }
 
     view_mapping = {
@@ -257,6 +262,7 @@ def test_rocpd_data(
         "rccl_api": "regions",
         "rocdecode_api": "regions",
         "rocjpeg_api": "regions",
+        "hipfile_api": "regions",
         "kernel_dispatch": "kernels",
         "memory_copy": "memory_copies",
         "memory_allocation": "memory_allocations",

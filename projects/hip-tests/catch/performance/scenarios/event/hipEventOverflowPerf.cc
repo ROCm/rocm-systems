@@ -10,14 +10,7 @@
 #include <hip_test_defgroups.hh>
 #include <unistd.h>
 #include <vector>
-#define HIP_CHECK_PERF(a)                                                                          \
-  {                                                                                                \
-    auto err = a;                                                                                  \
-    if ((err != hipSuccess) && (err != hipErrorNotReady)) {                                        \
-      printf(#a "= Error! %s\n", hipGetErrorString(err));                                          \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
+#include "hipPerfCommon.hh"
 /**
  * @addtogroup hipEventRecord hipEventRecord
  * @{
@@ -34,8 +27,8 @@ void rocm_null_gpu_job(void* stream) {
 }
 std::vector<std::vector<hipStream_t>> stream_pool;
 std::atomic<int> counter(0);
-bool do_kill = false;
-std::chrono::system_clock::time_point thread_reports[16];
+std::atomic<bool> do_kill{false};
+std::vector<PaddedTimestamp> thread_reports;
 void thread_job(int dev, int virt) {
   HIP_CHECK_PERF(hipSetDevice(dev));  // use dev
   uint8_t* mem;
@@ -63,7 +56,11 @@ void thread_job(int dev, int virt) {
       HIP_CHECK_PERF(hipStreamSynchronize(exec_stream));
       HIP_CHECK_PERF(hipStreamSynchronize(h2d_stream));
       HIP_CHECK_PERF(hipStreamSynchronize(d2h_stream));
-      thread_reports[dev * 4 + virt] = std::chrono::system_clock::now();
+      thread_reports[dev * 4 + virt].ns.store(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count(),
+          std::memory_order_relaxed);
     }
     counter++;
   }
@@ -96,7 +93,7 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);
   HIP_CHECK_PERF(hipSetDeviceFlags(hipDeviceScheduleSpin));
-  std::vector<uint8_t*> memory_buffers[2];
+  std::vector<std::vector<uint8_t*>> memory_buffers(mgpu);
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
     stream_pool[i].resize(12);
@@ -106,6 +103,9 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
     for (int j = 0; j < 128; j++)
       HIP_CHECK_PERF(hipMalloc(&memory_buffers[i][j], 4096 * ((j & 1) + 1)));
   }
+  // std::atomic is non-movable, so the vector cannot be resized — construct
+  // it at the required size and move-assign it into the global.
+  thread_reports = std::vector<PaddedTimestamp>(mgpu * 4);
   for (int nDev = 1; nDev <= mgpu; nDev++) {
     counter = 0;
     printf("RUNNING ON %d DEVICES\n", nDev);
@@ -122,9 +122,12 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
       auto t2 = std::chrono::system_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
       int count2 = int(counter);
+      int64_t t2_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          t2.time_since_epoch())
+                          .count();
       for (int i = 0; i < nDev * 4; i++) {
-        if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - thread_reports[i]).count() >=
-            1000000) {
+        int64_t slot_ns = thread_reports[i].ns.load(std::memory_order_relaxed);
+        if ((t2_ns - slot_ns) / 1000 >= 1000000) {
           printf("Thread %d/%d is stuck\n", i / 4, i % 4);
         }
       }
@@ -140,6 +143,11 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
       HIP_CHECK_PERF(hipSetDevice(i));
       HIP_CHECK_PERF(hipDeviceSynchronize());
     }
+  }
+  HIP_CHECK_PERF(hipSetDevice(0));
+  for (int i = 0; i < mgpu; i++) {
+    for (auto* buf : memory_buffers[i]) HIP_CHECK_PERF(hipFree(buf));
+    for (auto s : stream_pool[i]) HIP_CHECK_PERF(hipStreamDestroy(s));
   }
 }
 /**

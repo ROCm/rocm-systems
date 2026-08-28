@@ -30,7 +30,7 @@ trace_control::trace_control(std::string_view trace_regions)
         return;
     }
 
-    const auto delimited = rocprofsys::common::delimit(std::string{ trace_regions }, ",");
+    const auto delimited = rocprofsys::delimit(std::string{ trace_regions }, ",");
     m_trace_regions.insert(delimited.begin(), delimited.end());
     m_region_filter_active.store(!m_trace_regions.empty(), std::memory_order_relaxed);
 

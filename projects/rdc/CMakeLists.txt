@@ -209,7 +209,7 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     )
 endif()
 
-find_package(amd_smi 26.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
+find_package(amd_smi 27.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
 
 if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
     message(

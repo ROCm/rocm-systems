@@ -121,7 +121,7 @@ class RTCCompileProgram : public hip::RTCProgram {
   hip::comgr_helper::ComgrDataSetUniqueHandle link_input_;
 
   bool fgpu_rdc_;
-  std::vector<char> LLVMBitcode_;
+  std::vector<char> ir_;
 
   // Private Member functions
   bool addSource_impl();

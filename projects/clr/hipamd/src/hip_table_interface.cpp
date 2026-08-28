@@ -3347,3 +3347,9 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
   CATCH;
 }
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
+  CATCH;
+}

@@ -60,9 +60,16 @@ class PrintfDbg;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
+  //! Sentinel for queue_index_ when the owning stream is unknown.
+  static constexpr uint32_t kInvalidQueueIndex = std::numeric_limits<uint32_t>::max();
+
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
+  //! vGPU (queue) index of the stream this signal was dispatched on. Graphs span
+  //! multiple streams under one command, so profiling reads this per-signal to
+  //! attribute each kernel to the queue it actually ran on.
+  uint32_t queue_index_ = kInvalidQueueIndex;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
@@ -89,6 +96,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
+    queue_index_ = kInvalidQueueIndex;
   }
 
   virtual ~ProfilingSignal();
@@ -103,6 +111,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
+    queue_index_ = kInvalidQueueIndex;
   }
 
   //! Check if timing is already cached
@@ -499,8 +508,9 @@ class Device : public NullDevice {
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
-                                        amd::Memory::HandleType handle_type) override;
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                 void* shareableHandle,
+                                                 amd::Memory::HandleType handle_type) override;
 
   bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
                                 amd::Memory::HandleType handle_type) const;
@@ -585,6 +595,13 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const;
 
+  struct QueueExtras {
+    void* metadataRingBuffer = nullptr;
+    //! Cached hardware doorbell (UC MMIO), only set when DEBUG_CLR_DIRECT_DOORBELL is enabled.
+    volatile uint64_t* doorbellPtr = nullptr;
+    bool deviceMemRingBuf = false;
+  };
+
   //! Acquire HSA queue. This method can create a new HSA queue or
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
@@ -600,9 +617,11 @@ class Device : public NullDevice {
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
-                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                   void** metadata_ring_buffer = nullptr);
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+  //! Look up per-queue extras (metadata ring buffer and placement).
+  QueueExtras GetQueueExtras(hsa_queue_t* queue);
 
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
@@ -730,6 +749,7 @@ class Device : public NullDevice {
   size_t alloc_granularity_;
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
+  mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
@@ -750,10 +770,9 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
-    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -788,8 +807,11 @@ class Device : public NullDevice {
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
                                 hsa_queue_t* preferred = nullptr,
-                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                void** metadata_ring_buffer = nullptr);
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+
+  //! Per-queue extras (metadata ring buffer and placement), keyed by queue pointer.
+  //! Populated at queue creation, erased when non-pooled queues are destroyed.
+  std::unordered_map<hsa_queue_t*, QueueExtras> queue_extras_;
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,

@@ -16,8 +16,6 @@
 
 extern "C" int __llvm_profile_write_file(void);
 
-extern "C" __attribute__((visibility("default")))
-int rcclCoverageWriteFile(void)
-{
-    return __llvm_profile_write_file();
+extern "C" __attribute__((visibility("default"))) int rcclCoverageWriteFile(void) {
+  return __llvm_profile_write_file();
 }

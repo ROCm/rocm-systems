@@ -1,46 +1,10 @@
 name: rocprofiler-systems Code Coverage
-run-name: code-coverage
 
 permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
-      - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!projects/rocprofiler-systems/docs/**'
-      - '!projects/rocprofiler-systems/source/docs/**'
-      - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/docker/**'
-  pull_request:
-    paths:
-      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
-      - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!projects/rocprofiler-systems/docs/**'
-      - '!projects/rocprofiler-systems/source/docs/**'
-      - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/docker/**'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"

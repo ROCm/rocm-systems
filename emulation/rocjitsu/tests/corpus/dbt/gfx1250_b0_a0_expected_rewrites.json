@@ -1,0 +1,23 @@
+{
+  "expected_rewrites": {
+    "00023c9f3fc277f35d928cca3a2e5614bba26b581e71abd3bbcff3fe3a417405": {
+      "instructions_requiring_rewrite": 9
+    },
+    "00045dc998d1757d07529707db095b0ccfe75efbe920276a2415d67d4ec716f3": {
+      "instructions_requiring_rewrite": 891
+    },
+    "072f1bfcde3c4f062c5aaa29b354ddd0f5ed19388d58647eba3c06c2e94a2fca": {
+      "instructions_requiring_rewrite": 304
+    },
+    "1c2a9f4347fddcb05799148110648013771317cb5c0065a8ff29e22b73c3933d": {
+      "instructions_requiring_rewrite": 56
+    },
+    "f7cdacd90fb93aabab5bb5856a6655fed3e9e27688e76c6c76423711305d9127": {
+      "instructions_requiring_rewrite": 316
+    }
+  },
+  "input_revision": "b0",
+  "output_revision": "a0",
+  "schema_version": 1,
+  "target": "gfx1250"
+}

@@ -42,13 +42,13 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
 public:
   ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
 
-  void onInit() {
+  void onInit() override {
     if (auto *s = build_composite_sink("profile.log"))
       sink_ = s;
     ExecutionPluginGroup::onInit();
   }
 
-  void onShutdown() {
+  void onShutdown() override {
     if (prof_before_exec_.count > 0)
       print_profile_summary();
     ExecutionPluginGroup::onShutdown();
@@ -120,11 +120,18 @@ public:
                       [&]() { ExecutionPluginGroup::onAmdgpuWavefrontHalted(wf); });
   }
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
-                         uint32_t lane_end,
-                         uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
     profiled_dispatch(prof_read_vgpr_, [&]() {
-      ExecutionPluginGroup::onAmdgpuReadVgprs(wf, physical_reg, lane_begin, lane_end, byte_mask);
+      ExecutionPluginGroup::onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    });
+  }
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
+    profiled_dispatch(prof_write_vgpr_, [&]() {
+      ExecutionPluginGroup::onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
   }
 
@@ -158,6 +165,7 @@ private:
     prof_before_exec_ = {};
     prof_after_exec_ = {};
     prof_read_vgpr_ = {};
+    prof_write_vgpr_ = {};
     prof_read_sgpr_ = {};
     prof_route_mem_ = {};
     prof_barrier_ = {};
@@ -168,7 +176,8 @@ private:
   }
 
   void print_profile_summary() {
-    const char *kname = current_kernel_name_.empty() ? "?" : current_kernel_name_.c_str();
+    const char *kname =
+        current_kernel_name_.empty() ? kUnknownKernelIdentity : current_kernel_name_.c_str();
     sink().write(std::format("HOOK_PROFILE --- {} ---\n", kname));
     auto print_hook = [this](const char *name, const HookProfile &p) {
       if (p.count == 0)
@@ -179,6 +188,7 @@ private:
     print_hook("beforeExecuteInstruction", prof_before_exec_);
     print_hook("afterExecuteInstruction", prof_after_exec_);
     print_hook("readVgpr", prof_read_vgpr_);
+    print_hook("writeVgpr", prof_write_vgpr_);
     print_hook("readSgpr", prof_read_sgpr_);
     print_hook("routeMemoryInstruction", prof_route_mem_);
     print_hook("barrierResolved", prof_barrier_);
@@ -199,6 +209,7 @@ private:
   HookProfile prof_before_exec_;
   HookProfile prof_after_exec_;
   HookProfile prof_read_vgpr_;
+  HookProfile prof_write_vgpr_;
   HookProfile prof_read_sgpr_;
   HookProfile prof_route_mem_;
   HookProfile prof_barrier_;

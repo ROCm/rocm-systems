@@ -6,15 +6,14 @@
 /// VOP3 sdst-enc carry-bearing ops:
 ///   no-carry-in (CDNA4): v_add_co_u32, v_sub_co_u32, v_subrev_co_u32
 ///   src2-carry-in (CDNA4): v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32
-///   src2-carry-in (RDNA3, sdst pre-bound to VCC by decoder):
+///   src2-carry-in (RDNA3/RDNA4/gfx1250, sdst pre-bound to VCC by decoder):
 ///     v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32
-/// All six cin-form scalar bodies pull per-lane carry-in from
-/// `inst.src2.read_scalar64(wf)` (SGPR-pair) and write co into
-/// `inst.sdst.write_scalar64`, with inactive lanes zeroed in the
-/// incoming VCC. Each (case, vcc_in, cin) runs TWICE in the same process -- once
-/// forcing the scalar body, once the SIMD fast path, with identical inputs --
-/// and the scalar-vs-SIMD equivalence on BOTH the destination VGPR AND the full
-/// 64-bit SGPR-pair carry result is asserted with EXPECT_EQ
+/// All cin-form bodies pull per-lane carry-in through `read_wave_mask_scalar`
+/// and write carry-out through `write_explicit_lane_mask`: one SGPR for Wave32,
+/// an SGPR pair for Wave64. Each (case, vcc_in, cin) runs TWICE in the same
+/// process -- once forcing the scalar body, once the SIMD fast path, with identical inputs -- and
+/// the scalar-vs-SIMD equivalence on BOTH the destination VGPR AND the full wave-mask carry result
+/// is asserted with EXPECT_EQ
 /// (util::set_force_scalar_for_testing flips the gate in-process), sweeping
 /// {full, partial} EXEC × {VCC seeds} × {cin patterns}. In-process inactive dst
 /// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
@@ -23,6 +22,7 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -33,6 +33,7 @@
 
 #include "util/simd.h"
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -47,6 +48,16 @@ using namespace rocjitsu;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t DST_SENTINEL = 0xCAFEF00Du;
+
+// The production RDNA4 factory uses its default Wave32 form. Exercise the
+// supported Wave64 path with a test-only ISA trait so upper-half mask bits are
+// observable by the generated instruction body.
+struct Rdna4Wave64CarryTestIsa : rdna4::Isa {
+  static constexpr uint32_t WF_SIZE = 64;
+  static constexpr uint32_t WF_SIZE_MAX = 64;
+};
+
+static_assert(GpuIsa<Rdna4Wave64CarryTestIsa>);
 
 // CDNA4 / RDNA3 Vop3SdstEnc layout (identical bit fields, only the
 // `encoding` marker differs: CDNA4 = 0x34, RDNA3 = 0x35):
@@ -110,9 +121,22 @@ template <int WaveSize> struct WaveFixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(cu_label, cfg, &gpu_mem, &l2);
+    if constexpr (WaveSize == 64) {
+      if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+        cu = std::make_unique<
+            amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64CarryTestIsa>>(
+            cu_label, cfg, &gpu_mem, &l2);
+      } else {
+        cu = amdgpu::ComputeUnitCore::create(cu_label, cfg, &gpu_mem, &l2);
+      }
+    } else {
+      cu = amdgpu::ComputeUnitCore::create(cu_label, cfg, &gpu_mem, &l2);
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    if (wf != nullptr) {
+      EXPECT_EQ(wf->wf_size(), static_cast<uint32_t>(WaveSize));
+    }
   }
 
   void seed_inputs(uint64_t seed, uint64_t exec, uint64_t vcc_in, uint64_t sdst_in,
@@ -272,6 +296,57 @@ void run_rdna(uint64_t exec) {
                    ROCJITSU_CODE_ARCH_RDNA3, c, kRdna3Encoding, exec);
 }
 
+void run_rdna4_wave64(uint64_t exec) {
+  for (const auto &c : kRdnaCases)
+    check_case<64>("vop3_carry_simd_rdna4_mem", "vop3_carry_simd_rdna4_l2",
+                   "cu_vop3_carry_simd_rdna4", ROCJITSU_CODE_ARCH_RDNA4, c, kRdna3Encoding, exec);
+}
+
+void run_gfx1250_wave32(uint64_t exec) {
+  for (const auto &c : kRdnaCases)
+    check_case<32>("vop3_carry_simd_gfx1250_mem", "vop3_carry_simd_gfx1250_l2",
+                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_GFX1250, c, kRdna3Encoding,
+                   exec);
+}
+
+void check_rdna4_wave64_carry_in_oracle() {
+  ForceScalarGuard gate_guard;
+  constexpr uint64_t kCarryIn = 0xA5A5'0000'0000'0000ULL;
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    WaveFixture<64> fx("vop3_carry_oracle_mem", "vop3_carry_oracle_l2", "cu_vop3_carry_oracle",
+                       ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(fx.cu, nullptr);
+    ASSERT_NE(fx.wf, nullptr);
+
+    const uint32_t sb = fx.wf->sgpr_alloc().base;
+    const uint32_t cin_pair = sb + 2u;
+    uint32_t words[2] = {0u, 0u};
+    vop3_sdstenc_encode(/*op=*/288, /*vdst=*/2, /*sdst=*/sb,
+                        /*src0=*/256, /*src1=*/257, /*src2=*/cin_pair, kRdna3Encoding, words);
+    std::unique_ptr<Instruction> inst(fx.decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+
+    const uint32_t vbase = fx.wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      fx.cu->write_vgpr(vbase + 0, lane, 0u);
+      fx.cu->write_vgpr(vbase + 1, lane, 0u);
+      fx.cu->write_vgpr(vbase + 2, lane, DST_SENTINEL);
+    }
+    fx.wf->set_exec(~0ULL);
+    fx.cu->write_sgpr(cin_pair, static_cast<uint32_t>(kCarryIn));
+    fx.cu->write_sgpr(cin_pair + 1u, static_cast<uint32_t>(kCarryIn >> 32));
+    fx.cu->execute_instruction(inst.get(), *fx.wf);
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      const uint32_t expected = static_cast<uint32_t>((kCarryIn >> lane) & 1u);
+      EXPECT_EQ(fx.cu->read_vgpr(vbase + 2, lane), expected)
+          << "mode=" << (force_scalar ? "scalar" : "simd") << " lane=" << lane;
+    }
+  }
+}
+
 TEST(Vop3CarrySimdCorrectness, Cdna4FullExecMask) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
@@ -303,6 +378,23 @@ TEST(Vop3CarrySimdCorrectness, RdnaPartialExecMask) {
     return;
   }
   run_rdna(/*exec=*/0x00000000'A5A5F0F1ULL);
+}
+
+TEST(Vop3CarrySimdCorrectness, Gfx1250Wave32MaskOperands) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  run_gfx1250_wave32(/*exec=*/0x00000000'A5A5F0F1ULL);
+}
+
+TEST(Vop3CarrySimdCorrectness, Rdna4Wave64MaskOperands) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  run_rdna4_wave64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  check_rdna4_wave64_carry_in_oracle();
 }
 
 } // namespace

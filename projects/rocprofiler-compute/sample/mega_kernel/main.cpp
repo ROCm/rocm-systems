@@ -14,6 +14,7 @@
  *   - gfx1150 (Strix Point / RDNA 3.5)
  *   - gfx1151 (Strix Halo / RDNA 3.5)
  *   - gfx1152 (Krackan / RDNA 3.5)
+ *   - gfx1153 (RDNA 3.5)
  *   - gfx1200 (RX 9060/RDNA4)
  *   - gfx1201 (RX 9070 XT/RDNA4)
  *

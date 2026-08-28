@@ -42,11 +42,7 @@ class MockMspec:
 
 
 def mi200_mspec() -> MockMspec:
-    return MockMspec("MI200", "mi200", "gfx90a")
-
-
-def rdna_mspec() -> MockMspec:
-    return MockMspec("rdna35_halo", "navi3", "gfx1151")
+    return MockMspec("MI210", "mi200", "gfx90a")
 
 
 def make_roofline(
@@ -64,19 +60,19 @@ def make_roofline(
     return Roofline(argparse.Namespace(), mspec, run_parameters)
 
 
-def write_wmma_roofline_csv(workload_dir: str) -> None:
-    """Write a roofline.csv with RDNA BW + VALU + WMMA matrix columns."""
-    # rdna35_halo memory levels resolve to LDS/L0/L1/L2 (MALL skipped).
+def write_mfma_roofline_csv(workload_dir: str) -> None:
+    """Write a roofline.csv with CDNA BW + VALU + MFMA matrix columns."""
+    # gfx90a memory levels resolve to LDS/L1/L2/MALL.
     header = [
         "device",
         "LDSBw",
-        "L0Bw",
+        "MALL",
         "L1Bw",
         "L2Bw",
         "FP64Flops",
-        "WMMAF16Flops",
-        "WMMABF16Flops",
-        "WMMAF64Flops",
+        "MFMAF16Flops",
+        "MFMABF16Flops",
+        "MFMAF64Flops",
     ]
     row = ["0", "500", "500", "500", "500", "3000", "10000", "11000", "12000"]
     csv_path = Path(workload_dir) / "roofline.csv"
@@ -84,12 +80,12 @@ def write_wmma_roofline_csv(workload_dir: str) -> None:
     csv_path.write_text(content, encoding="utf-8")
 
 
-def wmma_roofline_instance(workload_dir: str) -> Roofline:
+def mfma_roofline_instance(workload_dir: str) -> Roofline:
     return make_roofline(
-        rdna_mspec(),
+        mi200_mspec(),
         ["FP64", "BF16"],
         workload_dir=workload_dir,
-        matrix_ops_type="WMMA",
+        matrix_ops_type="MFMA",
     )
 
 
@@ -119,35 +115,35 @@ def test_roofline_invalid_datatype_cli() -> None:
 
 
 # =============================================================================
-# WMMA (RDNA) legend coverage
+# MFMA (CDNA) legend coverage
 # =============================================================================
 
 
-def test_generate_plot_wmma_bf16_legend() -> None:
-    """BF16 on RDNA emits a Peak WMMA-BF16 roof and no VALU roof."""
+def test_generate_plot_mfma_bf16_legend() -> None:
+    """BF16 on CDNA2 emits a Peak MFMA-BF16 roof and no VALU roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
-        write_wmma_roofline_csv(workload_dir)
-        roofline_instance = wmma_roofline_instance(workload_dir)
+        write_mfma_roofline_csv(workload_dir)
+        roofline_instance = mfma_roofline_instance(workload_dir)
 
         # Pass an existing figure so the AI overlay (which needs ai_data) is
         # skipped; only the ceiling/legend traces are added.
         fig = roofline_instance.generate_plot("BF16", fig=go.Figure())
 
         names = " ".join(n for n in legend_names(fig) if n)
-        assert "Peak WMMA-BF16" in names, "BF16 should emit a Peak WMMA-BF16 roof"
-        assert "Peak MFMA-BF16" not in names, "RDNA path must not label roofs MFMA"
+        assert "Peak MFMA-BF16" in names, "BF16 should emit a Peak MFMA-BF16 roof"
+        assert "Peak WMMA-BF16" not in names, "CDNA2 path must not label roofs WMMA"
         assert "Peak VALU-BF16" not in names, "BF16 is matrix-only; no VALU roof"
 
 
-def test_generate_plot_wmma_fp64_dual_legend() -> None:
-    """FP64 on RDNA emits both a Peak VALU-FP64 and a Peak WMMA-FP64 roof."""
+def test_generate_plot_mfma_fp64_dual_legend() -> None:
+    """FP64 on CDNA2 emits both a Peak VALU-FP64 and a Peak MFMA-FP64 roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
-        write_wmma_roofline_csv(workload_dir)
-        roofline_instance = wmma_roofline_instance(workload_dir)
+        write_mfma_roofline_csv(workload_dir)
+        roofline_instance = mfma_roofline_instance(workload_dir)
 
         fig = roofline_instance.generate_plot("FP64", fig=go.Figure())
 
         names = " ".join(n for n in legend_names(fig) if n)
         assert "Peak VALU-FP64" in names, "FP64 is dual-path; expected a VALU roof"
-        assert "Peak WMMA-FP64" in names, "FP64 should emit a Peak WMMA-FP64 roof"
-        assert "Peak MFMA-FP64" not in names, "RDNA path must not label roofs MFMA"
+        assert "Peak MFMA-FP64" in names, "FP64 should emit a Peak MFMA-FP64 roof"
+        assert "Peak WMMA-FP64" not in names, "CDNA2 path must not label roofs WMMA"

@@ -21,6 +21,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SSubU32Sop2 : public Sop2 {
@@ -30,6 +31,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAddI32Sop2 : public Sop2 {
@@ -39,6 +41,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SSubI32Sop2 : public Sop2 {
@@ -48,6 +51,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAddcU32Sop2 : public Sop2 {
@@ -57,6 +61,8 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
+  Operand scc_in;
 };
 
 class SSubbU32Sop2 : public Sop2 {
@@ -66,6 +72,8 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
+  Operand scc_in;
 };
 
 class SAbsdiffI32Sop2 : public Sop2 {
@@ -75,6 +83,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshlB32Sop2 : public Sop2 {
@@ -84,6 +93,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshlB64Sop2 : public Sop2 {
@@ -93,6 +103,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshrB32Sop2 : public Sop2 {
@@ -102,6 +113,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshrB64Sop2 : public Sop2 {
@@ -111,6 +123,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAshrI32Sop2 : public Sop2 {
@@ -120,6 +133,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAshrI64Sop2 : public Sop2 {
@@ -129,6 +143,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshl1AddU32Sop2 : public Sop2 {
@@ -138,6 +153,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshl2AddU32Sop2 : public Sop2 {
@@ -147,6 +163,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshl3AddU32Sop2 : public Sop2 {
@@ -156,6 +173,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SLshl4AddU32Sop2 : public Sop2 {
@@ -165,6 +183,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SMinI32Sop2 : public Sop2 {
@@ -174,6 +193,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SMinU32Sop2 : public Sop2 {
@@ -183,6 +203,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SMaxI32Sop2 : public Sop2 {
@@ -192,6 +213,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SMaxU32Sop2 : public Sop2 {
@@ -201,6 +223,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAndB32Sop2 : public Sop2 {
@@ -210,6 +233,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAndB64Sop2 : public Sop2 {
@@ -219,6 +243,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SOrB32Sop2 : public Sop2 {
@@ -228,6 +253,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SOrB64Sop2 : public Sop2 {
@@ -237,6 +263,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SXorB32Sop2 : public Sop2 {
@@ -246,6 +273,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SXorB64Sop2 : public Sop2 {
@@ -255,6 +283,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SNandB32Sop2 : public Sop2 {
@@ -264,6 +293,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SNandB64Sop2 : public Sop2 {
@@ -273,6 +303,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SNorB32Sop2 : public Sop2 {
@@ -282,6 +313,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SNorB64Sop2 : public Sop2 {
@@ -291,6 +323,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SXnorB32Sop2 : public Sop2 {
@@ -300,6 +333,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SXnorB64Sop2 : public Sop2 {
@@ -309,6 +343,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAndNot1B32Sop2 : public Sop2 {
@@ -318,6 +353,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SAndNot1B64Sop2 : public Sop2 {
@@ -327,6 +363,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SOrNot1B32Sop2 : public Sop2 {
@@ -336,6 +373,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SOrNot1B64Sop2 : public Sop2 {
@@ -345,6 +383,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBfeU32Sop2 : public Sop2 {
@@ -354,6 +393,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBfeI32Sop2 : public Sop2 {
@@ -363,6 +403,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBfeU64Sop2 : public Sop2 {
@@ -372,6 +413,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBfeI64Sop2 : public Sop2 {
@@ -381,6 +423,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBfmB32Sop2 : public Sop2 {
@@ -435,6 +478,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCselectB64Sop2 : public Sop2 {
@@ -444,6 +488,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SPackLlB32B16Sop2 : public Sop2 {

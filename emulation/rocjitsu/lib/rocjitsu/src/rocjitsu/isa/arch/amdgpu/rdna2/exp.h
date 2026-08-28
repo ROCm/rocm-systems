@@ -23,6 +23,7 @@ public:
   Operand vsrc1;
   Operand vsrc2;
   Operand vsrc3;
+  Operand sdst_exec;
 };
 
 } // namespace rdna2

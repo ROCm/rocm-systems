@@ -39,8 +39,8 @@ use std::time::Duration;
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
 use mirage_core::container::{
-    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR,
-    ENV_MASTER_PORT, ENV_NCCL_HOSTID, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
+    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR, ENV_MASTER_PORT,
+    ENV_NCCL_HOSTID, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
@@ -227,45 +227,43 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         // Discover new execs. The orchestrator host of a containerised
         // session does not run execs itself (the per-node hosts do), so
         // it skips discovery and merely waits for shutdown.
-        if run_execs_here {
-            if let Ok(rd) = std::fs::read_dir(layout.exec_root()) {
-                for e in rd.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let Ok(eid) = ExecId::new(name.clone()) else {
-                        continue;
-                    };
-                    if seen.contains(&eid) {
-                        continue;
-                    }
-                    let exec_layout = layout.exec(&eid);
-                    if !exec_layout.def().exists() {
-                        continue;
-                    }
-                    // Skip execs this host has already handled (e.g. across
-                    // a host restart). A per-node host keys this off *its
-                    // own* node result, not the exec-wide `status.json`: in
-                    // a multi-node containerised session that shared status
-                    // is written by the rank-0 aggregator, so keying off it
-                    // would make a worker (rank > 0) treat the exec as done
-                    // before running its own rank — leaving its `exit_code`
-                    // unwritten and the aggregator waiting on it forever.
-                    let already_handled = match host_rank {
-                        Some(rank) => exec_layout.node(rank).exit_code().exists(),
-                        None => exec_layout.status().exists(),
-                    };
-                    if already_handled {
-                        seen.insert(eid);
-                        continue;
-                    }
-                    seen.insert(eid.clone());
-                    tracing::info!(exec = %eid, "discovered new exec");
-                    let exec_layout_clone = exec_layout.clone();
-                    tasks.push(tokio::spawn(async move {
-                        if let Err(err) = run_exec(exec_layout_clone, host_rank).await {
-                            tracing::error!("exec failed: {err}");
-                        }
-                    }));
+        if run_execs_here && let Ok(rd) = std::fs::read_dir(layout.exec_root()) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let Ok(eid) = ExecId::new(name.clone()) else {
+                    continue;
+                };
+                if seen.contains(&eid) {
+                    continue;
                 }
+                let exec_layout = layout.exec(&eid);
+                if !exec_layout.def().exists() {
+                    continue;
+                }
+                // Skip execs this host has already handled (e.g. across
+                // a host restart). A per-node host keys this off *its
+                // own* node result, not the exec-wide `status.json`: in
+                // a multi-node containerised session that shared status
+                // is written by the rank-0 aggregator, so keying off it
+                // would make a worker (rank > 0) treat the exec as done
+                // before running its own rank — leaving its `exit_code`
+                // unwritten and the aggregator waiting on it forever.
+                let already_handled = match host_rank {
+                    Some(rank) => exec_layout.node(rank).exit_code().exists(),
+                    None => exec_layout.status().exists(),
+                };
+                if already_handled {
+                    seen.insert(eid);
+                    continue;
+                }
+                seen.insert(eid.clone());
+                tracing::info!(exec = %eid, "discovered new exec");
+                let exec_layout_clone = exec_layout.clone();
+                tasks.push(tokio::spawn(async move {
+                    if let Err(err) = run_exec(exec_layout_clone, host_rank).await {
+                        tracing::error!("exec failed: {err}");
+                    }
+                }));
             }
         }
 
@@ -724,7 +722,11 @@ fn proc_mirage_env(
 ) -> Vec<(String, String)> {
     // The head node hosts the rendezvous: processes on it reach it via
     // loopback, processes on other nodes via the head's address.
-    let head = if node_rank == 0 { "localhost" } else { head_addr };
+    let head = if node_rank == 0 {
+        "localhost"
+    } else {
+        head_addr
+    };
     vec![
         (ENV_RANK.to_string(), node_rank.to_string()),
         (ENV_TORCH_RANK.to_string(), global_rank.to_string()),
@@ -1037,7 +1039,12 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     // rank in `0..world_size`.)
     if is_aggregator {
         for global in 0..world_size {
-            if status.nodes.get(&global).and_then(|n| n.exit_code).is_some() {
+            if status
+                .nodes
+                .get(&global)
+                .and_then(|n| n.exit_code)
+                .is_some()
+            {
                 continue;
             }
             let nlayout = layout.node(global);
@@ -1101,10 +1108,10 @@ struct SpawnedNode {
 /// the other ranks' results in a multi-node containerised session.
 async fn await_node_exit_code(nlayout: &mirage_core::paths::NodeLayout) -> i32 {
     loop {
-        if let Ok(s) = std::fs::read_to_string(nlayout.exit_code()) {
-            if let Ok(code) = s.trim().parse::<i32>() {
-                return code;
-            }
+        if let Ok(s) = std::fs::read_to_string(nlayout.exit_code())
+            && let Ok(code) = s.trim().parse::<i32>()
+        {
+            return code;
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }

@@ -67,16 +67,23 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Run it under the emulator with `RJ_RACE=1` to enable the race detector:
+Enable the race detector by adding it to the `plugins` section of your
+rocjitsu config file (`my_config.json`):
+
+```json
+{ "plugins": { "race": {} } }
+```
+
+Run it under the emulator:
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 You should see output:
 
 ```
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -84,8 +91,11 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
 END_RACE
 ```
 
-This tells you that wave 1 wrote to LDS (`ds_write_b32`) and wave 0 read from
-the same address (`ds_read_b32`) without a barrier in between. The fix is to add
+This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
+without a barrier in between. The `kernel` field is a compact display name, and
+`symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
+be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
 ### Running your own application
@@ -95,16 +105,22 @@ Replace the binary path with your application. This works with any ROCm workload
 launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- python my_script.py
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
 ```
 
-To capture reports to a file instead of stderr, set `RJ_SINKS=file` and
-`RJ_SINK_DIR`:
+To capture reports to a file instead of stderr (useful for CI or
+scripted workflows), add a `sinks` section to your config:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
 
 ```bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
@@ -244,14 +260,15 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with `RJ_RACE=1`.
+  kernel tests run under the emulator with the `race` plugin enabled in the
+  config file.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
-ctest --test-dir build -R "RaceTest"
+# End-to-end HIP tests (the test config enables the race plugin)
+ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
 
 ## Limitations

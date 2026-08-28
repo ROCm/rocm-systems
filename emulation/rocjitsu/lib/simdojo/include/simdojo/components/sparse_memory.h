@@ -15,9 +15,11 @@
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace simdojo {
 
@@ -27,8 +29,6 @@ namespace simdojo {
 /// and doubleword access plus bulk image loading and page iteration for
 /// serialization.
 ///
-/// Host ranges are tracked as a page-indexed map (page_number → host_ptr)
-/// for O(1) lookup per access, mirroring real IOMMU page table structure.
 class SparseMemory : public Component {
 public:
   static constexpr size_t PAGE_SIZE = 4096;
@@ -44,33 +44,17 @@ public:
   /// @param addr Memory address to read from.
   /// @returns The byte at the given address (0 if page not yet allocated).
   uint8_t read8(uint64_t addr) const {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end())
-        return it->second[addr & PAGE_MASK];
-    }
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    auto it = pages_.find(addr & ~PAGE_MASK);
-    return (it != pages_.end()) ? it->second[addr & PAGE_MASK] : 0;
+    uint8_t val = 0;
+    read_block(addr, std::span<uint8_t>(&val, 1));
+    return val;
   }
 
   /// @brief Read a 16-bit value from the given address (little-endian).
   /// @param addr Memory address to read from.
   /// @returns The 16-bit value at the given address.
   uint16_t read16(uint64_t addr) const {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
-        uint16_t val = 0;
-        std::memcpy(&val, it->second + (addr & PAGE_MASK), 2);
-        return val;
-      }
-    }
-    std::shared_lock<std::shared_mutex> lock(mutex_);
     uint16_t val = 0;
-    read_bytes(addr, &val, 2);
+    read_block(addr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(&val), sizeof(val)));
     return val;
   }
 
@@ -78,18 +62,8 @@ public:
   /// @param addr Memory address to read from.
   /// @returns The 32-bit value at the given address.
   uint32_t read32(uint64_t addr) const {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
-        uint32_t val = 0;
-        std::memcpy(&val, it->second + (addr & PAGE_MASK), 4);
-        return val;
-      }
-    }
-    std::shared_lock<std::shared_mutex> lock(mutex_);
     uint32_t val = 0;
-    read_bytes(addr, &val, 4);
+    read_block(addr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(&val), sizeof(val)));
     return val;
   }
 
@@ -97,83 +71,74 @@ public:
   /// @param addr Memory address to read from.
   /// @returns The 64-bit value at the given address.
   uint64_t read64(uint64_t addr) const {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
-        uint64_t val = 0;
-        std::memcpy(&val, it->second + (addr & PAGE_MASK), 8);
-        return val;
-      }
-    }
-    std::shared_lock<std::shared_mutex> lock(mutex_);
     uint64_t val = 0;
-    read_bytes(addr, &val, 8);
+    read_block(addr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(&val), sizeof(val)));
     return val;
+  }
+
+  /// @brief Read a block of bytes from sparse memory.
+  /// @details Thread-safe with page-granular synchronization. A read contained
+  /// within one sparse page is atomic with respect to writers of that page. A
+  /// read spanning multiple pages is not atomic as one transaction and may
+  /// observe different pages before and after a concurrent multi-page write.
+  /// @param addr Starting memory address.
+  /// @param dst Destination buffer.
+  void read_block(uint64_t addr, std::span<uint8_t> dst) const {
+    size_t copied = 0;
+    while (copied < dst.size()) {
+      const uint64_t ea = addr + copied;
+      const size_t page_off = ea & PAGE_MASK;
+      const size_t chunk = std::min(dst.size() - copied, PAGE_SIZE - page_off);
+      read_sparse_chunk(ea, dst.data() + copied, chunk);
+      copied += chunk;
+    }
   }
 
   /// @brief Write an 8-bit value to the given address.
   /// @param addr Memory address to write to.
   /// @param val Value to write.
-  void write8(uint64_t addr, uint8_t val) {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end()) {
-        it->second[addr & PAGE_MASK] = val;
-        return;
-      }
-    }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    get_page(addr)[addr & PAGE_MASK] = val;
-  }
+  void write8(uint64_t addr, uint8_t val) { write_block(addr, std::span<const uint8_t>(&val, 1)); }
 
   /// @brief Write a 16-bit value to the given address (little-endian).
   /// @param addr Memory address to write to.
   /// @param val Value to write.
   void write16(uint64_t addr, uint16_t val) {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
-        std::memcpy(it->second + (addr & PAGE_MASK), &val, 2);
-        return;
-      }
-    }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    write_bytes(addr, &val, sizeof(val));
+    write_block(addr,
+                std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&val), sizeof(val)));
   }
 
   /// @brief Write a 32-bit value to the given address (little-endian).
   /// @param addr Memory address to write to.
   /// @param val Value to write.
   void write32(uint64_t addr, uint32_t val) {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
-        std::memcpy(it->second + (addr & PAGE_MASK), &val, 4);
-        return;
-      }
-    }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    write_bytes(addr, &val, sizeof(val));
+    write_block(addr,
+                std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&val), sizeof(val)));
   }
 
   /// @brief Write a 64-bit value to the given address (little-endian).
   /// @param addr Memory address to write to.
   /// @param val Value to write.
   void write64(uint64_t addr, uint64_t val) {
-    {
-      std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-      auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-      if (it != host_page_map_.end() && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
-        std::memcpy(it->second + (addr & PAGE_MASK), &val, 8);
-        return;
-      }
+    write_block(addr,
+                std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&val), sizeof(val)));
+  }
+
+  /// @brief Write a block of bytes to sparse memory.
+  /// @details Thread-safe with page-granular synchronization. A write contained
+  /// within one sparse page is atomic with respect to other accesses to that
+  /// page. A write spanning multiple pages is not atomic as one transaction;
+  /// concurrent overlapping multi-page operations may interleave by page.
+  /// @param addr Starting memory address.
+  /// @param src Source buffer.
+  void write_block(uint64_t addr, std::span<const uint8_t> src) {
+    size_t copied = 0;
+    while (copied < src.size()) {
+      const uint64_t ea = addr + copied;
+      const size_t page_off = ea & PAGE_MASK;
+      const size_t chunk = std::min(src.size() - copied, PAGE_SIZE - page_off);
+      write_sparse_chunk(ea, src.data() + copied, chunk);
+      copied += chunk;
     }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    write_bytes(addr, &val, sizeof(val));
   }
 
   /// @brief Instruction fetch - read a 32-bit word (little-endian).
@@ -186,145 +151,89 @@ public:
   /// @param size Size of the image in bytes.
   /// @param base_addr Starting address to load the image at.
   void load_image(const uint8_t *data, size_t size, uint64_t base_addr) {
-    size_t offset = 0;
-    while (offset < size) {
-      uint64_t addr = base_addr + offset;
-      uint64_t page_off = addr & PAGE_MASK;
-      size_t chunk = std::min(PAGE_SIZE - page_off, size - offset);
-      {
-        std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-        auto it = host_page_map_.find(addr >> PAGE_SHIFT);
-        if (it != host_page_map_.end()) {
-          std::memcpy(it->second + page_off, data + offset, chunk);
-          offset += chunk;
-          continue;
-        }
-      }
-      {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        std::memcpy(&get_page(addr)[page_off], data + offset, chunk);
-      }
-      offset += chunk;
-    }
+    write_block(base_addr, std::span<const uint8_t>(data, size));
   }
 
   /// @brief Iterate over all allocated pages for checkpoint serialization.
+  /// @details Copies one stripe at a time before invoking callbacks, so callbacks
+  /// run without page-stripe locks held. The iteration is thread-safe but is not
+  /// a globally atomic snapshot across all stripes.
   /// @tparam F Callable with signature void(uint64_t page_addr, const Page&).
   /// @param fn Callback invoked for each allocated page.
   template <typename F> void for_each_page(F &&fn) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    for (const auto &[addr, page] : pages_)
-      fn(addr, page);
+    for (const auto &stripe : page_stripes_) {
+      std::vector<std::pair<uint64_t, Page>> pages;
+      {
+        std::shared_lock<std::shared_mutex> lock(stripe.mutex);
+        pages.reserve(stripe.pages.size());
+        for (const auto &[addr, page] : stripe.pages)
+          pages.emplace_back(addr, page);
+      }
+      for (const auto &[addr, page] : pages)
+        fn(addr, page);
+    }
   }
 
   /// @brief Return the number of allocated pages.
+  /// @details Counts one stripe at a time. The result is thread-safe but is not
+  /// a globally atomic snapshot if pages are allocated concurrently.
   /// @returns Count of allocated pages.
   size_t num_pages() const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    return pages_.size();
-  }
-
-  /// @brief Map host pages as the backing store for a GPU VA range.
-  /// @details After this call, read/write to addresses in [gpu_va, gpu_va+size)
-  /// access the host memory at [host_ptr, host_ptr+size) directly. Both the host
-  /// CPU and the simulated GPU see the same data — no copy needed.
-  ///
-  /// Internally stored as one entry per 4KB page (page_number → host_ptr),
-  /// giving O(1) lookup per memory access instead of O(n) range scan.
-  /// @param gpu_va Start of the GPU virtual address range (page-aligned).
-  /// @param host_ptr Host pointer to the backing pages (page-aligned).
-  /// @param size Size of the mapping in bytes (page-aligned).
-  void map_host_pages(uint64_t gpu_va, void *host_ptr, size_t size) {
-    auto *hp = static_cast<uint8_t *>(host_ptr);
-    std::lock_guard<std::shared_mutex> lock(host_range_mutex_);
-    for (uint64_t off = 0; off < size; off += PAGE_SIZE)
-      host_page_map_[(gpu_va + off) >> PAGE_SHIFT] = hp + off;
-  }
-
-  bool is_host_mapped(uint64_t gpu_va) const {
-    std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-    return host_page_map_.count(gpu_va >> PAGE_SHIFT) > 0;
-  }
-
-  /// @brief Find the base and size of the contiguous host-mapped region containing addr.
-  /// @details Scans backward and forward through host_page_map_ to find the
-  /// full contiguous range. Returns {0, 0} if addr is not host-mapped.
-  std::pair<uint64_t, uint64_t> find_host_range(uint64_t addr) const {
-    std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
-    uint64_t page = addr >> PAGE_SHIFT;
-    if (host_page_map_.count(page) == 0)
-      return {0, 0};
-    uint64_t lo = page;
-    while (lo > 0 && host_page_map_.count(lo - 1))
-      --lo;
-    uint64_t hi = page;
-    while (host_page_map_.count(hi + 1))
-      ++hi;
-    return {lo << PAGE_SHIFT, ((hi - lo) + 1) << PAGE_SHIFT};
-  }
-
-  void unmap_host_pages(uint64_t gpu_va, size_t size) {
-    std::lock_guard<std::shared_mutex> lock(host_range_mutex_);
-    for (uint64_t off = 0; off < size; off += PAGE_SIZE)
-      host_page_map_.erase((gpu_va + off) >> PAGE_SHIFT);
+    size_t count = 0;
+    for (const auto &stripe : page_stripes_) {
+      std::shared_lock<std::shared_mutex> lock(stripe.mutex);
+      count += stripe.pages.size();
+    }
+    return count;
   }
 
 private:
-  mutable std::shared_mutex mutex_;
-  mutable std::unordered_map<uint64_t, Page> pages_;
+  static constexpr size_t NUM_PAGE_STRIPES = 1024;
 
-  /// @brief Page-indexed host range map. Key = page_number (gpu_va >> 12),
-  /// value = host_ptr for the start of that page. O(1) lookup per access.
-  mutable std::shared_mutex host_range_mutex_;
-  std::unordered_map<uint64_t, uint8_t *> host_page_map_;
+  struct PageStripe {
+    mutable std::shared_mutex mutex;
+    mutable std::unordered_map<uint64_t, Page> pages;
+  };
+
+  static size_t stripe_index(uint64_t addr) {
+    constexpr uint64_t kMul = 11400714819323198485ull;
+    const uint64_t page_number = addr >> PAGE_SHIFT;
+    const uint64_t product = page_number * kMul;
+    const uint64_t mixed = product ^ (product >> 32);
+    return static_cast<size_t>(mixed & (NUM_PAGE_STRIPES - 1));
+  }
+
+  PageStripe &page_stripe(uint64_t addr) const { return page_stripes_[stripe_index(addr)]; }
+
+  void read_sparse_chunk(uint64_t addr, uint8_t *dst, size_t size) const {
+    auto &stripe = page_stripe(addr);
+    std::shared_lock<std::shared_mutex> lock(stripe.mutex);
+    auto it = stripe.pages.find(addr & ~PAGE_MASK);
+    if (it != stripe.pages.end()) {
+      std::memcpy(dst, &it->second[addr & PAGE_MASK], size);
+    } else {
+      std::memset(dst, 0, size);
+    }
+  }
+
+  void write_sparse_chunk(uint64_t addr, const uint8_t *src, size_t size) {
+    auto &stripe = page_stripe(addr);
+    std::unique_lock<std::shared_mutex> lock(stripe.mutex);
+    std::memcpy(&get_page_locked(stripe, addr)[addr & PAGE_MASK], src, size);
+  }
+
+  mutable std::array<PageStripe, NUM_PAGE_STRIPES> page_stripes_;
 
   // Returns a reference to the 4KB page containing addr, allocating if needed.
-  // Caller must hold exclusive lock on mutex_.
-  Page &get_page(uint64_t addr) const {
+  // Caller must hold exclusive lock on the page stripe.
+  Page &get_page_locked(PageStripe &stripe, uint64_t addr) const {
     uint64_t page_addr = addr & ~PAGE_MASK;
-    auto it = pages_.find(page_addr);
-    if (it == pages_.end()) {
-      auto [inserted, _] = pages_.emplace(page_addr, Page{});
+    auto it = stripe.pages.find(page_addr);
+    if (it == stripe.pages.end()) {
+      auto [inserted, _] = stripe.pages.emplace(page_addr, Page{});
       return inserted->second;
     }
     return it->second;
-  }
-
-  uint8_t *get_byte_ptr(uint64_t addr) const { return &get_page(addr)[addr & PAGE_MASK]; }
-
-  /// @brief Read N bytes from sparse pages, handling cross-page boundary access.
-  /// @note Caller must hold shared_lock on mutex_. Does NOT allocate pages;
-  ///       unallocated addresses read as zero.
-  void read_bytes(uint64_t addr, void *dst, size_t n) const {
-    // Note: caller holds shared_lock on mutex_.
-    size_t off = addr & PAGE_MASK;
-    if (off + n <= PAGE_SIZE) {
-      auto it = pages_.find(addr & ~PAGE_MASK);
-      if (it != pages_.end())
-        std::memcpy(dst, &it->second[off], n);
-      else
-        std::memset(dst, 0, n);
-    } else {
-      auto *out = static_cast<uint8_t *>(dst);
-      for (size_t i = 0; i < n; ++i) {
-        uint64_t a = addr + i;
-        auto it = pages_.find(a & ~PAGE_MASK);
-        out[i] = (it != pages_.end()) ? it->second[a & PAGE_MASK] : 0;
-      }
-    }
-  }
-
-  /// @brief Write N bytes, handling cross-page boundary access.
-  /// @note Caller must hold unique_lock on mutex_. Allocates pages as needed.
-  void write_bytes(uint64_t addr, const void *src, size_t n) {
-    size_t offset = addr & PAGE_MASK;
-    if (offset + n <= PAGE_SIZE) {
-      std::memcpy(&get_page(addr)[offset], src, n);
-    } else {
-      const auto *in = static_cast<const uint8_t *>(src);
-      for (size_t i = 0; i < n; ++i)
-        *get_byte_ptr(addr + i) = in[i];
-    }
   }
 };
 

@@ -32,7 +32,6 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/xf86drm.h"
-#include "config/amd_smi_config.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -58,7 +57,7 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder, const std:
 }
 
 amdsmi_status_t AMDSmiDrm::init() {
-  amdsmi_status_t status = lib_loader_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = lib_loader_.load(libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }

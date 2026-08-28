@@ -20,7 +20,7 @@ Requirements
 
 * ROCm 6.4.0 or later, including the :doc:`HIP runtime <hip:index>`. For more information, see `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
 
-  * ROCm 7.0 or later is required for the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``).
+  * ROCm 7.2 or later is required for the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``).
 
 * The following AMD GPUs have been fully tested for compatibility with rocSHMEM:
 
@@ -83,11 +83,11 @@ rocSHMEM requires ROCm-Aware Open MPI and UCX for the RO backend.
 MPI is optional with the IPC and GDA backends.
 Other MPI implementations, such as MPICH, have not been fully tested.
 
-To build and configure ROCm-Aware UCX 1.17.0 or later, run:
+UCX version 1.21.1 or newer is recommended for the RO backend. To build and configure ROCm-Aware UCX, run:
 
 .. code-block:: bash
 
-  git clone https://github.com/ROCm/ucx.git -b v1.17.x
+  git clone https://github.com/ROCm/ucx.git -b v1.21.x
   cd ucx
   ./autogen.sh
   ./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --enable-mt
@@ -141,7 +141,7 @@ rocSHMEM provides several GPU memory allocator options that control how the symm
 
 * **USE_HEAP_DEVICE_UNCACHED**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
 
-* **USE_HEAP_DEVICE_VMM_POSIX**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.0+).
+* **USE_HEAP_DEVICE_VMM_POSIX**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.2+).
   This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and
   cross-process file descriptor sharing via Linux kernel syscalls (``pidfd_open``, ``pidfd_getfd``).
 
@@ -149,7 +149,7 @@ rocSHMEM provides several GPU memory allocator options that control how the symm
 
     The VMM POSIX allocator requires:
 
-    * ROCm 7.0 or newer
+    * ROCm 7.2 or newer
     * Linux kernel 5.6 or newer
     * TCP Bootstrap-based initialization (not compatible with MPI-based initialization)
 
@@ -162,6 +162,45 @@ These options are mutually exclusive. To use a non-default allocator, pass the c
   cd projects/rocshmem/build
   cmake .. -DUSE_HEAP_DEVICE_COARSEGRAIN=ON -DUSE_HEAP_DEVICE_FINEGRAIN=OFF
   cmake --build . --parallel 8
+
+Profiling and tracing support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocSHMEM can register its host-side API tables with
+`rocprofiler-register <https://rocm.docs.amd.com/projects/rocprofiler-register/en/latest/>`_
+so that rocprofiler-sdk tools, such as ``rocprofv3``, can trace rocSHMEM
+host-stream API calls. This is controlled by the ``USE_ROCPROFILER_REGISTER``
+build option, which is enabled (``ON``) by default.
+
+When the option is enabled, the build searches for the ``rocprofiler-register``
+package. If it is found, rocSHMEM is compiled with tracing support and the
+following host-stream APIs are made visible to rocprofiler-sdk tools:
+
+* ``rocshmem_barrier_all_on_stream``
+* ``rocshmem_quiet_on_stream``
+* ``rocshmem_sync_all_on_stream``
+* ``rocshmem_alltoallmem_on_stream``
+* ``rocshmem_broadcastmem_on_stream``
+* ``rocshmem_getmem_on_stream``
+* ``rocshmem_putmem_on_stream``
+* ``rocshmem_putmem_signal_on_stream``
+* ``rocshmem_signal_wait_until_on_stream``
+
+If ``rocprofiler-register`` is not found, the build continues with tracing
+disabled and prints a status message. To build without tracing support, pass
+``-DUSE_ROCPROFILER_REGISTER=OFF`` to CMake:
+
+.. code-block:: bash
+
+  cd projects/rocshmem/build
+  cmake .. -DUSE_ROCPROFILER_REGISTER=OFF
+  cmake --build . --parallel 8
+
+Once rocSHMEM is built with tracing support, the host-stream APIs listed above
+become visible to rocprofiler-sdk tools such as ``rocprofv3``, which can then
+collect and report rocSHMEM API activity alongside the rest of the application's
+ROCm trace. For more information about capturing traces, see the
+`rocprofiler-sdk documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_.
 
 All backends build
 ^^^^^^^^^^^^^^^^^^

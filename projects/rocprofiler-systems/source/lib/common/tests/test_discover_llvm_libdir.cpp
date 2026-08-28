@@ -369,7 +369,7 @@ TEST_F(DiscoverLlvmLibdirTest, SymlinkToLibomptarget)
 
     create_directory(llvm_lib);
     std::string link_path = llvm_lib + "/libomptarget.so";
-    symlink(actual_file.c_str(), link_path.c_str());
+    EXPECT_EQ(symlink(actual_file.c_str(), link_path.c_str()), 0);
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();

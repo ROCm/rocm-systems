@@ -23,6 +23,9 @@ Required arguments:
 
 Options:
 
+- `--input-revision REVISION` and `--output-revision REVISION`: silicon
+  revisions (`a0` or `b0`). Both are required for `gfx1250`; other targets do
+  not accept them.
 - `--code-object-index N`: code-object index for executable inputs. Defaults to
   `0`.
 - `--output-mode MODE`: output format. `disasm` prints translated
@@ -36,10 +39,20 @@ Options:
 - `--debug-continue-after-failure`: keep scanning instructions after recoverable
   translation failures so one run can report multiple diagnostics. The output
   code object is still left unchanged when any error diagnostic is emitted.
+- `--skip-failed-kernels`: replace kernels that fail translation with
+  non-dispatchable `s_endpgm` stubs so diagnostic modes can continue inspecting
+  other kernels. Executable code-object output is rejected when any kernel was
+  skipped.
+- `--verify-idempotence`: translate the first output again with the same policy
+  and require the complete ELF bytes to stay unchanged. The command rejects
+  requests whose input and output architecture families differ. A second-pass
+  failure or byte difference makes the command fail. This option cannot be
+  combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
-Supported target names are `gfx942`, `gfx950`, `gfx1200`, and `gfx1201`.
+Supported target names are `gfx942`, `gfx950`, `gfx1200`, `gfx1201`, and
+`gfx1250`.
 
 ## Output
 
@@ -53,6 +66,35 @@ rj_dbt_translate vector_add.o --input-target gfx950 --output-target gfx1200 \
 
 Structured translation diagnostics and validation errors are written to stderr.
 Error diagnostics make the command fail.
+
+## Idempotence Verification
+
+Use `--verify-idempotence` to test whether an offline translation is a strict
+byte-level fixed point. For example, to test the gfx1250 B0-to-A0 path:
+
+```sh
+rj_dbt_translate input.gfx1250.co \
+  --input-target gfx1250 --input-revision b0 \
+  --output-target gfx1250 --output-revision a0 \
+  --verify-idempotence --output-mode code-object > output.gfx1250-a0.co
+```
+
+The verifier keeps the first translated ELF in memory, submits it to the same
+translation request, and compares the first and second outputs byte-for-byte
+before writing stdout. On a mismatch, stderr identifies the first differing
+executable code-section location when possible, falling back to the complete
+ELF image.
+
+Verification roughly doubles translation work. While comparing the result it
+also retains both translated byte buffers and their parsed code-object copies,
+so peak memory can approach four copies of a large code object.
+
+This is deliberately stricter than checking whether the second pass applies
+another instruction legalization. Relocation, branch layout, symbol sizes, and
+other ELF materialization are part of the result, so changes in any of them make
+verification fail. A failure does not by itself mean that the first output is
+invalid; it means the translation is not a byte-level fixed point. This mode is
+intended to expose such instability while developing or auditing the translator.
 
 ## Diff Mode
 

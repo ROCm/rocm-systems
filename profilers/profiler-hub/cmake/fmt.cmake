@@ -24,7 +24,17 @@ else()
     set(FMT_DOC OFF CACHE BOOL "" FORCE)
     set(FMT_TEST OFF CACHE BOOL "" FORCE)
 
+    # Force a static, PIC fmt regardless of a parent project's BUILD_SHARED_LIBS
+    # (e.g. rocprofiler-systems sets it ON project-wide, which would otherwise
+    # produce a libfmt.so that FMT_INSTALL=OFF never installs, leaving it
+    # unresolvable at runtime).
+    set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+
     FetchContent_MakeAvailable(fmt)
+
+    set(BUILD_SHARED_LIBS ${_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP})
+    unset(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP)
 
     if(TARGET fmt)
         set_target_properties(fmt PROPERTIES POSITION_INDEPENDENT_CODE ON)

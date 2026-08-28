@@ -130,8 +130,13 @@ class Flag {
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
-    var = os::GetEnvVar("HSA_RUNNING_UNDER_VALGRIND");
-    running_valgrind_ = (var == "1") ? true : false;
+    // Honor the env var as an explicit override; otherwise auto-detect Valgrind.
+    if (os::IsEnvVarSet("HSA_RUNNING_UNDER_VALGRIND")) {
+      var = os::GetEnvVar("HSA_RUNNING_UNDER_VALGRIND");
+      running_valgrind_ = (var == "1") ? true : false;
+    } else {
+      running_valgrind_ = DetectRunningUnderValgrind();
+    }
 
     var = os::GetEnvVar("HSA_SDMA_WAIT_IDLE");
     sdma_wait_idle_ = (var == "1") ? true : false;
@@ -313,6 +318,19 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // Shared DTIF/FFM fast-copy enable: skips the staging blit and uses host
+    // memcpy in the ROCr blit kernel/SDMA paths.
+    //   HSA_ENABLE_DTIF_FAST_COPY=1 -> on
+    //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
+    //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
+    var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
+    enable_dtif_fast_copy_ = var.empty()
+        ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")
+        : (var == "1");
+
+    var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
+    enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
+
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
@@ -489,6 +507,10 @@ class Flag {
 
   bool enable_dtif() const { return enable_dtif_; }
 
+  bool enable_dtif_fast_copy() const { return enable_dtif_fast_copy_; }
+
+  bool enable_dtif_skip_inv_code_cache() const { return enable_dtif_skip_inv_code_cache_; }
+
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
@@ -573,6 +595,8 @@ class Flag {
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
+  bool enable_dtif_fast_copy_;
+  bool enable_dtif_skip_inv_code_cache_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
@@ -622,6 +646,9 @@ class Flag {
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
+
+  // Returns true when the process runs under Valgrind.
+  static bool DetectRunningUnderValgrind();
 
   DISALLOW_COPY_AND_ASSIGN(Flag);
 };

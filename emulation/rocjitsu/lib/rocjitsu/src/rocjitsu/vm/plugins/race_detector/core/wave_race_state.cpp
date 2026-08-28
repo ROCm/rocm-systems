@@ -176,10 +176,17 @@ void WaveRaceState::flushBarrierPendingEvents() {
 }
 
 void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
+  checkVgprReadLanes(reg, uint64_t{1} << lane, byteMask);
+}
+
+void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {
+  if (laneMask == 0)
+    return;
   for (EventId eid : vgprMemoryEvents[reg]) {
+    uint64_t conflictMask = laneMask & detector->events().execMask(eid);
     if (isToVgpr(detector->events().type(eid)) &&
-        (detector->events().byteMask(eid) & byteMask) != 0 &&
-        detector->events().isActiveForLane(eid, lane)) {
+        (detector->events().byteMask(eid) & byteMask) != 0 && conflictMask != 0) {
+      int lane = std::countr_zero(conflictMask);
       detector->getRaceHandler()(
           {RaceViolation::Space::VGPR, reg, waveId.value, lane, false, detector->getWorkgroupId()});
     }

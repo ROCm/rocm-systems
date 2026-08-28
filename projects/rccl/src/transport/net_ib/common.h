@@ -36,29 +36,29 @@
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
-extern char ncclIbIfName[MAX_IF_NAME_SIZE+1];
+extern char ncclIbIfName[MAX_IF_NAME_SIZE + 1];
 extern union ncclSocketAddress ncclIbIfAddr;
 
 enum ncclIbRequestMatchingScheme {
-  BY_INDEX=0,
-  BY_ID=1,
+  BY_INDEX = 0,
+  BY_ID = 1,
 };
 
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;
   int refs;
-  ibv_mr *mr;
+  ibv_mr* mr;
 };
 
 struct ncclIbMrCache {
-  struct ncclIbMr *slots;
+  struct ncclIbMr* slots;
   int capacity, population;
 };
 
 extern int ncclNMergedIbDevs;
 #define NCCL_IB_MAX_DEVS_PER_NIC NCCL_NET_MAX_DEVS_PER_NIC
-#define MAX_MERGED_DEV_NAME (MAXNAMESIZE*NCCL_IB_MAX_DEVS_PER_NIC)+NCCL_IB_MAX_DEVS_PER_NIC
+#define MAX_MERGED_DEV_NAME (MAXNAMESIZE * NCCL_IB_MAX_DEVS_PER_NIC) + NCCL_IB_MAX_DEVS_PER_NIC
 struct alignas(64) ncclIbMergedDev {
   ncclNetVDeviceProps_t vProps;
   int speed;
@@ -106,13 +106,14 @@ struct alignas(64) ncclIbDev {
   } capsProvider;
 };
 
-#define MAX_IB_DEVS  32
-#define MAX_IB_VDEVS MAX_IB_DEVS*8
+#define MAX_IB_DEVS 32
+#define MAX_IB_VDEVS MAX_IB_DEVS * 8
 extern struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
 extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 extern int ncclIbRelaxedOrderingEnabled;
 
-#define NCCL_IB_LLSTR(ll) (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
+#define NCCL_IB_LLSTR(ll) \
+  (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
 
 // Per-Dev connection metadata
 struct ncclIbDevInfo {
@@ -134,7 +135,7 @@ struct ncclIbDevInfo {
   // registered the completion records structure (on the specific device).
   uint32_t rkey;
 
-  //remote dev info
+  // remote dev info
   union ibv_gid remoteGid;
   int ibv_dev_index;
 };
@@ -298,8 +299,9 @@ struct ncclIbQp {
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
-#define NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS)
-static_assert(NET_IB_MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
+#define NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
+static_assert(NET_IB_MAX_REQUESTS <= 256,
+              "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {
@@ -324,7 +326,6 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_mr* cmplsRecordsMr;
   struct ibv_sge sge;
 };
-
 
 // Wrapper to track an MR per-device, if needed
 struct ncclIbMrHandle {
@@ -363,9 +364,10 @@ struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, in
 
 // qpIndex is the index relative to a device.
 // For example, if a device has 2 QPs, qpIndex can be 0 or 1.
-static inline ncclResult_t ncclIbCommBaseGetQpByIndex(struct ncclIbNetCommBase* commBase, int devIndex, int qpIndex, ncclIbQp** qp) {
+static inline ncclResult_t ncclIbCommBaseGetQpByIndex(struct ncclIbNetCommBase* commBase, int devIndex, int qpIndex,
+                                                      ncclIbQp** qp) {
   assert(devIndex >= 0 && devIndex < commBase->vProps.ndevs);
-  *qp = commBase->activeQps[commBase->vProps.ndevs*qpIndex + devIndex];
+  *qp = commBase->activeQps[commBase->vProps.ndevs * qpIndex + devIndex];
   return ncclSuccess;
 }
 
@@ -377,7 +379,8 @@ static inline ncclResult_t ncclIbCommBaseGetQpByIndex(struct ncclIbNetCommBase* 
 // The function outputs the selected QP in the outQp argument and populates the
 // outQpIndex argument with the index of the selected QP. Note that the
 // outQpIndex is the index of the QP in the base::qps[] array.
-static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id, const uint8_t qpIndex, ncclIbQp** outQp, int* outQpIndex) {
+static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id,
+                                                         const uint8_t qpIndex, ncclIbQp** outQp, int* outQpIndex) {
   *outQpIndex = (id + qpIndex) % baseComm->nqps;
   *outQp = baseComm->activeQps[*outQpIndex];
   assert(*outQp != NULL);
@@ -386,12 +389,14 @@ static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBas
 
 // Get a QP object from a QP number. If not NULL, qpIndex will also return the
 // index of the QP in the ncclIbNetCommBase::qps[] array.
-static inline ncclResult_t ncclIbCommBaseGetQpByQpNum(struct ncclIbNetCommBase* commBase, int devIndex, uint32_t qpNum, ncclIbQp** qp, int* qpIndex) {
+static inline ncclResult_t ncclIbCommBaseGetQpByQpNum(struct ncclIbNetCommBase* commBase, int devIndex, uint32_t qpNum,
+                                                      ncclIbQp** qp, int* qpIndex) {
   assert(devIndex >= 0 && devIndex < commBase->vProps.ndevs);
   assert(qp != NULL);
-  TRACE(NCCL_NET, "NET/IB: %s: Looking for QP num %u on devIndex %d among %d QPs", __func__, qpNum, devIndex, commBase->nqps / commBase->vProps.ndevs);
+  TRACE(NCCL_NET, "NET/IB: %s: Looking for QP num %u on devIndex %d among %d QPs", __func__, qpNum, devIndex,
+        commBase->nqps / commBase->vProps.ndevs);
   for (int qpIndexInDev = 0; qpIndexInDev < (commBase->nqps / commBase->vProps.ndevs); qpIndexInDev++) {
-    *qp = &(commBase->qps[commBase->vProps.ndevs*qpIndexInDev + devIndex]);
+    *qp = &(commBase->qps[commBase->vProps.ndevs * qpIndexInDev + devIndex]);
     if ((*qp)->qp->qp_num == qpNum) {
       if (qpIndex != NULL) {
         *qpIndex = *qp - commBase->qps;
@@ -447,7 +452,8 @@ struct ncclIbSendComm {
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
 // written out of order when IB Relaxed Ordering is enabled
-static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0, "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
+static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
+              "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
@@ -520,7 +526,8 @@ struct ncclIbRecvComm {
   // and only the wr_id is updated before posting a receive work request.
   struct ibv_recv_wr ibRecvWorkRequest;
 };
-static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0, "ncclIbRecvComm ctsFifo must be 32-byte aligned");
+static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
+              "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
 ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
 ncclResult_t ncclIbRecvCommInit(struct ncclIbRecvComm* recvComm);
@@ -536,7 +543,7 @@ static ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat) {
   COMPILER_ATOMIC_STORE(&stat->fatalErrorCount, 0, std::memory_order_relaxed);
   return ncclSuccess;
 }
-static void ncclIbStatsFatalError(struct ncclIbStats* stat){
+static void ncclIbStatsFatalError(struct ncclIbStats* stat) {
   COMPILER_ATOMIC_FETCH_ADD(&stat->fatalErrorCount, 1, std::memory_order_relaxed);
 }
 static void ncclIbQpFatalError(struct ibv_qp* qp) {
@@ -569,29 +576,35 @@ static inline bool ncclIbRequestHasEvents(struct ncclIbRequest* r) {
   return false;
 }
 
-ncclResult_t ncclIbGetGidIndex(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr* portAttr, int *gidIndex);
+ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                               int* gidIndex);
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
-ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, ibv_mr** mhandle);
+ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
+                                       int fd, ibv_mr** mhandle);
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
 
 // Net IB plugin entry functions.
 ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
-ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
+ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
+                        ncclProfilerCallback_t profFunction);
 ncclResult_t ncclIbDevices(int* ndev);
 ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
-ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** /*sendDevComm*/);
+ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                           ncclNetDeviceHandle_t** /*sendDevComm*/);
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/);
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle);
-ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request);
-ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request);
+ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
+                         void** request);
+ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
+                         void** request);
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request);
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes);
 ncclResult_t ncclIbCloseSend(void* sendComm);
@@ -600,7 +613,6 @@ ncclResult_t ncclIbCloseListen(void* listenComm);
 ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props);
 ncclResult_t ncclIbFinalizeDevices(void);
 ncclResult_t ncclIbFinalize(void* ctx);
-ncclResult_t ncclIbSetNetAttr(void *ctx, ncclNetAttr_t *netAttr);
+ncclResult_t ncclIbSetNetAttr(void* ctx, ncclNetAttr_t* netAttr);
 
 #endif
-

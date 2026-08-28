@@ -93,12 +93,11 @@ def get_rocm_ver() -> str:
         )
         return rocm_ver_user
 
-    console_warning("Unable to detect a complete local ROCm installation.")
-    console_warning(
-        f"The expected {rocm_base_path}/.info/ versioning directory is missing."
+    console_error(
+        "Unable to detect a complete local ROCm installation. "
+        f"The expected {rocm_base_path}/.info/ versioning directory is missing. "
+        "Ensure you have a valid ROCm installation, or set ROCM_VER to override."
     )
-    console_error("Ensure you have valid ROCm installation.", exit=False)
-    return ""
 
 
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:

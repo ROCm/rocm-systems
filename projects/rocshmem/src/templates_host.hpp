@@ -129,7 +129,7 @@ __host__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T val, int pe);
 
 template <typename T>
 __host__ void rocshmem_broadcast(rocshmem_ctx_t ctx, T *dest, const T *source,
-                                  int nelement, int PE_root, int PE_start,
+                                  int nelems, int PE_root, int PE_start,
                                   int logPE_stride, int PE_size, long *pSync);
 
 template <typename T, ROCSHMEM_OP Op>

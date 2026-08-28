@@ -1,6 +1,6 @@
-//! Integration test for the in-process rocjitsu **daemon**.
+//! Integration tests for the shared in-process RocJitsu daemon API.
 //!
-//! Stands up the Rust daemon (the `rocjitsu --daemon` replacement),
+//! Stands up the `librocjitsu` daemon through the Rust lifecycle wrapper,
 //! connects a client speaking the daemon RPC protocol, performs the
 //! handshake the KMD interposer would, and verifies the daemon serves a
 //! live simulated device. The whole test is skipped when no rocjitsu KMD
@@ -14,6 +14,7 @@ use mirage_core::common::MaybeRef;
 use mirage_core::emulator::{EmulatorDaemon, EmulatorDef, ExecMode};
 use mirage_rocjitsu::daemon::Daemon;
 use mirage_rocjitsu::{kmd_config, kmd_preload};
+use rocjitsu_sys::RjDaemonStatus;
 
 /// Build the 16-byte RPC header the wire protocol uses.
 fn header(opcode: u16, request_id: u32, payload_bytes: u32, result: i32) -> [u8; 16] {
@@ -64,6 +65,7 @@ fn daemon_serves_handshake() {
 
     let runtime_dir = tmp.path().join("rt");
     let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    assert_eq!(daemon.status(), RjDaemonStatus::Running);
     assert!(
         daemon.socket_path().exists(),
         "daemon socket should be bound"
@@ -146,6 +148,7 @@ fn daemon_serves_multiple_clients() {
     let config = kmd_config(&def, None).unwrap();
     let runtime_dir = tmp.path().join("rt");
     let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    assert_eq!(daemon.status(), RjDaemonStatus::Running);
 
     for req_id in 0..3u32 {
         let mut stream = UnixStream::connect(daemon.socket_path()).expect("connect");

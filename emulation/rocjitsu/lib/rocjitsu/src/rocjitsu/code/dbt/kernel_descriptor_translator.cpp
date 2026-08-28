@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/dbt/virtual_lds.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -24,10 +27,12 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -52,17 +57,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // ISA-family helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-}
-
-[[nodiscard]] bool is_rdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
-}
-
 [[nodiscard]] bool arch_supports_wave_size(rj_code_arch_t arch, uint32_t wf) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -83,6 +77,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return supports_wave_size<rdna3_5::Isa>(wf);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return supports_wave_size<gfx1250::Isa>(wf);
   default:
     return false;
   }
@@ -108,33 +104,10 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::Isa::WF_SIZE;
   default:
     return 64;
-  }
-}
-
-[[nodiscard]] uint32_t arch_max_sgprs(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-    return cdna1::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    return cdna2::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    return cdna3::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return cdna4::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-    return rdna1::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    return rdna2::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    return rdna3::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return rdna3_5::Isa::MAX_SGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return rdna4::Isa::MAX_SGPRS_PER_WF;
-  default:
-    return 0;
   }
 }
 
@@ -158,6 +131,11 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
+    // Descriptor validation must allow the complete addressable register
+    // range even though its inherited RDNA base describes one 256-VGPR bank.
+    return gfx1250::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
   default:
     return 0;
   }
@@ -183,6 +161,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return HasAccVgpr<rdna3_5::Isa>;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return HasAccVgpr<gfx1250::Isa>;
   default:
     return false;
   }
@@ -203,28 +183,30 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // ELF kernel-descriptor discovery.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool kernel_descriptor_symbol(const Elf64_Sym &sym, const char *strtab,
-                                            size_t strtab_size) {
+[[nodiscard]] std::optional<std::string>
+kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
   if (sym.st_size != sizeof(KD))
-    return false;
+    return std::nullopt;
 
   // AMDHSA kernel descriptors are global object symbols. Size alone is not a
   // durable signal because unrelated data objects can also be 64 bytes.
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
       elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
-    return false;
+    return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
   // object is ambiguous, so require the ABI suffix instead of treating stripped
   // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return false;
+    return std::nullopt;
   if (sym.st_name >= strtab_size)
-    return false;
+    return std::nullopt;
 
   const char *name = strtab + sym.st_name;
   const size_t len = strnlen(name, strtab_size - sym.st_name);
-  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
+  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
+    return std::nullopt;
+  return std::string(name, len - 3);
 }
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
@@ -238,8 +220,9 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::nullopt;
 }
 
-using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
-                                                   uint64_t entry_text_offset, const KD &desc)>;
+using KernelDescriptorVisitor =
+    std::function<void(uint64_t descriptor_file_offset, std::string kernel_name,
+                       uint64_t entry_text_offset, const KD &desc)>;
 
 void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset,
                               uint64_t text_size, const KernelDescriptorVisitor &callback) {
@@ -283,7 +266,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
     const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
     for (size_t j = 0; j < nsyms; ++j) {
-      if (!kernel_descriptor_symbol(symtab[j], strtab, strtab_size))
+      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
+      if (!kernel_name)
         continue;
 
       const uint16_t sec_idx = symtab[j].st_shndx;
@@ -309,7 +293,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, entry_text_offset, desc);
+      callback(file_off, std::move(*kernel_name), entry_text_offset, desc);
     }
   }
 }
@@ -320,12 +304,18 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t guest_arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently translated here.
-  if (is_cdna_arch(guest_arch))
+  if (arch_is_cdna(guest_arch))
     return 64;
+
+  // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
+  // as Wave64: older producers may omit the bit even though the hardware has
+  // no Wave64 launch mode.
+  if (guest_arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 32;
 
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
   // clear, launch hardware interprets the descriptor as Wave64.
-  if (is_rdna_arch(guest_arch)) {
+  if (arch_is_rdna(guest_arch)) {
     const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
                                         kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
     return wave32 ? 32 : 64;
@@ -338,8 +328,79 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
+[[nodiscard]] bool has_kernarg_segment_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+}
+
+[[nodiscard]] bool has_dispatch_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
+}
+
+[[nodiscard]] std::optional<uint16_t> dispatch_ptr_sgpr(const KD &desc) {
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(desc.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+    sgpr += 4;
+  }
+  if (!has_dispatch_ptr(desc))
+    return std::nullopt;
+  return static_cast<uint16_t>(sgpr);
+}
+
+[[nodiscard]] uint16_t kernarg_segment_ptr_slot(const KD &desc) {
+  const uint32_t properties = desc.kernel_code_properties;
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    sgpr += 4;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+    sgpr += 2;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+    sgpr += 2;
+  return static_cast<uint16_t>(sgpr);
+}
+
+[[nodiscard]] std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
+  if (!has_kernarg_segment_ptr(desc))
+    return std::nullopt;
+  return kernarg_segment_ptr_slot(desc);
+}
+
 [[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+}
+
+[[nodiscard]] uint32_t kernarg_preload_offset(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
+}
+
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+[[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
+  const uint32_t preload_length = kernarg_preload_length(desc);
+  if (preload_length == 0)
+    return desc.kernarg_size;
+
+  const uint32_t preload_offset = kernarg_preload_offset(desc);
+  if (preload_offset > std::numeric_limits<uint32_t>::max() - preload_length)
+    return std::nullopt;
+  const uint32_t preload_end_dwords = preload_offset + preload_length;
+  if (preload_end_dwords > std::numeric_limits<uint32_t>::max() / sizeof(uint32_t))
+    return std::nullopt;
+  const uint32_t preload_end_bytes = preload_end_dwords * static_cast<uint32_t>(sizeof(uint32_t));
+
+  // KERNARG_PRELOAD_SPEC_LENGTH is the exact dword extent promised by the
+  // descriptor. Do not widen the source copy to the wrapper's 8-byte alignment:
+  // the following bytes may belong to no kernarg object at all. A real 64-bit
+  // argument must be covered by two declared preload dwords or KERNARG_SIZE.
+  return std::max(desc.kernarg_size, preload_end_bytes);
 }
 
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
@@ -350,10 +411,10 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0,
   };
 
-  // Workgroup-id SGPRs are allocated immediately after the user-SGPR block, in
-  // X/Y/Z order, but disabled dimensions consume no SGPR. That makes the
-  // descriptor-selected register number a direct function of USER_SGPR_COUNT
-  // plus the enabled dimensions that precede the requested one.
+  // Workgroup-id SGPRs are system SGPRs allocated immediately after the
+  // USER_SGPR_COUNT block, in X/Y/Z order; disabled dimensions consume no SGPR.
+  // The packed IDs on gfx942/gfx950 are work-item IDs in VGPR0, not these
+  // workgroup IDs, so each enabled workgroup dimension still consumes one SGPR.
   uint32_t sgpr = user_sgpr_count(desc);
   for (uint32_t i = 0; i < 3; ++i) {
     if (!enabled[i])
@@ -365,12 +426,35 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return -1;
 }
 
+[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc) {
+  // USER_SGPR_COUNT covers only the user block. Enabled workgroup IDs and
+  // WORKGROUP_INFO are dense system SGPRs that follow it and must move when a
+  // kernarg pointer is inserted into that user block.
+  uint32_t sgprs = user_sgpr_count(desc);
+  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  // Virtual-LDS translation currently has a gfx950 source. On gfx950 (and its
+  // gfx942 target), ENABLE_PRIVATE_SEGMENT initializes architected FLAT_SCRATCH
+  // special registers rather than appending an ordinary system SGPR, so it is
+  // deliberately absent from this repair range.
+  return sgprs;
+}
+
 [[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
          arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
-[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) { return is_rdna_arch(arch); }
+[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
+  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
 
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size) {
@@ -386,9 +470,14 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   // occupancy would mix two different hardware contracts.
   if (arch == ROCJITSU_CODE_ARCH_CDNA1)
     return 4;
-  if (is_cdna_arch(arch))
+  if (arch_is_cdna(arch))
     return 8;
-  if (is_rdna_arch(arch))
+  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
+  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
+  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 16;
+  if (arch_is_rdna(arch))
     return wavefront_size == 32 ? 8 : 4;
   return 1;
 }
@@ -487,7 +576,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (is_cdna_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     append_rdna4_workgroup_grid_prologue(words, src, host_arch);
 
   return words;
@@ -507,6 +596,29 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.supported = false;
 }
 
+[[nodiscard]] std::string hex_u64(uint64_t value) {
+  std::ostringstream os;
+  os << std::hex << value;
+  return os.str();
+}
+
+void append_descriptor_resource_error(KdTranslation &result, std::string message,
+                                      uint32_t required_vgprs, uint32_t required_vgpr_allocation,
+                                      uint32_t max_host_vgprs,
+                                      const KernelDescriptorTranslationOptions &options) {
+  message += " (descriptor_offset=0x" + hex_u64(result.descriptor_file_offset) +
+             ", entry_text_offset=0x" + hex_u64(result.entry_text_offset) +
+             ", guest_vgprs=" + std::to_string(result.guest_vgpr_count) +
+             ", minimum_vgprs=" + std::to_string(options.minimum_vgprs) +
+             ", required_vgprs=" + std::to_string(required_vgprs) +
+             ", accvgpr_base=" + std::to_string(result.accvgpr_base) +
+             ", target_accvgpr_base=" + std::to_string(result.target_accvgpr_base) +
+             ", target_agprs=" + std::to_string(result.target_agpr_count) +
+             ", required_allocation=" + std::to_string(required_vgpr_allocation) +
+             ", max_vgprs=" + std::to_string(max_host_vgprs) + ")";
+  append_descriptor_error(result, std::move(message));
+}
+
 [[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value, KdTranslation &result,
                                         const char *field_name) {
   if (value <= max_value)
@@ -520,16 +632,48 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
 
 [[nodiscard]] KdTranslation
 translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
-                         uint64_t descriptor_file_offset, uint64_t entry_text_offset, const KD &src,
+                         uint64_t descriptor_file_offset, std::string kernel_name,
+                         uint64_t entry_text_offset, const KD &src,
                          const KernelDescriptorTranslationOptions &options) {
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
+  // Snapshot the source descriptor bytes now, while descriptor_file_offset is
+  // still valid against the source image. Sidecar descriptors are materialized
+  // after .text is grown, which shifts a following descriptor section, so they
+  // must copy their template from this snapshot rather than re-reading the stale
+  // offset.
+  static_assert(sizeof(KD) == 64, "descriptor snapshot size mismatch");
+  std::memcpy(result.source_descriptor_bytes.data(), &src, sizeof(KD));
+  result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
-  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
-  result.kernarg_preload_entry_text_offset =
-      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
+  result.has_kernarg_preload_firmware_skip =
+      kernarg_preload_length(src) != 0 && uses_kernarg_preload_firmware_skip(guest_arch);
+  result.kernarg_preload_firmware_entry_text_offset =
+      result.has_kernarg_preload_firmware_skip ? entry_text_offset + kKernargPreloadSkipBytes
+                                               : entry_text_offset;
+  const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
+  result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
+  result.target_kernarg_size = src.kernarg_size;
+  result.source_user_sgpr_count = static_cast<uint8_t>(user_sgpr_count(src));
+  result.target_user_sgpr_count = result.source_user_sgpr_count;
+  result.source_has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
+  result.has_kernarg_segment_ptr = result.source_has_kernarg_segment_ptr;
+  if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src))
+    result.kernarg_segment_ptr_sgpr = *kernarg_sgpr;
+  // DBT does not consume the dispatch-packet pointer itself. The virtual-LDS
+  // SGPR allocator still needs to know when CP initializes this ABI pair so it
+  // does not permanently place the backing-buffer base over live source state.
+  result.has_dispatch_ptr = has_dispatch_ptr(src);
+  if (auto dispatch_sgpr = dispatch_ptr_sgpr(src))
+    result.dispatch_ptr_sgpr = *dispatch_sgpr;
+  result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0);
+  result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1);
+  result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2);
+  result.lds_overflow_workgroup_id_sgpr_x = result.workgroup_id_sgpr_x;
+  result.lds_overflow_workgroup_id_sgpr_y = result.workgroup_id_sgpr_y;
+  result.lds_overflow_workgroup_id_sgpr_z = result.workgroup_id_sgpr_z;
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not
@@ -539,7 +683,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_wavefront_size = kernel_wavefront_size(guest_arch, src);
   result.host_wavefront_size = choose_host_wavefront_size(result.guest_wavefront_size, host_arch);
   result.target_wave_size = result.host_wavefront_size;
-  result.force_wave64 = is_rdna_arch(host_arch) && result.target_wave_size == 64;
+  result.force_wave64 = arch_is_rdna(host_arch) && result.target_wave_size == 64;
   if (result.guest_wavefront_size != result.host_wavefront_size) {
     append_descriptor_error(result,
                             "guest and host wavefront sizes differ; descriptor was translated "
@@ -573,18 +717,18 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   result.guest_vgpr_allocation_count =
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+  result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
-    // CDNA encodes a unified VGPR allocation endpoint while ACCUM_OFFSET
-    // carves the trailing AccVGPR window out of that allocation. Liveness and
-    // semantic scratch allocation need the ordinary VGPR floor, not the unified
-    // endpoint, or they will unnecessarily force new scratch above the
-    // accumulator window and move ACCUM_OFFSET. That descriptor growth changed
-    // dynamic Triton matmul results on gfx942 because the translated MFMA/DS
-    // transpose sequence depends on the original ordinary/accumulator split.
+    // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
+    // that allocation into the ordinary VGPR prefix and the AccVGPR window.
+    // Without this split, gfx950 kernels that reserve a full accumulator bank
+    // look like they require 512 ordinary VGPRs and are incorrectly rejected.
+    // It also prevents liveness from forcing scratch above the accumulator
+    // window when ordinary dead registers can be reused safely.
+    result.guest_vgpr_count = result.accvgpr_base;
     result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
   }
-  result.guest_vgpr_count = result.guest_vgpr_allocation_count - result.guest_agpr_count;
 
   // Start from the guest's ordinary VGPR count. Keep the descriptor allocation
   // count separate for target reporting and descriptor encoding. CDNA
@@ -612,7 +756,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
   if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
       uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
-    if (result.target_agpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
+    if (options.minimum_vgprs > result.accvgpr_base) {
       result.target_accvgpr_base = util::align_up(options.minimum_vgprs, 4u);
       if (result.target_accvgpr_base > 256) {
         append_descriptor_error(result,
@@ -631,10 +775,28 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.host_vgpr_allocation_count = required_vgpr_allocation;
   result.target_vgpr_count = required_vgprs;
   result.target_vgpr_allocation_count = required_vgpr_allocation;
-  if (arch_max_vgprs(host_arch) != 0 && required_vgpr_allocation > arch_max_vgprs(host_arch)) {
-    append_descriptor_error(result,
-                            "required VGPR allocation exceeds target limit; spill tiers are "
-                            "not implemented for this descriptor");
+  const uint32_t max_host_vgprs = arch_max_vgprs(host_arch);
+  if (max_host_vgprs != 0 && required_vgprs > max_host_vgprs) {
+    append_descriptor_resource_error(
+        result,
+        "required ordinary VGPR count exceeds target limit; spill tiers are not implemented for "
+        "this descriptor",
+        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
+  }
+  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
+    if (max_host_vgprs != 0 && result.target_agpr_count > max_host_vgprs) {
+      append_descriptor_resource_error(
+          result,
+          "required AccVGPR count exceeds target limit; spill tiers are not implemented for this "
+          "descriptor",
+          required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
+    }
+  } else if (max_host_vgprs != 0 && required_vgpr_allocation > max_host_vgprs) {
+    append_descriptor_resource_error(
+        result,
+        "required VGPR allocation exceeds target limit; spill tiers are not implemented for this "
+        "descriptor",
+        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
   }
 
   result.target_vgpr_granulated = clamp_granulated(
@@ -651,7 +813,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_sgpr_count = granulated_count_to_registers(guest_sgpr_granulated, 8);
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
-  if (arch_max_sgprs(host_arch) != 0 && result.host_sgpr_count > arch_max_sgprs(host_arch)) {
+  const uint32_t max_descriptor_sgprs = arch_descriptor_sgpr_allocation_limit(host_arch);
+  if (max_descriptor_sgprs != 0 && result.host_sgpr_count > max_descriptor_sgprs) {
     append_descriptor_error(result, "required SGPR count exceeds target limit; spill tiers are not "
                                     "implemented for this descriptor");
   }
@@ -664,16 +827,105 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   }
 
   // LDS/private sizes are copied from the source descriptor and extended by
-  // explicit lowering addends. Spill-zone allocation and Zorua-style LDS
-  // overflow are represented in KdTranslation but are not implemented yet.
-  result.target_private_size =
-      src.private_segment_fixed_size + options.private_segment_fixed_size_addend;
-  result.target_lds_size = src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
+  // explicit lowering addends. In normal mode the translated descriptor still
+  // uses hardware LDS and must fit the host limit. In virtualized mode the
+  // descriptor advertises zero fixed LDS so the launch can fit on gfx942; all
+  // LDS accesses in the kernel body must then be lowered to a backing buffer
+  // supplied by the dispatch path.
+  // The source private/group sizes come from the guest descriptor and can be
+  // near UINT32_MAX; adding a lowering addend in 32 bits could wrap to a tiny
+  // size and silently under-allocate. Use checked addition and fail the
+  // descriptor translation on overflow.
+  const auto target_private_size =
+      util::checked_add(src.private_segment_fixed_size, options.private_segment_fixed_size_addend);
+  if (!target_private_size)
+    append_descriptor_error(result, "private segment size plus lowering addend overflows 32 bits");
+  result.target_private_size = target_private_size.value_or(0);
+  const auto requested_lds_size_checked =
+      util::checked_add(src.group_segment_fixed_size, options.group_segment_fixed_size_addend);
+  if (!requested_lds_size_checked)
+    append_descriptor_error(result, "group segment size plus lowering addend overflows 32 bits");
+  const uint32_t requested_lds_size = requested_lds_size_checked.value_or(0);
+  if (options.virtualize_lds) {
+    result.target_lds_size = 0;
+    result.lds_overflow_size = requested_lds_size;
+    result.needs_lds_overflow_buf = true;
+    if (!preserved_kernarg_bytes) {
+      append_descriptor_error(
+          result,
+          "virtual LDS cannot preserve kernarg preload bytes because the preload range overflows");
+    }
+    const KernargExtensionPayloadLayout virtual_lds_state{
+        .size = kVirtualLdsRuntimeStateBytes,
+        .alignment = alignof(uint64_t),
+    };
+    const auto wrapper_layout =
+        make_kernarg_extension_layout(result.kernarg_size, std::span{&virtual_lds_state, 1});
+    if (!wrapper_layout) {
+      append_descriptor_error(result, "virtual LDS kernarg wrapper size exceeds descriptor range");
+    } else {
+      result.kernarg_wrapper_original_pointer_offset =
+          wrapper_layout->original_kernarg_pointer_offset;
+      result.lds_overflow_kernarg_pointer_offset = wrapper_layout->payload_offsets[0];
+      result.target_kernarg_size = wrapper_layout->wrapper_size;
+    }
 
-  // The fixed user-SGPR prefix is preserved. Workgroup-id SGPRs are derived
-  // separately from the enable bits because they are allocated immediately after
-  // this prefix and are not included in USER_SGPR_COUNT.
-  result.target_user_sgpr_count = user_sgpr_count(src);
+    if (!result.source_has_kernarg_segment_ptr) {
+      if (result.source_user_sgpr_count > 14) {
+        append_descriptor_error(
+            result,
+            "virtual LDS cannot enable ENABLE_SGPR_KERNARG_SEGMENT_PTR because USER_SGPR_COUNT "
+            "would exceed the 16 SGPR hardware initialization limit");
+      } else {
+        const uint16_t inserted_slot = kernarg_segment_ptr_slot(src);
+        result.has_kernarg_segment_ptr = true;
+        result.kernarg_segment_ptr_sgpr = inserted_slot;
+        result.target_user_sgpr_count = result.source_user_sgpr_count + 2u;
+        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src);
+        if (source_initial_sgprs > inserted_slot) {
+          const uint32_t repair_count = source_initial_sgprs - inserted_slot;
+          if (repair_count > std::numeric_limits<uint16_t>::max()) {
+            append_descriptor_error(result,
+                                    "virtual LDS user SGPR repair range exceeds encoder range");
+          } else {
+            result.user_sgpr_repair_start = inserted_slot;
+            result.user_sgpr_repair_count = static_cast<uint16_t>(repair_count);
+          }
+        }
+        if (result.workgroup_id_sgpr_x >= 0)
+          result.lds_overflow_workgroup_id_sgpr_x =
+              static_cast<int16_t>(result.workgroup_id_sgpr_x + 2);
+        if (result.workgroup_id_sgpr_y >= 0)
+          result.lds_overflow_workgroup_id_sgpr_y =
+              static_cast<int16_t>(result.workgroup_id_sgpr_y + 2);
+        if (result.workgroup_id_sgpr_z >= 0)
+          result.lds_overflow_workgroup_id_sgpr_z =
+              static_cast<int16_t>(result.workgroup_id_sgpr_z + 2);
+      }
+    } else if (result.kernarg_segment_ptr_sgpr + 2 > result.source_user_sgpr_count) {
+      append_descriptor_error(
+          result,
+          "virtual LDS requires USER_SGPR_COUNT to cover the kernarg segment pointer SGPR pair");
+    }
+
+  } else {
+    result.target_lds_size = requested_lds_size;
+    const uint32_t max_host_lds_bytes = arch_lds_bytes(host_arch);
+    const bool exceeds_host =
+        max_host_lds_bytes != 0 && result.target_lds_size > max_host_lds_bytes;
+    if (exceeds_host && !options.allow_oversized_lds) {
+      append_descriptor_error(
+          result, "target LDS size exceeds host per-workgroup limit; LDS virtualization is not "
+                  "enabled (target_lds_size=" +
+                      std::to_string(result.target_lds_size) +
+                      ", max_lds=" + std::to_string(max_host_lds_bytes) + ")");
+    }
+    // When oversized LDS is tolerated only because a virtual sidecar will carry
+    // the launch, mark the normal descriptor as sidecar-dependent so a later
+    // sidecar failure stubs it instead of leaving a doomed dispatch target.
+    result.static_lds_requires_sidecar = exceeds_host && options.allow_oversized_lds;
+  }
+
   return result;
 }
 
@@ -683,19 +935,46 @@ KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch
                                                        rj_code_arch_t host_arch)
     : guest_arch_(guest_arch), host_arch_(host_arch) {}
 
+void KdTranslation::configure_skipped_stub() {
+  skipped = true;
+  target_vgpr_count = 0;
+  target_vgpr_allocation_count = 0;
+  target_vgpr_granulated = 0;
+  target_agpr_count = 0;
+  target_accvgpr_base = 4;
+  target_sgpr_count = 0;
+  target_sgpr_granulated = 0;
+  target_lds_size = 0;
+  lds_overflow_size = 0;
+  needs_lds_overflow_buf = false;
+  static_lds_requires_sidecar = false;
+  virtual_lds_lowering = {};
+  kernarg_size = 0;
+  target_kernarg_size = 0;
+  kernarg_wrapper_original_pointer_offset = 0;
+  lds_overflow_kernarg_pointer_offset = 0;
+  target_private_size = 0;
+  target_user_sgpr_count = 0;
+  source_user_sgpr_count = 0;
+  user_sgpr_repair_start = 0;
+  user_sgpr_repair_count = 0;
+  prologue_words.clear();
+}
+
 std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
     const KernelDescriptorTranslationOptions &options) const {
   std::vector<KdTranslation> translations;
 
-  visit_kernel_descriptors(
-      image, text_offset, text_size,
-      [&](uint64_t descriptor_file_offset, uint64_t entry_text_offset, const KD &src) {
-        KD desc{};
-        std::memcpy(&desc, &src, sizeof(desc));
-        translations.push_back(translate_one_descriptor(
-            guest_arch_, host_arch_, descriptor_file_offset, entry_text_offset, desc, options));
-      });
+  visit_kernel_descriptors(image, text_offset, text_size,
+                           [&](uint64_t descriptor_file_offset, std::string kernel_name,
+                               uint64_t entry_text_offset, const KD &src) {
+                             KD desc{};
+                             std::memcpy(&desc, &src, sizeof(desc));
+                             translations.push_back(translate_one_descriptor(
+                                 guest_arch_, host_arch_, descriptor_file_offset,
+                                 std::move(kernel_name), entry_text_offset, desc, options));
+                           });
 
   return translations;
 }
@@ -708,7 +987,7 @@ std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
+  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset, {},
                                   entry_text_offset, desc, options);
 }
 

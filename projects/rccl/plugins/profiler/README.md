@@ -50,7 +50,7 @@ would still work.
 ## Headers management
 
 To help users build plugins effortlessly, plugins should copy the `ncclProfiler_vX` definitions
-they support to their internal includes. An example is shown in `ext-profiler/example` where we
+they support to their internal includes. An example is shown in `plugins/profiler/example` where we
 keep all headers in the `nccl/` directory and provide thin layers to implement old version on top
 of newer ones.
 
@@ -431,7 +431,7 @@ typedef union {
 } ncclProfilerEventStateArgs_v5_t;
 ```
 
-The example profiler in `ext-profiler/example` contains details on how to capture and use the events above.
+The example profiler in `plugins/profiler/example` contains details on how to capture and use the events above.
 
 ### Event hierarchy
 

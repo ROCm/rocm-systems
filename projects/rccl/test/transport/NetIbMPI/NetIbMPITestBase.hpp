@@ -168,6 +168,7 @@ protected:
     // Timing constants
     static constexpr int kDefaultTimeoutMs = 5000;
     static constexpr int kLargeTransferTimeoutMs = 30000;
+    static constexpr int kConnectTimeoutMs = 30000;  // Handshake watchdog (see SetupConnection)
     static constexpr int kPollIntervalUs = 10000;  // 10ms
     static constexpr int kPollIntervalMs = 10;
     static constexpr int kMaxRetryAttempts = 1000;  // For NULL request handling
@@ -318,6 +319,9 @@ protected:
     };
 
     ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
+        // Cap the accept/connect handshake so a dead fabric fails fast instead
+        // of spinning forever (AICOMRCCL-1577).
+        const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
         if (rank == 0) {
             // Rank 0: Listen
             RCCL_TEST_CHECK(CreateListenComm(dev, &pair.handle, &pair.listenComm));
@@ -327,11 +331,20 @@ protected:
 
             // Accept connection
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (result == ncclSuccess && pair.recvComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.recvComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         } else {
             // Rank 1: Connect
@@ -339,11 +352,20 @@ protected:
 
             // Connect to peer
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                if (result == ncclSuccess && pair.sendComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.sendComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         }
 

@@ -1198,31 +1198,35 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_HEALTH_PENDING_PAGE_NUM: {
       uint32_t num_pages = 0;
       ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, nullptr);
-      if (AMDSMI_STATUS_SUCCESS == ret) {
-        if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
+      if (AMDSMI_STATUS_SUCCESS != ret) {
+        value->status = Smi2RdcError(ret);
+        break;
+      }
+
+      value->type = INTEGER;
+
+      if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
+        value->status = RDC_ST_OK;
+        value->value.l_int = static_cast<int64_t>(num_pages);
+        break;
+      }
+
+      // RDC_HEALTH_PENDING_PAGE_NUM: count pages pending retirement. When there are no
+      // bad pages (num_pages == 0) the count is simply 0; report it as a valid value
+      // instead of leaving the default NOT_SUPPORTED status, which surfaced as N/A.
+      uint64_t pending_page_num = 0;
+      if (0 < num_pages) {
+        std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
+        ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, bad_page_info.data());
+        if (AMDSMI_STATUS_SUCCESS != ret) {
           value->status = Smi2RdcError(ret);
-          value->type = INTEGER;
-          value->value.l_int = static_cast<int64_t>(num_pages);
           break;
         }
-
-        if ((0 < num_pages) && (RDC_HEALTH_PENDING_PAGE_NUM == field_id)) {
-          std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
-          ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, bad_page_info.data());
-          value->status = Smi2RdcError(ret);
-          value->type = INTEGER;
-          if (AMDSMI_STATUS_SUCCESS == ret) {
-            uint64_t pending_page_num = 0;
-            for (uint32_t i = 0; i < num_pages; i++) {
-              if (AMDSMI_MEM_PAGE_STATUS_PENDING == bad_page_info[i].status) pending_page_num++;
-            }
-
-            value->value.l_int = static_cast<int64_t>(pending_page_num);
-          }
-        }
-      } else {
-        value->status = Smi2RdcError(ret);
+        pending_page_num = count_pending_bad_pages(bad_page_info.data(), num_pages);
       }
+
+      value->status = RDC_ST_OK;
+      value->value.l_int = static_cast<int64_t>(pending_page_num);
       break;
     }
     case RDC_HEALTH_RETIRED_PAGE_LIMIT: {

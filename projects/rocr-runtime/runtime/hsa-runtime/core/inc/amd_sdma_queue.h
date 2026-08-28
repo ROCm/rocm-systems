@@ -114,9 +114,7 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
     assert(false && "SdmaQueue::ExecutePM4 is unimplemented");
   }
 
-  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override {
-    return HSA_STATUS_ERROR_INVALID_QUEUE;
-  }
+  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override;
 
   /// @brief Update write pointer and ring the SDMA queue doorbell.
   hsa_status_t RingDoorbell(uint64_t write_index);

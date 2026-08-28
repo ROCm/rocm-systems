@@ -13,8 +13,8 @@
 #include "p2p_resiliency_recovery_cast.h"
 
 #define NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID (0x1234)
-#define NCCL_IB_RECOVERY_QKEY                        0x1234ABCD
-#define NCCL_IB_MAX_RECOVERY_QPN_ENTRIES             NCCL_IB_MAX_QPS
+#define NCCL_IB_RECOVERY_QKEY 0x1234ABCD
+#define NCCL_IB_MAX_RECOVERY_QPN_ENTRIES NCCL_IB_MAX_QPS
 
 enum ncclIbPortRecoveryState {
   ncclIbPortRecoveryStateInit,

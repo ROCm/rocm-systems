@@ -46,7 +46,7 @@ private:
   uint8_t *key;
   size_t key_len;
   bool valid;
-  std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
+  std::string key_file_path;
 
 public:
   cuid_hmac();

@@ -519,13 +519,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -545,6 +545,11 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--kernel-trace",
         help="For collecting Kernel Dispatch Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-graph-trace",
+        help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -605,6 +610,16 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocshmem-trace",
+        help="For collecting rocSHMEM (ROCm SHared MEMory) host-stream API Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hipfile-trace",
+        help="For collecting hipFILE Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -1089,6 +1104,12 @@ For attachment profiling of running processes:
         help="Enables thread trace",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-intercept",
+        help="Enables ATT quick-scan mode without kernel-dispatch interception.",
+    )
+
     att_options.add_argument(
         "--att-library-path",
         help="Search path to decoder library.",
@@ -1118,7 +1139,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 256MB",
+        help="Thread trace buffer size. Default 384MB",
         default=None,
         type=str,
     )
@@ -1661,6 +1682,8 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1677,6 +1700,8 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1703,6 +1728,10 @@ def run(app_args, args, **kwargs):
         for itr in ("compiler", "runtime"):
             setattrifnone(args, f"hip_{itr}_trace", True)
 
+    if args.hip_runtime_trace:
+        # HIP graphs are part of the HIP runtime
+        setattrifnone(args, "hip_graph_trace", True)
+
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
             setattrifnone(args, f"hsa_{itr}_trace", True)
@@ -1710,6 +1739,9 @@ def run(app_args, args, **kwargs):
     if args.kfd_trace:
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
+
+    if args.att_no_intercept:
+        args.advanced_thread_trace = True
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
@@ -1726,7 +1758,10 @@ def run(app_args, args, **kwargs):
             ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
+            ["hipfile_trace", "HIPFILE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
+            ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
@@ -2181,6 +2216,7 @@ def run(app_args, args, **kwargs):
     if args.advanced_thread_trace:
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
+        update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
         if args.att_target_cu is not None:
             update_env(
@@ -2231,7 +2267,7 @@ def run(app_args, args, **kwargs):
                 args.att_library_path,
                 overwrite=True,
             )
-        else:
+        elif not args.att_no_intercept:
             fatal_error(
                 f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
             )
@@ -2351,6 +2387,14 @@ def main(argv=None):
 
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_no_intercept", False
+        ):
+            warning(
+                "--selected-regions does not control --att-no-intercept captures; "
+                "ATT no-intercept will quick-scan after each selected GPU agent's "
+                "first code-object upload"
+            )
+        elif getattr(_args, "selected_regions", False) and getattr(
             _args, "att_consecutive_kernels", None
         ):
             fatal_error(

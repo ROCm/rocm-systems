@@ -26,7 +26,7 @@
 #include "lib/aqlprofile/core/last_error.hpp"
 #include "lib/common/logging.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #define AQL_INFO          ROCP_INFO << "[aqlprofile] " << __FUNCTION__ << "(): "
 #define AQL_ERROR         ROCP_ERROR << "[aqlprofile] " << __FUNCTION__ << "(): "
