@@ -67,11 +67,6 @@ class TestGpuSystem(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_reset_gpu_fan=amdsmi.amdsmi_reset_gpu_fan, index=0)
         return
 
-    def test_shut_down(self):
-        self.common.print_func_name("")
-        self.common.Test_API(amdsmi_shut_down=amdsmi.amdsmi_shut_down)
-        return
-
     def test_status_code_to_string(self):
         self.common.print_func_name("")
 

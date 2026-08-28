@@ -23,7 +23,7 @@ import tempfile
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import ModuleIsolationMixin, amdsmi_path
 
 _ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
 _CLI_DIR = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli")
@@ -64,24 +64,26 @@ def _install_stubs():
 
 
 def _load_parser_module():
-    # Put the installed CLI dir on sys.path so the parser's own
-    # ``import amdsmi_cli_exceptions`` resolves to the real module.
-    if _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
     spec = importlib.util.spec_from_file_location("amdsmi_parser_under_test", PARSER_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-class TestOutputFileStdinGuard(unittest.TestCase):
+class TestOutputFileStdinGuard(ModuleIsolationMixin, unittest.TestCase):
+    # What _install_stubs() may fill in, plus the real module the parser imports
+    # by bare name once _CLI_DIR is importable.
+    ISOLATED_MODULES = ("amdsmi", "_version", "amdsmi_helpers", "amdsmi_cli_exceptions")
+    ISOLATED_PATH = _CLI_DIR
+
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(PARSER_PATH):
             raise unittest.SkipTest(f"amdsmi_parser not installed at {PARSER_PATH}")
+        super().setUpClass()
         _install_stubs()
         cls.parser_mod = _load_parser_module()
-        import amdsmi_cli_exceptions  # resolved from _CLI_DIR above
+        import amdsmi_cli_exceptions  # resolved from ISOLATED_PATH above
 
         cls.exceptions = amdsmi_cli_exceptions
 

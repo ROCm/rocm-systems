@@ -206,9 +206,8 @@ Run the python and C++ tests prior to running api_summary.py script.  The prefer
 
 <u>The python scripts are in the directory /opt/rocm/share/amd_smi/tests/python_unittest</u>
 ```
-sudo unit_tests.py -v > _py_unit_test.log 2> _py_unit_test_err.log
-sudo integration_test.py -v > _py_intg_test.log 2> _py_intg_test_err.log
-sudo functional_tests.py -v > _py_func_test.log 2> _py_func_test_err.log
+sudo unit_tests.py -v > _unit_test.log 2> _unit_test_err.log
+sudo run_tests.py --integration --functional -v > _integration_test.log 2> _integration_test_err.log
 ```
 
 <u>The C++ test is in the directory /opt/rocm/share/amd_smi/tests</u>

@@ -102,18 +102,6 @@ class TestCpuClock(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
         return
 
-    def test_get_cpu_cclk_limit(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_cclk_limit=amdsmi.amdsmi_get_cpu_cclk_limit)
-        return
-
-    def test_get_cpu_core_current_freq_limit(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_core_current_freq_limit=amdsmi.amdsmi_get_cpu_core_current_freq_limit
-        )
-        return
-
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name("")
         for i, gpu in enumerate(self.common.processors):
@@ -130,25 +118,6 @@ class TestCpuClock(unittest.TestCase):
                 self.common.print("")
         if self.raise_exception:
             raise self.raise_exception
-        return
-
-    def test_get_cpu_fclk_mclk(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_fclk_mclk=amdsmi.amdsmi_get_cpu_fclk_mclk)
-        return
-
-    def test_get_cpu_socket_current_active_freq_limit(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_current_active_freq_limit=amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit
-        )
-        return
-
-    def test_get_cpu_socket_freq_range(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_freq_range=amdsmi.amdsmi_get_cpu_socket_freq_range
-        )
         return
 
     def test_get_cpu_socket_lclk_dpm_level(self):

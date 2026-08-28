@@ -42,23 +42,6 @@ class TestGpuPci(unittest.TestCase):
         )
         return
 
-    def test_get_gpu_pci_replay_counter(self):
-        self.common.print_func_name("")
-
-        # TODO Check test_get_gpu_pci_replay_counter
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_pci_replay_counter=amdsmi.amdsmi_get_gpu_pci_replay_counter
-        )
-        return
-
-    def test_get_gpu_pci_throughput(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_pci_throughput=amdsmi.amdsmi_get_gpu_pci_throughput
-        )
-        return
-
     def test_get_link_metrics(self):
         self.common.print_func_name("")
 
@@ -68,21 +51,6 @@ class TestGpuPci(unittest.TestCase):
             self.skipTest(msg)
 
         self.common.Test_API_Per_GPU(amdsmi_get_link_metrics=amdsmi.amdsmi_get_link_metrics)
-        return
-
-    def test_get_link_topology_nearest(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_link_topology_nearest=amdsmi.amdsmi_get_link_topology_nearest,
-            link_type=common.LINK_TYPES,
-        )
-        return
-
-    def test_get_minmax_bandwidth_between_processors(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_GPU(
-            amdsmi_get_minmax_bandwidth_between_processors=amdsmi.amdsmi_get_minmax_bandwidth_between_processors
-        )
         return
 
     def test_get_pcie_info(self):

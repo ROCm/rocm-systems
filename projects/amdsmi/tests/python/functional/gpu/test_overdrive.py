@@ -127,13 +127,6 @@ class TestGpuOverdrive(unittest.TestCase):
 
     # integration
 
-    def test_get_gpu_mem_overdrive_level(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_mem_overdrive_level=amdsmi.amdsmi_get_gpu_mem_overdrive_level
-        )
-        return
-
     def test_get_gpu_od_volt_curve_regions(self):
         self.common.print_func_name("")
 
@@ -144,23 +137,6 @@ class TestGpuOverdrive(unittest.TestCase):
             amdsmi_get_gpu_od_volt_curve_regions=amdsmi.amdsmi_get_gpu_od_volt_curve_regions,
             num_region=num_region,
         )
-        return
-
-    def test_get_gpu_od_volt_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_od_volt_info=amdsmi.amdsmi_get_gpu_od_volt_info)
-        return
-
-    def test_get_gpu_overdrive_level(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_overdrive_level=amdsmi.amdsmi_get_gpu_overdrive_level
-        )
-        return
-
-    def test_get_gpu_perf_level(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_perf_level=amdsmi.amdsmi_get_gpu_perf_level)
         return
 
     def test_get_gpu_reg_table_info(self):
@@ -174,15 +150,6 @@ class TestGpuOverdrive(unittest.TestCase):
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_reg_table_info=amdsmi.amdsmi_get_gpu_reg_table_info,
             reg_type=common.REG_TYPES,
-        )
-        return
-
-    def test_get_gpu_volt_metric(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_Two_Enums(
-            amdsmi_get_gpu_volt_metric=amdsmi.amdsmi_get_gpu_volt_metric,
-            voltage_type=common.VOLTAGE_TYPES,
-            voltage_metric=common.VOLTAGE_METRICS,
         )
         return
 

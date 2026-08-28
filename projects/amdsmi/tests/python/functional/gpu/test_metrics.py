@@ -41,23 +41,6 @@ class TestGpuMetrics(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_activity=amdsmi.amdsmi_get_gpu_activity)
         return
 
-    def test_get_gpu_busy_percent(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_busy_percent=amdsmi.amdsmi_get_gpu_busy_percent)
-        return
-
-    def test_get_gpu_cache_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_cache_info=amdsmi.amdsmi_get_gpu_cache_info)
-        return
-
-    def test_get_gpu_metrics_header_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_metrics_header_info=amdsmi.amdsmi_get_gpu_metrics_header_info
-        )
-        return
-
     def test_get_gpu_metrics_info(self):
         self.common.print_func_name("")
 
@@ -84,13 +67,6 @@ class TestGpuMetrics(unittest.TestCase):
         if self.raise_exception:
             raise self.raise_exception
 
-    def test_get_gpu_pm_metrics_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_pm_metrics_info=amdsmi.amdsmi_get_gpu_pm_metrics_info
-        )
-        return
-
     def test_get_gpu_xcd_counter(self):
         self.common.print_func_name("")
 
@@ -114,9 +90,4 @@ class TestGpuMetrics(unittest.TestCase):
             amdsmi_get_utilization_count=amdsmi.amdsmi_get_utilization_count,
             utilization_counter_type=common.UTILIZATION_COUNTER_TYPES,
         )
-        return
-
-    def test_get_violation_status(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_violation_status=amdsmi.amdsmi_get_violation_status)
         return

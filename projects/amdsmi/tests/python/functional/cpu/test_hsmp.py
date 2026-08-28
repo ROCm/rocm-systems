@@ -30,11 +30,6 @@ class TestCpuHsmp(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    def test_get_cpu_ddr_bw(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_ddr_bw=amdsmi.amdsmi_get_cpu_ddr_bw)
-        return
-
     def test_get_cpu_hsmp_driver_version(self):
         self.common.print_func_name("")
 
@@ -81,18 +76,4 @@ class TestCpuHsmp(unittest.TestCase):
             self.common.print("")
         if self.raise_exception:
             raise self.raise_exception
-        return
-
-    def test_get_hsmp_metrics_table(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_hsmp_metrics_table=amdsmi.amdsmi_get_hsmp_metrics_table
-        )
-        return
-
-    def test_get_hsmp_metrics_table_version(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_hsmp_metrics_table_version=amdsmi.amdsmi_get_hsmp_metrics_table_version
-        )
         return

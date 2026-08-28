@@ -97,7 +97,7 @@ cd build/tests/amd_smi_test
 
 ### Python Integration Tests
 
-**Location:** `tests/python_unittest/integration_test.py`
+**Location:** `tests/python_unittest/functional_tests.py`
 
 **Test Functions:**
 - `test_uma_carveout_info()` - Read-only UMA carveout info test
@@ -116,15 +116,15 @@ cd build/tests/amd_smi_test
 **Running Python Integration Tests:**
 ```bash
 # All tests
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_tests.py -v
 
 # Memory tests only
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "uma\|ttm" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_tests.py -k "uma\|ttm" -v
 ```
 
 ### Python CLI Tests
 
-**Location:** `tests/python_unittest/cli_unit_test.py`
+**Location:** `tests/python_unittest/cli_tests.py`
 
 **Test Function:**
 - `test_static_mem_carveout_gtt()` - CLI command testing (display mode only)
@@ -141,10 +141,10 @@ cd build/tests/amd_smi_test
 **Running Python CLI Tests:**
 ```bash
 # All CLI tests
-sudo /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+sudo /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -v
 
 # Memory tests only
-sudo /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "mem_carveout_gtt" -v
+sudo /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -k "mem_carveout_gtt" -v
 ```
 
 ## Manual Testing (Real Write Operations)
