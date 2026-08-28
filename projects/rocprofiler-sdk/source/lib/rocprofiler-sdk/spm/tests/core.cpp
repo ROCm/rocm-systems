@@ -1158,18 +1158,14 @@ TEST(spm_core, set_agents_restricts_collection)
     rocprofiler_context_id_t ctx_id{};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx_id), "context creation failed");
 
-    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(ctx_id,
-                                                                         null_dispatch_callback,
-                                                                         nullptr,
-                                                                         null_record_callback,
-                                                                         nullptr),
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         ctx_id, null_dispatch_callback, nullptr, null_record_callback, nullptr),
                      "Could not setup counting service");
 
     // Scope the context to target_agent only.
     rocprofiler_agent_id_t target_id = target_agent->get_rocp_agent()->id;
-    ROCPROFILER_CALL(
-        rocprofiler_spm_dispatch_counting_service_set_agents(ctx_id, &target_id, 1),
-        "Could not set agents on SPM context");
+    ROCPROFILER_CALL(rocprofiler_spm_dispatch_counting_service_set_agents(ctx_id, &target_id, 1),
+                     "Could not set agents on SPM context");
 
     // Verify that the agent set was recorded correctly before starting the context.
     auto* ctx_p = context::get_mutable_registered_context(ctx_id);
@@ -1240,14 +1236,12 @@ TEST(spm_core, disjoint_contexts_no_conflict)
         ROCPROFILER_CALL(rocprofiler_create_context(&ctx_a), "create ctx_a");
         ROCPROFILER_CALL(rocprofiler_create_context(&ctx_b), "create ctx_b");
 
-        ROCPROFILER_CALL(
-            rocprofiler_spm_configure_callback_dispatch_service(
-                ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
-            "configure ctx_a");
-        ROCPROFILER_CALL(
-            rocprofiler_spm_configure_callback_dispatch_service(
-                ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
-            "configure ctx_b");
+        ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                             ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                         "configure ctx_a");
+        ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                             ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                         "configure ctx_b");
 
         // Point both contexts at the same (first) agent.
         ROCPROFILER_CALL(
@@ -1274,14 +1268,12 @@ TEST(spm_core, disjoint_contexts_no_conflict)
         ROCPROFILER_CALL(rocprofiler_create_context(&ctx_a), "create ctx_a (disjoint)");
         ROCPROFILER_CALL(rocprofiler_create_context(&ctx_b), "create ctx_b (disjoint)");
 
-        ROCPROFILER_CALL(
-            rocprofiler_spm_configure_callback_dispatch_service(
-                ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
-            "configure ctx_a (disjoint)");
-        ROCPROFILER_CALL(
-            rocprofiler_spm_configure_callback_dispatch_service(
-                ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
-            "configure ctx_b (disjoint)");
+        ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                             ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                         "configure ctx_a (disjoint)");
+        ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                             ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                         "configure ctx_b (disjoint)");
 
         ROCPROFILER_CALL(
             rocprofiler_spm_dispatch_counting_service_set_agents(ctx_a, &spm_agents[0], 1),
