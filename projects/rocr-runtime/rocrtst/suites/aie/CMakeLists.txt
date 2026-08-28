@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(aie_tests)
 
+enable_testing()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -65,6 +67,24 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Peano (llvm-aie) detection
+#
+# aiecc compiles the AIE cores with Peano, which ships as the llvm-aie wheel
+# installed alongside mlir-aie in the IRON environment.
+# ---------------------------------------------------------------------------
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" -c
+          "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'llvm-aie'))"
+  OUTPUT_VARIABLE PEANO_INSTALL_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT EXISTS "${PEANO_INSTALL_DIR}")
+  message(FATAL_ERROR "Could not find Peano (llvm-aie) at '${PEANO_INSTALL_DIR}'. "
+                      "Set up the IRON environment with iron_env_setup.sh first.")
+endif()
+message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
+
+# ---------------------------------------------------------------------------
 # Kernel artifact build pipeline
 # ---------------------------------------------------------------------------
 set(KERNEL ${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add.py)
@@ -87,11 +107,9 @@ add_custom_command(
 add_custom_command(
   OUTPUT "${INSTS_BIN}" "${DESIGN_PDI}"
   COMMAND aiecc
-          --aie-generate-npu-insts
-          --aie-generate-pdi
-          --no-compile-host
-          --no-xchesscc
-          --no-xbridge
+          --peano=${PEANO_INSTALL_DIR}
+          --get-npu-insts
+          --get-pdi
           --npu-insts-name=insts.bin
           --pdi-name=design.pdi
           "${AIE_MLIR}"
