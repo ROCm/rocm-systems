@@ -8,7 +8,7 @@
 ROCm Systems Profiler at a glance
 ******************************************************
 
-ROCm Systems Profiler (``rocprofiler-systems``) is a system-level profiler for GPU-accelerated applications. HIP/HSA API calls, kernel dispatches, memory copies, and GPU telemetry (temperature, power, utilization, and interconnect bandwidth) are the headline, captured in a single, unified timeline. Host call stacks, MPI/RCCL collectives, OpenMP regions, and Python frames exist to correlate with that GPU timeline - explaining why the device is busy, stalled, or waiting - rather than as a standalone CPU-profiling story.
+ROCm Systems Profiler (rocprofiler-systems) is a system-level profiler for GPU-accelerated applications. It captures HIP/HSA APIs, kernel dispatches, memory copies, RCCL, and GPU telemetry (temperature, power, utilization, interconnect) on one timeline, and correlates host call stacks, MPI, OpenMP, and Python so you can see why the device is busy, stalled, or waiting.
 
 This correlation matters because end-to-end GPU performance often depends on what's happening off the device. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cases means correlating host-side activity with the GPU timeline, not profiling the GPU in isolation.
 
