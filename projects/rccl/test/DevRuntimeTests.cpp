@@ -368,6 +368,35 @@ TEST_F(DevrFinalizeTest, ProxyOnly_SkipsSymmetricTeardown) {
   EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
 }
 
+// Branch: every stream call fails. All are wrapped in CUDACHECKIGNORE or
+// CUDASUCCESS, so teardown must still complete and still report success --
+// finalize runs on the abort path, where giving up would leak.
+TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ScopedHook create(g_hipStreamCreateWithFlags,
+                    [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook capture(g_hipThreadExchangeStreamCaptureMode,
+                     [](hipStreamCaptureMode*) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_GT(create.calls, 0);
+  EXPECT_EQ(capture.calls, 1);
+}
+
+// Branch: stream creation succeeds but synchronize and destroy fail, so the
+// CUDASUCCESS guards are entered and their inner ignores taken.
+TEST_F(DevrFinalizeTest, StreamTeardownFails_StillCompletes) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_GT(sync.calls, 0);
+  EXPECT_GT(destroy.calls, 0);
+}
+
 // AICOMRCCL-835: a Device-API consumer can create a symmetric-window resource
 // (leaving an ncclDevrMemory on memHead) without a matching destroy. Finalize
 // must drain those before freeing the flat VA reservation, or every per-rank
