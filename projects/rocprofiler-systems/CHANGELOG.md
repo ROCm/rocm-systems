@@ -8,23 +8,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- hipFile GPU-direct storage I/O telemetry. A background sampler queries
-  hipFile's in-process statistics API and reports per-GPU I/O counters (read/write
-  bytes, total/fastpath/fallback/unaligned operation counts, errors, and
-  read/write bandwidth) in both Perfetto and RocPD outputs. The counters are
-  cumulative and the bandwidths are normalized to wall-clock time over the
-  sampling interval, matching the conventions of the existing AMD SMI PCIe, XGMI,
-  and AI NIC metrics. Select metrics with `ROCPROFSYS_HIPFILE_METRICS`, which
-  defaults to `fastpath, fallback, bandwidth, bytes, errors` and accepts `all`, `none`, or any of
-  `bytes`, `ops`, `fastpath`, `fallback`, `unaligned`, `errors`, and `bandwidth`;
-  select GPUs with `ROCPROFSYS_SAMPLING_GPUS`. Requires hipFile 0.5.0 or later, which
-  is where the per-GPU statistics API first appears. `ROCPROFSYS_BUILD_HIPFILE`
-  is tri-state (`AUTO` / `ON` / `OFF`, default `AUTO`): missing or too-old hipFile
-  skips the collector with a status message under `AUTO`, fails configure under
-  `ON`, and is never searched for under `OFF`. The same minimum is re-checked
-  against the hipFile runtime actually loaded into the process. Collection is
-  then enabled per run with `ROCPROFSYS_USE_HIPFILE=ON` (requires a target application
-  that uses hipFile). See
+- hipFile GPU-direct storage I/O telemetry (`ROCPROFSYS_USE_HIPFILE=ON`;
+  requires hipFile 0.5.0 or later). See
   [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
 
 ### Changed

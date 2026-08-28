@@ -1423,12 +1423,8 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
             continue;
         }
 
-        auto _name = collector::track_name(_device_id, _metric.suffix);
-
-        // Keyed on name and ordinal together so each GPU keeps a distinct track even
-        // though every GPU emits the same metric set.
-        const auto _track_key =
-            std::hash<std::string>{}(_name + std::to_string(_device_id));
+        auto       _name      = collector::track_name(_device_id, _metric.suffix);
+        const auto _track_key = std::hash<std::string>{}(_name);
 
         if(!hipfile_track::exists(_track_key))
         {
@@ -1437,7 +1433,7 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
 
         TRACE_COUNTER(trait::name<category::hipfile>::value,
                       hipfile_track::at(_track_key, 0), _ts,
-                      static_cast<double>(_metric.value(_hipfile_sample.metric_values)));
+                      _metric.value(_hipfile_sample.metric_values));
     }
 }
 // NOLINTEND(readability-function-size)

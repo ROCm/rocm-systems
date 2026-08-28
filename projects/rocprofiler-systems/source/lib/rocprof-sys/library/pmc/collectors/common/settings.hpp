@@ -132,24 +132,13 @@ struct settings_policy
     }
 
     /**
-     * @brief Number of GPUs the HIP runtime exposes.
-     *
-     * Size of @c get_visible_gpu_type_indices(). std::nullopt from the BDF helper is
-     * treated as zero: hipFile has no slots to read.
-     */
-    static std::size_t get_visible_gpu_count()
-    {
-        return get_visible_gpu_type_indices().size();
-    }
-
-    /**
      * @brief hipFile metrics selected by ROCPROFSYS_HIPFILE_METRICS.
      *
      * Accepts "all"/"on", "none"/"off", or a comma or semicolon separated list of group
      * keys (e.g. "fastpath,fallback,bandwidth,bytes,errors"), case-insensitively. Each
-     * key selects a read/write pair. The setting's own default ("fastpath, fallback,
-     * bandwidth, bytes, errors") is registered in config.cpp; the "all" below applies
-     * only when the setting is absent entirely, as it is in unit tests.
+     * key selects a read/write pair. The setting's own default
+     * (@c env_vars::HIPFILE_METRICS_DEFAULT) is registered in config.cpp; the "all"
+     * below applies only when the setting is absent entirely, as it is in unit tests.
      */
     static hipfile::enabled_metrics get_hipfile_enabled_metrics()
     {

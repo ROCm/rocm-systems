@@ -663,7 +663,7 @@ configure_settings(bool _init)
         "hipFile metrics to collect: bytes, ops, fastpath, fallback, unaligned, errors, "
         "bandwidth. Each name selects both the read and the write track. An empty value "
         "implies 'all' and 'none' suppresses all.",
-        "fastpath, fallback, bandwidth, bytes, errors", "backend", "hipfile", "rocm",
+        env_vars::HIPFILE_METRICS_DEFAULT, "backend", "hipfile", "rocm",
         "process_sampling");
 #endif
 
