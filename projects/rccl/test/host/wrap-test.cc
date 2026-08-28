@@ -1694,3 +1694,244 @@ TEST(WrapMicrotest, OverrideChannels_MatchedThresholdOutsideCtaBoundsLeavesNcUnt
   EXPECT_EQ(-100, nc); // conflicting bounds -- not overridden
   DeleteCommWithArch(comm);
 }
+
+// ===========================================================================
+// rcclUseCeAllReduce -- rccl_wrap.cc:766-831. Caches rcclParamCeAllReduce
+// ("enabled") and rcclParamForceCeAllReduce ("force") in function-local
+// statics -- rcclParamCeAllReduce's real default (0) fully blocked this
+// function before the g_loadParam seam existed. Isolated per case.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_DisabledByDefaultWarnsOnce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_DisabledByDefaultWarnsOnce",
+      []() {
+        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevel
+        // (defaults to suppressed) unlike this file's WARN-based messages.
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
+        ncclComm* comm = MakeZeroedComm();
+        std::string log1 = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log1.find("CE AllReduce not enabled"));
+        std::string log2 = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_EQ(std::string::npos, log2.find("CE AllReduce not enabled")); // warn-once latch
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_BiasBufferPresentReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_BiasBufferPresentReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        int bias = 0;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, &bias));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_NoSymmetricSupportReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_NoSymmetricSupportReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 0;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("symmetric support is not enabled"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_MultiNodeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_MultiNodeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 2;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("nNodes is not 1"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, /*count=*/5, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("is not divisible by nRanks"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_MsgTooLargeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        // count * sizeof(float) must exceed NCCL_CE_AR_MAX_MSG_BYTES (256MiB).
+        size_t count = (256ull * 1024 * 1024 / 4) + 1;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, count, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("msgBytes"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("CTA policy is not ZERO"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_UnsupportedOpReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_UnsupportedOpReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclAvg, nullptr));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_Float8DatatypeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_Float8DatatypeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat8e4m3, ncclSum, nullptr));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // not ZERO -- force must bypass this
+        EXPECT_TRUE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// rcclDdaEnabled -- rccl_wrap.cc:648-667. rcclParamDdaEnable's real default
+// (1) and ncclGroupDepth's stub (0) both favor the "enabled" path, so most
+// branches are reachable without the seam; not cached, no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, DdaEnabled_DisabledByParamReturnsFalse) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_DDA_ENABLE") == 0 ? int64_t(0) : deft;
+  };
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  g_loadParam = DefaultLoadParam;
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx1250UsesCallerDefaultThreshold) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942BelowRankThresholdReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 7; // below the 8-rank floor
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942WithinThresholdReturnsTrue) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942AboveThresholdReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 8;
+  // gfx950Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, /*gfx950Default=*/0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, /*gfx950Default=*/2048, 0));
+  DeleteCommWithArch(comm);
+}
