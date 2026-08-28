@@ -151,21 +151,30 @@ do_host_tests() {
   )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
-  local rc=0 entry name xml
+  local rc=0 entry exe name xml profdir
   for entry in "${binaries[@]}"; do
     name="${entry%%:*}"
     xml="${entry#*:}"
-    if [ ! -x "$BUILD_DIR/$name" ]; then
-      echo "ERROR: expected binary not built: $BUILD_DIR/$name" | tee -a "$LOG_FILE"
+    exe="$BUILD_DIR/$name"
+    if [ ! -x "$exe" ]; then
+      echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
       rc=1
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
+    # Direct this binary's llvm profiles into its OWN subdir so `coverage` finds
+    # them at $COVERAGE_DIR/<binary>/. Without this, instrumented binaries write
+    # default.profraw into the CWD and coverage sees nothing. %p (PID) + %m
+    # (module hash) keep the process-isolated forks' files distinct; the runner
+    # inherits this value (it sets LLVM_PROFILE_FILE with overwrite=0).
+    profdir="$COVERAGE_DIR/$name"
+    mkdir -p "$profdir"
+    export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
     # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
     # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
     # HOST_TEST_SHUFFLE to run in declaration order while bisecting.
-    "$BUILD_DIR/$name" \
+    "$exe" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
       ${HOST_TEST_SHUFFLE_ARGS[@]+"${HOST_TEST_SHUFFLE_ARGS[@]}"} \
@@ -210,18 +219,19 @@ do_guards() {
 do_coverage() {
   echo "==> Coverage  (out: $COVERAGE_DIR)"
 
-  local test_bins
-  mapfile -t test_bins < <(find "$BUILD_DIR" -maxdepth 1 -type f -executable)
-  if [ "${#test_bins[@]}" -eq 0 ]; then
-    echo "error: no test binaries found in $BUILD_DIR -- run the build phase first" >&2
-    exit 1
-  fi
-
-  local exe name dir
+  local exe name dir rc=0
   local tracefiles=()
-  for exe in "${test_bins[@]}"; do
-    name="$(basename "$exe")"
-    dir="$COVERAGE_DIR/$name"
+  # Each binary's profraw lives in its own $COVERAGE_DIR/<name>/ subdir, written
+  # by the `run` phase. Iterate those so coverage tracks exactly what ran.
+  for dir in "$COVERAGE_DIR"/*/; do
+    name="$(basename "$dir")"
+    [ "$name" = overall ] && continue
+    exe="$BUILD_DIR/$name"
+    if [ ! -x "$exe" ]; then
+      echo "error: expected binary not built: $exe -- run the build phase first" >&2
+      rc=1
+      continue
+    fi
     if ! compgen -G "$dir/*.profraw" >/dev/null; then
       echo "    skip $name -- no profraw (run the 'run' phase first)" >&2
       continue
@@ -260,7 +270,7 @@ do_coverage() {
   # --- Overall union across all binaries (the CI metric) -------------------
   if ! command -v lcov >/dev/null 2>&1; then
     echo "    note: lcov not installed -- skipping overall union report (run the 'deps' phase)" >&2
-    return 0
+    return "$rc"
   fi
 
   local odir="$COVERAGE_DIR/overall"
@@ -299,6 +309,7 @@ do_coverage() {
   fi
   echo "    overall tracefile:   $odir/combined.lcov"
   echo "    overall summary:     $odir/summary.txt"
+  return "$rc"
 }
 
 # The `run` phase aggregates every check the host-test pipeline executes: the
