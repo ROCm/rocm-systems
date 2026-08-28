@@ -1,5 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+import os
 import shlex
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -9,6 +10,16 @@ from utils.utils_common import capture_subprocess_output
 
 # Lines of cmake output kept when a command fails.
 _ERROR_OUTPUT_LINES = 20
+
+_INSTALLED_LIB_ARTIFACT_GLOB = "lib*/rocprofiler-compute/{artifact_name}"
+
+
+def find_installed_artifacts(root_path: Path, artifact_name: str) -> List[Path]:
+    """Return ``lib*/rocprofiler-compute/`` files matching ``artifact_name``."""
+    search_root = root_path.parents[1] if len(root_path.parents) > 1 else Path()
+    pattern = _INSTALLED_LIB_ARTIFACT_GLOB.format(artifact_name=artifact_name)
+    console_debug(f"Searching {search_root} for {pattern}")
+    return sorted(path for path in search_root.glob(pattern) if path.is_file())
 
 
 class NativeToolFinder:
@@ -73,15 +84,8 @@ class NativeToolFinder:
         return artifact_path
 
     def _find_installed_artifact(self) -> Optional[Path]:
-        rocm_root_path = self._get_installed_rocm_root_path()
-        # lib* glob pattern is used to handle CMAKE_INSTALL_LIBDIR variations
-        pattern = f"lib*/rocprofiler-compute/{self.artifact_name}"
-        console_debug(f"Searching {rocm_root_path} for {pattern}")
-        match = next(rocm_root_path.glob(pattern), None)
-        return Path(match) if match is not None else None
-
-    def _get_installed_rocm_root_path(self) -> Path:
-        return self.root_path.parents[1] if len(self.root_path.parents) > 1 else Path()
+        matches = find_installed_artifacts(self.root_path, self.artifact_name)
+        return matches[0] if matches else None
 
     def _build_artifact(self) -> Optional[Path]:
         self._generate_cmake()
@@ -125,3 +129,42 @@ class NativeToolFinder:
         tail = "\n".join(output.strip().splitlines()[-_ERROR_OUTPUT_LINES:])
         message = f"Failed to execute command: {shlex.join(command)}"
         raise RuntimeError(f"{message}\n{tail}" if tail else message)
+
+
+def _source_library_output_dirs(root_path: Path) -> List[Path]:
+    directories: List[Path] = []
+    cmake_binary_dir = os.environ.get("CMAKE_BINARY_DIR")
+    if cmake_binary_dir:
+        directories.append(
+            Path(cmake_binary_dir) / NativeToolFinder.sources_bin_subdir_name
+        )
+    directories.append(
+        root_path.parent / "build" / NativeToolFinder.sources_bin_subdir_name
+    )
+    directories.append(
+        root_path
+        / NativeToolFinder.sources_dir_name
+        / NativeToolFinder.sources_build_subdir_name
+        / NativeToolFinder.sources_bin_subdir_name
+    )
+    return directories
+
+
+def find_prebuilt_artifacts(root_path: Path, artifact_name: str) -> List[Path]:
+    """Return matching artifacts from installed and source-tree locations."""
+    artifacts: List[Path] = list(find_installed_artifacts(root_path, artifact_name))
+    for directory in _source_library_output_dirs(root_path):
+        if not directory.is_dir():
+            continue
+        artifacts.extend(
+            sorted(path for path in directory.glob(artifact_name) if path.is_file())
+        )
+    unique_artifacts: List[Path] = []
+    seen_paths = set()
+    for path in artifacts:
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        unique_artifacts.append(path)
+    return unique_artifacts

@@ -11,6 +11,7 @@ Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
 import runpy
 import sys
 from pathlib import Path
+from typing import List
 
 # Make the inject_roctx package importable when run by absolute path.
 _PACKAGE_PARENT = str(Path(__file__).resolve().parents[2])
@@ -43,7 +44,7 @@ def _report_torch_trace_callback_errors() -> None:
 # Consume a leading "--frameworks <name> [<name> ...]" option and an optional
 # "--" separator. Framework names are all tokens until "--".
 args = sys.argv[1:]
-frameworks: list[str] = []
+frameworks: List[str] = []
 if args and args[0] == "--frameworks":
     args = args[1:]
     while args and args[0] != "--":

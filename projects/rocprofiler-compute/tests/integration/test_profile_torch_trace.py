@@ -4,7 +4,6 @@
 """Integration tests for PyTorch operator tracing during profiling."""
 
 import csv
-import gzip
 import os
 import re
 import time
@@ -19,6 +18,7 @@ from tests.integration.common import (
     config,
     require_torch,
 )
+from utils import csv_compression
 
 MARKER_API_COLUMNS = {
     "Domain",
@@ -46,6 +46,13 @@ _TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 5.0
 _TORCH_TRACE_GPU_IDLE_OVERHEAD_PCT = 5.0
 _TORCH_TRACE_MEAN_KERNEL_OVERHEAD_PCT = 5.0
 _TORCH_TRACE_MAX_KERNEL_OVERHEAD_PCT = 5.0
+
+
+def kernel_intervals_from_results(workload_dir):
+    """Return kernel ``(start, end)`` pairs from ``results_*.csv.gz``."""
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    df = pd.concat([pd.read_csv(path) for path in results_files], ignore_index=True)
+    return _kernel_intervals(df)
 
 
 def _kernel_intervals(df):
@@ -244,7 +251,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
         assert corresponding_counter_file.is_file(), (
             f"counter_collection CSV not found for {marker_file}"
         )
-        with gzip.open(marker_file, "rt", newline="", encoding="utf-8") as f:
+        with csv_compression.open_gzip_csv_read(marker_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
@@ -260,9 +267,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
-        with gzip.open(
-            corresponding_counter_file, "rt", newline="", encoding="utf-8"
-        ) as f:
+        with csv_compression.open_gzip_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
@@ -452,13 +457,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     baseline_time = time.time() - start_baseline
     assert returncode_baseline == 0, "Baseline profiling failed"
 
-    baseline_results_files = sorted(
-        Path(workload_dir_baseline).glob("results_*.csv.gz")
-    )
-    baseline_df = pd.concat(
-        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
-    )
-    baseline_intervals = _kernel_intervals(baseline_df)
+    baseline_intervals = kernel_intervals_from_results(workload_dir_baseline)
     baseline_idle = _gpu_idle_ns(baseline_intervals)
     _, baseline_span = _merged_busy_and_span(baseline_intervals)
     baseline_mean_kernel = _mean_kernel_duration_ns(baseline_intervals)
@@ -479,13 +478,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
 
-    with_flag_results_files = sorted(
-        Path(workload_dir_with_flag).glob("results_*.csv.gz")
-    )
-    with_flag_df = pd.concat(
-        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
-    )
-    with_flag_intervals = _kernel_intervals(with_flag_df)
+    with_flag_intervals = kernel_intervals_from_results(workload_dir_with_flag)
     with_flag_idle = _gpu_idle_ns(with_flag_intervals)
     with_flag_mean_kernel = _mean_kernel_duration_ns(with_flag_intervals)
     with_flag_max_kernel = _max_kernel_duration_ns(with_flag_intervals)
