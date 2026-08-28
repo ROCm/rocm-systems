@@ -92,6 +92,10 @@ if(BUILD_TESTS)
     # inline macro-argument literal, not a separately declared symbol.
     CONNECT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/graph/connect.cc"
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc"
+    # Same idea, for GroupDepth_InitializerMatchesProductionSource: catches
+    # wrap_stubs.cc's copied ncclGroupDepth initializer drifting from the
+    # real thread_local definition, which also has no importable constant.
+    GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     # Makes wrap-test.cc's process-isolated tests flush their coverage
     # counters in the forked child (test/common/ProcessIsolatedTestRunner.cpp);
     # without it those tests run correctly but contribute nothing to the
@@ -558,9 +562,11 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
   # See the in-build block's comment: real paths for the
-  # ParamDefaults_MatchProductionSource drift check.
+  # ParamDefaults_MatchProductionSource / GroupDepth_InitializerMatches...
+  # drift checks.
   CONNECT_CC_PATH="${RCCL_HIPIFY_DIR}/src/graph/connect.cc"
   ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+  GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   # RCCL_TEST_CODE_COVERAGE: makes wrap-test.cc's process-isolated tests flush
   # their coverage counters in the forked child
   # (test/common/ProcessIsolatedTestRunner.cpp); without it those tests run

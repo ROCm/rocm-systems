@@ -168,6 +168,10 @@ const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
 // ncclGroupStart nesting. rccl_wrap.cc reads it (never writes it) to check
 // "not inside a group" before some eligibility checks; 0 -- the real
 // default -- means "not grouped", which is what every test so far assumes.
+// Like the RCCL_PARAM defaults above, this initializer has no importable
+// constant to static_assert against; wrap-test.cc's
+// GroupDepth_InitializerMatchesProductionSource reads the real group.cc
+// source at run time instead.
 thread_local int ncclGroupDepth = 0;
 
 // rcclUseAinic: real definition (transport/net.cc:343) does hardware NIC
