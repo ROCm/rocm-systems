@@ -55,6 +55,10 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
     g_ginRegister;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_ginDeregister;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_rmaProxyConnectOnce;
+extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>
+    g_rmaProxyRegister;
+
 // Hands back an fd the caller must close; the default opens /dev/null.
 extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_proxyClientGetFdBlocking;
 

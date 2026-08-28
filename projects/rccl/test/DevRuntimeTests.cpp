@@ -1655,6 +1655,73 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
 
 
 // ---------------------------------------------------------------------------
+// symMemoryRegisterRma connects the RMA proxy if it is not up yet, then
+// registers the memory with it. Both steps are NCCLCHECK'd, so the only
+// branches are their two failure arms.
+
+class SymMemoryRegisterRmaTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrMemory mem{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    mem.primaryAddr = reinterpret_cast<void*>(0x100000);
+    mem.size = 8192;
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+};
+
+// The happy path: connect first, then register the whole allocation into the
+// memory's own RMA window array.
+TEST_F(SymMemoryRegisterRmaTest, Succeeds_ConnectsThenRegisters) {
+  int order = 0, connectOrder = 0, registerOrder = 0;
+  void* registeredAddr = nullptr;
+  size_t registeredSize = 0;
+  void** registeredWins = nullptr;
+  ScopedHook connect(g_rmaProxyConnectOnce, [&](ncclComm*) {
+    connectOrder = ++order;
+    return ncclSuccess;
+  });
+  ScopedHook reg(g_rmaProxyRegister, [&](ncclComm*, void* addr, size_t size, void* wins[]) {
+    registerOrder = ++order;
+    registeredAddr = addr;
+    registeredSize = size;
+    registeredWins = wins;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(connectOrder, 1);
+  EXPECT_EQ(registerOrder, 2);
+  EXPECT_EQ(registeredAddr, mem.primaryAddr);
+  EXPECT_EQ(registeredSize, mem.size);
+  EXPECT_EQ(registeredWins, mem.rmaHostWins);
+}
+
+// Branch: the proxy is unreachable, so nothing is registered against it.
+TEST_F(SymMemoryRegisterRmaTest, ConnectFails_ReturnsErrorWithoutRegistering) {
+  ScopedHook connect(g_rmaProxyConnectOnce, [](ncclComm*) { return ncclSystemError; });
+  ScopedHook reg(g_rmaProxyRegister,
+                 [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: the registration itself fails.
+TEST_F(SymMemoryRegisterRmaTest, RegisterFails_ReturnsError) {
+  ScopedHook reg(g_rmaProxyRegister,
+                 [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+
+  EXPECT_NE(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:

@@ -237,10 +237,23 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MA
 // ---------------------------------------------------------------------------
 // RMA proxy.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS]) {
+// Seams: symMemoryRegisterRma NCCLCHECKs both.
+static ncclResult_t DefaultRmaProxyConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_rmaProxyConnectOnce = DefaultRmaProxyConnectOnce;
+
+ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return g_rmaProxyConnectOnce(comm); }
+
+static ncclResult_t DefaultRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS]) {
   return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])> g_rmaProxyRegister =
+    DefaultRmaProxyRegister;
+
+ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* addr, size_t size,
+                                  void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
+  return g_rmaProxyRegister(comm, addr, size, hostWins);
+}
+
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
@@ -475,5 +488,7 @@ void ResetDevRuntimeFakes() {
   g_bootstrapAllGather                      = DefaultAllGather;
   g_ginRegister                             = DefaultGinRegister;
   g_ginDeregister                           = DefaultGinDeregister;
+  g_rmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
+  g_rmaProxyRegister                        = DefaultRmaProxyRegister;
   g_loadParam                               = DefaultLoadParam;
 }
