@@ -1852,14 +1852,19 @@ void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -1879,7 +1884,7 @@ void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -1891,14 +1896,19 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -1918,7 +1928,7 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -1930,14 +1940,19 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -1957,7 +1972,7 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -1969,21 +1984,29 @@ void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint32_t src_payload = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
+    uint32_t src_payload = src_region.lane(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
       return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -1995,21 +2018,29 @@ void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint32_t src_payload = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
+    uint32_t src_payload = src_region.lane(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
       return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2021,18 +2052,25 @@ void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint32_t src_payload = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 1u, 1ULL << lane);
+    uint32_t src_payload = src_region.lane(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = (src_payload >> (index * 4u)) & 0xfu;
       return util::fp4_e2m1_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_src(index) * scale;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane,
-                                                 std::bit_cast<uint32_t>(value));
+      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
@@ -2045,21 +2083,29 @@ void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2071,21 +2117,29 @@ void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2097,18 +2151,25 @@ void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_src(index) * scale;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane,
-                                                 std::bit_cast<uint32_t>(value));
+      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
@@ -2121,21 +2182,29 @@ void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2147,21 +2216,29 @@ void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
       uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2173,18 +2250,25 @@ void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
     float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
-    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    auto src_region = regs.read_vgpr_region(src_base, 2u, 1ULL << lane);
+    uint64_t src_payload = src_region.lane64(0, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & 0xffu);
       return util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
       float value = read_scaled_src(index) * scale;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane,
-                                                 std::bit_cast<uint32_t>(value));
+      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
@@ -2197,13 +2281,18 @@ void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -2222,7 +2311,7 @@ void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2234,13 +2323,18 @@ void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2260,7 +2354,7 @@ void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2272,13 +2366,18 @@ void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2298,7 +2397,7 @@ void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2310,13 +2409,18 @@ void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2336,7 +2440,7 @@ void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2348,13 +2452,18 @@ void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2374,7 +2483,7 @@ void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2386,14 +2495,19 @@ void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2414,7 +2528,7 @@ void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2426,14 +2540,19 @@ void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 1u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2454,7 +2573,7 @@ void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 1u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2466,14 +2585,19 @@ void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2494,7 +2618,7 @@ void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2506,14 +2630,19 @@ void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2534,7 +2663,7 @@ void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2546,14 +2675,19 @@ void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2574,7 +2708,7 @@ void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2586,14 +2720,19 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2614,7 +2753,7 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2626,13 +2765,18 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -2651,7 +2795,7 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2663,13 +2807,18 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2689,7 +2838,7 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2701,13 +2850,18 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -2726,7 +2880,7 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2738,13 +2892,18 @@ void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 2u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 4u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -2764,7 +2923,7 @@ void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2776,15 +2935,19 @@ void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2795,13 +2958,14 @@ void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
       uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2813,15 +2977,19 @@ void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2832,13 +3000,14 @@ void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
       uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2850,15 +3019,19 @@ void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2869,10 +3042,10 @@ void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::fp6_e2m3_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
     for (uint32_t index = 0; index < 16u; ++index) {
       float value = read_scaled_src(index) * scale;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane,
-                                                 std::bit_cast<uint32_t>(value));
+      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
@@ -2885,15 +3058,19 @@ void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2904,13 +3081,14 @@ void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
       uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2922,15 +3100,19 @@ void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2941,13 +3123,14 @@ void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
       uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -2959,15 +3142,19 @@ void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
-    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
+      continue;
+    uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
+    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));
+    auto src_region = regs.read_vgpr_region(src_base, 3u, 1ULL << lane);
     uint32_t src_words[4] = {};
     for (uint32_t word = 0; word < 3u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_src = [&](uint32_t index) -> float {
       uint32_t bit = index * 6u;
       uint32_t word = bit / 32u;
@@ -2978,10 +3165,10 @@ void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw &= 0x3fu;
       return util::bf6_e3m2_to_f32(static_cast<uint8_t>(raw));
     };
+    auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
     for (uint32_t index = 0; index < 16u; ++index) {
       float value = read_scaled_src(index) * scale;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane,
-                                                 std::bit_cast<uint32_t>(value));
+      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
@@ -2994,13 +3181,18 @@ void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[16] = {};
     for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -3019,7 +3211,7 @@ void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3031,13 +3223,18 @@ void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[16] = {};
     for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -3056,7 +3253,7 @@ void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3068,13 +3265,18 @@ void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3094,7 +3296,7 @@ void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3106,13 +3308,18 @@ void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3132,7 +3339,7 @@ void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3144,13 +3351,18 @@ void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3170,7 +3382,7 @@ void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3182,13 +3394,18 @@ void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3208,7 +3425,7 @@ void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3220,14 +3437,19 @@ void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[16] = {};
     for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -3247,7 +3469,7 @@ void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3259,14 +3481,19 @@ void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[16] = {};
     for (uint32_t word = 0; word < 16u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       return std::bit_cast<float>(src_words[index]);
     };
@@ -3286,7 +3513,7 @@ void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3298,14 +3525,19 @@ void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3326,7 +3558,7 @@ void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3338,14 +3570,19 @@ void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::f16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3366,7 +3603,7 @@ void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3378,14 +3615,19 @@ void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3406,7 +3648,7 @@ void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 
@@ -3418,14 +3660,19 @@ void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t dst_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t src_base =
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    amdgpu::RegisterAccess regs(wf);
+    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+      continue;
+    float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
+    auto dst_region = regs.write_vgpr_region(dst_base, 3u, 1ULL << lane);
     uint32_t src_words[8] = {};
     for (uint32_t word = 0; word < 8u; ++word)
-      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);
+      src_words[word] = src_region.lane(word, lane);
     auto read_scaled_input = [&](uint32_t index) -> float {
       uint32_t raw = src_words[index / 2u];
       return util::bf16_to_f32(static_cast<uint16_t>(raw >> ((index & 1u) * 16u)));
@@ -3446,7 +3693,7 @@ void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       seed = util::prng_advance(seed);
     }
     for (uint32_t word = 0; word < 3u; ++word)
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);
+      dst_region.set_lane(word, lane, dst_words[word]);
   }
 }
 

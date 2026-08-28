@@ -477,6 +477,7 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   cdna4::Operand vgpr(32, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_VGPR_MIN + 7);
   cdna4::Operand acc(32, cdna4::OperandType::OPR_SRC_ACCVGPR,
                      cdna4::OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + 7);
+  cdna4::Operand ttmp(64, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_TTMP_MIN + 2);
   cdna4::Operand imm32(32, cdna4::OperandType::OPR_SIMM32, 123);
 
   ASSERT_TRUE(sgpr.to_register_ref().has_value());
@@ -485,6 +486,8 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   EXPECT_EQ(*vgpr.to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
   ASSERT_TRUE(acc.to_register_ref().has_value());
   EXPECT_EQ(*acc.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
+  ASSERT_TRUE(ttmp.to_register_ref().has_value());
+  EXPECT_EQ(*ttmp.to_register_ref(), (RegisterRef{RegClass::TTMP, 2, 2}));
   EXPECT_FALSE(imm32.to_register_ref().has_value());
 }
 

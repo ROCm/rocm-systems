@@ -58,8 +58,11 @@ std::array<uint32_t, N> read_sgpr_group(const Wavefront &wf, int reg, bool allow
   if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + N > 106)
     throw util::UnimplementedInst("tensor DMA non-SGPR descriptor operand");
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
+  auto group = amdgpu::RegisterAccess(wf).read_sgpr_region(base, static_cast<uint32_t>(N));
+  if (!group.valid())
+    throw util::UnimplementedInst("tensor DMA descriptor outside wavefront SGPR block");
   for (size_t i = 0; i < N; ++i)
-    words[i] = amdgpu::RegisterAccess(wf).read_sgpr(base + static_cast<uint32_t>(i));
+    words[i] = group.dword(static_cast<uint32_t>(i));
   return words;
 }
 
