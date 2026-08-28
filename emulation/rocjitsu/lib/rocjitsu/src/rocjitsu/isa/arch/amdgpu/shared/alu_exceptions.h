@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>
@@ -15,6 +16,18 @@ namespace rocjitsu::amdgpu {
 inline constexpr uint32_t kAluExceptionModeShift = 12;
 inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << kAluExceptionModeShift;
 inline constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
+
+/// @brief Return the enabled ALU trap causes in EXCP_FLAG bit positions.
+///
+/// GFX12 moved these enables out of MODE[18:12], where those bits now select
+/// VGPR high banks, and into TRAP_CTRL[6:0]. Keeping the normalized mask here
+/// prevents exception checks from treating a debugger's trap enables as VGPR
+/// selectors, or a shader's VGPR selectors as enabled exceptions.
+inline uint32_t alu_exception_trap_enables(const Wavefront &wf) {
+  return wf.uses_separate_trap_ctrl()
+             ? wf.gfx12_trap_ctrl_raw() & kAluExceptionTrapstsMask
+             : (wf.mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
+}
 
 // Every classifier below reports what it found through wf.raise_alu_causes()
 // as well as returning it. The generated call sites OR the return value into
@@ -78,14 +91,20 @@ template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefr
       rhs = -rhs;
     // OMOD scales the result, so it has to take part in deriving the causes
     // rather than being compared against the unscaled product afterwards.
+    const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                  wf.ieee_mode(), inst.inst_.omod);
     float omod_scale = 1.0f;
-    if (inst.inst_.omod == 1)
+    if (omod == 1)
       omod_scale = 2.0f;
-    else if (inst.inst_.omod == 2)
+    else if (omod == 2)
       omod_scale = 4.0f;
-    else if (inst.inst_.omod == 3)
+    else if (omod == 3)
       omod_scale = 0.5f;
-    causes |= classify_mul_f32(lhs, rhs, omod_scale);
+    uint32_t lane_causes = classify_mul_f32(lhs, rhs, omod_scale);
+    if (omod != 0 &&
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5))
+      lane_causes &= ~((1u << 4) | (1u << 5));
+    causes |= lane_causes;
   }
   wf.raise_alu_causes(causes);
   return causes;

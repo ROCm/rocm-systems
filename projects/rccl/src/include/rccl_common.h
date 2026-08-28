@@ -196,8 +196,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
-                        const void* acc);
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -242,8 +241,8 @@ constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 // Returns true when the DDA fast path should be attempted for a collective.
 // Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
 // the user-configurable RCCL_DDA_THRESHOLD env var.
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
-                    size_t gfx950Default = 0, size_t gfx1250Default = 0);
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0,
+                    size_t gfx1250Default = 0);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);

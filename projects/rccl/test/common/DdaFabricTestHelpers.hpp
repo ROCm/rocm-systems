@@ -10,8 +10,8 @@
 #include <limits>
 
 #include "comm.h"
-#include "dda_init_detail.h"
-#include "fabric_gpu_barrier.h"
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 namespace RcclUnitTesting
 {

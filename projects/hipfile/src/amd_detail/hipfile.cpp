@@ -213,6 +213,10 @@ hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size,
 try {
     auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
 
+    if (file_offset < 0 || buffer_offset < 0) {
+        throw std::system_error(EINVAL, std::generic_category());
+    }
+
     std::shared_ptr<Backend> backend{selectBackend(backends, file, buffer, size, file_offset, buffer_offset)};
 
     return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
