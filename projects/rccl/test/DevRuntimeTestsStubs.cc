@@ -66,7 +66,10 @@ const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 // ---------------------------------------------------------------------------
 // Bootstrap.
 // ---------------------------------------------------------------------------
-ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+static ncclResult_t DefaultAllGather(void*, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather = DefaultAllGather;
+
+ncclResult_t bootstrapAllGather(void* bs, void* buf, int bytes) { return g_bootstrapAllGather(bs, buf, bytes); }
 ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
 // Seams: symMemoryMapLsaTeam NCCLCHECKGOTOs both of these, so their failure
 // arms are only reachable by driving them.
@@ -206,11 +209,30 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
-ncclResult_t ncclGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+// Seams: symMemoryRegisterGin NCCLCHECKs both, and its rollback path is only
+// observable through the deregister count.
+static ncclResult_t DefaultGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
   return ncclSuccess;
 }
-ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
+                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+    g_ginRegister = DefaultGinRegister;
+
+ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
+                             void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
+                             int memType) {
+  return g_ginRegister(comm, addr, size, hostWins, devWins, winFlags, multiSegment, memType);
+}
+
+static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_ginDeregister =
+    DefaultGinDeregister;
+
+ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
+  return g_ginDeregister(comm, hostWins);
+}
 
 // ---------------------------------------------------------------------------
 // RMA proxy.
@@ -450,5 +472,8 @@ void ResetDevRuntimeFakes() {
   g_bootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_hipMemAddressFree                       = DefaultMemAddressFree;
   g_hipMemUnmap                             = DefaultMemUnmap;
+  g_bootstrapAllGather                      = DefaultAllGather;
+  g_ginRegister                             = DefaultGinRegister;
+  g_ginDeregister                           = DefaultGinDeregister;
   g_loadParam                               = DefaultLoadParam;
 }

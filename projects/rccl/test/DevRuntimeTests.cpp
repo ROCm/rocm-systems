@@ -1391,6 +1391,114 @@ TEST_F(SymTeamDestroyAllTest, DriverCallsFail_StillEmptiesList) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryRegisterGin publishes memory to the GIN layer. It splits on whether
+// any rank contributed a CPU-backed segment: without one the whole allocation
+// registers as a single device window; with one it takes the elastic path,
+// which validates that every rank agrees on the segment layout and registers
+// one window per segment.
+//
+// This suite covers the single-window path; the elastic path follows below.
+
+class SymMemoryRegisterGinTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrMemory mem{};
+  std::vector<size_t> segmentSizes;
+  std::vector<hipMemGenericAllocationHandle_t> memHandles;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+    mem.primaryAddr = reinterpret_cast<void*>(0x100000);
+    mem.size = 8192;
+    mem.numSegments = 1;
+    mem.maxGlobalNumSegments = 1;
+    mem.globalHasSysmemSegment = false;
+    segmentSizes.assign({8192});
+    memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+    mem.segmentSizes = segmentSizes.data();
+    mem.memHandles = memHandles.data();
+  }
+
+  void TearDown() override {
+    free(mem.ginSegmentInfos);
+    mem.ginSegmentInfos = nullptr;
+    g_callocCallIndex = 0;  // TU-local, not covered by the reset below
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: no sysmem segment anywhere, so one device window covers the whole
+// allocation and a single segment info describes it.
+TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
+  size_t registeredSize = 0;
+  int registeredType = -1;
+  bool registeredMultiSegment = true;
+  ScopedHook reg(g_ginRegister, [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool multi,
+                                    int memType) {
+    EXPECT_EQ(addr, mem.primaryAddr);
+    registeredSize = size;
+    registeredType = memType;
+    registeredMultiSegment = multi;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(registeredSize, mem.size);  // the whole allocation, not a segment
+  EXPECT_EQ(registeredType, NCCL_PTR_CUDA);
+  EXPECT_FALSE(registeredMultiSegment);
+  ASSERT_EQ(mem.numGinSegments, 1);
+  ASSERT_NE(mem.ginSegmentInfos, nullptr);
+  EXPECT_EQ(mem.ginSegmentInfos[0].segmentSize, mem.size);
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
+}
+
+// The multiSegment flag passed to GIN comes from the communicator-wide segment
+// count, not this rank's.
+TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
+  mem.maxGlobalNumSegments = 2;
+  bool registeredMultiSegment = false;
+  ScopedHook reg(g_ginRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool multi, int) {
+                   registeredMultiSegment = multi;
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_TRUE(registeredMultiSegment);
+}
+
+// Branch: the GIN registration fails, so no segment info is allocated.
+TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                   return ncclSystemError;
+                 });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+  EXPECT_EQ(mem.numGinSegments, 0);
+}
+
+// Branch: the segment-info allocation fails after a successful registration.
+TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
+  ScopedHook reg(g_ginRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+  g_callocFailAt = g_callocCallIndex;  // fail the next ncclCalloc
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(mem.numGinSegments, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:

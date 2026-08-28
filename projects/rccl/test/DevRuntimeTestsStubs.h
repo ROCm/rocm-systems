@@ -11,7 +11,8 @@
 #ifndef RCCL_TEST_DEVRUNTIMETESTSSTUBS_H_
 #define RCCL_TEST_DEVRUNTIMETESTSSTUBS_H_
 
-#include "nccl.h"  // ncclResult_t, for the proxy seam below
+#include "nccl.h"          // ncclResult_t, for the proxy seam below
+#include "gin/gin_host.h"  // NCCL_GIN_MAX_CONNECTIONS, ncclGinWindow_t
 
 #include <hip/hip_runtime_api.h>
 
@@ -45,8 +46,14 @@ extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long lon
 extern std::function<hipError_t(void*, size_t)> g_hipMemAddressFree;
 extern std::function<hipError_t(void*, size_t)> g_hipMemUnmap;
 
+extern std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather;
+
+extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+    g_ginRegister;
+extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_ginDeregister;
 
 // Hands back an fd the caller must close; the default opens /dev/null.
 extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_proxyClientGetFdBlocking;
