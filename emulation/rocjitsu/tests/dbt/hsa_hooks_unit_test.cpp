@@ -6775,6 +6775,57 @@ TEST(HsaHooksUnitTest, AutoSampledReportLogsStaticMappingProvenance) {
   EXPECT_NE(log.find("sampled_watchpoint_slots_examined=1"), std::string::npos) << log;
 }
 
+TEST(HsaHooksUnitTest, AutoSampledReportDoesNotInferAttributionFromRawPatchTelemetry) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_sampled_transform_result();
+  g_transform_override_result.runtime_static_mapping = {};
+  rocjitsu::ConSanPatchInfo raw_patch_telemetry;
+  raw_patch_telemetry.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  raw_patch_telemetry.anchor_offset = 0x120u;
+  raw_patch_telemetry.trampoline_offset = 0x440u;
+  raw_patch_telemetry.sampled_first_slot = 0u;
+  raw_patch_telemetry.sampled_window_bank_count = 1u;
+  raw_patch_telemetry.sampled_access_range_count = 1u;
+  raw_patch_telemetry.relocated_guest_instruction_offset = 0x448u;
+  raw_patch_telemetry.scratch_vgpr = 12u;
+  raw_patch_telemetry.owner_descriptor_file_offsets = {0x100u};
+  g_transform_override_result.patches.push_back(std::move(raw_patch_telemetry));
+  g_seed_auto_sampled_report_on_load = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
+  EXPECT_EQ(log.find("ConSan MOI sampled diagnostic map reader=101"), std::string::npos) << log;
+  const size_t detail = log.find("ConSan MOI auto sampled reader=101");
+  ASSERT_NE(detail, std::string::npos) << log;
+  EXPECT_NE(log.find("instruction=0x0", detail), std::string::npos) << log;
+  EXPECT_NE(log.find("mapped=false", detail), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, AutoSampledPendingReleaseScansEachRelevantOwnerBankOnce) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
