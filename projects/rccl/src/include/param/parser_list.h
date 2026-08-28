@@ -9,7 +9,7 @@
 #define PARAM_PARSER_LIST_H_INCLUDED
 
 #include "param/parser_common.h"
-#include "param/utils_tmp.h"
+#include "param/utils.h"
 
 namespace nccl {
 namespace param {

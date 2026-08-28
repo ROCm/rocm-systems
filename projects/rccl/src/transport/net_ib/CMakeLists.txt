@@ -11,7 +11,24 @@ set(NET_IB_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gin.cc
 )
 
+# >>> RCCL-DELTA
+list(APPEND NET_IB_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/common.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/connect.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_flush_fault_inject.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gdaki/gin_host_gdaki.h
+)
+# <<< RCCL-DELTA
+
+#[[ >>> RCCL-DELTA: NCCL wires the gdaki (DOCA GPUNetIO) subdirectory here, which adds DOCA sources
+# and gin_host_gdaki.cc to TRANSPORT_SOURCES. Those are CUDA/DOCA-only and are not built by RCCL,
+# so the subdirectory is not added. The gdaki/CMakeLists.txt is kept as an NCCL mirror.
 add_subdirectory(gdaki)
+]] # <<< RCCL-DELTA
 
 # Add transport sources to parent scope
 set(TRANSPORT_SOURCES ${TRANSPORT_SOURCES} ${NET_IB_SOURCES} PARENT_SCOPE)

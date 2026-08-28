@@ -22,5 +22,37 @@ list(APPEND MISC_SOURCES
 )
 endif()
 
+# >>> RCCL-DELTA: NCCL sources that RCCL does not build.
+list(REMOVE_ITEM MISC_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/cudawrap.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/gdrwrap.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvmlwrap.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/git_version.cc
+)
+# <<< RCCL-DELTA
+
+# >>> RCCL-DELTA: RCCL-only sources
+list(APPEND MISC_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/alt_rsmi.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/archinfo.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/api_trace.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/api_trace.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/gdr_peermem.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ionicdvsymbols.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ionicdvwrap.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvmlwrap_stub.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel_config.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocmwrap.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/roctx.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/recorder.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/signals.cc
+    # latency_profiler (RCCL-only)
+    ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTrace.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTraceEvent.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTraceFunc.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTraceUtils.cc
+)
+# <<< RCCL-DELTA
+
 # Add misc sources to parent scope
 set(MISC_SOURCES ${MISC_SOURCES} PARENT_SCOPE)

@@ -7,7 +7,7 @@
 
 #include "dev_runtime_internal.h"
 #include "comm.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include "nccl_device/gin_barrier.h"
 #include "nccl_device/lsa_barrier.h"
 #include "rma/rma.h"

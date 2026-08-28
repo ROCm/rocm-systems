@@ -9,12 +9,8 @@
 #define PARAM_H_INCLUDED
 
 #include "nccl.h"
-// [RCCL] hipify's add_file_unique() appends _tmp to headers whose basename
-// clashes with another staged file (param/common.h vs device/common.h,
-// param/utils.h vs include/utils.h, param/param.h vs include/param.h). Source
-// keeps the plain names; includes must use the staged _tmp names.
-#include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+#include "param/common.h"
+#include "param/utils.h"
 #include "param/parsers.h"
 #include "param/param_registry.h"
 

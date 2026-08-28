@@ -3212,7 +3212,7 @@ __global__ void multiContextConsumerKernel(
   gin.waitSignal(ncclCoopCta(), (ncclGinSignal_t)blockIdx.x, expectedSignalValue);
 }
 
-// Drives all NCCL_GIN_MAX_CONTEXTS contexts in parallel, each with its own
+// Drives all NCCL_GIN_MAX_CONNECTIONS contexts in parallel, each with its own
 // slot + per-context signal. Confirms every contextId has a working
 // proxy ring + IB QP and that there's no cross-context contamination.
 TEST_F(GinMPIDeviceTests, MultiContext_AllFourRoute) {
@@ -3233,7 +3233,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_AllFourRoute) {
 
   // 4 per-context slots; 1 KiB payload into each 4 KiB slot. The 3 KiB
   // tail per slot is asserted zero to catch cross-context contamination.
-  constexpr int    kNumContexts    = NCCL_GIN_MAX_CONTEXTS;  // 4
+  constexpr int    kNumContexts    = NCCL_GIN_MAX_CONNECTIONS;  // 4
   constexpr size_t kSlotStride     = 4 * 1024;
   constexpr size_t kTransferBytes  = 1 * 1024;
   constexpr size_t kBufBytes       = kNumContexts * kSlotStride;
