@@ -3401,6 +3401,210 @@ TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevrFindWindow resolves a user address to the window covering it, using
+// the address-sorted list. The least upper bound is one past ours, so the
+// candidate is the entry before it -- and only if the address falls inside it.
+
+class DevrFindWindowTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<ncclDevrWindowSorted> sorted;
+  ncclDevrWindow winA{}, winB{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    // Two windows with a gap between them, so an address can fall outside both.
+    sorted = {{0x100000, 4096, &winA}, {0x200000, 4096, &winB}};
+    comm->devrState.winSorted = sorted.data();
+    comm->devrState.winSortedCount = 2;
+  }
+  void TearDown() override { comm->devrState.winSorted = nullptr; }  // borrowed
+};
+
+// An address inside a window resolves to it.
+TEST_F(DevrFindWindowTest, AddressInsideWindow_ReturnsIt) {
+  ncclDevrWindow* out = nullptr;
+  ASSERT_EQ(ncclDevrFindWindow(comm, reinterpret_cast<void*>(0x100010), &out), ncclSuccess);
+  EXPECT_EQ(out, &winA);
+}
+
+// The first byte is inside.
+TEST_F(DevrFindWindowTest, AddressAtWindowBase_ReturnsIt) {
+  ncclDevrWindow* out = nullptr;
+  ASSERT_EQ(ncclDevrFindWindow(comm, reinterpret_cast<void*>(0x100000), &out), ncclSuccess);
+  EXPECT_EQ(out, &winA);
+}
+
+// Boundary: one past the end belongs to no window, even though it is the
+// nearest one below.
+TEST_F(DevrFindWindowTest, AddressJustPastWindowEnd_ReturnsNull) {
+  ncclDevrWindow* out = &winB;
+  ASSERT_EQ(ncclDevrFindWindow(comm, reinterpret_cast<void*>(0x100000 + 4096), &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// Branch: an address below every window has no candidate at all.
+TEST_F(DevrFindWindowTest, AddressBelowAllWindows_ReturnsNull) {
+  ncclDevrWindow* out = &winA;
+  ASSERT_EQ(ncclDevrFindWindow(comm, reinterpret_cast<void*>(0x1000), &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// The second window is found through the same path, so the lookup is not
+// hard-wired to the first entry.
+TEST_F(DevrFindWindowTest, AddressInSecondWindow_ReturnsIt) {
+  ncclDevrWindow* out = nullptr;
+  ASSERT_EQ(ncclDevrFindWindow(comm, reinterpret_cast<void*>(0x200100), &out), ncclSuccess);
+  EXPECT_EQ(out, &winB);
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrGetRmaWin returns a window's RMA handle for one context. Symmetric
+// windows keep them on the backing memory, non-symmetric ones on the window
+// itself -- memory == nullptr is what tells them apart.
+
+TEST(DevrGetRmaWin, NullWindow_ReturnsNull) {
+  EXPECT_EQ(ncclDevrGetRmaWin(nullptr, 0), nullptr);
+}
+
+// Boundary: a negative context index.
+TEST(DevrGetRmaWin, NegativeContext_ReturnsNull) {
+  ncclDevrWindow win{};
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, -1), nullptr);
+}
+
+// Boundary: one past the last context.
+TEST(DevrGetRmaWin, ContextPastEnd_ReturnsNull) {
+  ncclDevrWindow win{};
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
+}
+
+// Branch: non-symmetric windows hold their own handles.
+TEST(DevrGetRmaWin, NonSymmetricWindow_ReadsFromWindow) {
+  ncclDevrWindow win{};
+  win.memory = nullptr;
+  win.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x1234);
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, 1), reinterpret_cast<void*>(0x1234));
+}
+
+// Branch: symmetric windows go through the backing memory. Both slots are set
+// to different values so reading the wrong one is visible.
+TEST(DevrGetRmaWin, SymmetricWindow_ReadsFromMemory) {
+  ncclDevrMemory mem{};
+  ncclDevrWindow win{};
+  win.memory = &mem;
+  win.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x1111);
+  mem.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x2222);
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, 1), reinterpret_cast<void*>(0x2222));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrGetLsaSelfAddr maps an address into this rank's slot of the LSA flat
+// space: addresses already in that range pass through, others are looked up
+// against the registered memories.
+
+class DevrGetLsaSelfAddrTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclDevrState* devr = nullptr;
+  ncclDevrMemory mem{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    devr = &commStorage->devrState;
+    devr->lsaSelf = 1;
+    devr->lsaSize = 2;
+    devr->bigSize = 0x10000;
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
+
+    mem.primaryAddr = reinterpret_cast<void*>(0x900000);
+    mem.size = 4096;
+    mem.bigOffset = 0x100;
+    devr->memHead = &mem;
+  }
+  void TearDown() override { devr->memHead = nullptr; }  // stack object
+};
+
+// Branch: an address already inside the flat range is returned unchanged.
+TEST_F(DevrGetLsaSelfAddrTest, AddressInFlatRange_PassesThrough) {
+  void* addr = reinterpret_cast<void*>(0x405000);
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaSelfAddr(devr, addr, &out), ncclSuccess);
+  EXPECT_EQ(out, addr);
+}
+
+// Branch: an address inside a registered memory is translated into our own slot
+// of the flat space, preserving the offset within that memory.
+TEST_F(DevrGetLsaSelfAddrTest, AddressInRegisteredMemory_TranslatesToOwnSlot) {
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaSelfAddr(devr, reinterpret_cast<void*>(0x900040), &out), ncclSuccess);
+  EXPECT_EQ(out, static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset + 0x40);
+}
+
+// Branch: an address in neither the flat range nor any memory is "not found",
+// reported as success with a null result -- the same convention
+// ncclDevrFindWindow uses, so callers must check the pointer, not the code.
+TEST_F(DevrGetLsaSelfAddrTest, UnknownAddress_ReturnsNullNotError) {
+  void* out = reinterpret_cast<void*>(0xdead);
+  EXPECT_EQ(ncclDevrGetLsaSelfAddr(devr, reinterpret_cast<void*>(0x50), &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// Boundary: one past a memory's end is outside it.
+TEST_F(DevrGetLsaSelfAddrTest, AddressJustPastMemory_ReturnsNull) {
+  void* out = reinterpret_cast<void*>(0xdead);
+  EXPECT_EQ(ncclDevrGetLsaSelfAddr(devr, reinterpret_cast<void*>(0x900000 + 4096), &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrWorldToLsaRank maps a world rank to its index within the LSA team.
+// Without symmetric support the team is the explicit lsaRankList.
+
+class DevrWorldToLsaRankTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->symmetricSupport = 0;
+    lsaRankList.assign({4, 5, 6});
+    comm->devrState.lsaSize = 3;
+    comm->devrState.lsaRankList = lsaRankList.data();
+  }
+  void TearDown() override { comm->devrState.lsaRankList = nullptr; }  // borrowed
+};
+
+// A member's index is its position in the list, not its world rank.
+TEST_F(DevrWorldToLsaRankTest, MemberRank_ReturnsItsIndex) {
+  int lsaRank = -1;
+  ASSERT_EQ(ncclDevrWorldToLsaRank(comm, 6, &lsaRank), ncclSuccess);
+  EXPECT_EQ(lsaRank, 2);
+}
+
+// The first entry, to show the search is not off by one.
+TEST_F(DevrWorldToLsaRankTest, FirstMember_ReturnsZero) {
+  int lsaRank = -1;
+  ASSERT_EQ(ncclDevrWorldToLsaRank(comm, 4, &lsaRank), ncclSuccess);
+  EXPECT_EQ(lsaRank, 0);
+}
+
+// Branch: a rank outside the team is an error, not a silent miss.
+TEST_F(DevrWorldToLsaRankTest, NonMemberRank_ReturnsError) {
+  int lsaRank = -1;
+  EXPECT_NE(ncclDevrWorldToLsaRank(comm, 9, &lsaRank), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
