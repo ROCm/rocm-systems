@@ -160,11 +160,19 @@ do_host_tests() {
   fi
 
   : > "$LOG_FILE"   # truncate; each binary appends below
-  local rc=0 exe name xml
+  local rc=0 exe name xml profdir
   for exe in "${binaries[@]}"; do
     name="$(basename "$exe")"
     xml="$(xml_for_binary "$name")"
     echo "----- $name -----" | tee -a "$LOG_FILE"
+    # Direct this binary's llvm profiles into its OWN subdir so `coverage` finds
+    # them at $COVERAGE_DIR/<binary>/. Without this, instrumented binaries write
+    # default.profraw into the CWD and coverage sees nothing. %p (PID) + %m
+    # (module hash) keep the process-isolated forks' files distinct; the runner
+    # inherits this value (it sets LLVM_PROFILE_FILE with overwrite=0).
+    profdir="$COVERAGE_DIR/$name"
+    mkdir -p "$profdir"
+    export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
     # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
     # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
