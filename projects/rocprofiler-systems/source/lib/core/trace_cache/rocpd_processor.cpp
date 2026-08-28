@@ -36,9 +36,11 @@
 #include <exception>
 #include <memory>
 #include <optional>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -1040,7 +1042,7 @@ rocpd_processor_t::finalize_processing()
         auto counters =
             std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
                                       m_unregistered_pmcs_already_warned.end() };
-        std::sort(counters.begin(), counters.end());
+        std::ranges::sort(counters);
 
         LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
                     "unregistered counter(s); {} is incomplete. Counters: {}",
