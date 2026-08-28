@@ -117,7 +117,6 @@ hipify:
 	# Also copy to rccl/rccl.h for files that use #include <rccl/rccl.h>
 	cp -a ../../src/nccl.h.in include/rccl/rccl.h
 	cp -a ../../src/include/ hipify_rccl/
-	cp -a ../../src/algorithms/ hipify_rccl/include/algorithms/
 	cp -a ../../src/graph/ hipify_rccl/
 	mkdir -p hipify_rccl/include
 	(cd ../../src && find algorithms -name '*.h' \

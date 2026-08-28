@@ -35,11 +35,21 @@ constexpr bool kSdmaDeviceBackendCompiled = (NCCL_GIN_ANVIL_SDMA_ENABLE != 0);
 
 // markSdmaDirty packs (peer, channel) into a 64-bit mask and drops anything past
 // bit 64. The scaleup path uses one channel, so this bound keeps us in range.
+// SDMA puts one peer per thread, so kGinA2AThreadsPerCta has to be at least this.
 constexpr int kGinA2AMaxRanks = 16;
 
 // This path only queues one put per peer and the SDMA engines do the copying.
 // That is little enough work for a single CTA, and more would not copy faster.
 constexpr int kGinA2ASdmaCtas = 1;
+
+// One put per thread, so the block only has to cover the peers. Rounded up to a
+// full wavefront instead of leaving a partial one.
+constexpr int kGinA2ASdmaMinThreads = 64;
+
+inline int ginA2ASdmaThreads(int nRanks) {
+  int threads = nRanks < kGinA2ASdmaMinThreads ? kGinA2ASdmaMinThreads : nRanks;
+  return threads > kGinA2AThreadsPerCta ? kGinA2AThreadsPerCta : threads;
+}
 
 // Best measured LSA geometry per size range.
 struct GinA2ALsaBand {
@@ -214,8 +224,9 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
   bool useSdma = bytesPerPeer >= (size_t)ncclParamGinA2ASdmaMinBytes();
 
   if (useSdma) {
-    INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu", bytesPerPeer);
-    ncclGinA2AKernel<true><<<kGinA2ASdmaCtas, kGinA2AThreadsPerCta, 0, stream>>>(
+    int sdmaThreads = ginA2ASdmaThreads(comm->nRanks);
+    INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu threads=%d", bytesPerPeer, sdmaThreads);
+    ncclGinA2AKernel<true><<<kGinA2ASdmaCtas, sdmaThreads, 0, stream>>>(
       sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, 0, comm->ginA2AState.devComm);
   } else {
     // Under LSA the CTAs do the copying, so the grid scales with the message.
