@@ -154,6 +154,8 @@ platforms:
       - rocrtstFunc.Deallocation_Notifier_Test
       - rocrtstFunc.AgentPropertiesTests
       - rocrtstFunc.SvmMemory_Basic_Test
+      - rocrtstFunc.SvmMemory_DiscardAndPrefetchBatch_Test
+      - rocrtstFunc.SvmMemory_DiscardAndPrefetchBatch_Perf_Test
       - rocrtstFunc.SvmMemory_Negative_Test
       - rocrtstFunc.VirtMemory_Basic_Test
       - rocrtstFunc.VirtMemory_Access_Test
