@@ -851,4 +851,52 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
     );
 }
 
+// =========================================================================
+// End-of-run summary: data loss must be visible in the output itself
+// =========================================================================
+TEST(AcclProfilerSummary, CleanRunReportsComplete) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.CleanRunReportsComplete",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5101, &mask, "sum_clean_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t d;
+            MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/80, /*count=*/256);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = ncclProfileKernelCh;
+            kd.parentObj = coll;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch0 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch0, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out =
+                ReadProfilerOutput("/tmp/accl_test_sum_clean", "0x5101");
+            ASSERT_FALSE(out.empty());
+            // Emitted even when nothing was lost: a missing summary must mean
+            // "the run died before finalize", never "the run was clean".
+            EXPECT_NE(out.find("\"complete\":true"), std::string::npos);
+            EXPECT_NE(out.find("\"dropped_collectives\":0"), std::string::npos);
+            EXPECT_NE(out.find("\"leaked_collectives\":0"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_clean"}}
+    );
+}
+
 } // namespace RcclUnitTesting
