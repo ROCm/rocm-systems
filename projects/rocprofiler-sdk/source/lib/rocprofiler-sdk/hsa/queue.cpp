@@ -547,7 +547,7 @@ WriteInterceptor(const void* packets,
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
-                          !event_api_active))
+                          !event_api_active && !hip::event::has_pending_waits()))
     {
         writer(packets, pkt_count);
         return;
@@ -578,7 +578,7 @@ WriteInterceptor(const void* packets,
     }
 
     auto* active_event_ctx = hip::event::get_active_event_context();
-    if(num_dispatch_packets == 0 && !active_event_ctx)
+    if(num_dispatch_packets == 0 && !active_event_ctx && !hip::event::has_pending_waits())
     {
         writer(packets, pkt_count);
         return;
