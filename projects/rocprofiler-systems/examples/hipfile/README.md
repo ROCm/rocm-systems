@@ -17,9 +17,12 @@ Source: `hipfile_trace.cpp`.
 
 A short read/write loop against a GPU buffer and a regular file. The profiler
 samples hipFile's in-process stats and reports per-GPU counters
-(`GPU [<N>] Storage <metric> (S)`). The file is opened without `O_DIRECT` so the
-workload runs on any filesystem; it is meant to exercise telemetry, not the
-GPU-direct fast path.
+(`GPU [<N>] Storage <metric> (S)`). The file is opened without `O_DIRECT` so
+`open(2)` itself does not require an `O_DIRECT`-capable filesystem. hipFile
+still tries to reopen the file through `/proc/self/fd` with `O_DIRECT` at
+`hipFileHandleRegister`, and uses the GPU-direct fast path when that succeeds.
+The POSIX fallback is used only when the reopen fails. The example is meant to
+exercise telemetry, not to pin a particular I/O path.
 
 Source: `hipfile-io.cpp`. Built whenever the hipFile runtime is found (same as
 `hipfile-trace`). Profiling its I/O counters still requires hipFile telemetry

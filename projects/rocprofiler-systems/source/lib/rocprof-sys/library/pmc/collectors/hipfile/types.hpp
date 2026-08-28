@@ -97,9 +97,11 @@ struct metrics
 /**
  * @brief Describes one emitted metric: its track suffix, unit, bit, and accessor.
  *
- * Single source of truth for the metric set. Sampling, pause, metadata registration,
- * and the settings parser all iterate this table, so adding a metric is a one-line
- * change rather than an edit in four places.
+ * Catalog for names, units, settings-group keys, bits, and the extractors used when a
+ * sample is expanded into Perfetto/RocPD tracks. Sampling, pause, metadata registration,
+ * and the settings parser iterate this table so those paths do not each hard-code the
+ * list.
+ *
  */
 struct metric_desc
 {
