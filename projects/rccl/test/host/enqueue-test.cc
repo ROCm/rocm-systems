@@ -6,6 +6,11 @@
 
 // Host-only microtests for src/enqueue.cc: the UUT is #include'd, so static
 // helpers are directly callable.
+//
+// LINE-NUMBER BASE: every `enqueue.cc:NNNN` citation in these tests refers to the
+// HIPIFIED copy (build/hipify/src/enqueue.cc), which is what this TU actually
+// compiles. Hipify inserts one line near the top, so these run exactly one higher
+// than the same code in src/enqueue.cc -- subtract 1 when navigating the original.
 
 #include <gtest/gtest.h>
 
@@ -83,8 +88,10 @@
 // Pre-setting another header's guard is the same technique init-test.cc uses for
 // the nvtx.h / nvtx_stub.h nccl_domain collision.
 // ---------------------------------------------------------------------------
-#include "device_table.h"  // real ncclDevKernelArgsDefaultStorage
 #define NCCL_DEVICE_COMMON_H_
+// ncclDevKernelArgsDefaultStorage comes from src/include/device.h, which is
+// already in scope via enqueue.h -> comm.h. The generated device_table.h is
+// NOT needed here and is deliberately not included.
 void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage) {}
@@ -101,6 +108,31 @@ class EnqueueMicrotest : public ::testing::Test {
   void TearDown() override { ResetEnqueueFakes(); }
 };
 
+// ---------------------------------------------------------------------------
+// The test bodies, split for reviewability. These are FRAGMENTS, not independent
+// files: they share this TU's single anonymous namespace and later ones use
+// fixtures from earlier ones, so THE ORDER BELOW IS LOAD-BEARING.
+//
+// Verified cross-fragment uses:
+//   CostTask / ScriptAllTimes / CostTable  defined in batch4, used by batch9
+//   RedOpComm                              defined in batch5, used by batch9
+//   BatchPlanComm                          defined in batch6, used by batch8, batch9
+//
+// What each holds (the numbering is historical; contents are what matter):
+//   1  ncclFuncTrafficPerByte, ncclTestBudget, the shmem constexprs,
+//      calcP2pChannelCount, geteActivationMask / gettaskEventHandle
+//   2  hostToDevRedOp
+//   3  calcCollChunking
+//   4  rcclKernelPackedChannels, ncclGetCollNetSupport, initCollCostTable,
+//      updateCollCostTable
+//   5  ncclRedOpCreatePreMulSum_impl / ncclRedOpDestroy_impl,
+//      rcclEffectiveP2pBatchEnable, getImplicitOrder
+//   6  addWorkBatchToPlan
+//   7  finishPlan
+//   8  waitWorkFifoAvailable, ncclPlanSetDefaultKernel, addProxyOpIfNeeded
+//   9  mutation reinforcements + topoGetAlgoInfo interaction tests (covers
+//      functions defined across 4, 6 and 7 -- look here for a mutation-driven test)
+// ---------------------------------------------------------------------------
 #include "tests_batch1.inc"
 #include "tests_batch2.inc"
 #include "tests_batch3.inc"

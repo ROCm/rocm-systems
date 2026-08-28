@@ -92,6 +92,14 @@ extern bool g_rcclUseAinic;
 extern bool g_devrWindowIsMultiSegment;
 extern bool g_devrWindowHasSysmemSegment;
 
+// LINK FLOOR ONLY -- no test drives the seams in this block today. They exist so
+// the binary links and so an accidental call is visible, NOT because the paths
+// behind them are covered. Do not read a declared seam as evidence of coverage:
+// the CE gates, the devr window predicates, ncclGetSymRegType, the min/max
+// channel params, ncclProxyStart and rcclIsArchSupportedForFunc all sit on
+// task-append and launch paths this binary deliberately does not exercise.
+// Driving one is the first step in covering its path, not a formality.
+
 // CE (copy-engine) availability gates (enqueue.cc:3498-3560, 3789+).
 extern bool g_ceImplemented;
 extern bool g_ceAvailable;
@@ -107,6 +115,16 @@ extern bool g_rcclCeAllReduceAllowed;
 // Scripted env for the UUT's ncclGetEnv reads. Cleared by ResetEnqueueFakes().
 // TRAP: updateCollCostTable:2527 caches NCCL_PROTO in a function-local static, so
 // only the first call in the PROCESS observes it -- scripting it later is a no-op.
+// Because no test writes this map, that static latches to 0 in every ordering:
+// the user-NCCL_PROTO bypass of the XGMI LL128 gate is therefore UNREACHABLE in
+// this binary, and --gtest_shuffle passing reflects a constant latch rather than
+// proven order-independence. The first test to script NCCL_PROTO inherits a
+// seed-dependent flake and should add process isolation.
+// TRAP 2: topoGetAlgoInfo:2686 reads NCCL_PROTO/NCCL_ALGO through raw libc
+// getenv(), NOT ncclGetEnv, so this map does not intercept them. Unreachable
+// today (gated on pivotA2ANumBiRings == 3, which the fixtures zero-init), but
+// one field assignment from making results depend on the CI machine's ambient
+// environment.
 extern std::unordered_map<std::string, std::string> g_enqEnv;
 
 // ncclCommEnsureReady result, and the Recorder's. Production NCCLCHECKs the

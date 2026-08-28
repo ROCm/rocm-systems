@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // finishPlan (enqueue.cc:295) -- packs the per-channel work batches into the
 // kernel-args block and merges the per-channel proxy-op lists into one ordered

@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // calcCollChunking (enqueue.cc:2871) -- the largest host-reachable block in the
 // file (278 lines, ~89 branch points) and entirely HIP-free.
@@ -295,7 +301,10 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_TreeLadderRespondsToTreeDepth) {
   ChunkComm deep(1 << 22);
   deep.comm.channels[0].tree.depth = 16;
   auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
-  EXPECT_GE(RunChunking(shallow, t, 4, 1 << 22).chunkSize,
+  // STRICTLY greater: every rung is `nBytes / (nChannels*chunkSize) < depth*K`,
+  // so substituting 1 for tree.depth makes shallow and deep identical and a >=
+  // assertion still passes. Measured values are 131072 vs 65536.
+  EXPECT_GT(RunChunking(shallow, t, 4, 1 << 22).chunkSize,
             RunChunking(deep, t, 4, 1 << 22).chunkSize);
 }
 

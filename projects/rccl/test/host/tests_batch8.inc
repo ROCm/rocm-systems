@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // waitWorkFifoAvailable (enqueue.cc:1652)
 //
@@ -104,9 +110,12 @@ TEST_F(EnqueueMicrotest, PlanSetDefaultKernel_SelectsKernelByCommUnroll) {
   comm->unroll = 1;
   ncclPlanSetDefaultKernel(comm.get(), planB.get());
 
-  EXPECT_NE(nullptr, planA->kernelFn);
-  EXPECT_NE(nullptr, planB->kernelFn);
-  EXPECT_NE(planA->kernelFn, planB->kernelFn) << "the index must come from comm->unroll";
+  // Assert the INDEX ARITHMETIC against the table, the same shape the sibling
+  // test below uses. Comparing the two plans to each other instead would rest on
+  // the surrogates having distinct addresses, which is a property of the test
+  // shim rather than of the code under test.
+  EXPECT_EQ(ncclKerns[0].kernelFn, planA->kernelFn) << "unroll 0 must select entry 0";
+  EXPECT_EQ(ncclKerns[1].kernelFn, planB->kernelFn) << "unroll 1 must select entry 1";
 }
 
 TEST_F(EnqueueMicrotest, PlanSetDefaultKernel_CopiesSpecializedFlagFromTheTable) {

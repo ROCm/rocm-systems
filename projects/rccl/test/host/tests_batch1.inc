@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // ncclFuncTrafficPerByte (enqueue.cc:158) -- traffic multiplier per collective.
 // Pure: no externals. The three nRanks-returning arms are indistinguishable
@@ -22,13 +28,26 @@ TEST_F(EnqueueMicrotest, FuncTrafficPerByte_ReduceScatter_IsNRanks) {
   EXPECT_EQ(3, ncclFuncTrafficPerByte(ncclFuncReduceScatter, 3));
 }
 
-TEST_F(EnqueueMicrotest, FuncTrafficPerByte_Default_IsOne) {
-  // Every func NOT named in the switch falls to 1. Broadcast/Reduce/Send/Recv
-  // share that arm; assert several so deleting one case label is visible.
-  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce, ncclFuncSendRecv,
-                       ncclFuncSend, ncclFuncRecv}) {
-    EXPECT_EQ(1, ncclFuncTrafficPerByte(f, 8)) << "func=" << int(f);
+TEST_F(EnqueueMicrotest, FuncTrafficPerByte_EveryFuncOutsideTheNamedArmsIsOne) {
+  // Sweep the WHOLE enum rather than a hand-picked few. A short list left
+  // ncclFuncAlltoAllvGda untested, so deleting `case ncclFuncAlltoAllvGda:
+  // return nRanks;` kept every test green. Sweeping also stays closed when a new
+  // ncclFunc_t is added: the new value lands in the default arm and is checked.
+  const int kRanks = 8;
+  for (int i = 0; i < int(ncclNumFuncs); ++i) {
+    const auto f = static_cast<ncclFunc_t>(i);
+    const bool namedArm = (f == ncclFuncAllReduce) || (f == ncclFuncAllGather) ||
+                          (f == ncclFuncReduceScatter) || (f == ncclFuncAlltoAllvGda);
+    if (namedArm) continue;
+    EXPECT_EQ(1, ncclFuncTrafficPerByte(f, kRanks)) << "func=" << i;
   }
+}
+
+TEST_F(EnqueueMicrotest, FuncTrafficPerByte_AlltoAllvGda_IsNRanks) {
+  // The arm the sweep above deliberately excludes -- and the one a short default
+  // list missed entirely. Two rank counts so a pinned constant cannot pass.
+  EXPECT_EQ(8, ncclFuncTrafficPerByte(ncclFuncAlltoAllvGda, 8));
+  EXPECT_EQ(3, ncclFuncTrafficPerByte(ncclFuncAlltoAllvGda, 3));
 }
 
 // ===========================================================================
@@ -150,9 +169,16 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_IsScratchTimesWarpCount) {
 }
 
 TEST_F(EnqueueMicrotest, ShmemDynamicSize_Gfx950_UsesItsOwnMaxNthreads) {
-  // :81 selects RCCL_GFX950_MAX_NTHREADS for arch 950 only. If the two
-  // constants are equal today this test still pins the SELECTION, so a change
-  // to either constant is caught rather than silently absorbed.
+  // HONEST SCOPE: RCCL_GFX950_MAX_NTHREADS and RCCL_DEFAULT_MAX_NTHREADS are
+  // both 256 today, so the `(cudaArch == 950) ? ... : ...` ternary is an
+  // EQUIVALENT MUTANT and the assertion below is a tautology -- there is nothing
+  // here for a test to catch. The static_assert is the real guard: the moment
+  // the two constants diverge it fails, and whoever changes them is told to make
+  // this test differential (compare 950 against a non-950 arch) at exactly the
+  // point the branch regains power.
+  static_assert(RCCL_GFX950_MAX_NTHREADS == RCCL_DEFAULT_MAX_NTHREADS,
+                "The gfx950 nthreads constant now differs from the default: make "
+                "ShmemDynamicSize_Gfx950_UsesItsOwnMaxNthreads differential.");
   constexpr int kWarps950 = RCCL_GFX950_MAX_NTHREADS / 32;
   EXPECT_EQ(rcclShmemScratchWarpSize(950, 32) * kWarps950, rcclShmemDynamicSize(950, 32));
 }

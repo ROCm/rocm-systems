@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // ncclRedOpCreatePreMulSum_impl (enqueue.cc:4104) / ncclRedOpDestroy_impl (:4148)
 //
@@ -255,11 +261,16 @@ struct BatchComm {
   ncclComm* get() { return comm.get(); }
 };
 
-void SetBatchParam(int64_t v) {
-  g_loadParam = [v](const char* env, int64_t deft) {
-    return std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0 ? v : deft;
+// One param setter for the whole file: three GetImplicitOrder tests below used
+// to re-roll this same lambda with a different key, which risks the copies
+// drifting on the `deft` fallback.
+void SetParam(const char* key, int64_t v) {
+  std::string k(key);
+  g_loadParam = [k, v](const char* env, int64_t deft) {
+    return std::strcmp(env, k.c_str()) == 0 ? v : deft;
   };
 }
+void SetBatchParam(int64_t v) { SetParam("RCCL_P2P_BATCH_ENABLE", v); }
 }  // namespace
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_UserOverrideWinsOverEverything) {
@@ -290,6 +301,18 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
   EXPECT_EQ(1, rcclEffectiveP2pBatchEnable(bc.get()));
 }
 
+TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
+  // The `!rcclUseAinic()` conjunct -- the reason fakes/enqueue_stub_overrides.cc
+  // exists at all. Without this the flag stays false in every test and dropping
+  // the conjunct survives. Differential with MultiNodeGfx950_IsEnabled, which is
+  // identical but for the AINIC flag.
+  BatchComm bc(/*nNodes=*/2, "gfx950");
+  SetBatchParam(-1);
+  g_rcclUseAinic = true;
+  EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get()))
+      << "gfx950 with AINIC must not enable p2p batching";
+}
+
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) {
   // Differential against the test above: same node count, different arch.
   for (const char* gcn : {"gfx942", "gfx90a", "gfx1100"}) {
@@ -307,18 +330,14 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 // ===========================================================================
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamDisabled_IsNone) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "LAUNCH_ORDER_IMPLICIT") == 0 ? int64_t(0) : deft;
-  };
+  SetParam("LAUNCH_ORDER_IMPLICIT", 0);
   auto mode = ncclImplicitOrderLaunch;  // poison
   ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderNone, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamEnabled_IsSerialOnAmd) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "LAUNCH_ORDER_IMPLICIT") == 0 ? int64_t(1) : deft;
-  };
+  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
   auto mode = ncclImplicitOrderNone;  // poison
   ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderSerial, mode);
@@ -328,9 +347,7 @@ TEST_F(EnqueueMicrotest, GetImplicitOrder_CapturingIsIrrelevantOnAmd) {
   // The `capturing` parameter only matters inside the #if'd-out CUDA block, so
   // on AMD both values must give the same answer. Pins that the AMD arm really
   // is unconditional -- if the #if ever changes, this fails.
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "LAUNCH_ORDER_IMPLICIT") == 0 ? int64_t(1) : deft;
-  };
+  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
   auto a = ncclImplicitOrderNone;
   auto b = ncclImplicitOrderNone;
   ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, /*capturing=*/true));

@@ -161,6 +161,17 @@
       "tests": [
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_enqueue": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroEnqueue",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -198,6 +209,12 @@
       "name": "RCCL Microtests - init.cc (uncached)",
       "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
       "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue.cc",
+      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_enqueue",
       "enabled": true
     }
   ]

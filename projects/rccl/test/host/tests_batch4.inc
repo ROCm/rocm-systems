@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // rcclKernelPackedChannels (enqueue.cc:177) -- how many channels a single
 // collective's traffic actually packs into. Reported to users via

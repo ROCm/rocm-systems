@@ -38,6 +38,17 @@ translation-unit anonymous namespaces):
 
 - **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
   `FreshRegistration*`.
+- **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
+  `EnqueueMicrotest.*`. Its tests are split across `tests_batch1..9.inc`, which are
+  `#include`d by `enqueue-test.cc` in order — they share one anonymous namespace
+  and later fragments use fixtures from earlier ones, so the include order is
+  load-bearing. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  which cannot compile host-only; the TU pre-sets that header's include guard and
+  supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
+  addresses are stored in a table, never launched). Three shared `nccl_stubs.cc`
+  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros — see
+  `fakes/enqueue_stub_overrides.cc` for the 1:1 mapping. See
+  `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc

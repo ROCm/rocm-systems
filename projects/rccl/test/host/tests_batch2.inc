@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // hostToDevRedOp (enqueue.cc:3186) -- maps a host ncclRedOp_t + datatype onto
 // the device-side op and its scalar argument.

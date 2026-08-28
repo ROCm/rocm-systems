@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // Mutation-driven reinforcements.
 //
@@ -193,12 +199,14 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   // no-op default leaves the selection identical either way.
   AlgoInfoComm cc;
   auto task = CostTask(ncclFuncAllReduce);
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  initCollCostTable((float**)table);
+  CostTable tbl;                       // batch4: owns the array + initCollCostTable
   ScriptAllTimes(1.0f);
 
-  float* tablePtr = (float*)table;
-  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, &tablePtr,
+  // ptr() hands over the ARRAY cast to float**, which is what production passes
+  // (:2783). topoGetAlgoInfo casts it straight back to float(*)[NCCL_NUM_PROTOCOLS]
+  // and reads all NCCL_NUM_ALGORITHMS*NCCL_NUM_PROTOCOLS cells -- passing the
+  // address of a float* local instead would read far past it.
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
 
   EXPECT_EQ(1, g_rcclUpdateCollectiveProtocolCalls) << "rcclUpdateCollectiveProtocol (:2657)";
@@ -223,16 +231,14 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
 TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsFailure_IsSilentlyIgnored) {
   AlgoInfoComm cc;
   auto task = CostTask(ncclFuncAllReduce);
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  initCollCostTable((float**)table);
+  CostTable tbl;
   ScriptAllTimes(1.0f);
   g_rcclOverrideChannels = [](struct ncclComm*, ncclFunc_t, size_t, int&) {
     return ncclInvalidArgument;
   };
 
-  float* tablePtr = (float*)table;
   EXPECT_EQ(ncclSuccess,
-            topoGetAlgoInfo(cc.get(), &task, 1 << 20, &tablePtr, /*simInfo=*/nullptr))
+            topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr))
       << "enqueue.cc:2660 discards the result, so the failure cannot surface";
   EXPECT_EQ(1, g_rcclOverrideChannelsCalls) << "but the hook WAS consulted";
 }
@@ -242,16 +248,70 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   // task, not just that the hook was called.
   AlgoInfoComm cc;
   auto task = CostTask(ncclFuncAllReduce);
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  initCollCostTable((float**)table);
+  CostTable tbl;
   ScriptAllTimes(1.0f);
   g_rcclOverrideChannels = [](struct ncclComm*, ncclFunc_t, size_t, int& nc) {
     nc = 3;
     return ncclSuccess;
   };
 
-  float* tablePtr = (float*)table;
-  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, &tablePtr,
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
+}
+
+// Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
+// table it was handed. Scripting exactly one (algo, proto) pair leaves every
+// other cell at NCCL_ALGO_PROTO_IGNORE, so the argmin has only one candidate and
+// selection is forced. If the table were not actually being read -- as when the
+// address of a float* local was passed instead of the array -- the choice would
+// be decided by whatever bytes followed it and this would not hold.
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_SelectsTheOnlyScriptedCell) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  // Only RING/SIMPLE gets a time; everything else stays IGNOREd.
+  g_topoGetAlgoTime = [](struct ncclComm*, int, int a, int p, size_t, int, float* t) {
+    if (a == NCCL_ALGO_RING && p == NCCL_PROTO_SIMPLE) { if (t) *t = 1.0f; return ncclSuccess; }
+    return ncclSystemError;   // NCCLCHECK'd, so this cell is never written
+  };
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
+// ===========================================================================
+// Seams whose comments promised a tested rejection path. Driving them here so
+// the promise holds; the remaining declared-but-undriven seams are marked in
+// enqueue_fakes.h as link-floor-only rather than left to imply coverage.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, RedOpCreate_CommNotReady_IsRejected) {
+  // g_commEnsureReadyResult is documented as "controllable so a test can
+  // exercise the not-ready rejection" -- this is that test. RedOpCreate joins
+  // the init thread through ncclCommEnsureReady before touching the free list,
+  // so a not-ready comm must be rejected with nothing allocated.
+  RedOpComm rc;
+  g_commEnsureReadyResult = ncclInvalidArgument;
+  ncclRedOp_t op = ncclSum;
+  float s = 1.0f;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
+                                          ncclScalarHostImmediate, rc.get()));
+  EXPECT_EQ(0, rc.get()->userRedOpCapacity) << "must reject before growing the free list";
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
+  // Production NCCLCHECKs the recorder call at the end of RedOpCreate, which is
+  // why the seam exists. Note the contrast with init.cc:369, where the identical
+  // call is NOT checked -- pinning this one keeps that asymmetry visible.
+  RedOpComm rc;
+  g_recorderResult = ncclInternalError;
+  ncclRedOp_t op = ncclSum;
+  float s = 1.0f;
+  EXPECT_EQ(ncclInternalError,
+            ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
+                                          ncclScalarHostImmediate, rc.get()));
 }

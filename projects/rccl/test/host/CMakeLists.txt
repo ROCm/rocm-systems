@@ -251,13 +251,22 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
   )
 
+  # The oracle TUs are produced by the hipify step, so they do not exist at
+  # configure time. The init block above marks them GENERATED, but source-file
+  # properties are DIRECTORY-scoped -- relying on that is a hidden dependency on
+  # target ordering within this file. Set it here too so this block stands alone.
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+    PROPERTIES GENERATED TRUE)
+
   add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
   target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_COMMON_INCLUDE_DIRS}
-    ${PROJECT_BINARY_DIR}/hipify/src/device          # device_table.h chain
-    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
-    ${PROJECT_BINARY_DIR}/hipify/gensrc)             # generated device_table.h
+    ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
+    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
   # src/enqueue.cc is basename-unique in the tree, so hipify keeps its name --
   # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
   target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
@@ -728,9 +737,8 @@ target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
 target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${RCCL_INCLUDE_DIRS}
-  ${RCCL_HIPIFY_DIR}/src/device                # device_table.h include chain
+  ${RCCL_HIPIFY_DIR}/src/device                # device/common.h (neutered)
   ${RCCL_HIPIFY_DIR}/src/include/nccl_device
-  ${RCCL_BUILD_DIR}/hipify/gensrc              # generated device_table.h
 )
 
 target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
@@ -764,4 +772,5 @@ endif()
 # with CTest (matching test/host from #9320); run them directly, e.g.
 #   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
 #   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
+#   ./build/rccl-UnitTestsMicroEnqueue
 # The in-RCCL-build path registers the micro/init binaries via CTest categories.

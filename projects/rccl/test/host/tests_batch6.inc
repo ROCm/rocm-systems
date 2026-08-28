@@ -1,3 +1,9 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 // ===========================================================================
 // addWorkBatchToPlan (enqueue.cc:209) -- appends one work item to a channel's
 // batch queue, opening a NEW batch or an EXTENSION batch when the current one
@@ -19,8 +25,17 @@ struct BatchPlanComm {
     comm->nNodes = nNodes;
     comm->cudaArch = cudaArch;
     ncclMemoryStackConstruct(&comm->memScoped);
+    // memPermanent is load-bearing, not decorative: addProxyOpIfNeeded allocates
+    // its queued copy from memPool_ncclProxyOp against &comm->memPermanent. A
+    // value-initialised stack has bumper == end == 0, so allocate() falls through
+    // to allocateSpilled and mallocs a 64 KiB hunk -- and because topFrame.hunk is
+    // null it is never linked into the frame chain, so nothing can reclaim it.
+    ncclMemoryStackConstruct(&comm->memPermanent);
   }
-  ~BatchPlanComm() { ncclMemoryStackDestruct(&comm->memScoped); }
+  ~BatchPlanComm() {
+    ncclMemoryStackDestruct(&comm->memScoped);
+    ncclMemoryStackDestruct(&comm->memPermanent);
+  }
   ncclComm* c() { return comm.get(); }
   ncclKernelPlan* p() { return plan.get(); }
   ncclKernelPlanner::WipPlan::Channel* chan(int id = 0) {

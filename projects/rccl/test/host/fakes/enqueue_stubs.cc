@@ -32,23 +32,20 @@ namespace {
 }
 }  // namespace
 
-#define FAIL_LOUD(fn) Unreached(fn)
-
 // ---- graph capture / stream ordering -------------------------------------
-extern "C" {}
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
-  FAIL_LOUD("ncclCudaGetCapturingGraph");
+  Unreached("ncclCudaGetCapturingGraph");
 }
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
-  FAIL_LOUD("ncclCudaGraphAddDestructor");
+  Unreached("ncclCudaGraphAddDestructor");
 }
 // ncclStreamWaitStream: owned by nccl_fakes.cc:293 (shared). Not redefined here.
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
-  FAIL_LOUD("ncclStreamAdvanceToEvent");
+  Unreached("ncclStreamAdvanceToEvent");
 }
 ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*,
                                                 bool, hipStream_t*) {
-  FAIL_LOUD("ncclStrongStreamAcquiredWorkStream");
+  Unreached("ncclStrongStreamAcquiredWorkStream");
 }
 
 // ---- symmetric / RMA / bcast scheduling ----------------------------------
@@ -56,27 +53,27 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm*, struct ncclTaskColl*,
                                        struct ncclIntruQueue<struct ncclTaskColl,
                                                              &ncclTaskColl::next>*,
                                        struct ncclTaskColl**) {
-  FAIL_LOUD("ncclMakeSymmetricTaskList");
+  Unreached("ncclMakeSymmetricTaskList");
 }
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,
                                         struct ncclIntruQueue<struct ncclTaskColl,
                                                               &ncclTaskColl::next>*,
                                         struct ncclKernelPlan*) {
-  FAIL_LOUD("ncclSymmetricTaskScheduler");
+  Unreached("ncclSymmetricTaskScheduler");
 }
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm*, struct ncclKernelPlan*,
                                           struct ncclKernelPlanBudget*) {
-  FAIL_LOUD("ncclScheduleBcastTasksToPlan");
+  Unreached("ncclScheduleBcastTasksToPlan");
 }
 ncclResult_t ncclRmaProxyReclaimPlan(struct ncclComm*, struct ncclKernelPlan*) {
-  FAIL_LOUD("ncclRmaProxyReclaimPlan");
+  Unreached("ncclRmaProxyReclaimPlan");
 }
 ncclResult_t ncclLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull,
                                ncclDataType_t, hipStream_t, void const*) {
-  FAIL_LOUD("ncclLaunchOneRank");
+  Unreached("ncclLaunchOneRank");
 }
 ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void*, void**) {
-  FAIL_LOUD("ncclShadowPoolToHost");
+  Unreached("ncclShadowPoolToHost");
 }
 
 // ---- buffer registration --------------------------------------------------
@@ -84,24 +81,24 @@ ncclResult_t ncclRegisterCollBuffers(struct ncclComm*, struct ncclTaskColl*, voi
                                      struct ncclIntruQueue<struct ncclCommCallback,
                                                            &ncclCommCallback::next>*,
                                      bool*) {
-  FAIL_LOUD("ncclRegisterCollBuffers");
+  Unreached("ncclRegisterCollBuffers");
 }
 ncclResult_t ncclRegisterCollNvlsBuffers(struct ncclComm*, struct ncclTaskColl*, void**, void**,
                                          struct ncclIntruQueue<struct ncclCommCallback,
                                                                &ncclCommCallback::next>*,
                                          bool*) {
-  FAIL_LOUD("ncclRegisterCollNvlsBuffers");
+  Unreached("ncclRegisterCollNvlsBuffers");
 }
 ncclResult_t ncclRegisterP2pIpcBuffer(struct ncclComm*, void*, size_t, int, int*, void**,
                                       struct ncclIntruQueue<struct ncclCommCallback,
                                                             &ncclCommCallback::next>*) {
-  FAIL_LOUD("ncclRegisterP2pIpcBuffer");
+  Unreached("ncclRegisterP2pIpcBuffer");
 }
 ncclResult_t ncclRegisterP2pNetBuffer(struct ncclComm*, void*, size_t, struct ncclConnector*,
                                       int*, void**,
                                       struct ncclIntruQueue<struct ncclCommCallback,
                                                             &ncclCommCallback::next>*) {
-  FAIL_LOUD("ncclRegisterP2pNetBuffer");
+  Unreached("ncclRegisterP2pNetBuffer");
 }
 
 // ---- misc ----------------------------------------------------------------
