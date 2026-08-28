@@ -116,6 +116,11 @@ def submit_and_wait(
         sys.stdout.flush()
 
         job_id = parse_parsable_job_id(proc.stdout)
+        if job_id and chdir is not None:
+            # So a later `if: cancelled()` step can scancel if this process is
+            # SIGKILL'd before the handler runs (GHA signals the step PID).
+            (chdir / "slurm-job-id").write_text(f"{job_id}\n")
+            log(f"==> wrote {chdir / 'slurm-job-id'}")
         if proc.returncode != 0:
             return proc.returncode, job_id
         if not job_id:
