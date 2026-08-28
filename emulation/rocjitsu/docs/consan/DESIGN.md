@@ -517,6 +517,50 @@ This HSA implementation is an adapter boundary for future DBI integration.
 Semantic inventory, planning, target lowering, evidence schemas, and analysis
 must not depend on HSA interposition details.
 
+### HSA-hook/DBI ownership and deletion boundary
+
+The current adapter has one explicit lifecycle. Reader creation snapshots the
+pristine code object. Executable load first runs address-free inventory and
+evidence planning, allocates report storage from the resulting typed layout,
+binds those runtime resources, and retries the production transform. Only a
+validated replacement is given to ROCR, and its storage plus kernel-object
+metadata remain live until the executable can no longer dispatch it. Queue
+interception adjusts only the dispatch metadata required by the installed
+patches. Executable destruction retires the corresponding report allocation;
+tool unload snapshots any remaining quiescent reports, decodes and analyzes
+them on the host, evaluates trust, renders diagnostics, and then relinquishes
+runtime-owned storage. Every failed inventory, allocation, retry, replacement
+load, or executable association follows the same registry-owned cleanup path.
+
+Before/after instrumentation is not chosen by the hook. `ConSanProbeIntent`
+records the semantic position and the transform pipeline realizes it today;
+future DBI site/probe placement will consume the same distinction. Likewise,
+the hook does not reconstruct report capacity or lowering success. It consumes
+`ConSanRequest`, the other immutable production policy contracts,
+`TransformResult`, `ConSanMoiReportBufferLayout`, and `BoundRuntimeResources`.
+MOI report decoding produces `AutoMoiReportSummary`; the pure
+`AutoMoiReportTrustEvaluation` projection owns dynamic completeness and
+diagnostic meaning, so generic HSA teardown consumes a typed verdict rather
+than individual report counters.
+
+The migration keep/delete map is:
+
+| Current responsibility | Present owner | DBI migration action |
+| --- | --- | --- |
+| ConSan option meaning, engine selection, race semantics, report payload schemas, host replay/analysis, trust policy, and user diagnostics | ConSan production components | **Keep.** Record/Replay host processing is the first DBI client; Sampled, InlineShadow, and SuperCollider remain until DBI has a reviewed on-device-processing contract. |
+| Immutable request/result, inventory, observation, report-layout, and bound-resource contracts | Shared RocJitsu/ConSan boundary | **Keep and adapt.** DBI consumes or supersedes the mechanical parts without introducing a second ConSan model. |
+| `HSA_TOOLS_LIB` activation, API-table chaining, reader/load/executable/symbol/queue interception, replacement-image retention, and dispatch packet interception | Temporary ConSan HSA adapter | **Delete** only when the common DBI hook and variant/dispatch lifecycle replace it. The current hook remains the sole intentional temporary framework boundary. |
+| Code-object snapshotting, variant installation, original/instrumented mapping, transparent placement, and kernel metadata growth | Current transform plus HSA adapter | **Move to DBI, then delete the adapter copies** one tested slice at a time; do not imitate the future DBI API locally. |
+| HSA report allocation, executable association, coherent snapshot, flow/loss accounting, and cleanup | ConSan automatic report registries | **Replace with DBI transport/lifetime services** when available. Preserve the typed ConSan layout/decoder and cleanup guarantees during cutover. |
+| Host Record/Replay report decode and causal replay | ConSan report runtime/model | **Keep in ConSan** behind DBI's host record stream; it must not move into the common hook. |
+| Device-side Sampled, InlineShadow, and SuperCollider evidence processing | ConSan probes | **Keep for now.** Reassess each independently after DBI defines on-device processing; near-term host-only DBI is not a reason to weaken them. |
+| Current ConSan hook/device tests | ConSan test suites | **Keep until ownership moves.** Add DBI-focused tests for each migrated mechanical invariant before relocating or deleting the corresponding ConSan integration test. |
+
+Translated-code instrumentation remains deferred until a concrete use case.
+The current five-target native-code requirement, both before- and after-guest
+intent, and per-dispatch buffer binding remain requirements on the eventual DBI
+client even where the checked-in DBI implementation does not yet provide them.
+
 ## Shared code and architecture-specific code
 
 The supported targets are gfx942 (CDNA3), gfx950 (CDNA4), gfx1100 (RDNA3),
