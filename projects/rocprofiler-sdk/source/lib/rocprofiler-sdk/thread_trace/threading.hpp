@@ -32,11 +32,18 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace thread_trace
 {
+inline uint64_t
+next_chunk_id(std::vector<uint64_t>& per_shader_engine, size_t shader_engine_id)
+{
+    return per_shader_engine[shader_engine_id]++;
+}
+
 rocprofiler_thread_trace_timestamp_t
 convert_timestamp(rocprofiler_agent_id_t agent_id, uint64_t gpu_clock);
 
@@ -79,7 +86,7 @@ struct triple_buffer_shared_data_t
         std::condition_variable cv{};
     };
 
-    static constexpr size_t MAX_SLOTS = 32;
+    static constexpr size_t MAX_SLOTS = 64;
 
     att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
 
@@ -113,6 +120,8 @@ struct triple_buffer_producer_data_t
     signal_ptr_t                                 submit_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
+    size_t                                       num_shader_engines{0};
+
     std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets{};
 
     std::function<bool(std::unique_ptr<hsa::TraceControlAQLPacket>&)> restart_trace{};
