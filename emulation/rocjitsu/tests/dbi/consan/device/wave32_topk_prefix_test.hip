@@ -204,11 +204,22 @@ __global__ __launch_bounds__(kThreadCount) void wave32_topk_prefix_for_consan(De
     const uint32_t write_index = builtin_prefix + builtin_rank;
     state->observed_builtin_payload[write_index] = tid + 1u;
   }
+  // Retain one fixed producer/consumer pair alongside the permuted TopK
+  // accesses. The sparse prefix remains the realistic workload, while this
+  // reserved tail slot makes the missing publication edge independent of
+  // physical wave scheduling and sampled bank selection.
+  constexpr uint32_t publication_slot = kThreadCount - 1u;
+  if (wave == 0u && lane == 0u)
+    consan_device_test::store_lds_word(&payload[publication_slot], 0x41000000u | lane);
 
   if (state->synchronize)
     __syncthreads();
 
   state->observed_payload[tid] = consan_device_test::load_lds_word(&payload[tid]);
+  if (wave == 1u && lane == 0u) {
+    const uint32_t publication = consan_device_test::load_lds_word(&payload[publication_slot]);
+    asm volatile("" : : "v"(publication));
+  }
   if (tid == 0u) {
     state->final_counter = counter;
     state->builtin_final_counter = builtin_counter;
