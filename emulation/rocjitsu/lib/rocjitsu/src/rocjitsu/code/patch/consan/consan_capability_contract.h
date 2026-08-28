@@ -325,6 +325,16 @@ struct ConSanTargetProfile {
   /// about whether the target supports two-address LDS operations.
   bool requires_split_two_address_lds_relocation = false;
   uint16_t semantic_form_mask = 0;
+  /// Maximum sites addressable by one ordinary dense MOI routing group. A
+  /// zero value selects target-specific translated routing instead.
+  uint8_t moi_dense_route_group_capacity = 0;
+  /// Whether a relocated dense host may rescue a far atomic or barrier that
+  /// has no directly reachable local island.
+  bool supports_moi_far_dense_atomic_route = false;
+  bool supports_moi_far_dense_barrier_route = false;
+  bool supports_moi_dense_s_call_b64 = false;
+  /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
+  bool requires_raw_memory_order_qualifier = false;
 };
 
 /// The validated, immutable target view for one kernel descriptor.
@@ -415,6 +425,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
+        .moi_dense_route_group_capacity = 31,
+        .supports_moi_far_dense_atomic_route = true,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = false,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX950,
@@ -457,6 +472,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
+        .moi_dense_route_group_capacity = 31,
+        .supports_moi_far_dense_atomic_route = true,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = false,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1100,
@@ -499,6 +519,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .requires_even_vgpr_tuples = false,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
+        .moi_dense_route_group_capacity = 64,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = false,
+        .supports_moi_dense_s_call_b64 = false,
+        .requires_raw_memory_order_qualifier = true,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1201,
@@ -541,6 +566,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .requires_even_vgpr_tuples = false,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
+        .moi_dense_route_group_capacity = 64,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = true,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1250,
@@ -583,6 +613,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
+        .moi_dense_route_group_capacity = 0,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = false,
+        .supports_moi_dense_s_call_b64 = false,
+        .requires_raw_memory_order_qualifier = true,
     },
 }};
 
@@ -680,6 +715,16 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
         (profile.requires_split_two_address_lds_relocation &&
          profile.encoding_family != ConSanEncodingFamily::Gfx12) ||
+        (profile.moi_dense_route_group_capacity != 0u &&
+         profile.moi_dense_route_group_capacity != 31u &&
+         profile.moi_dense_route_group_capacity != 64u) ||
+        (profile.supports_moi_far_dense_atomic_route &&
+         !profile.supports_moi_far_dense_barrier_route) ||
+        (profile.supports_moi_dense_s_call_b64 &&
+         profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
+        (profile.requires_raw_memory_order_qualifier !=
+         (profile.encoding_family == ConSanEncodingFamily::Gfx11 ||
+          profile.encoding_family == ConSanEncodingFamily::Gfx12)) ||
         (profile.has_cluster_facilities &&
          (profile.semantic_form_mask &
           consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u)) {

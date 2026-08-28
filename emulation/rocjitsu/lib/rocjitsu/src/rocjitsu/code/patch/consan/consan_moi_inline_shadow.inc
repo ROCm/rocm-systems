@@ -143,15 +143,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     branch_router.retire_range(offset, static_cast<uint64_t>(words) * sizeof(uint32_t));
   };
 
-  const bool uses_gfx9_cdna_encoding = target->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                                       target->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
-  const size_t dense_group_capacity =
-      target->has_selectable_vgpr_bank ? 0u : (uses_gfx9_cdna_encoding ? 31u : 64u);
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, arch, resource_state, original_text, candidates, dense_group_capacity,
-      access_island_begin, access_relay_words, use_indirect_appended,
-      MoiDenseAccessRouteAbi::InlineShadow, local_entry_islands ? &*local_entry_islands : nullptr,
-      &branch_router);
+      result, options, arch, resource_state, original_text, candidates,
+      target->moi_dense_route_group_capacity, access_island_begin, access_relay_words,
+      use_indirect_appended, MoiDenseAccessRouteAbi::InlineShadow,
+      local_entry_islands ? &*local_entry_islands : nullptr, &branch_router);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;

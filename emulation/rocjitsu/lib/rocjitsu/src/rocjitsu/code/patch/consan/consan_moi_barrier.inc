@@ -943,7 +943,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
-  if (!consan_is_capability_arch(arch)) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch does not support this architecture");
     return;
@@ -1751,9 +1752,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (consan_arch_has_s_call_i64(arch))
+        if (target->direct_call_form == ConSanDirectCallForm::SCallI64)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (consan_arch_has_s_call_b64(arch) && arch == ROCJITSU_CODE_ARCH_RDNA4)
+        if (target->direct_call_form == ConSanDirectCallForm::SCallB64 &&
+            target->arch == ROCJITSU_CODE_ARCH_RDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -1979,9 +1981,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (consan_arch_has_s_call_i64(arch))
+        if (target->direct_call_form == ConSanDirectCallForm::SCallI64)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (consan_arch_has_s_call_b64(arch))
+        if (target->direct_call_form == ConSanDirectCallForm::SCallB64)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };

@@ -1111,13 +1111,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       compute_sopp_branch_simm16(selected.front().candidate.barrier.site.text_offset,
                                  new_text.size())
           .has_value();
-  const bool direct_gfx12_transport =
-      target_profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
+  const bool direct_far_dense_transport =
+      target_profile->supports_moi_far_dense_barrier_route &&
       target_profile->code_transport == ConSanCodeTransportModel::DirectCodeObject;
   const bool has_stranded_barrier =
-      (target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-       target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4 ||
-       direct_gfx12_transport) &&
+      target_profile->supports_moi_far_dense_barrier_route &&
       std::ranges::any_of(std::views::iota(size_t{0}, selected.size()), [&](size_t index) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         const uint64_t reserved_island =
@@ -1128,7 +1126,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   const bool use_dense_barrier_relay =
       (target_profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation &&
        !translated_single_direct_barrier) ||
-      (direct_gfx12_transport && selected.size() >= 8u) || has_stranded_barrier;
+      (direct_far_dense_transport && selected.size() >= 8u) || has_stranded_barrier;
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
@@ -1246,7 +1244,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         if (target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
         if (target_profile->direct_call_form == ConSanDirectCallForm::SCallB64 &&
-            target_profile->encoding_family != ConSanEncodingFamily::Gfx11)
+            target_profile->supports_moi_dense_s_call_b64)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -2173,8 +2171,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   // body. CDNA atomic instructions have enough anchor space for a scalar
   // call, so share the same liveness-proven, call-return-keyed relay model as
   // far barriers instead of silently dropping the causal edge.
-  if (target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-      target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4) {
+  if (target_profile->supports_moi_far_dense_atomic_route) {
     std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0u; index < selected.size(); ++index) {
       const Planned &planned = selected[index];
@@ -2936,10 +2933,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     errors.emplace_back("ConSan MOI fence record patch has no supported target profile");
     return std::nullopt;
   }
-  const bool requires_raw_th = target->encoding_family == ConSanEncodingFamily::Gfx11 ||
-                               target->encoding_family == ConSanEncodingFamily::Gfx12;
   if (!address_plan.supported() || !candidate.communication_site.raw_scope ||
-      (requires_raw_th && !candidate.communication_site.raw_th) || !candidate.is_well_formed()) {
+      (target->requires_raw_memory_order_qualifier && !candidate.communication_site.raw_th) ||
+      !candidate.is_well_formed()) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
     return std::nullopt;
   }

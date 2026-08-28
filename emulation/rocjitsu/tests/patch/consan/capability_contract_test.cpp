@@ -59,6 +59,11 @@ struct ExpectedTargetProfile {
   bool requires_even_vgpr_tuples;
   bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
+  uint8_t moi_dense_route_group_capacity;
+  bool supports_moi_far_dense_atomic_route;
+  bool supports_moi_far_dense_barrier_route;
+  bool supports_moi_dense_s_call_b64;
+  bool requires_raw_memory_order_qualifier;
 };
 
 constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
@@ -103,6 +108,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
+        .moi_dense_route_group_capacity = 31,
+        .supports_moi_far_dense_atomic_route = true,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = false,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX950,
@@ -145,6 +155,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
+        .moi_dense_route_group_capacity = 31,
+        .supports_moi_far_dense_atomic_route = true,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = false,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1100,
@@ -187,6 +202,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = false,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
+        .moi_dense_route_group_capacity = 64,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = false,
+        .supports_moi_dense_s_call_b64 = false,
+        .requires_raw_memory_order_qualifier = true,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1201,
@@ -229,6 +249,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = false,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
+        .moi_dense_route_group_capacity = 64,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = true,
+        .supports_moi_dense_s_call_b64 = true,
+        .requires_raw_memory_order_qualifier = true,
     },
     {
         .target = ROCJITSU_CODE_TARGET_GFX1250,
@@ -271,6 +296,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .requires_even_vgpr_tuples = true,
         .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
+        .moi_dense_route_group_capacity = 0,
+        .supports_moi_far_dense_atomic_route = false,
+        .supports_moi_far_dense_barrier_route = false,
+        .supports_moi_dense_s_call_b64 = false,
+        .requires_raw_memory_order_qualifier = true,
     },
 }};
 
@@ -317,6 +347,14 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
             expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
+  EXPECT_EQ(actual.moi_dense_route_group_capacity, expected.moi_dense_route_group_capacity);
+  EXPECT_EQ(actual.supports_moi_far_dense_atomic_route,
+            expected.supports_moi_far_dense_atomic_route);
+  EXPECT_EQ(actual.supports_moi_far_dense_barrier_route,
+            expected.supports_moi_far_dense_barrier_route);
+  EXPECT_EQ(actual.supports_moi_dense_s_call_b64, expected.supports_moi_dense_s_call_b64);
+  EXPECT_EQ(actual.requires_raw_memory_order_qualifier,
+            expected.requires_raw_memory_order_qualifier);
 }
 
 TEST(ConSanCapabilityContract, TargetProfileRowsDeclareEveryArchitecturalFact) {
@@ -395,6 +433,14 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("two-address relocation split on a non-gfx12 encoding", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });
+  expect_invalid("unsupported dense-route group capacity",
+                 [](auto &profiles) { profiles[0].moi_dense_route_group_capacity = 1u; });
+  expect_invalid("far atomic route without far barrier route",
+                 [](auto &profiles) { profiles[0].supports_moi_far_dense_barrier_route = false; });
+  expect_invalid("dense s_call_b64 support without the target call form",
+                 [](auto &profiles) { profiles[4].supports_moi_dense_s_call_b64 = true; });
+  expect_invalid("raw memory-order qualifier disagrees with encoding",
+                 [](auto &profiles) { profiles[0].requires_raw_memory_order_qualifier = true; });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {
     profiles[0].semantic_form_mask = static_cast<uint16_t>(
         profiles[0].semantic_form_mask | (1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)));

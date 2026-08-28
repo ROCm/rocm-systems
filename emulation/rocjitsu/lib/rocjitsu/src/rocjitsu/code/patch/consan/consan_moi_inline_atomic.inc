@@ -320,8 +320,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   // reach of both the pristine-end island bank and every appended body.  A
   // liveness-proven relocated host supplies one shared in-kernel island.  Its
   // scalar key identifies the normal host path or one of the atomic bodies.
-  if (target->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-      target->encoding_family == ConSanEncodingFamily::Gfx9Cdna4) {
+  if (target->supports_moi_far_dense_atomic_route) {
     std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0; index < planned_candidates.size(); ++index) {
       const PlannedInlineAtomic &planned = planned_candidates[index];
