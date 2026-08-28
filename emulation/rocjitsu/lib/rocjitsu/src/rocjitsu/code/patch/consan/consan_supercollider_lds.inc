@@ -977,24 +977,40 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         // A shared helper can reuse any run proved dead in every owner. An
         // owner-wide maximum-reference floor would discard those common holes
         // and needlessly grow every descriptor.
-        const uint32_t begin = site_context.owner_descriptor_file_offsets.size() > 1u
+        RegisterSet live_before_all_owners;
+        for (const LivenessAnalysis *liveness : owner_liveness)
+          live_before_all_owners |= liveness->live_before(*site_inst);
+
+        ConSanRegisterRequest request;
+        request.reg_class = RegClass::VGPR;
+        request.count = scratch_vgprs;
+        request.alignment = lds_scratch_tuple_base_is_valid(site, arch, 1u) ? 1u : 2u;
+        request.search_start = site_context.owner_descriptor_file_offsets.size() > 1u
                                    ? 0u
                                    : min_auto_scratch_vgpr.value_or(0u);
-        const uint32_t limit = allocation_limit.value_or(256u);
-        for (uint32_t base = begin; base + scratch_vgprs <= limit && base + scratch_vgprs <= 256u;
-             ++base) {
-          if (is_forbidden_scratch_vgpr_run(site, static_cast<uint16_t>(base), scratch_vgprs))
-            continue;
-          if (!lds_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(base)))
-            continue;
-          const RegisterRef run{RegClass::VGPR, static_cast<uint16_t>(base),
-                                static_cast<uint8_t>(scratch_vgprs)};
-          if (std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-                return !liveness->any_live_before(*site_inst, run);
-              }))
-            return static_cast<uint16_t>(base);
+        request.current_allocation_count = allocation_limit.value_or(REGISTER_SET_MAX_VGPRS);
+        request.architecture_limit = request.current_allocation_count;
+        request.allow_spill = false;
+        const uint16_t data_vgprs = lds_dword_count(site).value_or(1u);
+        if (site.operands.address_vgpr)
+          request.forbidden.expand({RegClass::VGPR, *site.operands.address_vgpr, 1u});
+        if (site.operands.destination_vgpr)
+          request.forbidden.expand(
+              {RegClass::VGPR, *site.operands.destination_vgpr, static_cast<uint8_t>(data_vgprs)});
+        if (site.operands.data_vgpr)
+          request.forbidden.expand(
+              {RegClass::VGPR, *site.operands.data_vgpr, static_cast<uint8_t>(data_vgprs)});
+        if (site.operands.second_data_vgpr) {
+          const uint16_t per_address = static_cast<uint16_t>(
+              two_address_lds_element_width_bits(site.mnemonic).value_or(site.decoded_width_bits) /
+              32u);
+          request.forbidden.expand(
+              {RegClass::VGPR, *site.operands.second_data_vgpr, static_cast<uint8_t>(per_address)});
         }
-        return std::nullopt;
+
+        const ConSanRegisterPlan plan = plan_consan_registers(request, live_before_all_owners);
+        return plan.source == ConSanRegisterAllocationSource::LivenessDead ? plan.base
+                                                                           : std::nullopt;
       };
       uint16_t scratch_vgpr = 0;
       bool scratch_selected = false;
