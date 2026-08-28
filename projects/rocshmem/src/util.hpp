@@ -511,11 +511,7 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
                                                   int stride) {
   uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst);
   size_t prefix = (-dst_addr) & (ChunkSize - 1);
-
-  if (prefix > size) {
-    prefix = size;
-  }
-
+  
   if (tid == 0 && prefix > 0) {
     copy_prefix<LP, SP>(dst, src, prefix);
   }
@@ -541,8 +537,7 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ 
-  void memcpy_lane(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -566,12 +561,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     }
   }
   // Normal cache-bypass path for small transfers or single-lane execution
-  else [[likely]] {
+  else {
     if (size >= 16) {
       copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
                                             static_cast<uint8_t*>(src),
                                             size, 0, 1);
-    } else [[likely]] {
+    } else {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
                              static_cast<uint8_t*>(src),
                              size);
@@ -581,10 +576,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
 // memcpy_wave is group-cooperative: every lane in the wave passes the same
 // dst/src and only differs by wave_tid/wave_size (folded into the per-access
-// offset inside copy_bulk), so UniformBase=true
+// offset inside copy_bulk)
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ 
-  void memcpy_wave(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -599,7 +593,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
                                           static_cast<uint8_t*>(src),
                                           size, wave_tid, wave_size);
-  } else [[likely]] {
+  } else {
     // Small sizes skip bulk setup entirely
     if (wave_tid == 0) {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
@@ -610,8 +604,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ 
-  void memcpy_wg(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -626,7 +619,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
                                           static_cast<uint8_t*>(src),
                                           size, tid, stride);
-  } else [[likely]] {
+  } else {
     // Small sizes skip bulk setup entirely
     if (tid == 0) {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
