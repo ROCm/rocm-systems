@@ -604,7 +604,7 @@ using device_counting_service_cb_t = void*;
 // Minimal name_info stub for mock testing.
 // name_info_impl and name_info mirror rocprofiler::sdk::utility::name_info so that
 // Wrapper::callback_name_info_t / buffer_name_info_t are interchangeable in library_sdk
-// templates. items()/emplace() are functional (not no-op) since sdk_tracing_config's
+// templates. items()/emplace() are functional (not no-op) since tracing_config's
 // get_operations()/get_backtrace_operations() rely on items() for regex-based
 // operation filtering.
 
