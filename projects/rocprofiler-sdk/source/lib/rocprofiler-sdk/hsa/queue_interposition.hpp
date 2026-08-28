@@ -310,9 +310,7 @@ interposition_fini();
  *
  * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
  * (context stop, code-object unload). Returns without waiting if the monitor is not
- * running or if called from a completion callback, which runs on the monitor thread and
- * so cannot wait for itself. The wait is bounded in every case and warns on expiry
- * rather than hanging.
+ * running. The wait is bounded in every case and warns on expiry rather than hanging.
  */
 void
 interposition_sync();
@@ -320,11 +318,12 @@ interposition_sync();
 /**
  * @brief Stop and join the completion-monitor thread, retiring any stragglers
  *
- * Closes the producer admission gate, wakes the monitor, joins it, then waits (bounded)
- * for any producer still in the doorbell path to leave it and retires whatever they left
- * behind so pooled signals and correlation-id references are released. Must be called
- * before the signal pool is torn down so those releases target a live pool. A batch whose
- * completion signal never dropped is released without emitting a dispatch record: its
+ * Closes the producer admission gate, wakes the monitor, joins it, then retires everything
+ * left behind so pooled signals and correlation-id references are released. Does not wait for
+ * producers still in the doorbell path: a batch they register is either caught by that final
+ * retirement or disposed of by the producer itself, which sees the monitor stopped. Must be
+ * called before the signal pool is torn down so those releases target a live pool. A batch
+ * whose completion signal never dropped is released without emitting a dispatch record: its
  * timestamps live in that signal and were never written.
  */
 void
