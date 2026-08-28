@@ -3861,6 +3861,119 @@ TEST_F(DevicePointerAccessorTest, MultimemWithNvls_OffsetsFromMulticastBase) {
 
 
 // ---------------------------------------------------------------------------
+// ncclGinResourcesRequested answers whether a requirements set asks for any GIN
+// resource, either at the top level or in the per-resource list.
+
+class GinResourcesRequestedTest : public ::testing::Test {
+protected:
+  ncclDevCommRequirements reqs{};
+  ncclDevResourceRequirements node{}, node2{};
+};
+
+// None requested anywhere.
+TEST_F(GinResourcesRequestedTest, NothingRequested_ReturnsFalse) {
+  EXPECT_FALSE(ncclGinResourcesRequested(&reqs));
+}
+
+// Each top-level counter is ORed in, so each has to be able to answer alone.
+TEST_F(GinResourcesRequestedTest, EachTopLevelCounterAloneIsEnough) {
+  for (int* field : {&reqs.ginSignalCount, &reqs.ginCounterCount, &reqs.barrierCount, &reqs.railGinBarrierCount,
+                     &reqs.worldGinBarrierCount}) {
+    reqs = ncclDevCommRequirements{};
+    *field = 1;
+    EXPECT_TRUE(ncclGinResourcesRequested(&reqs));
+  }
+}
+
+// Branch: the per-resource list is walked when the top level asks for nothing.
+TEST_F(GinResourcesRequestedTest, ResourceListEntry_ReturnsTrue) {
+  node.ginSignalCount = 1;
+  reqs.resourceRequirementsList = &node;
+  EXPECT_TRUE(ncclGinResourcesRequested(&reqs));
+}
+
+// The walk continues past entries that ask for nothing, so a request on the
+// second node still counts.
+TEST_F(GinResourcesRequestedTest, LaterResourceListEntry_ReturnsTrue) {
+  node2.ginCounterCount = 1;
+  node.next = &node2;
+  reqs.resourceRequirementsList = &node;
+  EXPECT_TRUE(ncclGinResourcesRequested(&reqs));
+}
+
+// A list where nothing is requested is still false.
+TEST_F(GinResourcesRequestedTest, EmptyResourceList_ReturnsFalse) {
+  node.next = &node2;
+  reqs.resourceRequirementsList = &node;
+  EXPECT_FALSE(ncclGinResourcesRequested(&reqs));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrGetGinAnvilMemLayout reports the flat-VA base and 4G stride for the
+// memory an address belongs to, accepting either the user address or its
+// mapping in our own slot.
+
+class DevrGetGinAnvilMemLayoutTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclDevrState* devr = nullptr;
+  ncclDevrMemory mem{};
+  uintptr_t base = 0;
+  uint32_t stride = 0;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    devr = &commStorage->devrState;
+    devr->lsaSelf = 1;
+    devr->lsaSize = 2;
+    devr->bigSize = size_t(2) << 32;  // stride4G of 2
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
+    mem.primaryAddr = reinterpret_cast<void*>(0x900000);
+    mem.size = 4096;
+    mem.bigOffset = 0x300;
+    devr->memHead = &mem;
+  }
+  void TearDown() override { devr->memHead = nullptr; }  // stack object
+};
+
+// Branch: an address in a memory's user range.
+TEST_F(DevrGetGinAnvilMemLayoutTest, UserAddress_ReportsLayout) {
+  ASSERT_EQ(ncclDevrGetGinAnvilMemLayout(devr, reinterpret_cast<void*>(0x900010), &base, &stride), ncclSuccess);
+  EXPECT_EQ(base, reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + mem.bigOffset);
+  EXPECT_EQ(stride, 2u);  // bigSize >> 32
+}
+
+// Branch: the same memory addressed through our own slot of the flat space.
+TEST_F(DevrGetGinAnvilMemLayoutTest, FlatAddress_ReportsSameLayout) {
+  uintptr_t local = reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset;
+  ASSERT_EQ(ncclDevrGetGinAnvilMemLayout(devr, reinterpret_cast<void*>(local + 8), &base, &stride), ncclSuccess);
+  EXPECT_EQ(base, reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + mem.bigOffset);
+}
+
+// Branch: null arguments are rejected before anything is dereferenced.
+TEST_F(DevrGetGinAnvilMemLayoutTest, NullArguments_ReturnInvalidArgument) {
+  void* addr = reinterpret_cast<void*>(0x900010);
+  EXPECT_EQ(ncclDevrGetGinAnvilMemLayout(nullptr, addr, &base, &stride), ncclInvalidArgument);
+  EXPECT_EQ(ncclDevrGetGinAnvilMemLayout(devr, nullptr, &base, &stride), ncclInvalidArgument);
+  EXPECT_EQ(ncclDevrGetGinAnvilMemLayout(devr, addr, nullptr, &stride), ncclInvalidArgument);
+  EXPECT_EQ(ncclDevrGetGinAnvilMemLayout(devr, addr, &base, nullptr), ncclInvalidArgument);
+}
+
+// Branch: a devrState with no flat space cannot answer.
+TEST_F(DevrGetGinAnvilMemLayoutTest, NoFlatBase_ReturnsInvalidArgument) {
+  devr->lsaFlatBase = nullptr;
+  EXPECT_EQ(ncclDevrGetGinAnvilMemLayout(devr, reinterpret_cast<void*>(0x900010), &base, &stride),
+            ncclInvalidArgument);
+}
+
+// Branch: an address belonging to no memory.
+TEST_F(DevrGetGinAnvilMemLayoutTest, UnknownAddress_ReturnsInvalidArgument) {
+  EXPECT_NE(ncclDevrGetGinAnvilMemLayout(devr, reinterpret_cast<void*>(0x50), &base, &stride), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
