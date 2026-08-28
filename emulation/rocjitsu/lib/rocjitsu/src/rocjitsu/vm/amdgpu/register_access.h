@@ -37,6 +37,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -764,6 +765,26 @@ public:
       uint64_t lo = this->lane(relative_reg, lane);
       uint64_t hi = this->lane(relative_reg + 1, lane);
       return lo | (hi << 32);
+    }
+
+    /// @brief Snapshot dword registers into lane-major memory.
+    /// @details The region acquisition has already reported one plugin read per
+    /// register. This copies only selected lanes without repeating ownership
+    /// lookup and plugin dispatch for every individual lane.
+    void copy_dwords_lane_major(uint8_t *destination, uint64_t lane_mask) const {
+      assert(destination != nullptr && "VGPR snapshot destination must not be null");
+      const size_t lane_stride = static_cast<size_t>(reg_count_) * sizeof(uint32_t);
+      for (uint32_t reg = 0; reg < reg_count_; ++reg) {
+        const auto values = lanes(reg);
+        uint64_t active_lanes = lane_mask;
+        while (active_lanes) {
+          const uint32_t lane = std::countr_zero(active_lanes);
+          active_lanes &= active_lanes - 1;
+          std::memcpy(destination + static_cast<size_t>(lane) * lane_stride +
+                          static_cast<size_t>(reg) * sizeof(uint32_t),
+                      &values[lane], sizeof(uint32_t));
+        }
+      }
     }
 
   private:
