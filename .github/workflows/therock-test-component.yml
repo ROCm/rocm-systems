@@ -61,6 +61,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -78,7 +79,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: b014dba9f285f6d510624cbe1a1d20251c99c0f4 # 2026-08-21
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -91,6 +92,7 @@ jobs:
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
       - name: Driver / GPU sanity check
+        if: ${{ !fromJSON(inputs.component).linux_cpu_runner }}
         timeout-minutes: 3
         run: |
           python ./build_tools/print_driver_gpu_info.py
