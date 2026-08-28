@@ -42,8 +42,8 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
             }
         }
 #ifdef _WIN32
-        if (hip_interop_[i].nt_handle != nullptr) {
-            CloseHandle(hip_interop_[i].nt_handle);
+        if (hip_interop_[i].d3d12_shared_handle != nullptr) {
+            CloseHandle(hip_interop_[i].d3d12_shared_handle);
         }
 #endif
     }
@@ -153,8 +153,8 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     }
 
     if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
-        HANDLE nt_handle = nullptr;
-        rocdec_status = va_video_decoder_.ExportStagingBufferHandle(pic_idx, nt_handle);
+        HANDLE d3d12_shared_handle = nullptr;
+        rocdec_status = va_video_decoder_.ExportStagingBufferHandle(pic_idx, d3d12_shared_handle);
         if (rocdec_status != ROCDEC_SUCCESS) {
             ErrorLog(g_rocdec_logger, "ExportStagingBufferHandle failed for pic_idx=" + ROCDEC_TOSTR(pic_idx));
             FunctionExitLog(g_rocdec_logger);
@@ -167,13 +167,13 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
 
         hipExternalMemoryHandleDesc external_mem_handle_desc = {};
         external_mem_handle_desc.type = hipExternalMemoryHandleTypeD3D12Resource;
-        external_mem_handle_desc.handle.win32.handle = nt_handle;
+        external_mem_handle_desc.handle.win32.handle = d3d12_shared_handle;
         external_mem_handle_desc.size = resource_size;
 
         hipError_t hip_status = hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc);
         if (hip_status != hipSuccess) {
             CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipImportExternalMemory failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
-            CloseHandle(nt_handle);
+            CloseHandle(d3d12_shared_handle);
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -186,7 +186,7 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: hipExternalMemoryGetMappedBuffer failed with status: ") + ROCDEC_STR(hipGetErrorName(hip_status)));
             hipDestroyExternalMemory(hip_interop_[pic_idx].hip_ext_mem);
             hip_interop_[pic_idx].hip_ext_mem = nullptr;
-            CloseHandle(nt_handle);
+            CloseHandle(d3d12_shared_handle);
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -201,7 +201,7 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             hip_interop_[pic_idx].pitch[i] = d3d_pitches[i];
             hip_interop_[pic_idx].offset[i] = d3d_offsets[i];
         }
-        hip_interop_[pic_idx].nt_handle = nt_handle;
+        hip_interop_[pic_idx].d3d12_shared_handle = d3d12_shared_handle;
         InfoLog(g_rocdec_logger, "Staging D3D12<->HIP interop active for pic_idx=" + ROCDEC_TOSTR(pic_idx));
     }
 #else
@@ -270,8 +270,8 @@ rocDecStatus RocDecoder::FreeVideoFrame(int pic_idx) {
     if (hip_interop_[pic_idx].hip_ext_mem != nullptr)
         CHECK_HIP(hipDestroyExternalMemory(hip_interop_[pic_idx].hip_ext_mem));
 #ifdef _WIN32
-    if (hip_interop_[pic_idx].nt_handle != nullptr)
-        CloseHandle(hip_interop_[pic_idx].nt_handle);
+    if (hip_interop_[pic_idx].d3d12_shared_handle != nullptr)
+        CloseHandle(hip_interop_[pic_idx].d3d12_shared_handle);
 #endif
 
     memset((void *)&hip_interop_[pic_idx], 0, sizeof(hip_interop_[pic_idx]));
