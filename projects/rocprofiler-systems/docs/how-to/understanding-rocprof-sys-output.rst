@@ -300,9 +300,9 @@ set ``ROCPROFSYS_OUTPUT_PREFIX="%argt%-"``, and let ROCm Systems Profiler cleanl
 ROCm Profiling Data (rocpd) output
 =========================================
 
-Use the ``--output-format rocpd`` command-line argument to trigger the ROCm Systems Profiler to output a
-SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be the default output
-format. To output in ``rocpd`` format, ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
+The ROCm Profiling Data (or ``rocpd``) database is now the default output format for the ROCm Systems Profiler.
+It outputs a SQLite3 database containing all profiling data.
+ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
 
 You can view and analyze the generated ``rocpd`` files in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_ tool.
 
@@ -320,14 +320,23 @@ The features of ``rocpd`` output format are:
 Generating rocpd output
 -------------------------
 
-To generate profiling data in the ``rocpd`` format, pass ``--output-format rocpd`` to
-``rocprof-sys-run`` or ``rocprof-sys-sample``.
+The rocpd format is now enabled by default. Simply run the profiler without specifying an output format:
 
 .. code-block:: shell
 
-   rocprof-sys-sample --output-format rocpd -- ./your_application
+   rocprof-sys-sample -- ./your_application
 
-The ``--output-format`` argument is authoritative and only the listed format(s) are produced. Tokens are space- or comma-separated, so you can request multiple formats at once. For example, to emit both a Perfetto trace and a ``rocpd`` database, use ``--output-format proto rocpd`` . This argument cannot be combined with ``--trace``, ``--profile``, ``--flat-profile``, or ``--profile-format`` on the same command line.
+To explicitly request other formats (e.g. Perfetto), use ``--output-format``:
+
+.. code-block:: shell
+
+   rocprof-sys-sample --output-format proto -- ./your_application
+
+The ``--output-format`` argument is authoritative and only the listed format(s) are produced.
+Tokens are space- or comma-separated, so you can request multiple formats at once.
+For example, to emit both a Perfetto trace and a ``rocpd`` database, use
+``--output-format proto rocpd``. This argument cannot be combined with
+``--trace``, ``--profile``, ``--flat-profile``, or ``--profile-format`` on the same command line.
 
 See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
 details on setting up the profiling configuration options.
