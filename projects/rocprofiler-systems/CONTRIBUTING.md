@@ -40,11 +40,30 @@ leverage to automatically verify formatting before committing their change. Init
 
 ```shell
 pip install pre-commit  # or: apt-get install pre-commit
-cd rocprofiler-systems
-pre-commit install
+cd <repository-root>
+pre-commit install -c projects/rocprofiler-systems/.pre-commit-config.yaml
 ```
 
 **Note:** pre-commit version **3.0.0 or higher** is required.
+
+The `-c` flag matters. Without it, `pre-commit install` binds the git hook to
+the repository-root config and this project's own hooks (copyright headers,
+fixed-width types, markdownlint, JSON formatting) never run.
+
+Hooks shared with the rest of the monorepo — `clang-format`, `gersemi`,
+`black`, and the whitespace/YAML fixers — are not configured in this project.
+They are defined once in the repository-root `.pre-commit-config.yaml`, and
+this project's config delegates to it. That way there is a single pinned
+version of each formatter for the whole repository. To check the whole project
+manually, exactly as CI does:
+
+```shell
+pre-commit run -c projects/rocprofiler-systems/.pre-commit-config.yaml \
+    --files $(git ls-files projects/rocprofiler-systems/)
+```
+
+Avoid `--all-files` here: it would forward every file in the monorepo to the
+root config, including other projects' sources.
 
 Now, these pre-commit checks must pass before a change can be committed.
 
