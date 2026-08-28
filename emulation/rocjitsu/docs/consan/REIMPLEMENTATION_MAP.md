@@ -190,14 +190,54 @@ Stage 1 final exit. The same rule remains active through Stage 8: as each
 domain moves, its shared algorithms must consume typed facts or semantic target
 operations and its superseded product branches must be deleted immediately.
 
-## `ConSanOptions` state-ownership inventory
+### Stage 10 quantitative and deletion ledger
 
-`ConSanOptions` inherits six immutable input contracts, then adds 27 mutable
-lowering fields. The inherited values should be passed as their actual const
-types; the derived object itself has no production destination. All declared
-fields are listed below.
+The tables above remain the reproducible Stage 0 snapshot. At the final Stage
+10 code checkpoint, the same production scope contains 83 files, 95,484
+physical lines, 91,054 nonblank lines, and 84,028 comment-excluded code lines.
+The implementation is 626 code lines larger than the typed Stage 0 snapshot
+and 5,521 code lines smaller than the 89,549-line deletion-phase start. The net
+growth since Stage 0 is the cost of durable typed contracts and explicit
+cross-target coverage; the plan did not trade independent validation or
+flavor semantics for a line-count target.
 
-| Current field or fields | Current producer and consumers | Lifetime and semantic owner | Destination and deletion stage |
+The original lexical counter now finds 1,153 direct target-vocabulary lines in
+36 files, down from 1,358 lines in 39 files. Record/Replay, Sampled,
+InlineShadow, and all three SuperCollider bodies have no product selection in
+their semantic policy. Remaining target vocabulary is owned by the canonical
+profile table, raw classifiers, ABI/resource encodings, native instruction
+builders, independent expected-byte validation, diagnostics, and compile-time
+target fixtures. Validation resolves profile facts directly; the deleted
+architecture overload can no longer reconstruct SuperCollider relay bytes
+through a second target-selection path.
+
+The final deletion audit records:
+
+| Audited seam | Final disposition |
+| --- | --- |
+| 27 mutable `ConSanOptions` planning fields | Deleted; caller-owned inputs and `ConSanMoiOperatingPoint` are separate authorities |
+| Observation-plan-to-evidence sizing overloads | Four production compatibility overloads and their duplicate tests deleted |
+| SuperCollider validation architecture overload | Deleted; validator passes `ConSanTargetProfile` directly |
+| Flavor-private inventory/resource/placement projections | Deleted in Stages 4–8; surviving flavor code owns only its evidence semantics and native realization |
+| Report trust reconstruction in HSA teardown | Deleted; pure `AutoMoiReportTrustEvaluation` owns the decision |
+| Deprecated environment spellings | Retained deliberately at the user-facing hook boundary with warnings and direct tests |
+| String synchronization names | Retained as stable diagnostics and fault-selection identity; typed `SemanticSiteId` remains authoritative for target-neutral graph joins |
+| `MoiOptions` internal attempt context | Retained as the private composition of the sole caller-input aggregate and sole operating point; it is not a public or competing semantic contract |
+| Native-byte and mutation revalidation | Retained deliberately because emitted bytes, ELF/ABI bounds, and behavioral mutation cannot be proved by plan construction alone |
+
+No reachable old/new comparison switch, duplicate result wrapper, write-only
+planning field, or validation-only target adapter remains. Future file
+decomposition and DBI transport replacement are ownership migrations over
+these contracts, not unfinished compatibility cutovers in this plan.
+
+## Historical Stage 0 `ConSanOptions` state-ownership inventory
+
+At the Stage 0 snapshot, `ConSanOptions` inherited six immutable input
+contracts and added 27 mutable lowering fields. The inventory below records
+the migration destination that was then required; all 27 fields are deleted at
+the Stage 10 checkpoint.
+
+| Stage 0 field or fields | Stage 0 producer and consumers | Lifetime and semantic owner | Destination and deletion stage |
 | --- | --- | --- | --- |
 | `automatic_moi_persistent_vgprs` | Placement; barrier, InlineShadow, and prologue paths | Attempt-local proof of selected persistent representation | Derive from `MoiPersistentStatePlan`/allocation; delete in Stage 2 |
 | `automatic_moi_private_epoch` | Placement; thirteen planning/emission files | Accepted epoch-storage alternative | Typed `MoiEpochStorage` variant in operating point; delete broad flag in Stage 2 |

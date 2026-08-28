@@ -1602,7 +1602,7 @@ to another component.
 | Semantic host units | Site classification, synchronization sequences, ownership, capability, range conflict, report arithmetic, replay/scan/trust models | Highest internal-contract priority. Port to the new component input before deleting the old implementation. |
 | Mechanism host units | Register choices, spill/wait sequences, patch bytes, relay/placement, descriptor edits, ELF rollback | Gate the component that currently owns the mechanism. Preserve the invariant, but revise implementation-specific expected values when the reviewed boundary changes. |
 | HSA-hook units | Default activation, option parsing, memory admission, report allocation, reader/replacement/executable lifetime, dispatch growth, report teardown, failure policy | Preserve observable lifecycle behavior; migrate mocked tests to runtime-coordinator inputs rather than retaining a monolithic hook. |
-| Paired device contracts | Correct workload has exact output and no diagnostic; adjacent incorrect workload changes the relevant ordering/publication and produces the declared semantic signal | Primary behavioral oracle. Run on every applicable emulated target and periodically on physical gfx950. Do not weaken to make a refactor pass. |
+| Paired device contracts | Correct workload has exact output and no diagnostic; adjacent incorrect workload changes the relevant ordering/publication and produces the declared semantic signal | Primary behavioral oracle. Run on every applicable emulated target and periodically on the available supported physical GPU (currently gfx1201). Do not weaken to make a refactor pass. |
 | Target-specific device contracts | Real target-exclusive mechanism under the same correct/incorrect contract | Required for genuine ISA/ABI capability branches; typed not-applicable elsewhere. |
 | Physical and E2E qualification | Runtime/memory properties, generated workloads, scale and pressure not faithfully reducible to a checked-in fixture | Qualification gate at proportionate checkpoints, not the inner loop for every small cutover. Extract a quick regression whenever an investigation finds a missing contract. |
 
@@ -1731,7 +1731,7 @@ Every slice runs:
    targets, not only the architecture where the code was first noticed; and
 4. broader host and device suites proportional to the affected seam.
 
-The fast inner loop may omit serialized physical gfx950 runs, but the omission
+The fast inner loop may omit serialized physical-GPU runs, but the omission
 is recorded and discharged periodically, after native-sensitive changes, and
 at the implementation-week endpoint. E2E rows are selected when the slice
 touches a behavior not faithfully represented in the checked-in tier. No
@@ -1886,7 +1886,8 @@ and resolves any temporary deviation instead of silently redefining the design.
   lacks a behavioral oracle before relying on it.
 - **Temporary seam and consumers:** None; this slice changes tests/docs only.
 - **Test gate:** Complete ConSan host suite, all five simulator device targets,
-  and physical gfx950. Record any E2E gate that cannot be run in the timebox.
+  and the available supported physical GPU. Record any E2E gate that cannot be
+  run in the timebox.
 - **Cutover and deletion:** Baseline becomes the reviewed Stage 2 reference;
   delete redundant tests only when their unique assertion is named elsewhere.
 - **Prerequisite:** Reviewed Stage 1 document.
@@ -7235,3 +7236,61 @@ Stage 1 is complete only when reviewers can answer “yes” to every item below
 If implementation evidence changes an answer, update this document and the
 remaining sequence before proceeding. Stage 2 begins only after this gate is
 reviewed and explicitly opened.
+
+## 14. Stage 10 implementation reconciliation
+
+Sections 2–10 above are the chronological migration record; their “next”
+language describes the state at that slice and is not the current work queue.
+The final implementation has one production pipeline and no reachable
+comparison switch. Typed caller contracts enter `TransformResult`; the
+internal native lowerer returns `ConSanTransformArtifacts` directly. Its
+mutable attempt context combines the sole caller-input aggregate with the sole
+`ConSanMoiOperatingPoint`; it is not a public configuration, report, or hook
+interface.
+
+The report path now has a strict dependency chain:
+
+```text
+observation plan -> evidence-intent plan -> engine evidence requirement
+                 -> address-free ABI layout -> runtime binding
+```
+
+Only the evidence-intent overloads of the four engine planners remain. This
+deletes the last convenience path that silently repeated intent
+classification. The pipeline publishes that authoritative intermediate value,
+and direct tests explicitly classify before sizing.
+
+Final validation uses the published inventory, semantic plans, operating
+point, resource plans, patch provenance, coverage, and target profile. It does
+not rerun admission or allocation. Independent reconstruction remains only for
+properties that construction cannot prove about the final artifact: ELF and
+descriptor integrity, instruction decoding, exact relay/prologue/shadow bytes,
+branch reachability, ABI bounds, mutation behavior, and coverage agreement.
+Target-native reconstruction takes `ConSanTargetProfile` directly; raw
+architecture values are confined to decoder and instruction-builder calls.
+
+The Stage 12 questions now have implementation answers. Environment settings
+are classified by typed request/debug/mutation/runtime contracts, with tested
+deprecated aliases at the hook boundary. Report layouts are versioned internal
+ABI contracts shared by emitter and decoder. `ProgramInventory` owns stable
+content and semantic identities and exposes requested analysis facets.
+Trust distinguishes complete static lowering and valid retained evidence from
+exhaustive dynamic observation. The shared classifiers remain in ConSan for
+now; moving their durable ownership to DBI is deferred and does not change the
+contract. DBI remains host-only and Record/Replay-first, while translated-code
+instrumentation and the on-device engines are explicitly later work.
+
+At the final Stage 10 code checkpoint the production scope contains 83 files,
+95,484 physical lines, 91,054 nonblank lines, and 84,028 comment-excluded code
+lines.
+That is 626 code lines above the typed Stage 0 snapshot, reflecting the durable
+contracts and tests added during this plan, but 5,521 code lines below the
+89,549-line deletion-phase start. Direct target-vocabulary lines fell from
+1,358 in 39 files to 1,153 in 36 files, while every surviving policy-facing
+target decision is profile-owned. All 27 former mutable `ConSanOptions`
+planning fields remain deleted.
+
+The final checked-in Stage 10 gate passed 5,303/5,303 tests. Its `-j16`
+nonphysical tier passed 4,668/4,668 in 262.38 seconds, including all 2,908
+five-target RocJitsu device rows. The physical gfx1201 tier then passed
+635/635 in 107.81 seconds, serialized at `-j1`.

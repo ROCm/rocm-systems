@@ -275,8 +275,8 @@ that the end-state design should delete.
 - Keep commits small enough to bisect. Compile each coherent batch, run focused
   tests for changed behavior or fragile contracts, and run the broad checked-in
   host and emulated-device gates after several related commits or at a tranche
-  boundary. Run physical-gfx950 tests periodically and at major gates rather
-  than after every internal move.
+  boundary. Run the available supported physical-GPU tests periodically and at
+  major gates rather than after every internal move.
 - End-to-end workload revalidation remains outside this internal refactoring
   phase. Use the checked-in host and device contracts to iterate; resume E2E
   qualification after the implementation converges, as specified by `PLAN.md`.
@@ -941,7 +941,7 @@ the need to reconstruct planning facts from emitted bytes.
    aliases, duplicate target facts, temporary adapters, and write-only state.
 4. Update `DESIGN.md`, `PRODUCTION_DESIGN.md`, this study, and the quantitative
    ledger to describe the implementation that actually remains.
-5. Run all checked-in host and device tests, including the physical-gfx950
+5. Run all checked-in host and device tests, including the physical-gfx1201
    gate, and resolve every regression before calling the reimplementation
    complete.
 
@@ -951,6 +951,55 @@ to justified profile, ABI, and native-emission boundaries; flavor-private code
 describes genuine flavor semantics; the hook boundary is ready for DBI; the
 documentation matches the code; and the implementation is materially smaller
 without weakening the behavioral test contract.
+
+#### Stage 10 exit evidence
+
+Stage 10 is complete. Validation now consumes the published inventory,
+semantic plans, operating point, resource plans, patch provenance, coverage,
+and immutable `ConSanTargetProfile`. Policy decisions for direct-call form,
+dispatch identity, encoding family, full workgroup identity, and
+SuperCollider relay construction no longer rediscover facts from a raw
+architecture. Raw architecture remains only where an independent validator
+must decode instructions or rebuild exact target-native bytes.
+
+Production evidence sizing accepts only `ConSanEvidenceIntentPlan`; four
+observation-plan convenience overloads that silently repeated intent
+classification were deleted. SuperCollider validation likewise has no
+architecture convenience overload. The final source audit moved the last
+synchronization graph join to typed `SemanticSiteId`, classified string names
+as the deliberately stable diagnostic and mutation-selection interface, and
+confirmed that the private `MoiOptions` attempt context is solely the
+composition of caller inputs and the accepted operating point rather than a
+second public semantic authority.
+
+The deletion ledger found no reachable comparison switch, duplicate result
+wrapper, write-only planning field, validation-only target adapter, or stale
+temporary old/new seam. All 27 mutable `ConSanOptions` planning fields remain
+deleted. Deprecated user-facing environment spellings remain deliberately,
+with warnings and direct tests. Independent ELF, descriptor, branch, ABI,
+exact-byte, mutation, and coverage validation also remains deliberately:
+those properties cannot be proved from construction of the semantic plan.
+
+The Stage 10 code/test checkpoint is `c7368412ec`. Its seven implementation
+commits establish profile-driven relay validation, evidence-intent-only
+sizing, profile-driven validation policy, typed synchronization graph joins,
+and the final boundary-language audit. The final 83-file production scope
+contains 95,484 physical lines, 91,054 nonblank lines, and 84,028
+comment-excluded code lines. That is 626 code lines above the typed Stage 0
+snapshot, reflecting durable contracts and cross-target coverage added by the
+plan, and 5,521 lines below the 89,549-line deletion-phase start. Direct
+target-vocabulary lines fell from
+1,358 in 39 files to 1,153 in 36 files.
+
+At that revision the checked-in gate passed all 5,303 tests. The `-j16`
+nonphysical tier passed 4,668/4,668 in 262.38 seconds, including every one of
+the 2,908 RocJitsu device-emulation rows across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250. After that tier completed, the serialized `-j1` physical
+gfx1201 tier passed 635/635 in 107.81 seconds. Two simulator rows that had
+completed their GTest bodies in under one second but exceeded the 60-second
+CTest process allowance under full load passed alone in 0.35 and 0.72 seconds;
+their targeted allowances are now 120 seconds. No E2E qualification was used
+as an iteration gate.
 
 ## What this study does not establish
 

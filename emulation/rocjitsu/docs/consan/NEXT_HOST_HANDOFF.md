@@ -1,31 +1,70 @@
 # ConSan production-reimplementation handoff
 
-This document is the restart state for moving the active ConSan refactoring
-from the gfx950 host that was retired on 2026-08-28 to another machine. It is
-deliberately more operational than the design documents: a new Codex agent
-should be able to reconstruct the branch, build, test topology, current design
-judgment, and next action without relying on conversation history.
+This document began as the restart state for moving the active ConSan
+refactoring from the gfx950 host that was retired on 2026-08-28. The current
+gfx1201 host completed that transfer and Stages 7 through 10. The current state
+below is authoritative; the original source-host material remains later in the
+document as an explicit historical record.
 
-## Read this first
+## Current state: gfx1201 host
 
-1. **Do not start from the current remote branch until the old host's commits
-   have been pushed.** At the source snapshot described here, local
-   `shared/rocjitsu/sanitizers` was 240 commits ahead of
-   `origin/shared/rocjitsu/sanitizers`. The last code commit was
-   `28a35a910e06648f22813ddfddd43eb848b0634e`; this handoff document is committed
-   immediately after it.
-2. The active task is to complete Stages 7 through 10 in
-   [IMPLEMENTATION_SIZE_STUDY.md](IMPLEMENTATION_SIZE_STUDY.md), not to begin a
-   new design effort. Stages 0 through 6 are complete. Stage 7 is in progress.
-3. The full Stage 7 ConSan gate has **not** completed at the current code
-   revision. It was intentionally terminated when this host-removal handoff
-   became urgent. Focused Stage 7 tests were green; that is not a substitute
-   for the required full gate.
-4. Use RocJitsu itself for all emulation. The earlier FFM-based gfx1250 path is
-   obsolete and must not be revived.
-5. Do not disable ccache to work around a permission problem. Check that its
-   directory is writable before building and report a permission problem
-   immediately.
+The active checkout is `/home/benoit/workspace/TheRock/rocm-systems` on local
+branch `users/bjacob/sanitizers`, tracking
+`origin/users/bjacob/sanitizers`. The CMake/Ninja build is
+`/home/benoit/workspace/rocjitsu-consan-stage7-build`; the in-workspace ROCm
+runtime is `/home/benoit/workspace/TheRock-build/dist/rocm`. Builds need
+`CPLUS_INCLUDE_PATH=/home/benoit/workspace/TheRock-build/dist/rocm/lib/rocm_sysdeps/include`.
+ccache is enabled and writable.
+
+Current build and gate commands are:
+
+```sh
+CPLUS_INCLUDE_PATH=/home/benoit/workspace/TheRock-build/dist/rocm/lib/rocm_sysdeps/include \
+  cmake --build /home/benoit/workspace/rocjitsu-consan-stage7-build -j16
+ctest --test-dir /home/benoit/workspace/rocjitsu-consan-stage7-build \
+  --output-on-failure -j16 -R 'ConSan|consan' -LE physical
+ctest --test-dir /home/benoit/workspace/rocjitsu-consan-stage7-build \
+  --output-on-failure -j1 -R 'ConSan|consan' -L physical
+```
+
+Stages 0 through 10 are complete. The authoritative Stage 7, 8, and 9 exit
+evidence is in [IMPLEMENTATION_SIZE_STUDY.md](IMPLEMENTATION_SIZE_STUDY.md);
+the Stage 10 evidence records the final revision and exact gate totals. The
+physical tier on this host is gfx1201, not gfx950. Use `-j16` for builds and
+nonphysical tests and `-j1` for the physical tier. Never run physical GPU tests
+concurrently. Continue to use RocJitsu itself for all emulation; the old
+FFM-based gfx1250 path is obsolete.
+
+Operating rules that remain in force:
+
+- make frequent local commits and never push unless the user explicitly asks;
+- use the local TheRock toolchain and runtime rather than a system ROCm;
+- run all five emulated targets and serialize the physical gfx1201 tier;
+- do not use E2E as an iteration gate for this reimplementation-size plan;
+- do not weaken paired correct/incorrect behavioral tests;
+- format changed C/C++ sources and add regression coverage for discovered
+  defects; and
+- do not disable ccache to mask a permission problem.
+
+Current continuation ledger:
+
+| Stage | State | Boundary or evidence commit | Final checked-in gate |
+| ---: | --- | --- | --- |
+| 7 | Complete | `b269bcd6d3` | 4,667 nonphysical + 635 physical gfx1201 = 5,302 |
+| 8 | Complete | `f77aa9a4fa` | 4,667 nonphysical + 635 physical gfx1201 = 5,302 |
+| 9 | Complete | `01666fbafd` | 4,668 nonphysical + 635 physical gfx1201 = 5,303 |
+| 10 | Complete | Code/test checkpoint `c7368412ec`; exit evidence in this documentation revision | 4,668 nonphysical in 262.38 seconds + 635 physical gfx1201 in 107.81 seconds = 5,303 |
+
+Stage 10's implementation commits begin at `4ca48b33f7` and include the typed
+evidence-only sizing cutover, profile-driven validation, and final audit seam
+closure through `c7368412ec`. No temporary old/new comparison switch remains.
+
+## Historical source-host handoff (superseded)
+
+The remainder of this section through the original first-session checklist
+describes the retired gfx950 host and the state before the transfer. Paths,
+branch names, `-j64`, test inventories, and statements that Stages 7–10 had not
+started are historical evidence, not current instructions.
 
 ## Active objective and working rules
 

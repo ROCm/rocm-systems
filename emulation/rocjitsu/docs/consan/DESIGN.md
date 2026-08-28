@@ -194,9 +194,9 @@ The inventory records:
 
 `ProgramInventoryBuilder` is the only construction interface. Published
 `ProgramInventory` values are read-only and share immutable storage. The
-current compatibility lowerer still performs much of the underlying decode and
-analysis; the contract prevents later policy and lowering from rewriting the
-facts it produces.
+internal native lowerer performs much of the underlying decode and analysis;
+the contract prevents later policy and lowering from rewriting the facts it
+produces.
 
 The inventory is also the sole owner of the parsed target, semantic
 architecture, kernel-metadata trust state, malformed-note count, and the fact
@@ -676,18 +676,19 @@ Paths below are relative to `emulation/rocjitsu/`.
 | Shared semantic policy | `consan_access_policy.cpp`, `consan_barrier_policy.cpp`, `consan_atomic_fence_policy.cpp` |
 | Evidence schemas and host models | `consan_moi_abi.h`, `consan_moi_report_layout.h.inc`, `consan_moi_report_plan.cpp`, `consan_moi_model.cpp` |
 | Resource planning | `consan_resource.{h,cpp}`, shared liveness and `code/patch/spill_manager.*` |
-| Current compatibility lowering | `consan_lowering.h`, `consan.cpp` plus `consan_*.inc`, `consan_moi.cpp` plus `consan_moi_*.inc` |
+| Internal native lowering | `consan_lowering.h`, `consan.cpp` plus `consan_*.inc`, `consan_moi.cpp` plus `consan_moi_*.inc` |
 | Target-native emission | `code/patch/instrumentation_builder.h` and `{cdna3,cdna4,rdna3,rdna4,gfx1250}_instrumentation_builder.h` |
 | Shared patch mechanism | `code/patch/instruction_sequence.*`, `trampoline_builder.*`, `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*` |
 | HSA runtime adapter | `lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_hook_config.cpp`, `rj_hsa_dbi_hook_moi_report.cpp`, `rj_hsa_dbi_hooks.cpp` |
 | Host/unit tests | `tests/patch/consan/`, architecture builder tests under `tests/patch/`, and runtime contract tests under `tests/dbi/consan/` |
 | Checked-in device contracts | `tests/dbi/consan/device/`, registered by `tests/consan/CMakeLists.txt` |
 
-`consan.h` and `consan_moi.h` remain compatibility umbrellas while the old
-implementation is split. They are not invitations to add unrelated state to a
+`consan.h` and `consan_moi.h` remain internal implementation umbrellas for the
+large native-lowering translation units and focused mechanism tests. They are
+not public semantic boundaries or invitations to add unrelated state to a
 global result or options type.
 
-Within that compatibility lowerer, decisions whose scope is one candidate must
+Within that internal lowerer, decisions whose scope is one candidate must
 remain on its plan. For example, Sampled decides during access planning whether
 an overlapping LDS address will be recovered from the authoritative spill.
 That decision is stored on `PlannedSampledPatch` and passed directly to the
@@ -873,10 +874,10 @@ and section discovery remains the separate responsibility of
 `scan_kernel_descriptors`, while semantic resource mutation remains in the
 typed growth and spill contracts described above.
 
-Inventory-shape decisions use the typed caller inputs even while the old
-lowerer remains mutable. In particular,
+Inventory-shape decisions use the typed caller inputs even while the internal
+native lowerer uses mutable attempt-local state. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,
-`ConSanDebugOverrides`, and `MutationRequest`; the compatibility lowerer
+`ConSanDebugOverrides`, and `MutationRequest`; the lowerer
 projects those base subobjects at its remaining call site instead of
 reimplementing the rule over `ConSanOptions`.
 
@@ -911,38 +912,39 @@ focused host unit test. Device-only behavior uses side-by-side correct and
 incorrect workloads: the correct workload must preserve results and emit no
 diagnostic; the incorrect workload must emit the expected diagnostic.
 
-## Remaining migration boundary
+## Implemented boundary after the Stage 10 audit
 
-The architecture above is intentionally usable before the prototype lowerer is
-fully dismantled. The current state is:
+The public production path now crosses typed configuration, target/runtime
+capabilities, immutable inventory, observation and evidence-intent plans,
+engine-specific evidence requirements, runtime binding, coverage, and a typed
+transform result. Report sizing accepts only `ConSanEvidenceIntentPlan`; the
+former observation-plan convenience overloads are deleted. The HSA hook enters
+this pipeline for ordinary and mutation transforms and never reconstructs a
+prototype result wrapper.
 
-- typed configuration, target/runtime capabilities, immutable inventory,
-  semantic policy, observation plans, coverage, evidence requirements, stage
-  results, and loader action are public production contracts;
-- target profiles and target instruction builders are explicit and tested;
-- the HSA hook enters the typed pipeline for ordinary and mutation transforms;
-  but
-- the compatibility `ConSanResult` wrapper is gone; the lowerer returns
-  `ConSanTransformArtifacts` directly, with shared register placement in one
-  typed allocation and only genuinely patch-local state on emitted patches;
-  but
-- shared decode/inventory construction, resource planning, per-engine native
-  lowering, placement, and some lifecycle presentation remain monolithic
-  implementation responsibilities behind that artifact boundary.
+The internal native lowerer remains physically large, but it is not a second
+semantic authority. `ConSanOptions` aggregates only the six caller-owned input
+contracts. `ConSanMoiOperatingPoint` owns selected allocation and persistent
+state. `MoiOptions` combines those two base values only as an attempt-local
+mechanism context; public policy, report planning, host interpretation, and the
+hook cannot consume it. Per-patch plans own decisions that cross into native
+emission. Shared inventory, resource planning, descriptor growth, placement,
+and target profiles are consumed by all four engines.
 
-The next extraction order follows dependency direction:
+Final validation consumes the published inventory, observation plan, coverage
+ledger, operating point, resource plans, patch metadata, and immutable target
+profile. It independently checks ELF structure, exact emitted bytes, branch
+geometry, ABI/resource bounds, descriptor deltas, mutation behavior, and
+coverage. Raw architecture values remain only where the decoder or instruction
+builder must reproduce target-native bytes; policy selections use profile
+facts. The removed validation-only architecture overload no longer lets a
+validator bypass that profile.
 
-1. extract shared decode and inventory construction from the prototype
-   translation units;
-2. separate shared resource planning from engine evidence semantics, beginning
-   with Record/Replay;
-3. move target lowering behind explicit intent/resource interfaces; and
-4. isolate transactional placement, final validation, evidence decoding, and
-   verdict rendering as independently testable components.
-
-Each cutover is per component, never a big switch. Old and new implementations
-may coexist only behind a narrow comparison seam, and every step must preserve
-host tests, checked-in device contracts on all supported targets, physical
-gfx950 coverage, and the end-to-end validation ledgers. A test may change only
-when review shows that it encoded an accidental prototype trait rather than the
-behavioral contract.
+The remaining large translation units are implementation concentration, not
+reachable old/new comparison seams. Further physical decomposition may improve
+maintainability, but it must preserve the same authorities rather than create a
+parallel pipeline. The runtime replacement boundary is separately recorded in
+the HSA-hook/DBI keep/delete map above: `HSA_TOOLS_LIB` remains the near-term
+host integration until common DBI owns those lifecycle operations. The checked-
+in behavioral gate covers five emulated targets and serialized physical
+gfx1201 execution.
