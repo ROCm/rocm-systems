@@ -406,9 +406,7 @@ class OmniSoC_Base:
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
             hw = self._expand_tcc_template_counters(
-                extract_metric_formula_hw_counters(
-                    metric_yaml, self._mspec.gpu_series
-                )
+                extract_metric_formula_hw_counters(metric_yaml, self._mspec.gpu_series)
             )
             counters = frozenset(hw & remaining)
             if not counters:
