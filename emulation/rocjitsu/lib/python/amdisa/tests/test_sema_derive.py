@@ -1579,6 +1579,31 @@ class TestDeriveVectorBinop:
                     not in cpp
                 )
 
+    @pytest.mark.parametrize(
+        'op,dtype,expected',
+        [
+            ('add', 'u32', 'vop3_integer_add<uint32_t>'),
+            ('sub', 'u32', 'vop3_integer_sub<uint32_t>'),
+            ('subrev', 'u32', 'vop3_integer_sub<uint32_t>'),
+            ('add', 'i32', 'vop3_integer_add<int32_t>'),
+            ('sub', 'i32', 'vop3_integer_sub<int32_t>'),
+            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
+            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
+        ],
+    )
+    def test_vop3_integer_clamp_saturates_before_narrowing(self, op, dtype, expected):
+        sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
+        block = derive_sema_block(sem)
+        ctx = LoweringContext(
+            exec_model=block.pragma,
+            integer_saturation_dtype=dtype,
+        )
+
+        cpp = lower_sema_block(block, ctx)
+
+        assert 'inst_.clamp' in cpp
+        assert expected in cpp
+
     def test_lshlrev(self):
         sem = _FakeSem('V_LSHLREV_B32', 'vector_binop', 'lshlrev', 'b32')
         block = derive_sema_block(sem)

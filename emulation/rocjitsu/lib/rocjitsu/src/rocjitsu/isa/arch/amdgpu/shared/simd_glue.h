@@ -24,6 +24,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -92,6 +93,48 @@ template <typename T> inline T clamp_floating_result(T value, bool clamp_nan_to_
 /// @brief Clamp one floating result according to the wave's ISA and MODE state.
 template <typename T> inline T clamp_floating_result(T value, const Wavefront &wf) {
   return clamp_floating_result(value, floating_clamp_nan_to_zero(wf));
+}
+
+/// @brief Execute VOP3 integer addition, saturating when CLAMP is set.
+template <typename T> inline uint32_t vop3_integer_add(uint32_t lhs, uint32_t rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4));
+  using U = std::make_unsigned_t<T>;
+  const U lhs_bits = static_cast<U>(lhs);
+  const U rhs_bits = static_cast<U>(rhs);
+  if (!clamp)
+    return static_cast<uint32_t>(static_cast<U>(lhs_bits + rhs_bits));
+  if constexpr (std::is_signed_v<T>) {
+    using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
+    const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) +
+                      static_cast<Wide>(std::bit_cast<T>(rhs_bits));
+    const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
+                                      static_cast<Wide>(std::numeric_limits<T>::max()));
+    return static_cast<uint32_t>(static_cast<U>(saturated));
+  } else {
+    using Wide = std::conditional_t<sizeof(T) == 2, uint32_t, uint64_t>;
+    const Wide wide = static_cast<Wide>(lhs_bits) + static_cast<Wide>(rhs_bits);
+    return static_cast<uint32_t>(std::min(wide, static_cast<Wide>(std::numeric_limits<T>::max())));
+  }
+}
+
+/// @brief Execute VOP3 integer subtraction, saturating when CLAMP is set.
+template <typename T> inline uint32_t vop3_integer_sub(uint32_t lhs, uint32_t rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4));
+  using U = std::make_unsigned_t<T>;
+  const U lhs_bits = static_cast<U>(lhs);
+  const U rhs_bits = static_cast<U>(rhs);
+  if (!clamp)
+    return static_cast<uint32_t>(static_cast<U>(lhs_bits - rhs_bits));
+  if constexpr (std::is_signed_v<T>) {
+    using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
+    const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) -
+                      static_cast<Wide>(std::bit_cast<T>(rhs_bits));
+    const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
+                                      static_cast<Wide>(std::numeric_limits<T>::max()));
+    return static_cast<uint32_t>(static_cast<U>(saturated));
+  } else {
+    return lhs_bits < rhs_bits ? 0u : static_cast<uint32_t>(lhs_bits - rhs_bits);
+  }
 }
 
 /// @brief Return whether V_DOT4 integer instructions honor the encoded CLAMP bit.
@@ -1675,15 +1718,14 @@ template <typename Inst, typename CmpOp, typename WriteResult>
 /// VOP3 integer/bitwise binary SIMD fast path. Same shape as
 /// try_execute_binary_vop2_simd but reads the VOP3 operands `src0`/`src1`
 /// (instead of `src0`/`vsrc1`). The generated integer/bitwise VOP3 bodies apply
-/// no source/result modifiers (abs/neg/omod are float-only; clamp on an integer
-/// op means saturate, which these wrap-around/bitwise twins do not request), so
-/// the plain op is bit-identical to the scalar body on every input. T is a
-/// 32-bit integer lane type.
+/// no source/result modifiers other than integer CLAMP. Saturating integer
+/// arithmetic falls back to the scalar body; the plain op is bit-identical to
+/// that body when CLAMP is clear. T is a 32-bit integer lane type.
 template <typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));

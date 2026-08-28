@@ -6148,6 +6148,15 @@ class CodeGenerator:
                     mode_sensitive_f16_dst=not cls.startswith('scalar_'),
                     mask_result_writer=result_writer,
                 )
+                inst_fields = getattr(self, '_current_inst_fields', set())
+                if (
+                    is_vop3
+                    and cls == 'vector_binop'
+                    and op in ('add', 'sub', 'subrev', 'rsub')
+                    and dtype in ('i16', 'u16', 'i32', 'u32')
+                    and 'clamp' in inst_fields
+                ):
+                    lctx.integer_saturation_dtype = dtype
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.

@@ -3217,9 +3217,11 @@ inline void execute_v_add_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_add<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                          inst.inst_.clamp));
   }
 }
 
@@ -3246,10 +3248,12 @@ inline void execute_v_add_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                                (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                                 amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        static_cast<uint32_t>(
+            static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_add<int16_t>(
+                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), inst.inst_.clamp)))));
   }
 }
 
@@ -3260,9 +3264,11 @@ inline void execute_v_add_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_add<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                          inst.inst_.clamp));
   }
 }
 
@@ -3274,9 +3280,10 @@ inline void execute_v_add_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     sdwa::write_lane<false>(
         inst, wf, inst.vdst, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(
-            (static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
-             static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))));
+        static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+            inst.inst_.clamp))));
   }
 }
 
@@ -3300,9 +3307,11 @@ inline void execute_v_add_nc_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_add<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           inst.inst_.clamp));
   }
 }
 
@@ -3341,9 +3350,11 @@ inline void execute_v_add_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_add<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           inst.inst_.clamp));
   }
 }
 
@@ -19222,9 +19233,11 @@ inline void execute_v_sub_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                          inst.inst_.clamp));
   }
 }
 
@@ -19234,10 +19247,12 @@ inline void execute_v_sub_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                                (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) -
-                                 amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        static_cast<uint32_t>(
+            static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_sub<int16_t>(
+                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), inst.inst_.clamp)))));
   }
 }
 
@@ -19248,9 +19263,11 @@ inline void execute_v_sub_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                          inst.inst_.clamp));
   }
 }
 
@@ -19262,9 +19279,10 @@ inline void execute_v_sub_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     sdwa::write_lane<false>(
         inst, wf, inst.vdst, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(
-            (static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) -
-             static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))));
+        static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+            inst.inst_.clamp))));
   }
 }
 
@@ -19288,9 +19306,11 @@ inline void execute_v_sub_nc_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           inst.inst_.clamp));
   }
 }
 
@@ -19329,9 +19349,11 @@ inline void execute_v_sub_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           inst.inst_.clamp));
   }
 }
 
@@ -19733,9 +19755,11 @@ inline void execute_v_subrev_nc_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           inst.inst_.clamp));
   }
 }
 
@@ -19774,9 +19798,11 @@ inline void execute_v_subrev_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) -
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sub<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                           inst.inst_.clamp));
   }
 }
 

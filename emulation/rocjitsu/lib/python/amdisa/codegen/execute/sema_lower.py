@@ -128,6 +128,7 @@ class LoweringContext:
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
     mode_sensitive_f16_dst: bool = True
+    integer_saturation_dtype: str | None = None
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -537,6 +538,12 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind == SemaNodeKind.ID:
         return _lower_id(node, ctx)
 
+    if (
+        kind in (SemaNodeKind.ADD, SemaNodeKind.SUB)
+        and ctx.integer_saturation_dtype is not None
+    ):
+        return _lower_saturating_integer_binary(node, ctx)
+
     if kind in _INFIX_OPS:
         if (expr := _lower_less_greater_once(node, ctx)) is not None:
             return expr
@@ -725,6 +732,21 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'/* stmt-in-expr: {kind.name} */'
 
     raise ValueError(f'Unhandled SemaNodeKind in lowering: {kind.name}')
+
+
+def _lower_saturating_integer_binary(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower VOP3 integer add/sub with optional CLAMP saturation."""
+    dtype = ctx.integer_saturation_dtype
+    if dtype not in ('i16', 'u16', 'i32', 'u32'):
+        raise ValueError(f'Unsupported integer saturation type: {dtype}')
+
+    lhs = _lower_expr(node.children[0], replace(ctx, integer_saturation_dtype=None))
+    rhs = _lower_expr(node.children[1], replace(ctx, integer_saturation_dtype=None))
+    operation = 'add' if node.kind == SemaNodeKind.ADD else 'sub'
+    cpp_type = f'{"int" if dtype.startswith("i") else "uint"}{dtype[1:]}_t'
+    return (
+        f'amdgpu::vop3_integer_{operation}<{cpp_type}>(' f'{lhs}, {rhs}, inst_.clamp)'
+    )
 
 
 def _lower_lit(node: SemaNode) -> str:

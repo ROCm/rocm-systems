@@ -1438,11 +1438,13 @@ void VAddU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src0, wf, lane, opsel, 0)) +
-                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src1, wf, lane, opsel, 1)))))));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
+              inst_.clamp)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1455,11 +1457,13 @@ void VSubU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src0, wf, lane, opsel, 0)) -
-                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src1, wf, lane, opsel, 1)))))));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
+              inst_.clamp)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1472,11 +1476,13 @@ void VSubrevU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src1, wf, lane, opsel, 1)) -
-                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                     src0, wf, lane, opsel, 0)))))));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
+              static_cast<uint16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+              inst_.clamp)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -3034,10 +3040,10 @@ void VAddI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              (::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) +
-               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
+          static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_add<int16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.clamp))))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -3050,10 +3056,10 @@ void VSubI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              (::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) -
-               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
+          static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_sub<int16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.clamp))))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }

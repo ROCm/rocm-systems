@@ -156,6 +156,72 @@ TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMo
   }
 }
 
+TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
+  ForceScalarGuard guard;
+  for (uint32_t scalar = 0; scalar < 2; ++scalar) {
+    util::set_force_scalar_for_testing(scalar != 0);
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1u);
+    const uint32_t base = wf->vgpr_alloc().base;
+
+    // Exact instruction from ROCm/rocm-systems#10760:
+    // v_sub_nc_u32 v4, v4, 4 clamp
+    cu->write_vgpr(base + 4, 0, 1u);
+    constexpr std::array<uint32_t, 2> kIssueInstruction = {0xd5268004u, 0x02010904u};
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> issue_inst(decode_valid(*decoder, kIssueInstruction.data()));
+    ASSERT_NE(issue_inst, nullptr);
+    EXPECT_EQ(issue_inst->mnemonic(), "v_sub_nc_u32");
+    issue_inst->execute(*issue_inst, wf);
+    EXPECT_EQ(cu->read_vgpr(base + 4, 0), 0u) << "scalar " << scalar;
+
+    struct TestCase {
+      uint16_t opcode;
+      uint32_t lhs;
+      uint32_t rhs;
+      uint32_t expected;
+    };
+    constexpr std::array<TestCase, 8> kBoundaryCases = {{
+        {cdna5::kVAddNcU32Vop3, UINT32_MAX, 1u, UINT32_MAX},
+        {cdna5::kVSubNcU32Vop3, 7u, 3u, 4u},
+        {cdna5::kVAddNcI32Vop3, static_cast<uint32_t>(INT32_MAX), 1u,
+         static_cast<uint32_t>(INT32_MAX)},
+        {cdna5::kVSubNcI32Vop3, static_cast<uint32_t>(INT32_MIN), 1u,
+         static_cast<uint32_t>(INT32_MIN)},
+        {cdna5::kVAddNcU16Vop3, UINT16_MAX, 1u, UINT16_MAX},
+        {cdna5::kVSubNcU16Vop3, 0u, 1u, 0u},
+        {cdna5::kVAddNcI16Vop3, static_cast<uint16_t>(INT16_MAX), 1u,
+         static_cast<uint16_t>(INT16_MAX)},
+        {cdna5::kVSubNcI16Vop3, static_cast<uint16_t>(INT16_MIN), 1u,
+         static_cast<uint16_t>(INT16_MIN)},
+    }};
+    for (const auto &test : kBoundaryCases) {
+      cu->write_vgpr(base + 0, 0, test.lhs);
+      cu->write_vgpr(base + 1, 0, test.rhs);
+      cu->write_vgpr(base + 2, 0, 0u);
+      const auto words =
+          cdna5::build_vop3(test.opcode, {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      inst->execute(*inst, wf);
+      EXPECT_EQ(cu->read_vgpr(base + 2, 0), test.expected) << "scalar " << scalar;
+    }
+
+    // CLAMP=0 retains the architectural modulo result.
+    cu->write_vgpr(base + 0, 0, UINT32_MAX);
+    cu->write_vgpr(base + 1, 0, 1u);
+    const auto wrap_words =
+        cdna5::build_vop3(cdna5::kVAddNcU32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+    cdna5::VAddNcU32Vop3 wrap_inst(wrap_words.data());
+    wrap_inst.execute_impl(*wf);
+    EXPECT_EQ(cu->read_vgpr(base + 2, 0), 0u) << "scalar " << scalar;
+  }
+}
+
 TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
   ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
