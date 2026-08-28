@@ -3,3 +3,4 @@ leak:hwloc.so
 leak:open-pal.so
 leak:ucs.so
 leak:uct.so
+leak:libhsa-runtime64.so

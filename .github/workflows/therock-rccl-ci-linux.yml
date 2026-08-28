@@ -28,6 +28,9 @@ on:
       notify_webhook:
         type: string
         default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
 
 permissions:
   contents: read
@@ -58,7 +61,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: b014dba9f285f6d510624cbe1a1d20251c99c0f4 # 2026-08-21
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
 
       - name: Install python deps
         run: |
@@ -88,7 +91,7 @@ jobs:
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          echo "No patches to remove"
 
       - name: Configure Projects
         env:
@@ -106,7 +109,6 @@ jobs:
         run: cmake --build TheRock/build --target therock-artifacts
 
       - name: Report
-        #if: ${{ !cancelled() }}
         run: |
           echo "Full SDK du:"
           echo "------------"
@@ -174,6 +176,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -188,6 +192,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -201,6 +207,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
