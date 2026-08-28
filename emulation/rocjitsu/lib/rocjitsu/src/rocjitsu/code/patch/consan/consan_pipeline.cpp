@@ -98,6 +98,13 @@ ConSanPipelineStageState &stage_record(TransformResult &result, ConSanPipelineSt
   return result.stages[static_cast<size_t>(stage)];
 }
 
+void block_pipeline_after(TransformResult &result, ConSanPipelineStage completed_or_failed) {
+  const size_t first_blocked = static_cast<size_t>(completed_or_failed) + 1u;
+  const size_t publication = static_cast<size_t>(ConSanPipelineStage::ResultPublication);
+  for (size_t index = first_blocked; index < publication; ++index)
+    result.stages[index].status = ConSanPipelineStageStatus::Blocked;
+}
+
 [[nodiscard]] ConSanDispatchRequirements
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
                             std::span<const ConSanPatchInfo> patches) {
@@ -210,7 +217,8 @@ public:
         mutation_(mutation), capabilities_(capabilities), resources_(resources) {}
 
   [[nodiscard]] TransformResult
-  execute(std::optional<ConSanTransformArtifacts> supplied_lowering = std::nullopt);
+  execute(std::optional<ConSanTransformArtifacts> supplied_lowering = std::nullopt,
+          std::optional<ConSanLoweringExecution> supplied_execution = std::nullopt);
 
 private:
   std::span<const uint8_t> code_object_bytes_;
@@ -228,10 +236,11 @@ private:
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    std::optional<ConSanTransformArtifacts> supplied_lowering = std::nullopt) {
+    std::optional<ConSanTransformArtifacts> supplied_lowering = std::nullopt,
+    std::optional<ConSanLoweringExecution> supplied_execution = std::nullopt) {
   return ConSanTransformTransaction(code_object_bytes, request, transform_policy, runtime_policy,
                                     debug, mutation, capabilities, resources)
-      .execute(std::move(supplied_lowering));
+      .execute(std::move(supplied_lowering), std::move(supplied_execution));
 }
 
 bool ConSanPipelineStageState::well_formed(ConSanPipelineStage stage) const {
@@ -560,12 +569,13 @@ TransformResult resume_consan_automatic_transform(std::span<const uint8_t> code_
     ConSanOptions retry_options(deferred.request_, deferred.transform_policy_, deferred.debug_,
                                 deferred.requested_mutation_, deferred.capabilities_, resources);
     ConSanTransformArtifacts retry_inventory = deferred.inventory_result_.take_lowering_artifacts();
+    ConSanLoweringExecution execution;
     ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-        std::move(retry_inventory), std::move(retry_options), code_object_bytes);
-    return execute_consan_transaction(code_object_bytes, deferred.request_,
-                                      deferred.transform_policy_, deferred.runtime_policy_,
-                                      deferred.debug_, deferred.requested_mutation_,
-                                      deferred.capabilities_, resources, std::move(retried));
+        std::move(retry_inventory), std::move(retry_options), code_object_bytes, &execution);
+    return execute_consan_transaction(
+        code_object_bytes, deferred.request_, deferred.transform_policy_, deferred.runtime_policy_,
+        deferred.debug_, deferred.requested_mutation_, deferred.capabilities_, resources,
+        std::move(retried), execution);
   }
   case ConSanDeferredBinding::ResumeStrategy::RelowerFromInput:
     return deferred.requested_mutation_.has_mutation()
@@ -611,7 +621,8 @@ TransformResult transform_consan_with_mutation(
 }
 
 TransformResult
-ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supplied_artifacts) {
+ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supplied_artifacts,
+                                    std::optional<ConSanLoweringExecution> supplied_execution) {
   const std::span<const uint8_t> code_object_bytes = code_object_bytes_;
   const ConSanRequest &request = request_;
   const TransformPolicy &transform_policy = transform_policy_;
@@ -631,6 +642,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     configuration.status = ConSanPipelineStageStatus::Invalid;
     configuration.contract_issue = configuration_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
+    block_pipeline_after(result, ConSanPipelineStage::Configuration);
     stage_record(result, ConSanPipelineStage::ResultPublication).status =
         ConSanPipelineStageStatus::Completed;
     return result;
@@ -644,18 +656,20 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     capability_stage.status = ConSanPipelineStageStatus::Invalid;
     capability_stage.contract_issue = backend_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
+    block_pipeline_after(result, ConSanPipelineStage::TargetAndRuntimeCapabilities);
     stage_record(result, ConSanPipelineStage::ResultPublication).status =
         ConSanPipelineStageStatus::Completed;
     return result;
   }
 
+  ConSanLoweringExecution execution = supplied_execution.value_or(ConSanLoweringExecution{});
   ConSanTransformArtifacts lowering;
   if (supplied_artifacts) {
     lowering = std::move(*supplied_artifacts);
   } else {
     const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
                                          resources);
-    lowering = lower_consan(code_object_bytes, lowering_options);
+    lowering = lower_consan(code_object_bytes, lowering_options, &execution);
   }
   result.publish_lowering_artifacts(std::move(lowering));
   const ConSanTransformOutcome lowerer_outcome = result.outcome;
@@ -678,6 +692,8 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       stage_record(result, ConSanPipelineStage::ProgramInventory);
   if (flavor == ConSanFlavor::None) {
     inventory_stage.status = ConSanPipelineStageStatus::NotApplicable;
+  } else if (execution.program_inventory_passes == 0u) {
+    inventory_stage.status = ConSanPipelineStageStatus::Blocked;
   } else if (!result.program_inventory.empty() &&
              result.program_inventory.code_object_id() == result.code_object) {
     inventory_stage.status = ConSanPipelineStageStatus::Completed;
@@ -691,6 +707,8 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       stage_record(result, ConSanPipelineStage::ObservationPlan);
   if (flavor == ConSanFlavor::None) {
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
+  } else if (execution.observation_plan_passes == 0u) {
+    observation_stage.status = ConSanPipelineStageStatus::Blocked;
   } else if (result.observation_plan.valid()) {
     observation_stage.status = ConSanPipelineStageStatus::Completed;
   } else if (result.outcome == ConSanTransformOutcome::Unsupported) {
@@ -701,7 +719,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
   }
 
-  if (result.observation_plan.valid()) {
+  if (observation_stage.status == ConSanPipelineStageStatus::Completed) {
     result.evidence_intent_plan = plan_consan_evidence_intents(result.observation_plan);
     const std::optional<uint64_t> maximum_access_probe_count =
         transform_policy.max_patches_is_expert_limit
@@ -737,22 +755,25 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
 
   ConSanPipelineStageState &evidence_stage =
       stage_record(result, ConSanPipelineStage::EvidenceRequirements);
-  if (result.evidence_intent_plan && result.evidence_intent_plan->well_formed() &&
-      result.evidence_requirements &&
-      consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
+  if (flavor == ConSanFlavor::None) {
+    evidence_stage.status = ConSanPipelineStageStatus::NotApplicable;
+  } else if (observation_stage.status != ConSanPipelineStageStatus::Completed) {
+    evidence_stage.status = ConSanPipelineStageStatus::Blocked;
+  } else if (result.evidence_intent_plan && result.evidence_intent_plan->well_formed() &&
+             result.evidence_requirements &&
+             consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
     evidence_stage.status = ConSanPipelineStageStatus::Completed;
-  } else if (flavor == ConSanFlavor::None || !result.observation_plan.valid()) {
-    evidence_stage.status = observation_stage.status == ConSanPipelineStageStatus::Completed
-                                ? ConSanPipelineStageStatus::Invalid
-                                : observation_stage.status;
   } else {
     evidence_stage.status = ConSanPipelineStageStatus::Invalid;
   }
 
   ConSanPipelineStageState &binding_stage =
       stage_record(result, ConSanPipelineStage::RuntimeBinding);
-  if (!result.evidence_requirements) {
+  if (flavor == ConSanFlavor::None) {
     binding_stage.status = ConSanPipelineStageStatus::NotApplicable;
+  } else if (evidence_stage.status != ConSanPipelineStageStatus::Completed ||
+             !result.evidence_requirements) {
+    binding_stage.status = ConSanPipelineStageStatus::Blocked;
   } else if (!evidence_is_complete(*result.evidence_requirements)) {
     binding_stage.status = ConSanPipelineStageStatus::Unsupported;
   } else if (!evidence_requires_binding(*result.evidence_requirements)) {
@@ -813,8 +834,12 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     lowering_stage.status = ConSanPipelineStageStatus::NotApplicable;
     validation_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else {
-    lowering_stage.status = terminal_stage_status(lowerer_outcome);
-    validation_stage.status = terminal_stage_status(lowerer_outcome);
+    lowering_stage.status = execution.resource_solving_and_lowering_passes == 0u
+                                ? ConSanPipelineStageStatus::Blocked
+                                : terminal_stage_status(lowerer_outcome);
+    validation_stage.status = execution.final_validation_passes == 0u
+                                  ? ConSanPipelineStageStatus::Blocked
+                                  : terminal_stage_status(lowerer_outcome);
   }
   stage_record(result, ConSanPipelineStage::ResultPublication).status =
       ConSanPipelineStageStatus::Completed;
@@ -828,9 +853,15 @@ TransformResult TransformResult::execute_test_transaction(
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
     ConSanTransformArtifacts lowering_artifacts) {
+  const ConSanLoweringExecution synthetic_execution = {
+      .program_inventory_passes = 1,
+      .observation_plan_passes = 1,
+      .resource_solving_and_lowering_passes = 1,
+      .final_validation_passes = 1,
+  };
   return execute_consan_transaction(code_object_bytes, request, transform_policy, runtime_policy,
                                     debug, mutation, capabilities, resources,
-                                    std::move(lowering_artifacts));
+                                    std::move(lowering_artifacts), synthetic_execution);
 }
 
 } // namespace rocjitsu

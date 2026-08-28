@@ -403,9 +403,9 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeTargetLoweringWithTypedIssue
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
   EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-            ConSanPipelineStageStatus::NotApplicable);
+            ConSanPipelineStageStatus::Blocked);
   EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
-            ConSanPipelineStageStatus::NotApplicable);
+            ConSanPipelineStageStatus::Blocked);
   EXPECT_EQ(result.stage(ConSanPipelineStage::ResultPublication)->status,
             ConSanPipelineStageStatus::Completed);
 
@@ -443,7 +443,7 @@ TEST(ConSanPipeline, InvalidCodeObjectRetainsOneResultIdentity) {
   EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
             ConSanPipelineStageStatus::Completed);
   EXPECT_EQ(result.stage(ConSanPipelineStage::ObservationPlan)->status,
-            ConSanPipelineStageStatus::Invalid);
+            ConSanPipelineStageStatus::Blocked);
   EXPECT_FALSE(result.errors.empty());
 }
 

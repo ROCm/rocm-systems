@@ -40,7 +40,8 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
 finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
                        uint64_t expected_moi_report_dispatch_id = 0,
                        bool validating_carried_composite_stage = false,
-                       const ConSanPerturbationPlanningState *carried_perturbation = nullptr);
+                       const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
+                       ConSanLoweringExecution *execution = nullptr);
 
 template <typename Site>
 void move_sites_in_range(std::vector<Site> &source, std::vector<Site> &destination, uint64_t begin,
@@ -504,7 +505,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {},
-    bool require_applicable_fault_plan = false) {
+    bool require_applicable_fault_plan = false, ConSanLoweringExecution *execution = nullptr) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -558,7 +559,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     } else {
       pristine_mutation_plan =
           try_patch_consan_impl(code_object_bytes, planning_options, {}, std::nullopt,
-                                &pristine_perturbation, {}, {}, true);
+                                &pristine_perturbation, {}, {}, true, execution);
     }
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
@@ -603,8 +604,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
     apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result.fault_plans,
                                       fault_result);
-    fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
-                                          fault_options.moi_report_dispatch_id);
+    fault_result =
+        finalize_consan_result(std::move(fault_result), code_object_bytes,
+                               fault_options.moi_report_dispatch_id, false, nullptr, execution);
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
@@ -662,9 +664,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried, {},
-                              &perturbation, instrument_preapplied),
+                              &perturbation, instrument_preapplied, {}, false, execution),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
-        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
+        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation,
+        execution);
     const major_image_ownership::ScopedOwner instrument_result_owner(
         major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
     // Resource ownership is a logical kernel identity, but instrumentation of
@@ -788,6 +791,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   if (options.flavor == ConSanFlavor::None)
     return result;
+
+  if (execution != nullptr)
+    execution->note_program_inventory();
 
   if (code_object_bytes.empty()) {
     result.errors.emplace_back("ConSan received an empty code object");
@@ -987,6 +993,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
   result.program_inventory = inventory_builder.view();
   if (options.fault_dry_run) {
+    if (execution != nullptr)
+      execution->note_resource_solving_and_lowering();
     build_fault_mutation_plan(options, arch, result, require_applicable_fault_plan);
     build_perturbation_plan(options, perturbation, result, carried_plans);
     return result;
@@ -1003,7 +1011,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // section objects and names, and derived state cannot overlap every
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
-    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch);
+    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
@@ -1011,8 +1019,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return result;
   }
 
-  if (!initialize_sc_access_coverage(options, result))
+  const bool sc_observation_valid = initialize_sc_access_coverage(options, result);
+  if (execution != nullptr)
+    execution->note_observation_plan();
+  if (!sc_observation_valid)
     return result;
+
+  if (execution != nullptr)
+    execution->note_resource_solving_and_lowering();
 
   const bool has_redundant_access = options.probe_lds_check_trap || options.probe_flat_check_trap;
   const uint32_t overall_patch_budget = std::max<uint32_t>(options.max_patches, 1u);

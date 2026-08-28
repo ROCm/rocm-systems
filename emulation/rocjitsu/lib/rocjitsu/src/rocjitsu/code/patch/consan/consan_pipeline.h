@@ -90,13 +90,15 @@ static_assert(kConSanPipelineStages.size() == static_cast<size_t>(ConSanPipeline
 /// `Completed` means the stage produced and validated its promised value.
 /// `Deferred` is a successful static result that intentionally awaits a later
 /// runtime allocation or dispatch binding; it is neither an error nor silent
-/// success. `NotApplicable` means the selected mode or result needs no value
-/// from that stage. `Unsupported` represents a known input outside the current
-/// contract, while `Invalid` means an input or produced value violated a
-/// required invariant. `Count` is never a recorded status.
+/// success. `Blocked` means the stage did not execute because an earlier
+/// dependency failed. `NotApplicable` means the selected mode or result needs
+/// no value from that stage. `Unsupported` represents a known input outside
+/// the current contract, while `Invalid` means an input or produced value
+/// violated a required invariant. `Count` is never a recorded status.
 enum class ConSanPipelineStageStatus : uint8_t {
   Completed,
   Deferred,
+  Blocked,
   NotApplicable,
   Unsupported,
   Invalid,
@@ -104,10 +106,10 @@ enum class ConSanPipelineStageStatus : uint8_t {
 };
 
 /// Complete iterable set of pipeline-stage statuses.
-inline constexpr std::array<ConSanPipelineStageStatus, 5> kConSanPipelineStageStatuses = {
-    ConSanPipelineStageStatus::Completed,     ConSanPipelineStageStatus::Deferred,
-    ConSanPipelineStageStatus::NotApplicable, ConSanPipelineStageStatus::Unsupported,
-    ConSanPipelineStageStatus::Invalid,
+inline constexpr std::array<ConSanPipelineStageStatus, 6> kConSanPipelineStageStatuses = {
+    ConSanPipelineStageStatus::Completed,   ConSanPipelineStageStatus::Deferred,
+    ConSanPipelineStageStatus::Blocked,     ConSanPipelineStageStatus::NotApplicable,
+    ConSanPipelineStageStatus::Unsupported, ConSanPipelineStageStatus::Invalid,
 };
 
 /// Return the stable diagnostic spelling of a stage status.
@@ -118,6 +120,8 @@ consan_pipeline_stage_status_name(ConSanPipelineStageStatus status) {
     return "completed";
   case ConSanPipelineStageStatus::Deferred:
     return "deferred";
+  case ConSanPipelineStageStatus::Blocked:
+    return "blocked";
   case ConSanPipelineStageStatus::NotApplicable:
     return "not-applicable";
   case ConSanPipelineStageStatus::Unsupported:

@@ -288,10 +288,9 @@ bool consan_supercollider_supports_access(const ConSanAccessInventorySite &acces
       arch);
 }
 
-ConSanTransformArtifacts
-retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifacts,
-                                      ConSanOptions options,
-                                      std::span<const uint8_t> code_object_bytes) {
+ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
+    ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,
+    std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
@@ -320,7 +319,8 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
     }
     if (!inventory.errors.empty()) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+      return finalize_consan_result(std::move(inventory), code_object_bytes, 0, false, nullptr,
+                                    execution);
     }
 
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
@@ -336,7 +336,8 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
     }
     if (!inventory.errors.empty()) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+      return finalize_consan_result(std::move(inventory), code_object_bytes, 0, false, nullptr,
+                                    execution);
     }
 
     // The retry replaces diagnostics from the unbound sizing attempt. The
@@ -348,31 +349,67 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry accepts only a live late-bound fault selection");
       inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+      return finalize_consan_result(std::move(inventory), code_object_bytes, 0, false, nullptr,
+                                    execution);
     }
     if (has_late_fault) {
       // A pristine report-sizing inventory deliberately excludes the live
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.
-      ConSanTransformArtifacts result = try_patch_consan_impl(code_object_bytes, options);
+      ConSanTransformArtifacts result = try_patch_consan_impl(
+          code_object_bytes, options, {}, std::nullopt, nullptr, {}, {}, false, execution);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
-                                    options.moi_report_dispatch_id);
+                                    options.moi_report_dispatch_id, false, nullptr, execution);
     }
     ConSanTransformArtifacts result =
-        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
+        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch, execution);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes,
-                                  options.moi_report_dispatch_id);
+                                  options.moi_report_dispatch_id, false, nullptr, execution);
   } catch (const std::exception &error) {
     ConSanTransformArtifacts result;
     result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
                                error.what());
-    return finalize_consan_result(std::move(result), code_object_bytes);
+    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
+                                  execution);
   } catch (...) {
     ConSanTransformArtifacts result;
     result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
-    return finalize_consan_result(std::move(result), code_object_bytes);
+    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
+                                  execution);
+  }
+}
+
+[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering_observed(
+    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
+    ConSanPerturbationPlanningState *inspected_perturbation,
+    const ConSanPreappliedMutationLayout &preapplied_mutation,
+    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs,
+    ConSanLoweringExecution *execution) {
+  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
+                                                       code_object_bytes.data(),
+                                                       code_object_bytes.size());
+  try {
+    MoiOptions effective_options = options;
+    ConSanTransformArtifacts result = try_patch_consan_impl(
+        code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation,
+        preapplied_mutation, initial_owner_transient_sgprs, false, execution);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
+    result =
+        finalize_consan_result(std::move(result), code_object_bytes, options.moi_report_dispatch_id,
+                               false, inspected_perturbation, execution);
+    return result;
+  } catch (const std::exception &error) {
+    ConSanTransformArtifacts result;
+    result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
+    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
+                                  execution);
+  } catch (...) {
+    ConSanTransformArtifacts result;
+    result.errors.emplace_back("ConSan transform threw a non-standard exception");
+    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
+                                  execution);
   }
 }
 
@@ -381,27 +418,9 @@ ConSanTransformArtifacts complete_consan_lowering(
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
-  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
-                                                       code_object_bytes.data(),
-                                                       code_object_bytes.size());
-  try {
-    MoiOptions effective_options = options;
-    ConSanTransformArtifacts result = try_patch_consan_impl(
-        code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation,
-        preapplied_mutation, initial_owner_transient_sgprs);
-    try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
-    result = finalize_consan_result(std::move(result), code_object_bytes,
-                                    options.moi_report_dispatch_id, false, inspected_perturbation);
-    return result;
-  } catch (const std::exception &error) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
-    return finalize_consan_result(std::move(result), code_object_bytes);
-  } catch (...) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back("ConSan transform threw a non-standard exception");
-    return finalize_consan_result(std::move(result), code_object_bytes);
-  }
+  return complete_consan_lowering_observed(code_object_bytes, options, inspected_perturbation,
+                                           preapplied_mutation, initial_owner_transient_sgprs,
+                                           nullptr);
 }
 
 ConSanTransformArtifacts test_apply_consan_fault_plans(std::span<const uint8_t> code_object_bytes,
@@ -419,8 +438,11 @@ ConSanTransformArtifacts test_apply_consan_fault_plans(std::span<const uint8_t> 
 }
 
 ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes,
-                                      const ConSanOptions &options) {
-  return complete_consan_lowering(code_object_bytes, options);
+                                      const ConSanOptions &options,
+                                      ConSanLoweringExecution *execution) {
+  if (execution != nullptr)
+    *execution = {};
+  return complete_consan_lowering_observed(code_object_bytes, options, nullptr, {}, {}, execution);
 }
 
 } // namespace rocjitsu

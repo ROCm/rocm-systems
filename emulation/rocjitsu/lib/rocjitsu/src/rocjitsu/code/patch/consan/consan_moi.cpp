@@ -15,6 +15,7 @@
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
+#include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -688,7 +689,8 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                               const MoiOptions &options,
                                               std::span<const uint8_t> code_object_bytes,
-                                              rj_code_arch_t arch) {
+                                              rj_code_arch_t arch,
+                                              ConSanLoweringExecution *execution) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   MoiOptions effective_options = options;
@@ -719,11 +721,16 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     return result;
   const std::set<OrderedOrdinarySyncSiteKey> ordered_sync_sites =
       ordered_ordinary_sync_site_keys(result);
-  if (!initialize_moi_access_observation_plan(result.program_inventory,
-                                              effective_options.flat_provenance_mode,
-                                              effective_options, ordered_sync_sites, result)) {
+  const bool observation_valid = initialize_moi_access_observation_plan(
+      result.program_inventory, effective_options.flat_provenance_mode, effective_options,
+      ordered_sync_sites, result);
+  if (execution != nullptr)
+    execution->note_observation_plan();
+  if (!observation_valid) {
     return result;
   }
+  if (execution != nullptr)
+    execution->note_resource_solving_and_lowering();
   std::vector<ConSanMoiCandidate> moi_candidates =
       build_moi_candidates(result.program_inventory, result.observation_plan, result.errors);
   if (!result.errors.empty())
