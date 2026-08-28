@@ -308,7 +308,15 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* addr, size_t size
   return g_rmaProxyRegister(comm, addr, size, hostWins);
 }
 
-ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+static ncclResult_t DefaultRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_rmaProxyDeregister =
+    DefaultRmaProxyDeregister;
+
+ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* wins[NCCL_GIN_MAX_CONNECTIONS]) {
+  return g_rmaProxyDeregister(comm, wins);
+}
 
 // ---------------------------------------------------------------------------
 // devr internal helpers (defined elsewhere in the real build).
@@ -637,6 +645,7 @@ void ResetDevRuntimeFakes() {
   g_hipMemRetainAllocationHandle            = DefaultMemRetainAllocationHandle;
   g_ncclCommRegister                        = DefaultCommRegister;
   g_ncclCommDeregister                      = DefaultCommDeregister;
+  g_rmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }

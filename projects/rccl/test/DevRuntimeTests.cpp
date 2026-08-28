@@ -3289,6 +3289,87 @@ TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_ReleasesEarlierHandles) {
 
 
 // ---------------------------------------------------------------------------
+// windowDeregisterNonSym undoes windowRegisterNonSym stage by stage: the RMA
+// MR, the IPC peer mappings, the shadow-pool entry, then the local
+// registration. The window must still be in winSorted, which is how a repeated
+// deregister of an already-freed handle is caught.
+
+class WindowDeregisterNonSymTest : public WindowRegisterNonSymTest {
+protected:
+  // Register a window through the real path, so the state being torn down is
+  // exactly what the register path produces.
+  ncclWindow_t RegisterOne(void* userPtr) {
+    ncclWindow_t out = nullptr;
+    EXPECT_EQ(windowRegisterNonSym(comm, userPtr, 4096, 0, nullptr, &out), ncclSuccess);
+    return out;
+  }
+};
+
+// The happy path: the window leaves the sorted list and its local registration
+// is released.
+TEST_F(WindowDeregisterNonSymTest, Succeeds_RemovesWindowAndReleasesRegistration) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  EXPECT_EQ(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
+// Branch: a window that is not in winSorted -- a second deregister of the same
+// handle -- is reported rather than tearing down freed state again.
+TEST_F(WindowDeregisterNonSymTest, AlreadyDeregistered_ReturnsInvalidArgument) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ASSERT_EQ(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+
+  EXPECT_EQ(windowDeregisterNonSym(comm, winDev), ncclInvalidArgument);
+}
+
+// Branch: only the window asked for is removed; its neighbours stay registered.
+TEST_F(WindowDeregisterNonSymTest, RemovesOnlyTheNamedWindow) {
+  ncclWindow_t first = RegisterOne(reinterpret_cast<void*>(0x100000));
+  RegisterOne(reinterpret_cast<void*>(0x200000));
+  ASSERT_EQ(comm->devrState.winSortedCount, 2);
+
+  ASSERT_EQ(windowDeregisterNonSym(comm, first), ncclSuccess);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  EXPECT_EQ(comm->devrState.winSorted[0].userAddr, 0x200000u);
+}
+
+// Branch: an RMA MR was taken, so it is released before the rest. rmaHostWins[0]
+// is the witness the function uses, so setting it is what selects this arm.
+TEST_F(WindowDeregisterNonSymTest, RmaRegistered_DeregistersMr) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  comm->devrState.winSorted[0].win->rmaHostWins[0] = reinterpret_cast<void*>(0x1);
+  ScopedHook rmaDereg(g_rmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(rmaDereg.calls, 1);
+}
+
+// Branch: no MR was taken, so nothing is released.
+TEST_F(WindowDeregisterNonSymTest, NoRmaRegistration_SkipsMrDeregister) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook rmaDereg(g_rmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(rmaDereg.calls, 0);
+}
+
+// Branch: the shadow-pool release fails, so the window stays registered rather
+// than being dropped from the list with its device entry still live.
+TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook poolFree(g_shadowPoolFree,
+                      [](ncclShadowPool*, void*, hipStream_t) { return ncclSystemError; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
