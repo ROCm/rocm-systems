@@ -110,16 +110,14 @@ def find_cli_dir(*start_dirs):
     for start in start_dirs:
         if not start:
             continue
-        directory = os.path.abspath(start)
-        while True:
+        # abspath rather than Path.resolve(): a symlinked ROCm root
+        # (/opt/rocm -> /opt/rocm-x.y.z) must stay as the caller spelled it.
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
             for rel in (("libexec", "amdsmi_cli"), ("amdsmi_cli",)):
-                candidate = os.path.join(directory, *rel)
-                if os.path.isfile(os.path.join(candidate, sentinel)):
-                    return candidate
-            parent = os.path.dirname(directory)
-            if parent == directory:  # reached filesystem root
-                break
-            directory = parent
+                candidate = directory.joinpath(*rel)
+                if (candidate / sentinel).is_file():
+                    return str(candidate)
     return None
 
 
