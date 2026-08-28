@@ -50,7 +50,8 @@ permissions:
 # Per-PR: a new push cancels the previous GitHub run. submit_slurm_job.py
 # scancels the Slurm allocation so cancelled GIN jobs do not keep holding
 # rccl_ci nodes until wall clock.
-# Probe push: cancel GitHub run 33211263499 / SLURM 19186 while it is live.
+# GHA cancel signals the submit step PID; rccl-suite.yml exec's python so
+# submit_slurm_job.py actually receives SIGINT/SIGTERM and scancels.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
