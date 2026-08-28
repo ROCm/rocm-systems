@@ -173,7 +173,8 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
-    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) -- needs a refactor
+    // of sample_processor's handle for all modes
     void handle(const hipfile_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 
