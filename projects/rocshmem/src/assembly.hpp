@@ -774,7 +774,7 @@ make_buffer_resource(const void* base, uint32_t num_bytes) {
 // caller must guarantee the pointer resolves to the symmetric heap (or an
 // IPC/RDMA-mapped remote of it). Scalar p()/g() (util.hpp's
 // memcpy_lane_scalar) also satisfy this: the remote side is always global,
-// and the local scalar value/return never has its address taken.
+// and local scalars are accessed via regular loads/stores rather than AsmAccess.
 template <int Size, CachePolicy LoadPolicy = CachePolicy::Standard,
           CachePolicy StorePolicy = LoadPolicy>
 struct AsmAccess;
