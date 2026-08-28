@@ -28,6 +28,11 @@ extern std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)>
 extern std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
     g_hipMemGetAllocationGranularity;
 
+extern std::function<hipError_t(hipStream_t*, unsigned int)> g_hipStreamCreateWithFlags;
+extern std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize;
+extern std::function<hipError_t(hipStream_t)> g_hipStreamDestroy;
+extern std::function<hipError_t(hipStreamCaptureMode*)> g_hipThreadExchangeStreamCaptureMode;
+
 // Backs every NCCL_PARAM in the unit under test. DevRuntimeTests.cpp redefines
 // the macro to call this instead of param.h's caching body, so a param's value
 // can differ between tests; the default returns the param's own default.

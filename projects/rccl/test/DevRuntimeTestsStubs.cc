@@ -312,18 +312,6 @@ HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDe
   return g_hipMemSetAccess(ptr, size, desc, count);
 }
 
-// Params are not cached here (see DevRuntimeTestsStubs.h), so the default just
-// hands back the value the NCCL_PARAM declaration was written with.
-static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
-std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
-
-void ResetDevRuntimeFakes() {
-  g_hipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
-  g_hipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
-  g_hipMemSetAccess                         = DefaultMemSetAccess;
-  g_hipMemGetAllocationGranularity          = DefaultMemGetAllocationGranularity;
-  g_loadParam                               = DefaultLoadParam;
-}
 HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
@@ -341,13 +329,54 @@ HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, 
 // throwaway streams for its teardown bookkeeping; none carry real work on the
 // host, so a non-null opaque handle and success returns are sufficient.
 // ---------------------------------------------------------------------------
-HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
+// Seams: ncclDevrFinalize wraps each of these in CUDACHECKIGNORE/CUDASUCCESS,
+// so the failure arms are only reachable by driving them.
+static hipError_t DefaultStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
   if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipStreamSynchronize(hipStream_t) { return hipSuccess; }
-HIP_FAKE hipError_t hipStreamDestroy(hipStream_t) { return hipSuccess; }
-HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+std::function<hipError_t(hipStream_t*, unsigned int)> g_hipStreamCreateWithFlags =
+    DefaultStreamCreateWithFlags;
+
+HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags) {
+  return g_hipStreamCreateWithFlags(stream, flags);
+}
+
+static hipError_t DefaultStreamSynchronize(hipStream_t) { return hipSuccess; }
+std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultStreamSynchronize;
+
+HIP_FAKE hipError_t hipStreamSynchronize(hipStream_t stream) { return g_hipStreamSynchronize(stream); }
+
+static hipError_t DefaultStreamDestroy(hipStream_t) { return hipSuccess; }
+std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultStreamDestroy;
+
+HIP_FAKE hipError_t hipStreamDestroy(hipStream_t stream) { return g_hipStreamDestroy(stream); }
+
+static hipError_t DefaultThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
   if (mode) *mode = hipStreamCaptureModeRelaxed;
   return hipSuccess;
+}
+std::function<hipError_t(hipStreamCaptureMode*)> g_hipThreadExchangeStreamCaptureMode =
+    DefaultThreadExchangeStreamCaptureMode;
+
+HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+  return g_hipThreadExchangeStreamCaptureMode(mode);
+}
+
+// ---------------------------------------------------------------------------
+// Params are not cached here (see DevRuntimeTestsStubs.h), so the default just
+// hands back the value the NCCL_PARAM declaration was written with.
+static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
+std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
+void ResetDevRuntimeFakes() {
+  g_hipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
+  g_hipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
+  g_hipMemSetAccess                         = DefaultMemSetAccess;
+  g_hipMemGetAllocationGranularity          = DefaultMemGetAllocationGranularity;
+  g_hipStreamCreateWithFlags                = DefaultStreamCreateWithFlags;
+  g_hipStreamSynchronize                    = DefaultStreamSynchronize;
+  g_hipStreamDestroy                        = DefaultStreamDestroy;
+  g_hipThreadExchangeStreamCaptureMode      = DefaultThreadExchangeStreamCaptureMode;
+  g_loadParam                               = DefaultLoadParam;
 }
