@@ -294,9 +294,11 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
 /// Construct temporary lowering state from one admitted normalized access.
 /// The exact inventory record remains the candidate's base; construction only
 /// selects its unambiguous execution-owner descriptor.
-[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access) {
+[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access,
+                                                    ConSanProbeIntentId intent_id) {
   ConSanMoiCandidate candidate;
   static_cast<ConSanAccessInventorySite &>(candidate) = access;
+  candidate.intent_ids.push_back(intent_id);
   if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
     candidate.kernel_descriptor_file_offset =
         access.execution_owner_descriptor_file_offsets.front();
@@ -311,7 +313,7 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
 build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
                      std::vector<std::string> &errors) {
   std::vector<ConSanMoiCandidate> candidates;
-  std::unordered_set<uint64_t> admitted_offsets;
+  std::map<uint64_t, size_t> candidate_index_by_offset;
   for (const ConSanProbeIntent &intent : plan.probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
         intent.kind != ConSanProbeIntentKind::SampledAccess &&
@@ -325,8 +327,18 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
       errors.emplace_back("ConSan MOI access intent lost its inventory site");
       return {};
     }
-    if (admitted_offsets.insert(access->physical_id.original_text_offset).second)
-      candidates.push_back(make_moi_candidate(*access));
+    const auto [position, inserted] = candidate_index_by_offset.try_emplace(
+        access->physical_id.original_text_offset, candidates.size());
+    if (inserted) {
+      candidates.push_back(make_moi_candidate(*access, intent.id));
+    } else {
+      ConSanMoiCandidate &candidate = candidates[position->second];
+      if (candidate.physical_id != access->physical_id) {
+        errors.emplace_back("ConSan MOI coalesced distinct physical access identities");
+        return {};
+      }
+      candidate.intent_ids.push_back(intent.id);
+    }
   }
   return candidates;
 }

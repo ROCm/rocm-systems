@@ -1,3 +1,26 @@
+[[nodiscard]] std::optional<ConSanCommittedLowering>
+make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
+                                const ConSanMoiCandidate &candidate, const ConSanPatchInfo &patch) {
+  std::vector<ConSanCommittedLoweringLocation> locations;
+  locations.push_back({
+      .original_site = candidate.physical_id,
+      .emitted_text_offset = patch.anchor_offset,
+      .emitted_size = patch.original_size,
+      .relocated_guest_text_offset =
+          patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
+  });
+  if (patch.trampoline_size != 0u) {
+    locations.push_back({
+        .original_site = candidate.physical_id,
+        .emitted_text_offset = patch.trampoline_offset,
+        .emitted_size = patch.trampoline_size,
+        .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
+    });
+  }
+  return make_consan_committed_lowering(result.observation_plan, candidate.intent_ids, locations,
+                                        ConSanLoweringOutcomeKind::Instrumented);
+}
+
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
           typename ApplyExtraRequirements>
 [[nodiscard]] bool apply_inline_moi_access_patches(
@@ -41,8 +64,30 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     return false;
   }
 
-  for (const PlannedPatch &planned_patch : planned_patches)
-    result.patches.push_back(make_patch_info(planned_patch));
+  std::vector<ConSanPatchInfo> patch_infos;
+  std::vector<ConSanCommittedLowering> lowering_commits;
+  patch_infos.reserve(planned_patches.size());
+  lowering_commits.reserve(planned_patches.size());
+  for (const PlannedPatch &planned_patch : planned_patches) {
+    ConSanPatchInfo patch = make_patch_info(planned_patch);
+    auto commit = make_moi_access_lowering_commit(result, *planned_patch.candidate, patch);
+    if (!commit) {
+      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                                 " produced an invalid intent-bound lowering");
+      result.replacement.clear();
+      return false;
+    }
+    patch_infos.push_back(std::move(patch));
+    lowering_commits.push_back(std::move(*commit));
+  }
+  if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                               " could not commit its semantic lowerings");
+    result.replacement.clear();
+    return false;
+  }
+  result.patches.insert(result.patches.end(), std::make_move_iterator(patch_infos.begin()),
+                        std::make_move_iterator(patch_infos.end()));
   result.mark_modified();
   return true;
 }

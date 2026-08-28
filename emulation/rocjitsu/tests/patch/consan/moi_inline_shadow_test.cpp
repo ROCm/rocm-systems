@@ -288,6 +288,9 @@ TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiExactShadowStore);
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.committed_lowerings.front().locations.size(), 1u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 8u);
 

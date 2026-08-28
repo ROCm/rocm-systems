@@ -195,6 +195,9 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             1u);
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.committed_lowerings.front().locations.size(), 1u);
   EXPECT_EQ(access_patch->anchor_offset, 0u);
   ASSERT_TRUE(access_patch->scratch_vgpr);
   EXPECT_EQ(*access_patch->scratch_vgpr, 8u);
@@ -864,6 +867,11 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             1u);
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.committed_lowerings.front().intent_ids.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().original_semantic_sites.size(), 2u);
+  EXPECT_EQ(result.committed_lowerings.front().locations.size(), 2u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = patched.text_sections().front();

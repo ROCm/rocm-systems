@@ -689,7 +689,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
+    std::vector<ConSanCommittedLowering> lowering_commits;
     patches.reserve(planned_patches.size());
+    lowering_commits.reserve(planned_patches.size());
     if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
                                              direct_branch_reservoirs, "sampled probe", arch,
                                              new_text, patches, result))
@@ -1024,6 +1026,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.relocated_guest_instruction_offset =
             candidate.anchor() + planned_patch.probe_guest_instruction_offset;
       }
+      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      if (!commit) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled probe produced an invalid intent-bound lowering");
+        return;
+      }
+      lowering_commits.push_back(std::move(*commit));
       patches.push_back(info);
       if (planned_patch.branch_only_route) {
         std::string relay_error;
@@ -1051,6 +1060,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       return;
     }
     result.replacement = std::move(patcher).emit();
+    if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled probe could not commit its semantic lowerings");
+      result.discard_candidate_modification();
+      return;
+    }
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.mark_modified();
     return;

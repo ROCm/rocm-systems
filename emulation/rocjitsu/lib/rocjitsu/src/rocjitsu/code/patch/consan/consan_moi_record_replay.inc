@@ -1122,7 +1122,9 @@ void try_apply_first_light_access_record_patch(
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
+    std::vector<ConSanCommittedLowering> lowering_commits;
     patches.reserve(planned_patches.size());
+    lowering_commits.reserve(planned_patches.size());
     if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
                                              direct_branch_reservoirs, "first-light probe", arch,
                                              new_text, patches, result))
@@ -1436,6 +1438,13 @@ void try_apply_first_light_access_record_patch(
         if (selected_record_replay_anchor_relay_offsets.contains(offset))
           info.branch_relay_offsets.push_back(offset);
       }
+      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      if (!commit) {
+        result.errors.emplace_back(
+            "ConSan MOI first-light probe produced an invalid intent-bound lowering");
+        return;
+      }
+      lowering_commits.push_back(std::move(*commit));
       patches.push_back(info);
       if (planned_patch.branch_only_route) {
         std::string relay_error;
@@ -1470,6 +1479,12 @@ void try_apply_first_light_access_record_patch(
       return;
     }
     result.replacement = std::move(patcher).emit();
+    if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+      result.errors.emplace_back(
+          "ConSan MOI first-light probe could not commit its semantic lowerings");
+      result.discard_candidate_modification();
+      return;
+    }
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     if (reserved_sync_island_count != 0u) {
       access_output.reserved_sync_islands = MoiReservedBarrierIslandLayout{

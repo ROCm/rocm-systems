@@ -5192,6 +5192,12 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoNativeLdsAccessRecords) {
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches[1].anchor_offset, kSecondSiteWord * sizeof(uint32_t));
   expect_bounded_static_record_replay_probe_size(result.patches[1].original_size);
+  ASSERT_EQ(result.committed_lowerings.size(), 2u);
+  for (const ConSanCommittedLowering &commit : result.committed_lowerings) {
+    EXPECT_EQ(commit.outcome, ConSanLoweringOutcomeKind::Instrumented);
+    EXPECT_EQ(commit.intent_ids.size(), 1u);
+    EXPECT_EQ(commit.locations.size(), 1u);
+  }
 
   std::vector<uint32_t> first_words(result.patches[0].original_size / sizeof(uint32_t));
   std::vector<uint32_t> second_words(result.patches[1].original_size / sizeof(uint32_t));

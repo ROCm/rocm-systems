@@ -8,6 +8,8 @@
 /// inventory value keeps its established field vocabulary without maintaining
 /// an independent access identity, operand, or decode schema.
 struct ConSanMoiCandidate : ConSanAccessInventorySite {
+  /// Every observation intent coalesced onto this physical access.
+  std::vector<ConSanProbeIntentId> intent_ids;
   /// Return the original-text instruction offset used as this lowering
   /// operation's physical insertion anchor.
   [[nodiscard]] uint64_t anchor() const { return physical_id.original_text_offset; }

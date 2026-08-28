@@ -37,13 +37,13 @@
 
 #include "rocjitsu/code/patch/consan/consan_site_identity.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_resource_types.h.inc"
-
 #include "rocjitsu/code/patch/consan/consan_fault_sync_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_program_inventory.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_observation_plan.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_resource_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_result.h.inc"
 

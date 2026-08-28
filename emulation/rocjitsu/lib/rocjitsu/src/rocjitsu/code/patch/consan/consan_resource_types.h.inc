@@ -42,6 +42,8 @@ struct ConSanResourcePlanAlternative {
 struct ConSanCandidateResourcePlan {
   ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
   size_t candidate_index = 0;
+  /// Semantic intents whose lowering is governed by this site-local plan.
+  std::vector<ConSanProbeIntentId> intent_ids;
   /// Physical instruction where liveness and allocation were evaluated.
   uint64_t text_offset = 0;
   /// Logical synchronization site represented by a patch whose physical

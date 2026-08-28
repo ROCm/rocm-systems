@@ -901,7 +901,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
+    std::vector<ConSanCommittedLowering> lowering_commits;
     patches.reserve(planned_patches.size());
+    lowering_commits.reserve(planned_patches.size());
     if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
                                              direct_branch_reservoirs, "inline-shadow probe", arch,
                                              new_text, patches, result))
@@ -1281,6 +1283,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               (words->size() - planned_patch.guest_instruction_word_count) * sizeof(uint32_t);
         }
       }
+      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      if (!commit) {
+        result.errors.emplace_back(
+            "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");
+        return;
+      }
+      lowering_commits.push_back(std::move(*commit));
       patches.push_back(info);
       if (planned_patch.branch_only_route) {
         std::string relay_error;
@@ -1315,6 +1324,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       return;
     }
     result.replacement = std::move(patcher).emit();
+    if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+      result.errors.emplace_back(
+          "ConSan MOI inline-shadow probe could not commit its semantic lowerings");
+      result.discard_candidate_modification();
+      return;
+    }
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.mark_modified();
     return;

@@ -67,6 +67,12 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  ASSERT_EQ(result.committed_lowerings.size(), kAccessCount);
+  for (const ConSanCommittedLowering &commit : result.committed_lowerings) {
+    EXPECT_EQ(commit.outcome, ConSanLoweringOutcomeKind::Instrumented);
+    EXPECT_EQ(commit.intent_ids.size(), 1u);
+    EXPECT_EQ(commit.locations.size(), 2u);
+  }
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
       continue;

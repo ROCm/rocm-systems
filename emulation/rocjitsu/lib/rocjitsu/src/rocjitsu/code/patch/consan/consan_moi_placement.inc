@@ -3066,6 +3066,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
   plan.site_kind = site_kind;
   plan.candidate_index = candidate_index;
   plan.text_offset = text_offset;
+  if (access_candidate != nullptr)
+    plan.intent_ids = access_candidate->intent_ids;
   plan.scratch_vgpr_count = scratch_count;
   if (!state.valid) {
     plan.reason = ConSanRegisterPlanReason::MissingInstruction;
