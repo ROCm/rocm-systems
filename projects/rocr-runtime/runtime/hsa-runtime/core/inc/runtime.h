@@ -1129,6 +1129,10 @@ class Runtime {
     DriverMemoryHandle driver_handle;
     // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
     bool owns_driver_handle = true;
+    // For CPU targetAgent over an imported MemoryHandle: the GPU agent whose DRM context
+    // holds the BO that driver_handle refers to, and whose device fd the CPU mmap uses.
+    // set to nullptr for all other cases.
+    Agent* cpu_mmap_drm_agent = nullptr;
   };
 
   struct MappedHandle {
