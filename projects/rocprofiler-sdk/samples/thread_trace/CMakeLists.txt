@@ -48,35 +48,21 @@ endforeach()
 set_source_files_properties(
     main.cpp PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}")
 
-add_executable(thread-trace-sample)
-target_sources(thread-trace-sample PRIVATE main.cpp agent.cpp)
+find_package(rocprof-trace-decoder 0.2.2 REQUIRED)
 
+add_library(thread-trace-sample)
+target_sources(thread-trace-sample PRIVATE agent.cpp)
+set_target_properties(thread-trace-sample PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(thread-trace-sample PRIVATE /opt/rocm/include/rocprof-trace-decoder/)
 target_link_libraries(
     thread-trace-sample
     PUBLIC rocprofiler-sdk::samples-build-flags
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr)
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr rocprof-trace-decoder::rocprof-trace-decoder)
 
 add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
-
-set(IS_DISABLED ON)
-if(attdecoder_FOUND)
-    set(IS_DISABLED OFF)
-endif()
+set(IS_DISABLED OFF)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
 list(APPEND PRELOAD_ENV "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}")

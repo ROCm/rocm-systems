@@ -33,7 +33,7 @@ endif()
 add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
-add_subdirectory(openmp)
+#add_subdirectory(openmp)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 

@@ -621,7 +621,7 @@ public:
                                TOKEN_EXCLUDE,
                                ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
                                 (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT) |
-                                (1 << SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT) | (1 << SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT) | (1<<0xA) |
                                 (1 << SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT) |
                                 (1 << SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT) |
                                 (1 << SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) |

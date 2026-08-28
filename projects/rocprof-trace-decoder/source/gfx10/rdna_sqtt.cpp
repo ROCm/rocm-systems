@@ -94,7 +94,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 if (tt_version >= 5)
                 {
                     mi400::misc_type misc{.raw = token.contents};
-                    DEBUGPRINT(misc);
+                    //DEBUGPRINT(misc);
                     fields.raw = (uint8_t) misc.fields;
                     fields.tt5_shift();
 
@@ -112,7 +112,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 else
                 {
                     gfx10::misc_type misc{.raw = token.contents};
-                    DEBUGPRINT(misc);
+                    //DEBUGPRINT(misc);
                     fields.raw = (uint8_t) misc.fields;
                 }
 
