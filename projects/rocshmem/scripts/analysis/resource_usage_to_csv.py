@@ -72,6 +72,9 @@ KEY_TO_COLUMN = {
 # kernel with a garbage name.
 _VALID_SYMBOL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$]*$")
 
+# Every non-name metric value is either a plain integer or True/False.
+_VALID_METRIC_VALUE = re.compile(r"^(?:\d+|True|False)$")
+
 # Columns a real remark block always populates (everything but the identity
 # fields set when the row is opened). A row that reaches finalization with
 # none of these attached only happens when its "Function Name:" line's own
@@ -156,6 +159,17 @@ def parse_log(log_path: Path):
                 # A metric line with no open row at its own location means the
                 # "Function Name" line that should have opened it was itself
                 # lost to interleaving corruption -- nothing to attach this to.
+                continue
+            if not _VALID_METRIC_VALUE.match(value):
+                # Splicing can also merge two metric lines (same location
+                # prefix) into one physical line, not just corrupt "Function
+                # Name:" -- drop just this field, not the whole row.
+                print(
+                    f"warning: discarding corrupted {key!r} value at "
+                    f"{loc[0]}:{loc[1]} (likely spliced with a following "
+                    f"build-log line): {value!r}",
+                    file=sys.stderr,
+                )
                 continue
             row[column] = value
     for loc in list(open_rows):
