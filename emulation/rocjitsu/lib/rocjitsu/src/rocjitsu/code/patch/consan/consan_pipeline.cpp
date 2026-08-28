@@ -299,11 +299,11 @@ TransformResult transform_consan_pristine_moi_inventory(std::span<const uint8_t>
                                                         const ConSanDebugOverrides &debug,
                                                         const MutationRequest &disabled_mutation,
                                                         const RuntimeCapabilities &capabilities) {
-  ConSanOptions legacy_options(request, transform_policy, debug, disabled_mutation, capabilities,
-                               BoundRuntimeResources{});
+  ConSanOptions lowering_options(request, transform_policy, debug, disabled_mutation, capabilities,
+                                 BoundRuntimeResources{});
   TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-      capabilities, BoundRuntimeResources{}, lower_consan(code_object_bytes, legacy_options));
+      capabilities, BoundRuntimeResources{}, lower_consan(code_object_bytes, lowering_options));
   result.moi_retry_inventory_available_ = true;
   return result;
 }

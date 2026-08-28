@@ -524,25 +524,26 @@ TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCa
                            ConSanDebugOverrides{}, capabilities, BoundRuntimeResources{});
 
       ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
+      const ConSanEvidenceIntentPlan evidence_intents =
+          plan_consan_evidence_intents(result.observation_plan);
       switch (engine) {
       case ConSanMoiEngine::RecordReplay:
-        EXPECT_EQ(std::get<ConSanRecordReplayEvidenceRequirements>(*result.evidence_requirements),
-                  plan_consan_record_replay_evidence(
-                      result.observation_plan,
-                      {.caller_ceiling_bytes = 4096u,
-                       .maximum_access_probe_count = maximum_access_probe_count}));
+        EXPECT_EQ(
+            std::get<ConSanRecordReplayEvidenceRequirements>(*result.evidence_requirements),
+            plan_consan_record_replay_evidence(
+                evidence_intents, {.caller_ceiling_bytes = 4096u,
+                                   .maximum_access_probe_count = maximum_access_probe_count}));
         break;
       case ConSanMoiEngine::Sampled:
         EXPECT_EQ(std::get<ConSanSampledEvidenceRequirements>(*result.evidence_requirements),
-                  plan_consan_sampled_evidence(
-                      result.observation_plan,
-                      {.caller_ceiling_bytes = 4096u,
-                       .maximum_access_probe_count = maximum_access_probe_count}));
+                  plan_consan_sampled_evidence(evidence_intents, {.caller_ceiling_bytes = 4096u,
+                                                                  .maximum_access_probe_count =
+                                                                      maximum_access_probe_count}));
         break;
       case ConSanMoiEngine::InlineShadow:
         EXPECT_EQ(std::get<ConSanInlineShadowEvidenceRequirements>(*result.evidence_requirements),
                   plan_consan_inline_shadow_evidence(
-                      result.program_inventory, result.observation_plan,
+                      result.program_inventory, evidence_intents,
                       {.caller_ceiling_bytes = 4096u,
                        .maximum_access_probe_count = maximum_access_probe_count,
                        .maximum_workgroup_lds_bytes = 96u * 1024u}));

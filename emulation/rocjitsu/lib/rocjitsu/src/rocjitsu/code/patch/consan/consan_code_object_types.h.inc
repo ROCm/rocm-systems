@@ -316,7 +316,7 @@ enum class ConSanProgramContainerKind : uint8_t {
 struct ConSanProgramContainerRef {
   /// Whether the symbol is a dispatchable kernel or a helper function.
   ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
-  /// Symbol name retained for diagnostics and temporary legacy lookup.
+  /// Symbol name retained for diagnostics and symbol-attributed inventory lookup.
   std::string name;
   /// Original executable-text entry offset of the symbol range.
   uint64_t entry_text_offset = 0;
@@ -356,13 +356,13 @@ enum class ConSanAccessOrigin : uint8_t {
   Count,
 };
 
-/// Decoder operands retained by normalized access inventory and temporary
-/// compatibility lowering.
+/// Decoder operands retained by normalized access inventory and native
+/// lowering.
 ///
 /// Optional fields preserve “not encoded/not decoded” rather than inventing a
 /// register or immediate. Raw FLAT fields remain target-neutral facts here;
 /// interpreting whether a particular combination is instrumentable belongs to
-/// engine policy and target lowering. The temporary MOI candidate embeds this
+/// engine policy and target lowering. The MOI lowering candidate embeds this
 /// same record rather than copying selected operands into a parallel schema.
 struct ConSanAccessOperandFacts {
   std::optional<uint16_t> destination_vgpr;

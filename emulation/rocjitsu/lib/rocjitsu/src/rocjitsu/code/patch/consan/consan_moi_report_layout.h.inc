@@ -519,14 +519,6 @@ struct ConSanRecordReplayEvidenceRequirements {
 plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                                    const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
 
-/// Compatibility entry point that classifies an immutable observation plan
-/// through `plan_consan_evidence_intents` before deriving Record/Replay
-/// capacity. Production pipeline code publishes and passes that intermediate
-/// contract explicitly; direct callers cannot bypass the canonical mapping.
-[[nodiscard]] ConSanRecordReplayEvidenceRequirements
-plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
-                                   const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
-
 /// Caller policy controlling bounded Sampled evidence capacity.
 ///
 /// The optional physical-probe limit carries the explicit expert admission
@@ -677,12 +669,6 @@ consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requi
 plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                              const ConSanSampledCapacityPolicy &capacity_policy = {});
 
-/// Compatibility entry point that classifies an immutable observation plan
-/// through the canonical intent planner before deriving Sampled capacity.
-[[nodiscard]] ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
-                             const ConSanSampledCapacityPolicy &capacity_policy = {});
-
 /// Derive InlineShadow evidence from typed policy plus immutable original-
 /// program facts. The function reads no code bytes, emitted patches, or
 /// mutable resource assignments.
@@ -691,23 +677,10 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
                                    const ConSanEvidenceIntentPlan &evidence_intents,
                                    const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
 
-/// Compatibility entry point that classifies an immutable observation plan
-/// through the canonical intent planner before joining immutable program
-/// facts needed for InlineShadow capacity.
-[[nodiscard]] ConSanInlineShadowEvidenceRequirements
-plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
-                                   const ConSanObservationPlan &observation_plan,
-                                   const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
-
 /// Derive the fixed SuperCollider marker contract from a typed observation
 /// plan. No report-layout or allocation mechanism participates.
 [[nodiscard]] ConSanSuperColliderEvidenceRequirements
 plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents);
-
-/// Compatibility entry point that classifies an immutable observation plan
-/// through the canonical intent planner before deriving marker storage.
-[[nodiscard]] ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan);
 
 /// Revalidates a caller-carried layout against the canonical planner and the
 /// registered allocation size. A malformed, noncanonical, wrong-engine, or

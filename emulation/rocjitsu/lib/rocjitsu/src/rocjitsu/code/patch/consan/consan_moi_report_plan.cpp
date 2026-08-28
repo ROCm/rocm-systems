@@ -644,13 +644,6 @@ plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_inte
   return requirements;
 }
 
-ConSanRecordReplayEvidenceRequirements
-plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
-                                   const ConSanRecordReplayCapacityPolicy &capacity_policy) {
-  return plan_consan_record_replay_evidence(plan_consan_evidence_intents(observation_plan),
-                                            capacity_policy);
-}
-
 ConSanSampledEvidenceRequirements
 plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                              const ConSanSampledCapacityPolicy &capacity_policy) {
@@ -691,13 +684,6 @@ plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
       requirements.abi_plan.required_bytes;
   requirements.reason = ConSanEvidenceRequirementReason::None;
   return requirements;
-}
-
-ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
-                             const ConSanSampledCapacityPolicy &capacity_policy) {
-  return plan_consan_sampled_evidence(plan_consan_evidence_intents(observation_plan),
-                                      capacity_policy);
 }
 
 ConSanInlineShadowEvidenceRequirements
@@ -802,14 +788,6 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   return requirements;
 }
 
-ConSanInlineShadowEvidenceRequirements
-plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
-                                   const ConSanObservationPlan &observation_plan,
-                                   const ConSanInlineShadowCapacityPolicy &capacity_policy) {
-  return plan_consan_inline_shadow_evidence(
-      program_inventory, plan_consan_evidence_intents(observation_plan), capacity_policy);
-}
-
 ConSanSuperColliderEvidenceRequirements
 plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents) {
   ConSanSuperColliderEvidenceRequirements requirements;
@@ -825,11 +803,6 @@ plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_inte
   requirements.runtime_requirements.executable_binding = true;
   requirements.reason = ConSanEvidenceRequirementReason::None;
   return requirements;
-}
-
-ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan) {
-  return plan_consan_supercollider_evidence(plan_consan_evidence_intents(observation_plan));
 }
 
 ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory,
