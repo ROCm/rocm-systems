@@ -136,9 +136,11 @@ TEST(WslUnit, TryPopulateOnWslAgreesWithActiveState) {
     EXPECT_EQ(WSLGPUBackend::shutdown(), AMDSMI_STATUS_SUCCESS);
     EXPECT_FALSE(WSLGPUBackend::is_active());
   } else {
-    // DRIVER_NOT_LOADED (no librocdxg) or NOT_FOUND (no GPU) leave it inactive.
-    EXPECT_TRUE(r == AMDSMI_STATUS_DRIVER_NOT_LOADED || r == AMDSMI_STATUS_NOT_FOUND)
-        << "unexpected status: " << r;
+    // Any failure — no librocdxg, DXG runtime unavailable, no usable GPU —
+    // must leave the backend inactive and the caller's containers untouched,
+    // so amdsmi_init() can fall through to the native Linux path.
+    EXPECT_TRUE(sockets.empty()) << "failed with " << r << " but left sockets behind";
+    EXPECT_TRUE(processors.empty()) << "failed with " << r << " but left processors behind";
     EXPECT_FALSE(WSLGPUBackend::is_active());
   }
 }

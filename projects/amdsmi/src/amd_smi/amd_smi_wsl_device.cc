@@ -217,9 +217,13 @@ amdsmi_status_t WSLGPUBackend::try_populate(std::vector<AMDSmiSocket*>& sockets,
     info.struct_size = sizeof(info);
     hstatus = g_wsl_syms.rocdxg_smi_get_device_info(node_id, &info);
     if (hstatus != HSAKMT_STATUS_SUCCESS) {
-      g_wsl_syms.hsaKmtReleaseSystemProperties();
-      g_wsl_syms.hsaKmtCloseKFD();
-      return hsakmt_to_amdsmi(hstatus);
+      // A librocdxg built from a different rocdxg_smi.h rejects the struct size
+      // outright. Drop just this device rather than reporting no GPUs at all.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | rocdxg_smi_get_device_info(" << node_id
+         << ") failed with status " << hstatus << "; skipping device";
+      LOG_ERROR(ss);
+      continue;
     }
 
     auto* backend = new WSLGPUBackend(gpu_index, node_id, info);
