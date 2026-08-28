@@ -2229,7 +2229,7 @@ impl AmdsmiGpuBlockT {
     pub const AmdsmiGpuBlockUmc: AmdsmiGpuBlockT = AmdsmiGpuBlockT::AmdsmiGpuBlockFirst;
 }
 impl AmdsmiGpuBlockT {
-    pub const AmdsmiGpuBlockLast: AmdsmiGpuBlockT = AmdsmiGpuBlockT::AmdsmiGpuBlockMpio;
+    pub const AmdsmiGpuBlockLast: AmdsmiGpuBlockT = AmdsmiGpuBlockT::AmdsmiGpuBlockUciePcs;
 }
 #[repr(u64)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -2254,6 +2254,26 @@ pub enum AmdsmiGpuBlockT {
     AmdsmiGpuBlockJpeg = 65536,
     AmdsmiGpuBlockIh = 131072,
     AmdsmiGpuBlockMpio = 262144,
+    AmdsmiGpuBlockMmsch = 524288,
+    AmdsmiGpuBlockMp5 = 1048576,
+    AmdsmiGpuBlockAtu = 2097152,
+    AmdsmiGpuBlockDaccBe = 4194304,
+    AmdsmiGpuBlockEclr = 8388608,
+    AmdsmiGpuBlockKpxSerdes = 16777216,
+    AmdsmiGpuBlockLsdma = 33554432,
+    AmdsmiGpuBlockMpart = 67108864,
+    AmdsmiGpuBlockMpifoe = 134217728,
+    AmdsmiGpuBlockMpras = 268435456,
+    AmdsmiGpuBlockNbif = 536870912,
+    AmdsmiGpuBlockNbio = 1073741824,
+    AmdsmiGpuBlockOxrp = 2147483648,
+    AmdsmiGpuBlockPciePl = 4294967296,
+    AmdsmiGpuBlockPcsXgmi = 8589934592,
+    AmdsmiGpuBlockPie = 17179869184,
+    AmdsmiGpuBlockCs = 34359738368,
+    AmdsmiGpuBlockShub = 68719476736,
+    AmdsmiGpuBlockSsbdci = 137438953472,
+    AmdsmiGpuBlockUciePcs = 274877906944,
     AmdsmiGpuBlockReserved = 9223372036854775808,
 }
 impl AmdsmiClkLimitTypeT {
