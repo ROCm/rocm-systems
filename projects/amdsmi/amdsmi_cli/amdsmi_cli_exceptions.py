@@ -420,7 +420,12 @@ def library_code_to_exit_code(error_code):
     0xFFFFFFFF) fold to their low byte (254 / 255). No status numbers are
     hardcoded here.
     """
-    return abs(int(error_code)) & 0xFF
+    status = abs(int(error_code))
+    folded = status & 0xFF
+    # A nonzero status that is an exact multiple of 256 folds to 0, reporting success.
+    if status and not folded:
+        return CLI_EXIT_CODE_BAND_END
+    return folded
 
 
 class AmdSmiErrorCollector:

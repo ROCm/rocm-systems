@@ -160,6 +160,26 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             cli_exc.library_code_to_exit_code(amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR), 254
         )
 
+    def test_status_exits_zero_only_when_it_is_success(self):
+        # Walks the whole enum, not a sample. A nonzero status that is an exact
+        # multiple of 256 folds to 0 and would report a failed command as successful;
+        # SUCCESS itself must still exit 0.
+        for status in amdsmi.AmdSmiStatus:
+            exit_code = cli_exc.library_code_to_exit_code(status.value)
+            if status.value == 0:
+                self.assertEqual(exit_code, 0, f"{status.name} must exit 0")
+            else:
+                self.assertNotEqual(
+                    exit_code, 0, f"{status.name} ({status.value}) folds to a success exit code"
+                )
+
+    def test_status_that_folds_to_zero_never_exits_success(self):
+        # 256 and 512 are not real statuses; they stand in for any future multiple
+        # of 256, which the byte fold alone would turn into a success exit code.
+        # The enum-wide test above cannot catch this until such a status exists.
+        for status in (256, 512):
+            self.assertNotEqual(cli_exc.library_code_to_exit_code(status), 0)
+
     def test_library_exception_surfaces_status(self):
         exc = cli_exc.AmdSmiLibraryErrorException("", amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
         self.assertEqual(exc.value, int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED))
@@ -422,7 +442,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         cmd.helpers = AMDSMIHelpers()
         cmd.logger = _FakeLogger()
         # Avoid the driver-backed core-id lookup.
-        cmd.helpers.get_core_id_from_device_handle = lambda handle: 0
+        cmd.helpers.get_core_id_from_device_handle = lambda input_device_handle: 0
 
         args = argparse.Namespace(
             core="fake-core-handle",  # non-list, non-None -> handle_cores returns (False, handle)
@@ -477,7 +497,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             "core-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
         }
 
-        def fake_subcommand(args, multiple_devices=False, core=None):
+        def fake_subcommand(args, multiple_devices=False, core=""):
             raise _FakeLibErr(codes[core])
 
         helpers = AMDSMIHelpers()
@@ -592,7 +612,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         cmd: Any = set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
         cmd.logger = _FakeLogger()
-        cmd.helpers.get_core_id_from_device_handle = lambda handle: 0
+        cmd.helpers.get_core_id_from_device_handle = lambda input_device_handle: 0
 
         args = argparse.Namespace(
             core="fake-core-handle",
@@ -825,7 +845,7 @@ def _make_set_gpu_cmd(set_value):
     cmd.device_handles = []
     cmd.group_check_printed = True
     cmd.helpers.is_baremetal = lambda: True
-    cmd.helpers.get_gpu_id_from_device_handle = lambda handle: 0
+    cmd.helpers.get_gpu_id_from_device_handle = lambda input_device_handle: 0
     return cmd
 
 
@@ -1237,7 +1257,7 @@ def _make_reset_cmd(reset):
     cmd.device_handles = []
     cmd.group_check_printed = True
     cmd.helpers.is_baremetal = lambda: True
-    cmd.helpers.get_gpu_id_from_device_handle = lambda handle: 0
+    cmd.helpers.get_gpu_id_from_device_handle = lambda input_device_handle: 0
     return cmd
 
 
