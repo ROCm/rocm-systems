@@ -17,7 +17,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
-from utils.inject_roctx._backends.torch_cpp_loader import UnsupportedTorchVersionError
+from utils.inject_roctx._backends.torch_cpp_loader import (
+    UnsupportedTorchVersionError,
+)
+from utils.inject_roctx._backends.torch_cpp_loader import (
+    load as load_torch_trace_collector,
+)
 from utils.inject_roctx.registry import register
 from utils.logger import console_error, console_log, console_warning
 
@@ -1209,15 +1214,7 @@ def _resolve_torch() -> bool:
         _STATE.nn = _nn_mod
     except Exception:
         _STATE.nn = None
-    try:
-        from .torch_cpp_loader import load as _loader_fn
-
-        _STATE.load_torch_trace_collector = _loader_fn
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            f"torch_cpp_loader unavailable; falling back to Python tier: {exc}",
-        )
+    _STATE.load_torch_trace_collector = load_torch_trace_collector
 
     return True
 

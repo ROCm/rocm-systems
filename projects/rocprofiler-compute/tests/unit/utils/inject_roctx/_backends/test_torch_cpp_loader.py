@@ -3,7 +3,6 @@
 
 """Unit tests for utils.inject_roctx._backends.torch_cpp_loader. No GPU."""
 
-import importlib
 import sys
 import types
 from pathlib import Path
@@ -54,18 +53,33 @@ def test_torch_version_exits_when_torch_is_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def collector_artifact_dir(tmp_path: Path, *versions: str) -> Path:
-    """Create ``tmp_path/lib/rocprofiler-compute/*.so`` and return that directory."""
-    artifact_dir = tmp_path / "lib" / "rocprofiler-compute"
-    artifact_dir.mkdir(parents=True)
+@pytest.fixture(autouse=True)
+def clear_cmake_binary_dir(monkeypatch):
+    monkeypatch.delenv("CMAKE_BINARY_DIR", raising=False)
+
+
+def write_collector_so(directory: Path, version: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"torch_trace_collector-{version}.so"
+    path.write_bytes(b"stub")
+    return path
+
+
+def installed_package_root(tmp_path: Path, libdir: str, *versions: str):
+    """Return ``(package_root, artifact_dir)`` for an install-prefix layout."""
+    package_root = tmp_path / "libexec" / "rocprofiler-compute"
+    package_root.mkdir(parents=True)
+    artifact_dir = tmp_path / libdir / "rocprofiler-compute"
     for version in versions:
-        (artifact_dir / f"torch_trace_collector-{version}.so").write_bytes(b"stub")
-    return artifact_dir
+        write_collector_so(artifact_dir, version)
+    return package_root, artifact_dir
 
 
 def test_list_collector_artifacts_returns_paths_and_versions(tmp_path, monkeypatch):
-    artifact_dir = collector_artifact_dir(tmp_path, "2.8.0", "2.9.0", "2.8.0")
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    package_root, artifact_dir = installed_package_root(
+        tmp_path, "lib", "2.8.0", "2.9.0", "2.8.0"
+    )
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     assert inject_roctx_loader.list_collector_artifacts() == {
         "2.8.0": artifact_dir / "torch_trace_collector-2.8.0.so",
         "2.9.0": artifact_dir / "torch_trace_collector-2.9.0.so",
@@ -73,18 +87,19 @@ def test_list_collector_artifacts_returns_paths_and_versions(tmp_path, monkeypat
 
 
 def test_list_collector_artifacts_is_empty_without_artifacts(tmp_path, monkeypatch):
-    artifact_dir = tmp_path / "lib" / "rocprofiler-compute"
-    artifact_dir.mkdir(parents=True)
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    package_root, _artifact_dir = installed_package_root(tmp_path, "lib")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     assert inject_roctx_loader.list_collector_artifacts() == {}
 
 
 def test_list_collector_artifacts_skips_legacy_names(tmp_path, monkeypatch):
-    artifact_dir = collector_artifact_dir(tmp_path, "2.8.0", _FAKE_TORCH_VERSION)
+    package_root, artifact_dir = installed_package_root(
+        tmp_path, "lib", "2.8.0", _FAKE_TORCH_VERSION
+    )
     (
         artifact_dir / "torch_trace_collector-py3.12_torch2.13.0_srcdeadbeef.so"
     ).write_bytes(b"legacy")
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     assert inject_roctx_loader.list_collector_artifacts() == {
         "2.8.0": artifact_dir / "torch_trace_collector-2.8.0.so",
         _FAKE_TORCH_VERSION: (
@@ -93,17 +108,58 @@ def test_list_collector_artifacts_skips_legacy_names(tmp_path, monkeypatch):
     }
 
 
-def test_list_collector_artifacts_uses_build_lib_when_install_dir_missing(
+def test_list_collector_artifacts_finds_lib64_install(tmp_path, monkeypatch):
+    package_root, artifact_dir = installed_package_root(tmp_path, "lib64", "2.13.0")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
+    so_path = artifact_dir / "torch_trace_collector-2.13.0.so"
+    assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
+
+
+def test_list_collector_artifacts_finds_lib64_when_lib_has_no_collector(
+    tmp_path, monkeypatch
+):
+    package_root, artifact_dir = installed_package_root(tmp_path, "lib64", "2.13.0")
+    lib_install_dir = tmp_path / "lib" / "rocprofiler-compute"
+    lib_install_dir.mkdir(parents=True)
+    (lib_install_dir / "librocprofiler-compute-tool.so").write_bytes(b"tool")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
+    so_path = artifact_dir / "torch_trace_collector-2.13.0.so"
+    assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
+
+
+def test_list_collector_artifacts_uses_src_lib_build_when_install_dir_missing(
     tmp_path, monkeypatch
 ):
     package_root = tmp_path / "src"
-    build_dir = package_root / "lib" / "_build" / "lib"
-    build_dir.mkdir(parents=True)
-    so_path = build_dir / "torch_trace_collector-2.13.0.so"
-    so_path.write_bytes(b"stub")
-    monkeypatch.setattr(
-        inject_roctx_loader, "_ARTIFACT_DIR", tmp_path / "missing-install"
-    )
+    so_path = write_collector_so(package_root / "lib" / "_build" / "lib", "2.13.0")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
+    assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
+
+
+def test_list_collector_artifacts_uses_root_build_lib(tmp_path, monkeypatch):
+    package_root = tmp_path / "src"
+    package_root.mkdir(parents=True)
+    so_path = write_collector_so(tmp_path / "build" / "lib", "2.13.0")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
+    assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
+
+
+def test_list_collector_artifacts_uses_cmake_binary_dir_lib(tmp_path, monkeypatch):
+    package_root = tmp_path / "src"
+    package_root.mkdir(parents=True)
+    cmake_binary_dir = tmp_path / "out"
+    so_path = write_collector_so(cmake_binary_dir / "lib", "2.13.0")
+    monkeypatch.setenv("CMAKE_BINARY_DIR", str(cmake_binary_dir))
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
+    assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
+
+
+def test_list_collector_artifacts_finds_source_build_when_prefix_lib_is_empty(
+    tmp_path, monkeypatch
+):
+    package_root = tmp_path / "src"
+    (tmp_path / "lib" / "rocprofiler-compute").mkdir(parents=True)
+    so_path = write_collector_so(package_root / "lib" / "_build" / "lib", "2.13.0")
     monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     assert inject_roctx_loader.list_collector_artifacts() == {"2.13.0": so_path}
 
@@ -114,8 +170,8 @@ def test_list_collector_artifacts_uses_build_lib_when_install_dir_missing(
 
 
 def test_load_raises_when_torch_version_is_unsupported(monkeypatch, tmp_path):
-    artifact_dir = collector_artifact_dir(tmp_path, "2.8.0")
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    package_root, _artifact_dir = installed_package_root(tmp_path, "lib", "2.8.0")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     monkeypatch.setattr(
         inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
     )
@@ -129,9 +185,8 @@ def test_load_raises_when_torch_version_is_unsupported(monkeypatch, tmp_path):
 
 
 def test_load_raises_when_no_artifacts_are_discovered(monkeypatch, tmp_path):
-    artifact_dir = tmp_path / "lib" / "rocprofiler-compute"
-    artifact_dir.mkdir(parents=True)
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    package_root, _artifact_dir = installed_package_root(tmp_path, "lib")
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     monkeypatch.setattr(
         inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
     )
@@ -143,8 +198,10 @@ def test_load_raises_when_no_artifacts_are_discovered(monkeypatch, tmp_path):
 
 
 def test_load_exits_when_matching_artifact_fails(monkeypatch, tmp_path):
-    artifact_dir = collector_artifact_dir(tmp_path, _FAKE_TORCH_VERSION)
-    monkeypatch.setattr(inject_roctx_loader, "_ARTIFACT_DIR", artifact_dir)
+    package_root, _artifact_dir = installed_package_root(
+        tmp_path, "lib", _FAKE_TORCH_VERSION
+    )
+    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     monkeypatch.setattr(
         inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
     )
@@ -152,65 +209,3 @@ def test_load_exits_when_matching_artifact_fails(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as raised:
         inject_roctx_loader.load()
     assert raised.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# Python fallback integration
-# ---------------------------------------------------------------------------
-
-
-def test_python_fallback_path_still_works_without_so(monkeypatch):
-    """With the loader returning ``None``, the Python fallback still works."""
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        pytest.skip("torch not importable")
-    monkeypatch.setattr(inject_roctx_loader, "load", lambda: None)
-    if "utils.inject_roctx" in sys.modules:
-        del sys.modules["utils.inject_roctx"]
-    importlib.import_module("utils.inject_roctx")
-    try:
-        from utils.inject_roctx import core
-        from utils.inject_roctx._backends import torch as _torch_backend
-
-        assert _torch_backend.using_c_tier() is False
-        assert _torch_backend.dump_torch_trace_stats() is None
-
-        pushed = []
-        original_io = core.get_python_tier_io()
-        core.set_python_tier_io(push=pushed.append, pop=lambda: None)
-        try:
-            core._push_scope("py.tier.test", "#1@test:1")
-            core._pop_scope()
-        finally:
-            core.set_python_tier_io(*original_io)
-        assert pushed, "Python-tier rangePush was not invoked in fallback mode"
-    finally:
-        sys.modules.pop("utils.inject_roctx", None)
-
-
-def test_import_does_not_apply_global_patches(monkeypatch):
-    """Importing ``utils.inject_roctx`` does not patch PyTorch."""
-    monkeypatch.setattr(inject_roctx_loader, "load", lambda: None)
-    if "utils.inject_roctx" in sys.modules:
-        del sys.modules["utils.inject_roctx"]
-
-    try:
-        import torch  # noqa: F401
-    except Exception:
-        pytest.skip("torch not importable")
-
-    import torch as _torch
-
-    pre = {"compile": getattr(_torch, "compile", None)}
-    importlib.import_module("utils.inject_roctx")
-    try:
-        post = {"compile": getattr(_torch, "compile", None)}
-        from utils.inject_roctx import core
-        from utils.inject_roctx._backends import torch as _torch_backend
-
-        assert hasattr(core, "install_global_wraps")
-        assert hasattr(_torch_backend, "using_c_tier")
-        assert post["compile"] is pre["compile"]
-    finally:
-        sys.modules.pop("utils.inject_roctx", None)

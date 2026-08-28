@@ -3,10 +3,9 @@
 
 """Load the ``torch_trace_collector`` extension for the workload PyTorch version.
 
-Looks in ``<prefix>/lib/rocprofiler-compute/`` (CMake
-``${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute``) for
-``torch_trace_collector-<torch-version>.so``. If that directory is absent,
-looks in ``<package_root>/lib/_build/lib`` (CMake library output).
+Searches ``<prefix>/lib*/rocprofiler-compute/``, ``<project>/build/lib``,
+``src/lib/_build/lib``, and ``$CMAKE_BINARY_DIR/lib`` when ``CMAKE_BINARY_DIR``
+is set.
 """
 
 import importlib.util
@@ -16,13 +15,14 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 from utils.logger import console_error, console_log
+from utils.native_tool_finder import find_prebuilt_artifacts
 
 _THIS_DIR = Path(__file__).resolve().parent
 _PACKAGE_ROOT = _THIS_DIR.parents[2]
-_ARTIFACT_DIR = _PACKAGE_ROOT.parents[1] / "lib" / "rocprofiler-compute"
 
 _ARTIFACT_PREFIX = "torch_trace_collector-"
 _ARTIFACT_SUFFIX = ".so"
+_ARTIFACT_NAME_GLOB = f"{_ARTIFACT_PREFIX}*{_ARTIFACT_SUFFIX}"
 _ARTIFACT_NAME_PATTERN = re.compile(
     r"^"
     + re.escape(_ARTIFACT_PREFIX)
@@ -62,20 +62,14 @@ def torch_version() -> str:
 
 def list_collector_artifacts() -> Dict[str, Path]:
     """Return ``{torch version: collector path}`` for each matching ``.so``."""
-    artifact_dir = _ARTIFACT_DIR
-    if not artifact_dir.is_dir():
-        artifact_dir = _PACKAGE_ROOT / "lib" / "_build" / "lib"
-    if not artifact_dir.is_dir():
-        return {}
     artifacts: Dict[str, Path] = {}
-    pattern = f"{_ARTIFACT_PREFIX}*{_ARTIFACT_SUFFIX}"
-    for path in sorted(artifact_dir.glob(pattern)):
-        if not path.is_file():
-            continue
+    for path in find_prebuilt_artifacts(_PACKAGE_ROOT, _ARTIFACT_NAME_GLOB):
         match = _ARTIFACT_NAME_PATTERN.match(path.name)
         if match is None:
             continue
-        artifacts[match.group(1)] = path
+        version = match.group(1)
+        if version not in artifacts:
+            artifacts[version] = path
     return artifacts
 
 
