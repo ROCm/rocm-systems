@@ -1634,25 +1634,6 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, const LUID* adapter_luid) {
     InfoLog(g_rocdec_logger, "Initializing VA-API via vaon12 (LUID: " +
             ROCDEC_TOSTR(adapter_luid->HighPart) + ":" + ROCDEC_TOSTR(adapter_luid->LowPart) + ")");
 
-    // Auto-set LIBVA_DRIVERS_PATH to the directory containing rocdecode.dll so that
-    // libva can find vaon12_drv_video.dll (which is deployed alongside rocdecode.dll).
-    if (std::getenv("LIBVA_DRIVERS_PATH") == nullptr) {
-        HMODULE hm = nullptr;
-        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               reinterpret_cast<LPCSTR>(&VaContext::GetInstance), &hm)) {
-            char module_path[MAX_PATH] = {};
-            if (GetModuleFileNameA(hm, module_path, MAX_PATH) > 0) {
-                std::string dir(module_path);
-                auto pos = dir.find_last_of("\\/");
-                if (pos != std::string::npos) {
-                    dir = dir.substr(0, pos);
-                    _putenv_s("LIBVA_DRIVERS_PATH", dir.c_str());
-                    InfoLog(g_rocdec_logger, "Auto-set LIBVA_DRIVERS_PATH=" + dir);
-                }
-            }
-        }
-    }
-
     va_contexts_[va_ctx_idx].va_display = vaGetDisplayWin32(adapter_luid);
     if (!va_contexts_[va_ctx_idx].va_display) {
         CriticalLog(g_rocdec_logger, "Failed to create VA display via vaGetDisplayWin32.");
