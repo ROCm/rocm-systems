@@ -1104,6 +1104,7 @@ TEST(ConSanInlineShadowTest, CrossWaveRacyStoreCompletes) {
 }
 
 TEST(ConSanInlineShadowTest, BarrierOrderedCrossWaveStoreCompletes) {
+  const bool barrier_moved = std::getenv("RJ_CONSAN_FAULT_MOVE_BARRIER") != nullptr;
   const uint32_t launches = inline_versioned_launch_count();
   ASSERT_NE(launches, 0u);
   uint32_t *d_out = nullptr;
@@ -1118,7 +1119,10 @@ TEST(ConSanInlineShadowTest, BarrierOrderedCrossWaveStoreCompletes) {
 
     uint32_t out = 0;
     HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
-    EXPECT_EQ(out, 0xFACE0040u);
+    if (barrier_moved)
+      EXPECT_TRUE(out == 0xCAFE0000u || out == 0xFACE0040u);
+    else
+      EXPECT_EQ(out, 0xFACE0040u);
   }
   free_device_ptr(d_out);
 }
