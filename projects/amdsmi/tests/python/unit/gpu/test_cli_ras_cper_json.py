@@ -29,23 +29,10 @@ import tempfile
 import types
 import unittest
 
-from common.common import add_class_cleanup, amdsmi_path, stub_modules
+from common.common import add_class_cleanup, amdsmi_path, find_cli_dir, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-# Source tree: tests/python/unit/gpu -> repo root is four levels up.
-_SRC_CLI_DIR = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-# Installed tree: <rocm>/share/amd_smi/amdsmi -> <rocm>/libexec/amdsmi_cli.
-_INSTALLED_CLI_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli"
-)
-# Prefer the source copy when present so a source-tree run tests local edits;
-# otherwise fall back to the installed CLI (how the suite runs in CI).
-_CLI_DIR = (
-    _SRC_CLI_DIR
-    if os.path.isfile(os.path.join(_SRC_CLI_DIR, "subcommands", "ras.py"))
-    else _INSTALLED_CLI_DIR
-)
-_RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py")
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+_RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py") if _CLI_DIR else None
 
 # Modules imported (directly or transitively) when the source CLI loads against
 # the faked ``amdsmi`` package. They are cleared around the suite so a
@@ -192,8 +179,10 @@ def _build_ras_args(handles, **overrides):
 class TestCliRasCperJson(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(_RAS_SRC):
-            raise unittest.SkipTest(f"amd-smi CLI ras.py not found at {_RAS_SRC}")
+        if not _RAS_SRC or not os.path.isfile(_RAS_SRC):
+            raise unittest.SkipTest(
+                f"amd-smi CLI ras.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
 
         # Clear the CLI modules so the fake amdsmi wins the import race; the fakes
         # replace the entries they own. stub_modules restores every name afterwards.

@@ -209,7 +209,7 @@ class TestCliCacheLabels(unittest.TestCase):
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(
-                f"amd-smi CLI not found ({STATIC_PATH or _CLI_DIR}): static.py not present"
+                f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_modules()
         stub_modules(cls, modules)
