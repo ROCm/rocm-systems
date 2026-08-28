@@ -266,7 +266,3 @@ class TestCliStaticBusPcieValid(unittest.TestCase):
         bus_info = self._run_bus("json")
         self.assertEqual(bus_info["max_pcie_speed"], {"value": 16, "unit": "GT/s"})
         self.assertEqual(bus_info["pcie_interface_version"], "Gen 4")
-
-
-if __name__ == "__main__":
-    unittest.main()
