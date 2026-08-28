@@ -63,13 +63,11 @@
 // are defined once, by fakes/nccl_fakes.cc, which this binary already links
 // for p2p.cc's tests -- defining them again here would be a duplicate-symbol
 // error. ncclDebugMask's default there (0) differs from what this file used
-// when it was its own standalone binary (~0ULL), but that's not observable
-// by anything currently covered: WARN(...) calls ncclDebugLog() unconditionally
-// regardless of mask, and no function covered so far calls INFO(...) (which
-// does check ncclDebugLevel/ncclDebugMask) at all. A future test that needs to
-// capture an INFO(...) line should raise both explicitly first, e.g. with
-// RcclUnitTesting::ScopedDebugLogging, rather than relying on either side's
-// default.
+// when it was its own standalone binary (~0ULL), but that's not
+// observable: WARN(...) calls ncclDebugLog() unconditionally regardless of
+// mask, and every INFO(...)-gated test in wrap-test.cc already raises both
+// ncclDebugLevel and ncclDebugMask explicitly via
+// RcclUnitTesting::ScopedDebugLogging before capturing.
 // ---------------------------------------------------------------------------
 FILE* ncclDebugFile = nullptr;
 char  ncclLastError[1024] = {};
