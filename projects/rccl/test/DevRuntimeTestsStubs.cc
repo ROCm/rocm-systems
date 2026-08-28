@@ -218,9 +218,14 @@ ncclResult_t ncclShadowPoolFree(struct ncclShadowPool* pool, void* devObj, hipSt
   return g_shadowPoolFree(pool, devObj, stream);
 }
 
-ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** outHostObj) {
+static ncclResult_t DefaultShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** outHostObj) {
   if (outHostObj) *outHostObj = devObj;  // same buffer, see above
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclShadowPool*, void*, void**)> g_shadowPoolToHost = DefaultShadowPoolToHost;
+
+ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool* pool, void* devObj, void** outHostObj) {
+  return g_shadowPoolToHost(pool, devObj, outHostObj);
 }
 
 // ---------------------------------------------------------------------------
@@ -636,6 +641,7 @@ void ResetDevRuntimeFakes() {
   g_devrPopulateSegmentSizes                = DefaultPopulateSegmentSizes;
   g_shadowPoolAlloc                         = DefaultShadowPoolAlloc;
   g_shadowPoolFree                          = DefaultShadowPoolFree;
+  g_shadowPoolToHost                        = DefaultShadowPoolToHost;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_hipMemsetAsync                          = DefaultMemsetAsync;
   g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;

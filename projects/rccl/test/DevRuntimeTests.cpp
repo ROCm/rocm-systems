@@ -3605,6 +3605,159 @@ TEST_F(DevrWorldToLsaRankTest, NonMemberRank_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// ncclWinGetUserPtr recovers the user pointer a window was registered with,
+// decoding the host record from the device handle.
+
+class WinGetUserPtrTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclWindow_vidmem vidmem{};
+  ncclDevrWindow win{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->symmetricSupport = 1;
+    win.userPtr = reinterpret_cast<void*>(0x123000);
+    vidmem.winHost = &win;
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+};
+
+TEST_F(WinGetUserPtrTest, Succeeds_ReturnsRegisteredPointer) {
+  void* out = nullptr;
+  ASSERT_EQ(ncclWinGetUserPtr(comm, &vidmem, &out), ncclSuccess);
+  EXPECT_EQ(out, win.userPtr);
+}
+
+// Branch: without symmetric support there is no symmetric registration to
+// report, which is a null result rather than an error.
+TEST_F(WinGetUserPtrTest, NoSymmetricSupport_ReturnsNullNotError) {
+  comm->symmetricSupport = 0;
+  void* out = reinterpret_cast<void*>(0xdead);
+  EXPECT_EQ(ncclWinGetUserPtr(comm, &vidmem, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// Branch: a device handle whose host record is missing is an internal error --
+// distinct from the unsupported case above, which is benign.
+TEST_F(WinGetUserPtrTest, MissingHostRecord_ReturnsInternalError) {
+  vidmem.winHost = nullptr;
+  void* out = nullptr;
+  EXPECT_EQ(ncclWinGetUserPtr(comm, &vidmem, &out), ncclInternalError);
+}
+
+// Branch: the shadow-pool decode fails.
+TEST_F(WinGetUserPtrTest, ShadowDecodeFails_ReturnsError) {
+  ScopedHook toHost(g_shadowPoolToHost,
+                    [](ncclShadowPool*, void*, void**) { return ncclSystemError; });
+  void* out = nullptr;
+  EXPECT_NE(ncclWinGetUserPtr(comm, &vidmem, &out), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrGetLsaRankPtr resolves an offset within a window to the address it
+// occupies on one LSA rank. Three routes: a self-targeted op on a non-symmetric
+// window, an IPC-backed window's per-peer table, and otherwise flat-VA
+// arithmetic over the symmetric space.
+
+class DevrGetLsaRankPtrTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrWindow win{};
+  std::vector<void*> peerPtrs;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->symmetricSupport = 1;
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 1;
+    devr->lsaSize = 3;
+    devr->bigSize = 0x10000;
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
+
+    win.userPtr = reinterpret_cast<void*>(0x900000);
+    win.size = 4096;
+    win.bigOffset = 0x200;
+  }
+};
+
+// The symmetric route: flat base, the target rank's slot, the window's offset,
+// then the caller's. Every term is distinct so a dropped one shows.
+TEST_F(DevrGetLsaRankPtrTest, SymmetricWindow_UsesFlatVaArithmetic) {
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, /*offset=*/0x40, /*lsaRank=*/2, &out), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(out, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + 2 * devr->bigSize +
+                                         win.bigOffset + 0x40));
+}
+
+// Boundary: an offset at the window's size is past its end.
+TEST_F(DevrGetLsaRankPtrTest, OffsetAtWindowSize_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, win.size, 0, &out), ncclInvalidArgument);
+}
+
+// Boundary: a rank outside the team.
+TEST_F(DevrGetLsaRankPtrTest, RankPastTeam_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
+}
+
+// Branch: a non-symmetric window targeting ourselves resolves against the local
+// window base, not the flat space -- which does not apply to it.
+TEST_F(DevrGetLsaRankPtrTest, NonSymmetricSelfTarget_UsesLocalBase) {
+  comm->symmetricSupport = 0;
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0x40, comm->devrState.lsaSelf, &out), ncclSuccess);
+  EXPECT_EQ(out, static_cast<char*>(win.userPtr) + 0x40);
+}
+
+// Branch: an IPC-backed window uses its per-peer table, because IPC mappings
+// land wherever the driver puts them rather than at a computable address.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindow_UsesPeerTable) {
+  comm->symmetricSupport = 0;
+  peerPtrs = {reinterpret_cast<void*>(0xA000), nullptr, reinterpret_cast<void*>(0xC000)};
+  win.ipcPeerPtrs = peerPtrs.data();
+  win.ipcPeerCount = 3;
+
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0x40, 2, &out), ncclSuccess);
+  EXPECT_EQ(out, static_cast<char*>(peerPtrs[2]) + 0x40);
+}
+
+// Branch: a peer that was never mapped -- a same-process cross-thread peer --
+// is an internal error rather than a null dereference downstream.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindowUnmappedPeer_ReturnsInternalError) {
+  comm->symmetricSupport = 0;
+  comm->devrState.lsaSelf = 0;  // the unmapped rank must not be us, or the
+                                // self-target branch answers first
+  peerPtrs = {reinterpret_cast<void*>(0xA000), nullptr, reinterpret_cast<void*>(0xC000)};
+  win.ipcPeerPtrs = peerPtrs.data();
+  win.ipcPeerCount = 3;
+
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, 1, &out), ncclInternalError);
+}
+
+// Boundary: a rank outside the IPC table.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
+  comm->symmetricSupport = 0;
+  peerPtrs = {reinterpret_cast<void*>(0xA000)};
+  win.ipcPeerPtrs = peerPtrs.data();
+  win.ipcPeerCount = 1;
+
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, 5, &out), ncclInvalidArgument);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
