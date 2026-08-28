@@ -57,7 +57,8 @@ RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
-RCCL_PARAM(CeArMaxMsgBytes,  "CE_AR_MAX_MSG_BYTES", -1);  // -1 = use ceArMax from arch table
+RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_MAX_MSG_BYTES", -1);     // -1 = use ceArMax (2-shot)
+RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
 
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
@@ -716,6 +717,13 @@ inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 }
 } // namespace
 
+size_t rcclCeArRegisteredMax(const ncclComm* comm) {
+  const int64_t param = rcclParamCeArRegMaxMsgBytes();
+  if (param >= 0) return (size_t)param;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  return table != nullptr ? table->ceArRegMax : 0;
+}
+
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
@@ -1135,7 +1143,13 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
     ceAvailable = false;
   }
-  if (ceAvailable && !hasSysmemSegment && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  // Tuning cap only: registered CE has no staging allocation, so this does not
+  // size a buffer. 0 (or unset table) means no upper bound. Independent of the
+  // 2-shot ceArMax / ceArMaxBytes limit used above.
+  const size_t ceArRegMax = rcclCeArRegisteredMax(comm);
+  const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
+  if (ceRegInWindow && ceAvailable && !hasSysmemSegment &&
+      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;

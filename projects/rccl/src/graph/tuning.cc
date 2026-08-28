@@ -1833,8 +1833,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [7] Recv            -- not used
     0,                   // [8] AlltoAll        -- no graph-specific override
   },
-  .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
-  .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
+  .ceArMin     = 4ULL   * 1024 * 1024,   // 2-shot lower bound (stored; not a selector gate)
+  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging / rcclUseCeAllReduce cap
+  .ceArRegMax  = 8ULL * 1024 * 1024 * 1024,   // registered CE AUTO cap (0 = unlimited)
   // symMaxR2: suppress symk in favour of CE when recv is registered and msg > threshold.
   // AR set to 512 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
   // All other collectives: 0 (no suppression).
@@ -1863,7 +1864,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
-  .ceArMax     = 256ULL * 1024 * 1024,
+  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging cap
+  .ceArRegMax  = 256ULL * 1024 * 1024,   // registered CE AUTO cap
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
@@ -1874,7 +1876,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
-  .ceArMax     = 256ULL * 1024 * 1024,
+  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging cap
+  .ceArRegMax  = 256ULL * 1024 * 1024,   // registered CE AUTO cap
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };

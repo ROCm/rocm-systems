@@ -79,7 +79,7 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
-  size_t ceArMaxBytes;   // resolved at init: env var > arch table ceArMax
+  size_t ceArMaxBytes;   // 2-shot staging cap, resolved at init: env > arch ceArMax
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
