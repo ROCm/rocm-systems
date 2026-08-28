@@ -209,7 +209,7 @@ Instrumenting the application with rocprof-sys-instrument
 The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events. Expand for step-by-step instructions:
 
 .. dropdown:: Optional: Steps for instrumenting the application with rocprof-sys-instrument
-    
+
     1. Instrument the application to generate an instrumented binary, ``jacobi.inst``:
 
     .. code-block:: shell
@@ -237,7 +237,7 @@ The application can be instrumented with ``rocprof-sys-instrument`` to also capt
         With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
         may prevent the expected function from being instrumented. For details, see :ref:`selective-instrumentation` section under the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide.
 
-For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`. 
+For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`.
 
 .. _openmp-env-var-config:
 

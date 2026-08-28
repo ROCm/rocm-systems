@@ -6,6 +6,11 @@
         "name": "profile-only",
         "use_case": "Quick performance overview with lowest possible overhead"
     },
+    "output": {
+        "rocpd_output": {
+            "enabled": false
+        }
+    },
     "profiling": {
         "enabled": true,
         "flat_profile": {
@@ -17,10 +22,5 @@
     },
     "tracing": {
         "enabled": false
-    },
-    "output": {
-        "rocpd_output": {
-            "enabled": false
-        }
     }
 }

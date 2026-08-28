@@ -55,4 +55,3 @@ ___tls_get_addr:
 #endif
 
 .section .note.GNU-stack,"",@progbits
-
