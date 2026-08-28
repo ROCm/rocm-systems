@@ -130,6 +130,7 @@ static uint32_t kernelMask_user() {
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
+NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 RCCL_PARAM(SymModel, "SYM_MODEL", 0)
 
@@ -202,6 +203,21 @@ static int rcclSymkTuningModelIndex() {
     }
   }
   return s_cache;
+}
+
+static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
+static constexpr size_t ncclSymkRsGinMinChunkBytes = 128;
+static constexpr size_t ncclSymkRsGinMaxChunkBytes = size_t(1) << 30;
+
+static size_t ncclSymkRsGinChunkBytes() {
+  int64_t param = ncclParamSymRsGinChunkSize();
+  size_t chunkBytes = param > 0 ? (size_t)param : ncclSymkRsGinDefaultChunkBytes;
+  chunkBytes = std::max(ncclSymkRsGinMinChunkBytes, std::min(chunkBytes, ncclSymkRsGinMaxChunkBytes));
+  return pow2Down(chunkBytes);
+}
+
+static uint32_t ncclSymkRsGinAccumBytesPerBlock() {
+  return (uint32_t)alignUp(2 * ncclSymkRsGinChunkBytes(), 128);
 }
 
 static double softmin(double x, double ceiling, double softness) {
@@ -277,9 +293,9 @@ static void getBusMul_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc, do
 
 static double getSmBw_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
   if (100 <= comm->minCompCap) {
-    return ldmc ? 2.25e9 : 5.0e9;
+    return ldmc ? 8.44e9 : 26.6e9;
   } else {
-    return ldmc ? 9.85e9 : 14.5e9;
+    return ldmc ? 4.22e9 : 13.7e9;
   }
 }
 
@@ -513,6 +529,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
     struct ncclDevResourceRequirements ginOutboxReq = {};
+    struct ncclDevResourceRequirements rsGinAccumReq = {};
     struct ncclDevResourceRequirements railSignalReq = {};
     if (ncclParamSymGinKernelsEnable() && ncclTeamLsa(comm).nRanks < comm->nRanks) {
       int maxBlocks;
@@ -524,6 +541,13 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       if (ncclParamSymCTAs() >= 1) maxBlocks = ncclParamSymCTAs();
       maxBlocks = std::min(maxBlocks, ncclSymkMaxBlocks);
       symk->maxGinInboxBlocks = maxBlocks;
+      symk->kcomm.rsGinAccumBytesPerBlock = ncclSymkRsGinAccumBytesPerBlock();
+
+      rsGinAccumReq.bufferSize = (size_t)maxBlocks * symk->kcomm.rsGinAccumBytesPerBlock;
+      rsGinAccumReq.bufferAlign = 128;
+      rsGinAccumReq.outBufferHandle = &symk->kcomm.rsGinAccumBuf;
+      rsGinAccumReq.next = reqs.resourceRequirementsList;
+      reqs.resourceRequirementsList = &rsGinAccumReq;
 
       ncclGinInboxA2ACreateRequirement(ncclTeamRail(comm), maxBlocks, log2Up(bufSize), &symk->kcomm.ginInboxRail,
                                        &ginInboxRailReq);
@@ -541,8 +565,6 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       railSignalReq.outBufferHandle = nullptr;
       railSignalReq.ginSignalCount = railSignalCount;
       railSignalReq.outGinSignalStart = &symk->kcomm.ginSyncHandle.railSignals;
-      railSignalReq.ginCounterCount = ncclSymkMaxBlocks;
-      railSignalReq.outGinCounterStart = &symk->kcomm.ginCounterPerBlock;
       railSignalReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &railSignalReq;
       reqs.barrierCount = ncclSymkMaxBlocks;

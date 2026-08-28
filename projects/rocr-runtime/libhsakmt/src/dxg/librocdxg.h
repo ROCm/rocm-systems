@@ -114,6 +114,7 @@ struct hsakmtRuntime {
 
   size_t max_single_alloc_size;
   uint32_t default_node;
+  D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */
   uint64_t local_heap_space_start_;

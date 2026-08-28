@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef CUID_FILE_H
 #define CUID_FILE_H
@@ -29,6 +10,7 @@
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -144,15 +126,20 @@ struct CuidFileEntry {
   uint8_t revision_id = 0;
 
   // Device-specific information
-  uint16_t family = 0;         // For CPU
-  uint16_t model = 0;          // For CPU
-  uint16_t pci_class = 0;      // For PCIe devices (GPU, NIC)
-  uint16_t unit_id = 0;        // For CPU and GPU
-  std::string device_node;     // For GPU: /sys/class/drm/renderD128, NIC:
-                               // /sys/class/net/eth0
-  std::string package_core_id; // For CPU: "0:0" (package:core)
-  std::string bdf;             // PCIe Bus:Device.Function
-  std::string mac_address;     // For NIC
+  uint16_t family = 0;    // For CPU
+  uint16_t model = 0;     // For CPU
+  uint16_t pci_class = 0; // For PCIe devices (GPU, NIC)
+  uint16_t unit_id = std::numeric_limits<uint16_t>::max(); // For CPU and GPU
+  std::string device_node; // For GPU: /sys/class/drm/renderD128, NIC:
+                           // /sys/class/net/eth0
+  uint16_t package_id =
+      std::numeric_limits<uint16_t>::max(); // For CPU, aka physical id, akin to
+                                            // socket id
+  uint16_t core_id =
+      std::numeric_limits<uint16_t>::max(); // For CPU, aka core id within the
+                                            // package
+  std::string bdf;                          // PCIe Bus:Device.Function
+  std::string mac_address;                  // For NIC
 
   bool is_temporary = false; // Indicates if the CUID is temporary (not derived
                              // from a true hardware fingerprint)
@@ -190,8 +177,8 @@ public:
                                        CuidFileEntry &entry) const;
   amdcuid_status_t find_by_bdf(const std::string &bdf,
                                CuidFileEntry &entry) const;
-  amdcuid_status_t find_by_package_core_id(const std::string &package_core_id,
-                                           CuidFileEntry &entry) const;
+  amdcuid_status_t find_by_package_id(uint16_t package_id,
+                                      CuidFileEntry &entry) const;
   amdcuid_status_t find_by_device_type(amdcuid_device_type_t device_type,
                                        CuidFileEntry &entry) const;
   amdcuid_status_t find_by_derived_cuid(const amdcuid_id_t &derived_cuid,

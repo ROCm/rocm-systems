@@ -320,7 +320,7 @@ __device__ void GDAContext::internal_get_broadcastmem_wave(void *dst, const void
 }
 
 __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest, 
-    const void* source, int nelement, int PE_root) {
+    const void* source, int nelems, int PE_root) {
   if (dest == nullptr || 
     source == nullptr || 
     team == ROCSHMEM_TEAM_INVALID)
@@ -335,7 +335,7 @@ __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcastmem_wave(dest, source, nelement, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wave(dest, source, nelems, pe_root_world, pe_start, stride,
                pe_size, p_sync);
   return ROCSHMEM_SUCCESS;
 }
@@ -446,7 +446,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
             ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
     qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
                                 src_local, src_lkey, nelems, false);
-    qps[dest_pe].atomic_nofetch_single(
+    qps[dest_pe].atomic_add_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -521,8 +521,8 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
+  // Use lane ID within the wave so any wave in a multi-wave WG works correctly.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -545,7 +545,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
             ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
     qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
                                 src_local, src_lkey, nelems, false);
-    qps[dest_pe].atomic_nofetch_single(
+    qps[dest_pe].atomic_add_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -562,7 +562,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     team_obj->alltoall_sequence_number++;
   }
 

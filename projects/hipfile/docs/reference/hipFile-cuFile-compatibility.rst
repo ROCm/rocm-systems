@@ -18,4 +18,4 @@ There is no hipFile counterpart to cuFile's ``cuFileDriverClose_v2`` alias. Both
 
 There is no hipFile counterpart to cuFile's ``sockaddr_t`` typedef. Use ``struct sockaddr`` or add a custom implementation of the typedef.
 
-`HIPIFY <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/index.html>`_ provides information about converting CUDA code to ROCm code. A `cuFile-to-hipFile API map <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/reference/tables/cuFile_API_supported_by_HIP.md>`_ is available.
+`HIPIFY <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/index.html>`_ provides information about converting CUDA code to ROCm code. A `cuFile-to-hipFile API map <https://rocm.docs.amd.com/projects/HIPIFY/en/latest/reference/tables/cuFile_API_supported_by_HIP.html>`_ is available.

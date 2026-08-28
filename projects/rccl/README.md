@@ -80,7 +80,7 @@ RCCL build & installation helper script
        --verbose               Show compile commands
 
   Available RCCL-specific CMake options for --cmake-options:
-    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
+    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)
     -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
@@ -139,6 +139,16 @@ RCCL package install requires sudo/root access because it installs under `/opt/r
 ## Docker build
 
 Refer to [docker/README.md](docker/README.md "docker/README.md")
+
+Python wheel :
+```shell
+$ # Install uv to create the Python wheel (uv manages Python deps in a venv)
+$ # See: https://docs.astral.sh/uv/getting-started/installation/
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
+$ # Build NCCL Python wheel (this also builds the .txz archive as an intermediate)
+$ make pkg.python_wheel.build
+$ ls build/pkg/python_wheel/
+```
 
 ## Tests
 
