@@ -27,26 +27,38 @@
 #include <hip/hip_runtime.h>
 #include <rocshmem/rocshmem.hpp>
 
+#include <algorithm>
 #include <cstdio>
+#include <limits>
+#include <vector>
 
 using namespace rocshmem;
 
 namespace {
 
-constexpr int kValueBase = 1000;
+unsigned char source_pattern(int pe, size_t worker, size_t byte) {
+  return static_cast<unsigned char>(
+      (static_cast<size_t>(pe) + worker + byte) & 0xff);
+}
 
-__global__ void BufferRegisterSymmetricTest(int *dest,
+__global__ void BufferRegisterSymmetricTest(unsigned char *dest,
+                                            const unsigned char *source,
+                                            size_t message_size,
                                             ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  if (hipBlockIdx_x == 0 && is_thread_zero_in_block()) {
-    int my_pe = rocshmem_ctx_my_pe(ctx);
-    int n_pes = rocshmem_ctx_n_pes(ctx);
-    int next_pe = (my_pe + 1) % n_pes;
-    rocshmem_ctx_int_p(ctx, dest, kValueBase + my_pe, next_pe);
-    rocshmem_ctx_quiet(ctx);
-  }
+  const size_t worker =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t offset = worker * message_size;
+  int my_pe = rocshmem_ctx_my_pe(ctx);
+  int n_pes = rocshmem_ctx_n_pes(ctx);
+  int next_pe = (my_pe + 1) % n_pes;
+
+  rocshmem_ctx_putmem(ctx, dest + offset, source + offset, message_size,
+                      next_pe);
+  rocshmem_ctx_quiet(ctx);
+  __syncthreads();
 
   rocshmem_wg_ctx_destroy(&ctx);
 }
@@ -54,10 +66,10 @@ __global__ void BufferRegisterSymmetricTest(int *dest,
 #if HIP_VERSION >= 70200000
 bool device_supports_vmm(int device_id) {
   int supported = 0;
-  hipError_t err = hipDeviceGetAttribute(
+  CHECK_HIP(hipDeviceGetAttribute(
       &supported, hipDeviceAttributeVirtualMemoryManagementSupported,
-      device_id);
-  return err == hipSuccess && supported != 0;
+      device_id));
+  return supported != 0;
 }
 
 bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
@@ -130,7 +142,21 @@ BufferRegisterSymmetricTester::BufferRegisterSymmetricTester(
   _type = BufferRegisterSymmetricTestType;
   _print_results = false;
   this->args.min_msg_size = sizeof(int);
-  max_msg_size = sizeof(int);
+  max_msg_size =
+      args.max_msg_size_set
+          ? std::max(args.max_msg_size, this->args.min_msg_size)
+          : this->args.min_msg_size;
+  worker_count_ = static_cast<size_t>(args.num_wgs) * args.wg_size;
+
+  if (worker_count_ == 0 ||
+      max_msg_size > std::numeric_limits<size_t>::max() / worker_count_) {
+    std::fprintf(stderr,
+                 "[PE %d] buffer_register_symmetric: invalid buffer size\n",
+                 this->args.myid);
+    rocshmem_global_exit(1);
+    return;
+  }
+  const size_t requested_size = worker_count_ * max_msg_size;
 
   if (rocshmem_query_backend_type() == BackendType::RO_BACKEND) {
     if (this->args.myid == 0) {
@@ -141,24 +167,17 @@ BufferRegisterSymmetricTester::BufferRegisterSymmetricTester(
     return;
   }
 
-#if HIP_VERSION < 70200000
-  if (this->args.myid == 0) {
-    std::printf("buffer_register_symmetric: SKIPPED "
-                "(requires ROCm 7.2 or newer)\n");
-  }
-  skip_ = true;
-  return;
-#else
+#if HIP_VERSION >= 70200000
   if (!device_supports_vmm(device_id)) {
-    if (this->args.myid == 0) {
-      std::printf("buffer_register_symmetric: SKIPPED "
-                  "(GPU does not support HIP VMM)\n");
-    }
-    skip_ = true;
+    std::fprintf(stderr,
+                 "[PE %d] buffer_register_symmetric: GPU does not support "
+                 "HIP VMM; launcher preflight should have skipped this test\n",
+                 this->args.myid);
+    rocshmem_global_exit(1);
     return;
   }
 
-  if (!vmm_alloc(&original_, &handle_, sizeof(int), &allocation_size_,
+  if (!vmm_alloc(&original_, &handle_, requested_size, &allocation_size_,
                  device_id)) {
     std::fprintf(stderr,
                  "[PE %d] buffer_register_symmetric: VMM allocation failed\n",
@@ -168,7 +187,15 @@ BufferRegisterSymmetricTester::BufferRegisterSymmetricTester(
     return;
   }
 
+  source_ = static_cast<unsigned char *>(alloc_test_buffer(allocation_size_));
   registerBuffer();
+#else
+  if (this->args.myid == 0) {
+    std::printf("buffer_register_symmetric: SKIPPED "
+                "(requires ROCm 7.2 or newer)\n");
+  }
+  skip_ = true;
+  return;
 #endif
 }
 
@@ -183,18 +210,33 @@ BufferRegisterSymmetricTester::~BufferRegisterSymmetricTester() {
     vmm_free(original_, handle_, allocation_size_);
     original_ = nullptr;
   }
+  if (source_ != nullptr) {
+    free_test_buffer(source_);
+    source_ = nullptr;
+  }
 #endif
 }
 
 void BufferRegisterSymmetricTester::resetBuffers(
-    [[maybe_unused]] uint64_t size) {
+    uint64_t size) {
 #if HIP_VERSION >= 70200000
   if (skip_) {
     return;
   }
 
-  CHECK_HIP(hipMemset(original_, 0xff, sizeof(int)));
-  CHECK_HIP(hipDeviceSynchronize());
+  const size_t buffer_size = worker_count_ * size;
+  std::vector<unsigned char> source(buffer_size);
+  for (size_t worker = 0; worker < worker_count_; ++worker) {
+    for (size_t byte = 0; byte < size; ++byte) {
+      source[worker * size + byte] =
+          source_pattern(args.myid, worker, byte);
+    }
+  }
+
+  CHECK_HIP(hipMemsetAsync(original_, 0, buffer_size, stream));
+  CHECK_HIP(hipMemcpyAsync(source_, source.data(), buffer_size,
+                           hipMemcpyHostToDevice, stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
 #endif
 }
 
@@ -212,6 +254,8 @@ void BufferRegisterSymmetricTester::registerBuffer() {
   CHECK_HIP(hipMalloc(&plain_buffer, allocation_size_));
   void *plain_alias =
       rocshmem_buffer_register_symmetric(plain_buffer, allocation_size_);
+  // The expected rejection of non-VMM memory may leave a HIP error pending.
+  (void)hipGetLastError();
   if (plain_alias != nullptr) {
     int unregister_status =
         rocshmem_buffer_unregister_symmetric(plain_alias);
@@ -227,7 +271,7 @@ void BufferRegisterSymmetricTester::registerBuffer() {
   }
   CHECK_HIP(hipFree(plain_buffer));
 
-  alias_ = static_cast<int *>(
+  alias_ = static_cast<unsigned char *>(
       rocshmem_buffer_register_symmetric(original_, allocation_size_));
   if (alias_ == nullptr) {
     std::fprintf(stderr,
@@ -250,37 +294,48 @@ void BufferRegisterSymmetricTester::registerBuffer() {
 
 void BufferRegisterSymmetricTester::launchKernel(
     [[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-    [[maybe_unused]] int loop, [[maybe_unused]] uint64_t size) {
+    int loop, uint64_t size) {
 #if HIP_VERSION >= 70200000
   if (skip_) {
     return;
   }
 
   hipLaunchKernelGGL(BufferRegisterSymmetricTest, gridSize, blockSize, 0, stream,
-                     alias_, _shmem_context);
-  num_msgs = 1;
-  num_timed_msgs = 1;
+                     alias_, source_, size, _shmem_context);
+  num_msgs = (loop + args.skip) * worker_count_;
+  num_timed_msgs = loop * worker_count_;
 #endif
 }
 
 void BufferRegisterSymmetricTester::verifyResults(
-    [[maybe_unused]] uint64_t size) {
+    uint64_t size) {
 #if HIP_VERSION >= 70200000
   if (skip_) {
     return;
   }
 
-  int received = -1;
-  CHECK_HIP(
-      hipMemcpy(&received, original_, sizeof(int), hipMemcpyDeviceToHost));
+  const size_t buffer_size = worker_count_ * size;
+  std::vector<unsigned char> received(buffer_size);
+  CHECK_HIP(hipMemcpy(received.data(), original_, buffer_size,
+                      hipMemcpyDeviceToHost));
   int previous_pe = (args.myid - 1 + args.numprocs) % args.numprocs;
-  int expected = kValueBase + previous_pe;
-  if (received != expected) {
-    std::fprintf(stderr,
-                 "[PE %d] buffer_register_symmetric: received %d, expected "
-                 "%d from PE %d\n",
-                 args.myid, received, expected, previous_pe);
-    pass_ = false;
+  for (size_t worker = 0; worker < worker_count_; ++worker) {
+    for (size_t byte = 0; byte < size; ++byte) {
+      const unsigned char expected =
+          source_pattern(previous_pe, worker, byte);
+      const unsigned char actual = received[worker * size + byte];
+      if (actual != expected) {
+        std::fprintf(
+            stderr,
+            "[PE %d] buffer_register_symmetric: offset %zu received %u, "
+            "expected %u from PE %d\n",
+            args.myid, worker * size + byte,
+            static_cast<unsigned int>(actual),
+            static_cast<unsigned int>(expected), previous_pe);
+        pass_ = false;
+        return;
+      }
+    }
   }
 #endif
 }
@@ -297,13 +352,16 @@ void BufferRegisterSymmetricTester::unregisterBuffer() {
   }
   alias_ = nullptr;
 
-  constexpr int kPostUnregisterValue = 0x13579bdf;
-  int post_unregister_value = 0;
-  CHECK_HIP(hipMemcpy(original_, &kPostUnregisterValue, sizeof(int),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMemcpy(&post_unregister_value, original_, sizeof(int),
+  // Verify unregister leaves the original VMM allocation usable.
+  constexpr unsigned char kPostUnregisterValue = 0xa5;
+  CHECK_HIP(hipMemset(original_, kPostUnregisterValue, allocation_size_));
+  std::vector<unsigned char> post_unregister(allocation_size_);
+  CHECK_HIP(hipMemcpy(post_unregister.data(), original_, allocation_size_,
                       hipMemcpyDeviceToHost));
-  if (post_unregister_value != kPostUnregisterValue) {
+  if (!std::all_of(post_unregister.begin(), post_unregister.end(),
+                   [](unsigned char value) {
+                     return value == kPostUnregisterValue;
+                   })) {
     std::fprintf(stderr,
                  "[PE %d] buffer_register_symmetric: original VMM allocation "
                  "is unusable after unregister\n",
@@ -316,9 +374,17 @@ void BufferRegisterSymmetricTester::unregisterBuffer() {
     return;
   }
 
+  // Do not print PASS while another PE may still report a local failure.
+  rocshmem_barrier_all();
+
   if (args.myid == 0) {
-    std::printf("PASS: symmetric VMM buffer registration, remote RMA, and "
-                "unregistration succeeded\n");
+    if (args.verif) {
+      std::printf("PASS: symmetric VMM buffer registration, remote RMA, and "
+                  "unregistration succeeded\n");
+    } else {
+      std::printf("PASS: symmetric VMM buffer registration, RMA launch, and "
+                  "unregistration succeeded (data verification disabled)\n");
+    }
   }
 #endif
 }
