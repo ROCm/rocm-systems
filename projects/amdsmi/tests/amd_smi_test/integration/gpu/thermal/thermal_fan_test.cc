@@ -155,7 +155,7 @@ TEST_F(GpuIntegration, GetTempMetric_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetTempMetric_AllGpusAllTypesMetrics) {
-  GTEST_SKIP()
+  AMDSMI_SKIP_KNOWN_FAILURE()
       << "GetTempMetric_AllGpusAllTypesMetrics fails with error 43, AMDSMI_STATUS_UNEXPECTED_DATA";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_temp_metric");

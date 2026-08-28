@@ -60,6 +60,13 @@ inline bool IsFeatureAbsent(amdsmi_status_t status) {
          status == AMDSMI_STATUS_DRIVER_NOT_LOADED || status == AMDSMI_STATUS_NON_AMD_CPU;
 }
 
+// Tests whose API is tracked in known_failures.md are skipped by default.
+// Set AMDSMI_RUN_KNOWN_FAILURES to run them and see the current behavior.
+inline bool RunKnownFailures() {
+  static const bool run = std::getenv("AMDSMI_RUN_KNOWN_FAILURES") != nullptr;
+  return run;
+}
+
 // Human-readable "N (NAME)" for a status code.
 inline std::string AmdsmiStatusLabel(amdsmi_status_t err) {
   const char* name = nullptr;
@@ -466,6 +473,11 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
       GTEST_SKIP() << "device write skipped; AMDSMI_NON_PRIVILEGED is set";                        \
     if (!amd::smi::is_sudo_user()) GTEST_SKIP() << "device write skipped; must run as super user"; \
   } while (0)
+
+// Skip a test blocked by an entry in known_failures.md. Stream the symptom
+// onto it; AMDSMI_RUN_KNOWN_FAILURES runs the test instead of skipping.
+#define AMDSMI_SKIP_KNOWN_FAILURE() \
+  if (!::amdsmi::test::RunKnownFailures()) GTEST_SKIP()
 
 // The null-output / invalid-handle / all-GPUs trio below is the shape almost
 // every read-only getter is tested with. Generating it keeps one copy of the

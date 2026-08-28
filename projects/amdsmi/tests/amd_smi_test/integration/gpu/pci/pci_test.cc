@@ -45,8 +45,9 @@ TEST_F(GpuIntegration, GetPciBandwidth_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetPciBandwidth_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_pcie_bandwidth returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_pcie_bandwidth returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_pci_bandwidth");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -93,7 +94,7 @@ TEST_F(GpuIntegration, GetBdfId_AllGpus) {
 
 // ---------------- amdsmi_get_gpu_pci_throughput ----------------
 TEST_F(GpuIntegration, GetPciThroughput_NullOutput) {
-  GTEST_SKIP()
+  AMDSMI_SKIP_KNOWN_FAILURE()
       << "GetPciThroughput_NullOutput fails with Successful return, expected AMDSMI_STATUS_INVAL";
 
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "gpu=0 out=nullptr", kVerbose);
@@ -179,8 +180,9 @@ TEST_F(GpuIntegration, GetPcieInfo_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetPcieInfo_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_pcie_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
-                  "under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_pcie_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
+         "under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_pcie_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

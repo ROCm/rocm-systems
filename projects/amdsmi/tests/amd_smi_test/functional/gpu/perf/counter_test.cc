@@ -40,8 +40,9 @@ static constexpr amdsmi_event_type_t kEvent = AMDSMI_EVNT_XGMI_0_NOP_TX;
 // ---------------- Perf counters only monitor (no device-config change) and destroy() releases
 // exactly what create() allocated, so this is not gated behind the mutation flag.
 TEST_F(GpuFunctionalReadOnly, Counter_LifecycleWorkflow) {
-  GTEST_SKIP() << "counter lifecycle returns AMDSMI_STATUS_UNEXPECTED_SIZE; root cause unknown, "
-                  "under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "counter lifecycle returns AMDSMI_STATUS_UNEXPECTED_SIZE; root cause unknown, "
+         "under investigation";
 
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_gpu_counter_lifecycle");

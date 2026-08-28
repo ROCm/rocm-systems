@@ -92,8 +92,9 @@ TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetGpuXgmiLinkStatus_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_xgmi_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
-                  "under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_xgmi_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
+         "under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_xgmi_link_status");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -127,8 +128,9 @@ TEST_F(SystemIntegration, GetLinkMetrics_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetLinkMetrics_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_link_metrics returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_link_metrics returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_link_metrics");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -147,7 +149,7 @@ TEST_F(SystemIntegration, GetLinkMetrics_AllGpus) {
 // ---- amdsmi_topo_get_numa_node_number : invalid params first ----
 
 TEST_F(SystemIntegration, TopoGetNumaNodeNumber_NullOutput) {
-  GTEST_SKIP()
+  AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_topo_get_numa_node_number crashes on a null output pointer; proper return "
          "should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
@@ -254,8 +256,8 @@ TEST_F(SystemIntegration, GetLinkTopologyNearest_NullOutput) {
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(SystemIntegration, GetLinkTopologyNearest_InvalidHandle) {
-  GTEST_SKIP() << "amdsmi_get_link_topology_nearest returns SUCCESS for an "
-                  "invalid handle; proper return should be AMDSMI_STATUS_INVAL";
+  AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_link_topology_nearest returns SUCCESS for an "
+                                 "invalid handle; proper return should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
   //   amdsmi_topology_nearest_t info; memset(&info, 0, sizeof(info));
   //   amdsmi_status_t err = amdsmi_get_link_topology_nearest(

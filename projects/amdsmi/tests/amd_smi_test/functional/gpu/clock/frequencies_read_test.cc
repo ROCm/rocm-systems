@@ -11,6 +11,7 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestFrequenciesRead::TestFrequenciesRead() : TestBase() {
@@ -66,8 +67,8 @@ static void print_frequencies(amdsmi_frequencies_t* f, uint32_t* l = nullptr) {
 }
 
 void TestFrequenciesRead::Run(void) {
-  GTEST_SKIP() << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
-                  "TestFrequenciesRead; root cause unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
+                                 "TestFrequenciesRead; root cause unknown, under investigation";
 
   amdsmi_status_t err;
   amdsmi_frequencies_t f;

@@ -348,7 +348,7 @@ TEST_F(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
 TEST_F(SystemFunctionalReadOnly, TestConcurrentInit) {
   // Asserts an over-shutdown yields AMDSMI_STATUS_INIT_ERROR, but amdsmi_shut_down()
   // returns SUCCESS once the init refcount is already zero. See known_failures.md.
-  GTEST_SKIP() << "amdsmi_shut_down() does not report INIT_ERROR on over-shutdown";
+  AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_shut_down() does not report INIT_ERROR on over-shutdown";
   TestConcurrentInit tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();

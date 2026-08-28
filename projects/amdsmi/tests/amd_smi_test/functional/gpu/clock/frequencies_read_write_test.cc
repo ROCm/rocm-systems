@@ -13,6 +13,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {
@@ -44,8 +45,9 @@ void TestFrequenciesReadWrite::Close() {
 }
 
 void TestFrequenciesReadWrite::Run(void) {
-  GTEST_SKIP() << "amdsmi_set_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
-                  "TestFrequenciesReadWrite; root cause unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_set_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
+         "TestFrequenciesReadWrite; root cause unknown, under investigation";
 
   amdsmi_status_t ret;
   amdsmi_frequencies_t f;

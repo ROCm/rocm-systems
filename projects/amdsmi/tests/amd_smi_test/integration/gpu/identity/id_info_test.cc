@@ -344,8 +344,9 @@ TEST_F(GpuIntegration, GetSubsystemName_AllGpus) {
 
 // ---------------- amdsmi_get_gpu_xcd_counter ----------------
 TEST_F(GpuIntegration, GetXcdCounter_NullOutput) {
-  GTEST_SKIP() << "amdsmi_get_gpu_xcd_counter crashes on a null output pointer; proper return "
-                  "should be AMDSMI_STATUS_INVAL";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_gpu_xcd_counter crashes on a null output pointer; proper return "
+         "should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
   //   amdsmi_status_t err = amdsmi_get_gpu_xcd_counter(gpus()[0], nullptr);
   //   AMDSMI_EXPECT_NULL_ARG(err);
@@ -359,8 +360,9 @@ TEST_F(GpuIntegration, GetXcdCounter_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetXcdCounter_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_gpu_xcd_counter returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_gpu_xcd_counter returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_xcd_counter");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

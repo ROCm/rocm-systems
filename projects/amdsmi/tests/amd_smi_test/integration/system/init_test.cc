@@ -72,8 +72,9 @@ TEST_F(SystemIntegration, GetLibVersion_Valid) {
 
 // ---- amdsmi_status_code_to_string : invalid params first ----
 TEST_F(SystemIntegration, StatusCodeToString_NullOutput) {
-  GTEST_SKIP() << "amdsmi_status_code_to_string crashes on a null output pointer; proper return "
-                  "should be AMDSMI_STATUS_INVAL";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_status_code_to_string crashes on a null output pointer; proper return "
+         "should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
   //   amdsmi_status_t err = amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr);
   //   AMDSMI_EXPECT_NULL_ARG(err);

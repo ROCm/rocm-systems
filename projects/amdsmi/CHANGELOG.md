@@ -256,6 +256,7 @@ GPU: 0
   - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - Device writes in `*FunctionalReadWrite` suites require root, and each test restores the value it changed.
+  - Tests blocked by a known driver or library bug are skipped and tracked in `tests/amd_smi_test/known_failures.md`. Set `AMDSMI_RUN_KNOWN_FAILURES` to run them anyway and see their current behavior.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Optimized

@@ -33,7 +33,7 @@ static constexpr amdsmi_reg_type_t kRegTypes[] = {AMDSMI_REG_XGMI, AMDSMI_REG_WA
 
 // ---------------- amdsmi_get_gpu_metrics_header_info ----------------
 TEST_F(GpuIntegration, GetMetricsHeaderInfo_NullOutput) {
-  GTEST_SKIP()
+  AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_gpu_metrics_header_info crashes on a null output pointer; proper return "
          "should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
@@ -81,8 +81,9 @@ TEST_F(GpuIntegration, GetMetricsInfo_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetMetricsInfo_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_gpu_metrics_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_gpu_metrics_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_metrics_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

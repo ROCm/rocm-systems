@@ -308,8 +308,9 @@ TEST_F(SystemIntegration, GetProcessorHandleFromBdf_NullOutput) {
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(SystemIntegration, GetProcessorHandleFromBdf_ZeroBdf) {
-  GTEST_SKIP() << "amdsmi_get_processor_handle_from_bdf returns AMDSMI_STATUS_API_FAILED for zero "
-                  "BDF; should return NOT_FOUND or INVAL, library validation bug";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_processor_handle_from_bdf returns AMDSMI_STATUS_API_FAILED for zero "
+         "BDF; should return NOT_FOUND or INVAL, library validation bug";
 
   amdsmi_bdf_t bdf;
   memset(&bdf, 0, sizeof(bdf));
