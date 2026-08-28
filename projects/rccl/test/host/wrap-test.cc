@@ -30,21 +30,25 @@
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
+#include "fakes/wrap_stubs.h"                        // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
-// RCCL_PARAM redirector. rccl_wrap.cc's RCCL_PARAM(...) invocations are not
-// exercised by this first test batch (none of the nine units below read a
-// param), so -- unlike init-test.cc's g_loadParam hook -- there is nothing
-// yet to make per-test-controllable. Redirecting straight to deftVal is the
-// minimal correct behaviour: it keeps the real macro (and its mismatched-
-// looking real ncclLoadParam(), see fakes/nccl_fakes.cc's stale 4-arg
-// version vs param.h's real 5-arg declaration) out of this TU entirely.
-// Upgrade to the g_loadParam std::function pattern (fakes/nccl_fakes.h) the
-// moment a future test needs to flip a specific param per test.
+// RCCL_PARAM redirector: routes every generated rcclParamXxx() through
+// g_loadParam on each call (no caching), so a test can flip one param's
+// value between cases -- same mechanism and env-string convention
+// ("RCCL_" + env) as init-test.cc's redirect, replicated here rather than
+// linking fakes/nccl_fakes.cc (this file's own fakes stay self-contained,
+// see wrap_stubs.cc's header comment).
 #include "param.h"
+
+#include <functional>
+
+static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal) { return deftVal; }
+std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
 #undef RCCL_PARAM
 #define RCCL_PARAM(name, env, deftVal) \
-  int64_t rcclParam##name() { return (deftVal); }
+  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
