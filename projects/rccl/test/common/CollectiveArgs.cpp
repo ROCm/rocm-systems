@@ -119,15 +119,14 @@ namespace RcclUnitTesting
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
       }
-      CHECK_CALL(this->AttachMem());
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+      CHECK_CALL(this->AttachMem());  
     }
     else
     {
       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
+    CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
     // Device-data mode: a device-resident expected buffer for device-side validate.
@@ -139,7 +138,11 @@ namespace RcclUnitTesting
         (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
          || this->funcType == ncclCollReduceScatter))
     {
-      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, false));
+      // userRegistered must be passed, otherwise in the case of symmetric memory,
+      // data validation failures show up with UT_DEVICE_DATA=1 but not with 0 
+      // it is verified that even expected [CPU data] !=  expectedGpu .
+      // ncclMemAlloc() +  hipMallocManaged/hipMalloc is not compatible.
+      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
     }
 
     // Allocate bias buffers if bias is enabled
@@ -182,6 +185,7 @@ namespace RcclUnitTesting
     // (no D2H copy, no host element loop), using the same per-type tolerances as IsEqual.
     if (UtDeviceDataEnabled() && this->expectedOnDevice)
     {
+      CHECK_HIP(hipSetDevice(this->deviceId));
       size_t mismatches = 0;
       CHECK_CALL(PtrUnion::IsEqualDevice(this->dataType,
                                          this->numOutputElements,

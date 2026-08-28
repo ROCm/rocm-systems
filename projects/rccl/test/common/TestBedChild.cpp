@@ -181,7 +181,6 @@ namespace RcclUnitTesting
       case CHILD_EXECUTE_COLL    : status = ExecuteCollectives();   break;
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
       case CHILD_LAUNCH_GRAPHS   : status = LaunchGraphs();         break;
-      // case CHILD_DEREGISTER_MEM  : status = DeregisterMemInternal();break;
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
@@ -935,7 +934,10 @@ namespace RcclUnitTesting
       if (this->verbose) TEST_INFO("Starting synchronization for group %d rank %d", groupId, localRank);
       CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
       for (int i = 0; i < this->numStreamsPerGroup[groupId]; i++)
+      {
         CHECK_HIP(hipStreamSynchronize(this->streams[groupId][localRank][i]));
+      }
+      CHECK_HIP(hipDeviceSynchronize());
     }
 
     if (this->printValues)
