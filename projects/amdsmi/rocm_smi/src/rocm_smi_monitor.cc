@@ -446,7 +446,10 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
 }
 
 uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
-  return temp_type_index_map_.at(type);
+  // Report the sentinel the callers already test for; throwing here would skip
+  // their not-supported path and surface as an internal exception instead.
+  auto it = temp_type_index_map_.find(type);
+  return it == temp_type_index_map_.end() ? RSMI_TEMP_TYPE_INVALID : it->second;
 }
 
 rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
@@ -454,7 +457,8 @@ rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
 }
 
 uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
-  return volt_type_index_map_.at(type);
+  auto it = volt_type_index_map_.find(type);
+  return it == volt_type_index_map_.end() ? RSMI_VOLT_TYPE_INVALID : it->second;
 }
 
 rsmi_voltage_type_t Monitor::getVoltSensorEnum(uint64_t ind) {

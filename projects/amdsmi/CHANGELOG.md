@@ -86,6 +86,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi metric --usage` reporting APU IPU read/write bandwidth without a unit**.  
   - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` printed bare numbers while the adjacent DRAM counters carried `MB/s`. All four bandwidth counters now report `MB/s`, and the header documents the unit for each.
 
+- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for a sensor the device does not expose**.  
+  - `Monitor::getTempSensorIndex()` resolved the sensor with `std::map::at`, which threw `std::out_of_range` before the caller could test the result for `RSMI_TEMP_TYPE_INVALID`. The intended `AMDSMI_STATUS_NOT_SUPPORTED` path was therefore unreachable, and the throw surfaced as `Exception caught: map::at` on stderr.
+  - `getVoltSensorIndex()` carried the same unguarded lookup and now returns its invalid sentinel instead of throwing.
+
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
 
