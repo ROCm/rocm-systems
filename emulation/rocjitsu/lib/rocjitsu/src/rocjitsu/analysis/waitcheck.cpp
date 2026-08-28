@@ -395,6 +395,12 @@ enum class WaitEventKind {
   Count,
 };
 
+enum class OrderedCounterDomain {
+  None,
+  Vmem,
+  Lds,
+};
+
 inline constexpr size_t kWaitEventKindCount = static_cast<size_t>(WaitEventKind::Count);
 inline constexpr uint8_t kNoPendingEventAge = std::numeric_limits<uint8_t>::max();
 
@@ -455,6 +461,7 @@ struct PartialRegisterAccess {
 struct PendingEvent {
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitEventKind kind = WaitEventKind::Unknown;
+  OrderedCounterDomain ordered_domain = OrderedCounterDomain::None;
   RegisterSet regs;
   RegisterSet old_value_regs;
   // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
@@ -476,6 +483,10 @@ struct PendingEvent {
   bool check_program_end = false;
   bool check_counter_parity_order = false;
   uint32_t min_younger = 0;
+  // Minimum number of later operations known to complete after this event on
+  // the same ordered hardware queue.  Once this reaches the counter's maximum
+  // outstanding value, issue backpressure proves that this event has retired.
+  uint32_t min_ordered_younger = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };
@@ -495,6 +506,7 @@ struct DtlVisibilityEvent {
   std::optional<LdsInterval> interval;
   bool active = true;
   uint32_t min_younger = 0;
+  uint32_t min_ordered_younger = 0;
   std::optional<uint32_t> barrier_required_count;
   uint64_t barrier_section_offset = 0;
   std::string section_name;
@@ -1170,6 +1182,101 @@ private:
     return std::numeric_limits<uint32_t>::max();
   }
 
+  [[nodiscard]] static OrderedCounterDomain ordered_counter_domain(rj_code_arch_t arch,
+                                                                   const ClassifiedEvent &event,
+                                                                   const Instruction &inst) {
+    // CDNA prevents a wait counter from overflowing by stalling the issue of
+    // the instruction that would overflow it. Keep completion order separate
+    // from the counter itself: mixed event types need not complete in order.
+    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+      return OrderedCounterDomain::None;
+    if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds &&
+        inst.mnemonic().starts_with("ds_")) {
+      // CDNA3/CDNA4 encode the DS GDS modifier in bit 16.
+      return (inst.raw_encoding()[0] & (1u << 16u)) == 0 ? OrderedCounterDomain::Lds
+                                                         : OrderedCounterDomain::None;
+    }
+    if (event.counter == WaitCounterKind::Load) {
+      switch (event.kind) {
+      case WaitEventKind::VmemNoSamplerLoad:
+      case WaitEventKind::VmemStore:
+      case WaitEventKind::Sample:
+      case WaitEventKind::Bvh:
+      case WaitEventKind::GlobalInv:
+      case WaitEventKind::GlobalWb:
+      case WaitEventKind::LdsDirect:
+        // CDNA has no separate VSCNT. Its non-FLAT VMEM events share one
+        // in-order VMCNT stream.
+        return OrderedCounterDomain::Vmem;
+      default:
+        break;
+      }
+    }
+    return OrderedCounterDomain::None;
+  }
+
+  [[nodiscard]] static std::optional<uint32_t> ordered_counter_capacity(rj_code_arch_t arch,
+                                                                        const PendingEvent &event) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+      return std::nullopt;
+    switch (event.ordered_domain) {
+    case OrderedCounterDomain::Vmem:
+      return 63;
+    case OrderedCounterDomain::Lds:
+      return 15;
+    case OrderedCounterDomain::None:
+      return std::nullopt;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] static bool same_ordered_capacity_domain(rj_code_arch_t arch,
+                                                         const PendingEvent &older,
+                                                         const PendingEvent &younger) {
+    const auto older_capacity = ordered_counter_capacity(arch, older);
+    return older_capacity && ordered_counter_capacity(arch, younger) == older_capacity &&
+           older.ordered_domain == younger.ordered_domain;
+  }
+
+  static void apply_ordered_counter_backpressure(PendingState &state,
+                                                 std::span<const ClassifiedEvent> current_events,
+                                                 const Instruction &inst, rj_code_arch_t arch) {
+    for (const ClassifiedEvent &classification : current_events) {
+      PendingEvent current;
+      current.counter = classification.counter;
+      current.kind = classification.kind;
+      current.ordered_domain = ordered_counter_domain(arch, classification, inst);
+
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+          current.ordered_domain == OrderedCounterDomain::Vmem) {
+        const auto capacity = ordered_counter_capacity(arch, current);
+        if (capacity) {
+          for (DtlVisibilityEvent &visibility : state.dtl_visibility) {
+            if (!visibility.active)
+              continue;
+            if (visibility.min_ordered_younger < *capacity)
+              ++visibility.min_ordered_younger;
+            if (visibility.min_ordered_younger >= *capacity)
+              visibility.active = false;
+          }
+        }
+      }
+
+      auto &pending = state.pending[counter_index(classification.counter)];
+      for (PendingEvent &older : pending) {
+        const auto capacity = ordered_counter_capacity(arch, older);
+        if (capacity && same_ordered_capacity_domain(arch, older, current) &&
+            older.min_ordered_younger < *capacity) {
+          ++older.min_ordered_younger;
+        }
+      }
+      retire_events(state, pending, [&](const PendingEvent &older) {
+        const auto capacity = ordered_counter_capacity(arch, older);
+        return capacity && older.min_ordered_younger >= *capacity;
+      });
+    }
+  }
+
   [[nodiscard]] static bool is_counter_token_only(const PendingEvent &event) {
     // Events without a dependency payload exist only to advance the age of
     // older events on the same hardware counter. Once those ages have been
@@ -1182,7 +1289,8 @@ private:
   }
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
-    return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
+    return lhs.counter == rhs.counter && lhs.kind == rhs.kind &&
+           lhs.ordered_domain == rhs.ordered_domain && lhs.regs == rhs.regs &&
            lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
            lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
            lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
@@ -1220,14 +1328,14 @@ private:
   [[nodiscard]] static bool event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
     const auto lhs_key =
         std::tie(lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction,
-                 lhs.counter, lhs.kind, lhs.barrier_id, lhs.produces_regs, lhs.check_uses,
-                 lhs.check_defs, lhs.check_exec_defs, lhs.check_memory_order, lhs.check_program_end,
-                 lhs.check_counter_parity_order);
+                 lhs.counter, lhs.kind, lhs.ordered_domain, lhs.barrier_id, lhs.produces_regs,
+                 lhs.check_uses, lhs.check_defs, lhs.check_exec_defs, lhs.check_memory_order,
+                 lhs.check_program_end, lhs.check_counter_parity_order);
     const auto rhs_key =
         std::tie(rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction,
-                 rhs.counter, rhs.kind, rhs.barrier_id, rhs.produces_regs, rhs.check_uses,
-                 rhs.check_defs, rhs.check_exec_defs, rhs.check_memory_order, rhs.check_program_end,
-                 rhs.check_counter_parity_order);
+                 rhs.counter, rhs.kind, rhs.ordered_domain, rhs.barrier_id, rhs.produces_regs,
+                 rhs.check_uses, rhs.check_defs, rhs.check_exec_defs, rhs.check_memory_order,
+                 rhs.check_program_end, rhs.check_counter_parity_order);
     if (lhs_key != rhs_key)
       return lhs_key < rhs_key;
     if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
@@ -2542,6 +2650,8 @@ private:
           dst.pending[i].insert(position, event);
         } else {
           position->min_younger = std::min(position->min_younger, event.min_younger);
+          position->min_ordered_younger =
+              std::min(position->min_ordered_younger, event.min_ordered_younger);
           position->old_value_regs &= event.old_value_regs;
         }
       }
@@ -5501,6 +5611,7 @@ private:
               .interval = cdna4_dtl_interval(state, inst, wavefront_size_),
               .active = true,
               .min_younger = 0,
+              .min_ordered_younger = 0,
               .barrier_required_count = std::nullopt,
               .barrier_section_offset = 0,
               .section_name = section_name,
@@ -5515,6 +5626,7 @@ private:
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
+    event.ordered_domain = ordered_counter_domain(arch, classification, inst);
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
     if (classification.registers == TrackedRegisterSource::Defs) {
       if (const auto partial = partial_d16_load_def(inst, arch);
@@ -5525,8 +5637,6 @@ private:
     }
     event.produces_regs = tracks_committed_vgpr_generations(arch) &&
                           classification.registers == TrackedRegisterSource::Defs;
-    if (event.produces_regs)
-      event.old_value_regs = event.regs & (state.ready_regs | local_ready_regs);
     event.special_reg = classification.special_reg;
     event.barrier_id = classification.barrier_id;
     event.check_uses = classification.check_uses;
@@ -5553,6 +5663,8 @@ private:
       if (pending_event.min_younger < max_wait)
         ++pending_event.min_younger;
     }
+    if (event.produces_regs)
+      event.old_value_regs = event.regs & (state.ready_regs | local_ready_regs);
     if (record_stats)
       ++report_.memory_events_tracked;
     if (is_counter_token_only(event))
@@ -5560,6 +5672,7 @@ private:
     auto position = std::ranges::lower_bound(state.pending[idx], event, event_identity_less);
     if (position != state.pending[idx].end() && same_event_identity(*position, event)) {
       position->min_younger = 0;
+      position->min_ordered_younger = 0;
       position->old_value_regs &= event.old_value_regs;
     } else {
       state.pending[idx].insert(position, std::move(event));
@@ -5638,6 +5751,11 @@ private:
         return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
       });
     }
+    // A memory instruction cannot issue if incrementing its wait counter would
+    // overflow it. Apply that backpressure before checking the instruction's
+    // register and memory dependencies: the instruction that fills the next
+    // slot may itself safely consume the oldest completed result.
+    apply_ordered_counter_backpressure(state, events, inst, arch);
     apply_implicit_xcnt_ordering(state, du, events);
     if (emit_diagnostics)
       check_dtl_lds_access(state, inst, section_name, section_offset, file_offset, arch);
