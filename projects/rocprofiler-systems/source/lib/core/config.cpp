@@ -31,10 +31,10 @@
 #include <timemory/components/papi/papi_config.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
 #include <timemory/components/roofline/types.hpp>
-#include <timemory/mpl/type_traits.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/type_traits.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -1471,8 +1471,10 @@ configure_settings(bool _init)
     if(_paranoid > 2 && !_has_perf_cap)
     {
         const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
-        const bool all_events_network_related = std::ranges::all_of(
-            papi_events, [](const std::string& _event) { return _event.starts_with("net:::"); });
+        const bool all_events_network_related =
+            std::ranges::all_of(papi_events, [](const std::string& _event) {
+                return _event.starts_with("net:::");
+            });
         if(!all_events_network_related)
         {
             LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
