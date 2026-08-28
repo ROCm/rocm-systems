@@ -31,6 +31,7 @@
 #include "host/ScopedHook.h"
 
 #include <cstdlib>
+#include <fcntl.h>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -539,6 +540,174 @@ TEST_F(SymMemoryExportSegmentHandleTest, PropertiesFail_ReturnsErrorWithoutWriti
   EXPECT_NE(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
   EXPECT_EQ(props.calls, 1);
   EXPECT_EQ(msg.segmentSize, 0u);  // untouched
+}
+
+
+// ---------------------------------------------------------------------------
+// symMemoryImportAndMapSegmentHandle makes one peer segment addressable. It
+// picks a handle three ways -- reuse the local one, import an fd fetched from
+// the proxy, or import a fabric handle -- then maps it, grants access, and
+// releases the imported handle. Everything after the pick is shared, so the
+// reuseLocal flag decides both the first branch and the last.
+
+class SymImportAndMapSegmentTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  symLsaMessage msg{};
+  std::vector<int> lsaRankList;
+  hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
+
+  // reinterpret_cast is not a constant expression, so these are plain members.
+  const hipDeviceptr_t kAddr = reinterpret_cast<hipDeviceptr_t>(0x100000);
+  const hipMemGenericAllocationHandle_t kLocal = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    lsaRankList.assign({0, 1});
+    comm->devrState.lsaRankList = lsaRankList.data();
+    msg.segmentSize = 4096;
+  }
+  void TearDown() override {
+    comm->devrState.lsaRankList = nullptr;  // borrowed from lsaRankList, not malloc'd
+    ncclCuMemHandleType = savedHandleType;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: reuseLocal skips both the import and the matching release -- the
+// handle is the caller's, so releasing it would drop a reference it still owns.
+TEST_F(SymImportAndMapSegmentTest, ReuseLocal_MapsWithoutImportingOrReleasing) {
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  hipMemGenericAllocationHandle_t mapped{};
+  ScopedHook map(g_hipMemMap,
+                 [&](void*, size_t, size_t, hipMemGenericAllocationHandle_t h, unsigned long long) {
+                   mapped = h;
+                   return hipSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, kLocal, /*reuseLocal=*/true), ncclSuccess);
+  EXPECT_EQ(import.calls, 0);
+  EXPECT_EQ(release.calls, 0);
+  EXPECT_EQ(map.calls, 1);
+  EXPECT_EQ(mapped, kLocal);
+}
+
+// Branch: POSIX-FD import. The fd comes from the proxy and is closed after the
+// import, so the descriptor must be real for the SYSCHECK on close() to pass.
+TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  ScopedHook proxy(g_proxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
+    *fd = open("/dev/null", O_RDONLY);
+    return *fd < 0 ? ncclSystemError : ncclSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(release.calls, 1);
+}
+
+// Branch: any other handle type imports the fabric handle directly, with no
+// proxy round trip.
+TEST_F(SymImportAndMapSegmentTest, FabricHandle_ImportsWithoutProxy) {
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ScopedHook proxy(g_proxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+                      return hipSuccess;
+                    });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(import.calls, 1);
+}
+
+// Branch: the proxy cannot supply an fd, so the import never runs.
+TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  ScopedHook proxy(g_proxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(import.calls, 0);
+}
+
+// Branch: the import itself fails.
+TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
+                      return hipErrorInvalidValue;
+                    });
+  ScopedHook map(g_hipMemMap,
+                 [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(map.calls, 0);
+}
+
+// Branch: import failure on the POSIX-FD path, which is a separate CUCHECKGOTO
+// from the fabric one above.
+TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
+                      return hipErrorInvalidValue;
+                    });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(import.calls, 1);
+}
+
+// Branch: the SYSCHECK on close(). A stale descriptor from the proxy fails with
+// EBADF, which the import path treats as fatal rather than ignoring.
+TEST_F(SymImportAndMapSegmentTest, CloseFdFails_ReturnsError) {
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  ScopedHook proxy(g_proxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = 999999;  // never a live descriptor in this process
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+}
+
+// Branch: the mapping fails, so access is never granted.
+TEST_F(SymImportAndMapSegmentTest, MapFails_ReturnsErrorWithoutSettingAccess) {
+  ScopedHook map(g_hipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, kLocal, /*reuseLocal=*/true), ncclSuccess);
+  EXPECT_EQ(setAccess.calls, 0);
+}
+
+// Branch: granting access fails, propagated through the NCCLCHECKGOTO.
+TEST_F(SymImportAndMapSegmentTest, SetAccessFails_ReturnsError) {
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, kLocal, /*reuseLocal=*/true), ncclSuccess);
+  EXPECT_EQ(setAccess.calls, 1);
+}
+
+// Branch: the release of an imported handle fails.
+TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
+  EXPECT_EQ(release.calls, 1);
 }
 
 
