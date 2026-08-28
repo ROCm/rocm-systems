@@ -22,11 +22,11 @@
 
 namespace {
 
-constexpr std::initializer_list ioTypes{
+constexpr std::array ioTypes{
     hipFile::IoType::Read,
     hipFile::IoType::Write,
 };
-constexpr std::initializer_list backends{
+constexpr std::array backends{
     hipFile::StatsBackend::Fastpath,
     hipFile::StatsBackend::Fallback,
     hipFile::StatsBackend::Host,
