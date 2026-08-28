@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <signal.h>
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -926,11 +927,22 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
     _exit(1);
   } else {
     hsa_status_t status;
-    // Parent process - write core dump to pipe
+    // Parent process - write core dump to pipe.  Temporarily ignore SIGPIPE so
+    // that a broken-pipe condition (handler exits early) causes write() to
+    // return EPIPE instead of killing the process.
+    struct sigaction old_sigpipe = {};
+    struct sigaction ign_sigpipe = {};
+    ign_sigpipe.sa_handler = SIG_IGN;
+    sigemptyset(&ign_sigpipe.sa_mask);
+    sigaction(SIGPIPE, &ign_sigpipe, &old_sigpipe);
+
     close(pipefd[0]);  // Close read end
     // Write core dump data to pipe
     status = write_core_dump_to_fd(pipefd[1], segments, -1, show_progress);
     close(pipefd[1]);
+
+    sigaction(SIGPIPE, &old_sigpipe, nullptr);
+
     // Wait for child to finish
     int child_status;
     if (waitpid(pid, &child_status, 0) == -1) {
@@ -1044,6 +1056,20 @@ hsa_status_t dump_gpu_core(std::vector<AMD::AqlQueue*>* suspended_queues_out) {
   }
 
   bool show_progress = core::Runtime::runtime_singleton_->flag().enable_core_dump_progress();
+
+  // Kernel pipe handlers (e.g., apport on Ubuntu) are CPU coredump consumers
+  // that cannot parse the GPU ELF format.  When we fell back to the kernel
+  // core_pattern and it is a pipe handler, produce a local file instead so
+  // that the dump is useful and the process is not killed by SIGPIPE or by a
+  // handler that rejects the unexpected input.
+  if (kernel_pattern && !pattern.empty() && pattern[0] == '|') {
+    fprintf(stderr,
+            "GPU coredump: kernel core_pattern is a pipe handler; "
+            "falling back to local file (GPU ELF is incompatible with CPU "
+            "coredump handlers).  Set HSA_COREDUMP_PATTERN to override.\n");
+    // Keep kernel_pattern=true so the .gpu suffix is appended below.
+    pattern = PREFIX_FILE_NAME + ".%p";
+  }
 
   hsa_status_t dump_status;
   if (!pattern.empty() && pattern[0] == '|') {
