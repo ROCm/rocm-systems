@@ -874,6 +874,10 @@ struct ncclComm {
   // no launch yet, which keeps "launched on the default stream" distinguishable. Not a
   // hipStream_t: the app may destroy that stream while the comm lives on and HIP gives no
   // notification, so this is compared, never passed to a HIP API.
+  //
+  // If the handle is recycled onto a new stream, tag equality deliberately skips the wait:
+  // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
+  // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
   latency_profiler::CollTrace* ctrace;
 
