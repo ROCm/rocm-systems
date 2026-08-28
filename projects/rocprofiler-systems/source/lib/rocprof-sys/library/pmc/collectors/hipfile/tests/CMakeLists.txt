@@ -10,6 +10,7 @@ add_library(
     test_device.cpp
     test_hipfile_traits.cpp
     test_collector_workflow.cpp
+    test_types.cpp
 )
 
 target_link_libraries(

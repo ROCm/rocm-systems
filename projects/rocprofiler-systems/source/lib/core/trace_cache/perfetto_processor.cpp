@@ -1136,7 +1136,6 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     using thread_hardware_counter_track =
         core::perfetto::counter_track<category::thread_hardware_counter>;
     using comm_data_track = core::perfetto::counter_track<category::comm_data>;
-    using hipfile_track   = core::perfetto::counter_track<category::hipfile>;
 
     static const std::unordered_map<size_t, pmc_track_info> PMC_TRACK_MAP = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
@@ -1214,24 +1213,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             [](auto id, auto idx, auto ts, auto val) {
                 TRACE_COUNTER(trait::name<category::comm_data>::value,
                               comm_data_track::at(id, idx), ts, val);
-            } } },
-
-        { ROCPROFSYS_CATEGORY_HIPFILE,
-          { .default_units = "",
-            .exists_fn =
-                [](std::uint64_t track_id) { return hipfile_track::exists(track_id); },
-            .emplace_fn =
-                [](std::uint64_t track_id, const std::string& name,
-                   const std::string& units) {
-                    hipfile_track::emplace(track_id, name, units.c_str());
-                },
-            .trace_fn =
-                [](std::uint64_t track_id, std::uint64_t track_idx,
-                   std::uint64_t timestamp_ns, double val) {
-                    TRACE_COUNTER(trait::name<category::hipfile>::value,
-                                  hipfile_track::at(track_id, track_idx), timestamp_ns,
-                                  val);
-                } } }
+            } } }
     };
 
     const auto track_name = std::string(_pmc.track_name);
@@ -1492,7 +1474,7 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
 
         if(!hipfile_track::exists(_track_key))
         {
-            hipfile_track::emplace(_track_key, _name, "");
+            hipfile_track::emplace(_track_key, _name, _metric.unit);
         }
 
         TRACE_COUNTER(trait::name<category::hipfile>::value,
