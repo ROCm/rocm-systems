@@ -123,6 +123,10 @@ public:
 
         // The first sample has no interval behind it, so it has no rate. Reporting the
         // lifetime total over a zero interval would open every run with a false spike.
+        // The stamp is the process sampler's tick (tim::get_clock_real_now →
+        // steady_clock), the same value every PMC collector gets that interval.
+        // It does not step backward with NTP, so the unsigned subtraction cannot wrap
+        // from a wall-clock rewind. A repeated stamp is already treated as zero elapsed.
         if(m_has_previous)
         {
             const auto elapsed_ns = timestamp - m_previous_timestamp;
@@ -142,9 +146,9 @@ public:
 
 private:
     /**
-     * @brief Wall-clock bandwidth in bytes/sec over one sampling interval.
+     * @brief Bandwidth in bytes/sec over one sampling interval.
      *
-     * Normalised by elapsed wall time rather than by hipFile's own I/O-call duration,
+     * Normalised by the sampler interval rather than by hipFile's own I/O-call duration,
      * so the track is directly comparable to the AMD SMI instantaneous PCIe bandwidth
      * sitting beside it on the same GPU timeline.
      *

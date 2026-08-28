@@ -64,7 +64,7 @@ inline constexpr std::uint32_t ALL_HIPFILE_METRICS   = (1U << HIPFILE_METRICS_CO
  * ABSOLUTE gets the same thing here as it does there. Perfetto's delta view recovers
  * the per-window signal for anyone who wants it.
  *
- * The two bandwidths are wall-clock rates over the sampling interval, matching AMD
+ * The two bandwidths are rates over the sampling interval, matching AMD
  * SMI's instantaneous PCIe bandwidth. They are deliberately not derived from hipFile's
  * own read_bw_bytes_per_sec (lifetime-averaged, so it cannot show a burst) nor
  * normalised by read_duration_us (time inside I/O calls, which would put a number on
@@ -225,6 +225,17 @@ inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
                 return sample_metrics.write_bandwidth;
             } } }
 };
+
+static_assert([]() constexpr {
+    for(const auto& metric : METRIC_TABLE)
+    {
+        if(metric.unit == nullptr || metric.unit[0] == '\0')
+        {
+            return false;
+        }
+    }
+    return true;
+}());
 
 /**
  * @brief Bits of every metric in @p group, or 0 when the group is unknown.

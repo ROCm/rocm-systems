@@ -7,9 +7,9 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::hipfile
@@ -73,8 +73,8 @@ struct hipfile_traits
     }
 
     // Perfetto customization points are no-ops: hipFile counter tracks reach Perfetto
-    // through the PMC path (pmc_event_with_sample), not the legacy per-collector
-    // Perfetto policy that the AMD SMI collectors still carry.
+    // from the same hipfile_pmc_sample records that populate RocPD, not the legacy
+    // per-collector Perfetto policy that the AMD SMI collectors still carry.
     template <typename Perfetto, typename DeviceEntries>
     static void init_perfetto_storage(const DeviceEntries& /*device_entries*/)
     {}
