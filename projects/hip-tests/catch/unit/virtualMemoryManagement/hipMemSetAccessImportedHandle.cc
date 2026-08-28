@@ -186,9 +186,10 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_MulProc_ImportedDeviceMem_HostAccess) {
  * Test Description
  * ------------------------
  *    - Multiprocess functionality test. Same import as above, but the Child Process grants
- * CPU access to the imported mapping *before* granting GPU access, then launches a kernel
- * on it. This checks that the host and device mappings of an imported allocation coexist
- * and that granting host access first does not disturb the subsequent device mapping.
+ * CPU access to the imported mapping *before* granting GPU access, seeds it through the CPU
+ * mapping and then overwrites it from the device with hipMemsetD32. This checks that the host
+ * and device mappings of an imported allocation coexist and that granting host access first
+ * does not disturb the subsequent device mapping.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemSetAccessImportedHandle.cc
  * Test requirements

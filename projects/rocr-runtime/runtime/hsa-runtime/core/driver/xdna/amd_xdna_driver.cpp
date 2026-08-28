@@ -965,6 +965,7 @@ hsa_status_t XdnaDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
   // handle->handle and handle->size carry over from allocation
   handle->dmabuf_fd = params.fd;
   handle->mmap_offset = get_bo_info_args.map_offset;
+  handle->mmap_offset_valid = true;
 
   *offset = 0;
 

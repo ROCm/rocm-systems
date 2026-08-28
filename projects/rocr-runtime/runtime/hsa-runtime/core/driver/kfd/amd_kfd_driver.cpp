@@ -577,12 +577,13 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
     // Record the DRM mmap offset of the imported BO so the CPU mapping can be established
-    // later in Runtime::MappedHandleAllowedAgent::EnableAccess. set mmap_offset to 0 and
-    // let the CPU-access path report the error if its requested.
-    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
-                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
-      handle->mmap_offset = 0;
-    }
+    // later in Runtime::MappedHandleAllowedAgent::EnableAccess. This is best effort: a BO that
+    // is not CPU mappable must still import successfully for GPU access, so leave the offset
+    // marked invalid and let the CPU-access path reject it if a CPU mapping is requested.
+    handle->mmap_offset_valid =
+        HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) == HSAKMT_STATUS_SUCCESS;
+    if (!handle->mmap_offset_valid) handle->mmap_offset = 0;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -607,11 +608,11 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
-    //Refer the DMABUF_FD case, best-effort mmap offset for the CPU-access path.
-    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
-                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
-      handle->mmap_offset = 0;
-    }
+    // See the DMABUF_FD case above: best-effort mmap offset for the CPU-access path.
+    handle->mmap_offset_valid =
+        HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) == HSAKMT_STATUS_SUCCESS;
+    if (!handle->mmap_offset_valid) handle->mmap_offset = 0;
     return HSA_STATUS_SUCCESS;
   }
   default:
@@ -689,6 +690,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     DestroyMemoryHandle(&targetHandle);
     return HSA_STATUS_ERROR;
   }
+  // Unlike the import path this is not best effort: a locally created shareable handle always
+  // carries a usable CPU mmap offset, or CreateShareableHandle fails above.
+  handle->mmap_offset_valid = true;
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
