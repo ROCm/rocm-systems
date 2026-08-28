@@ -41,6 +41,42 @@ using std::unique_ptr;
 
 static const size_t DefaultChunkSize = 16 * 1024 * 1024;
 
+namespace {
+
+// Makes the buffer's GPU current for the lifetime of the guard (hipMemcpy operates on the current
+// device's context) and restores the caller's device on scope exit, including during exceptions.
+class DeviceGuard {
+public:
+    explicit DeviceGuard(int buffer_device) : prev_device_{Context<Hip>::get()->hipGetDevice()}
+    {
+        if (buffer_device != prev_device_) {
+            Context<Hip>::get()->hipSetDevice(buffer_device);
+            switched_ = true;
+        }
+    }
+    ~DeviceGuard()
+    {
+        if (switched_) {
+            try {
+                Context<Hip>::get()->hipSetDevice(prev_device_);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to restore the caller's HIP device.");
+            }
+        }
+    }
+    DeviceGuard(const DeviceGuard &)            = delete;
+    DeviceGuard &operator=(const DeviceGuard &) = delete;
+    DeviceGuard(DeviceGuard &&)                 = delete;
+    DeviceGuard &operator=(DeviceGuard &&)      = delete;
+
+private:
+    int  prev_device_;
+    bool switched_{false};
+};
+
+} // namespace
+
 int
 Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
                 hoff_t file_offset, hoff_t buffer_offset) const
@@ -83,6 +119,8 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
     if (!paramsValid(buffer, size, file_offset, buffer_offset)) {
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
+
+    DeviceGuard device_guard{buffer->getGpuId()};
 
     auto ptr     = Context<Sys>::get()->mmap(nullptr, chunk_size, PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

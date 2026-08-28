@@ -108,13 +108,13 @@ typedef struct {
     } \
 }
 
-enum {
+enum FrameBufUseStatus {
     kNotUsed = 0,
     kTopFieldUsedForDecode = 1,
     kBottomFieldUsedForDecode = 1 << 1,
     kFrameUsedForDecode = kTopFieldUsedForDecode | kBottomFieldUsedForDecode,
     kFrameUsedForDisplay = 1 << 2
-} FrameBufUseStatus;
+};
 
 /**
  * @brief Base class for video parsing
