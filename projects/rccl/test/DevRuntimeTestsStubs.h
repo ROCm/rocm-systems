@@ -42,6 +42,8 @@ extern std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHa
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease;
 
 extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_hipMemAddressReserve;
+extern std::function<hipError_t(void*, size_t)> g_hipMemAddressFree;
+extern std::function<hipError_t(void*, size_t)> g_hipMemUnmap;
 
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather;

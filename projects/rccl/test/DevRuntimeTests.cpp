@@ -1266,6 +1266,131 @@ TEST_F(SymTeamObtainTest, SingleRankTeam_ListsSelfOnly) {
 
 
 // ---------------------------------------------------------------------------
+// symTeamDestroyAll empties devrState.teamHead, tearing down each team's
+// multicast mapping first if it has one. It returns void, so the assertions are
+// on the resulting state and on which driver calls were made.
+
+class SymTeamDestroyAllTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->devrState.bigSize = 1u << 20;
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+
+  // Teams are freed by the unit under test, so they must be malloc'd. nRanks is
+  // 1 because worldRankList is a flexible array member.
+  ncclDevrTeam* PushTeam(void* mcBasePtr) {
+    auto* t = static_cast<ncclDevrTeam*>(calloc(1, sizeof(ncclDevrTeam) + sizeof(int)));
+    t->team.nRanks = 1;
+    t->mcBasePtr = mcBasePtr;
+    t->next = comm->devrState.teamHead;
+    comm->devrState.teamHead = t;
+    return t;
+  }
+};
+
+// Branch: an empty list, so the loop body never runs.
+TEST_F(SymTeamDestroyAllTest, EmptyList_DoesNothing) {
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(unmap.calls, 0);
+}
+
+// Branch: teams without a multicast mapping are freed without touching the
+// driver.
+TEST_F(SymTeamDestroyAllTest, PlainTeams_FreedWithoutDriverCalls) {
+  PushTeam(nullptr);
+  PushTeam(nullptr);
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(unmap.calls, 0);
+  EXPECT_EQ(addrFree.calls, 0);
+  EXPECT_EQ(release.calls, 0);
+}
+
+// Branch: a team with a multicast mapping is unmapped, its VA freed and its
+// handle released -- in that order, each over the team's full bigSize.
+TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnmapsFreesAndReleases) {
+  void* mcBase = reinterpret_cast<void*>(0x400000);
+  PushTeam(mcBase);
+  size_t unmapSize = 0, freeSize = 0;
+  ScopedHook unmap(g_hipMemUnmap, [&](void* p, size_t size) {
+    EXPECT_EQ(p, mcBase);
+    unmapSize = size;
+    return hipSuccess;
+  });
+  ScopedHook addrFree(g_hipMemAddressFree, [&](void* p, size_t size) {
+    EXPECT_EQ(p, mcBase);
+    freeSize = size;
+    return hipSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(unmap.calls, 1);
+  EXPECT_EQ(addrFree.calls, 1);
+  EXPECT_EQ(release.calls, 1);
+  EXPECT_EQ(unmapSize, comm->devrState.bigSize);
+  EXPECT_EQ(freeSize, comm->devrState.bigSize);
+}
+
+// Branch: the per-memory unbind loop. Every live memory is unbound from the
+// team before its mapping goes away, but the memories themselves are owned by
+// devrState.memHead and must survive.
+TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
+  ncclDevrMemory second{};
+  ncclDevrMemory first{};
+  first.next = &second;
+  comm->devrState.memHead = &first;
+  comm->nvlsSupport = 1;
+  PushTeam(reinterpret_cast<void*>(0x400000));
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(comm->devrState.memHead, &first);  // memories are not this function's to free
+  EXPECT_EQ(first.next, &second);
+}
+
+// A mixed list: only the multicast team reaches the driver, and both are freed.
+TEST_F(SymTeamDestroyAllTest, MixedList_TearsDownOnlyMulticastTeams) {
+  PushTeam(nullptr);
+  PushTeam(reinterpret_cast<void*>(0x400000));
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(unmap.calls, 1);
+}
+
+// The driver calls are CUCHECKIGNORE'd, so a failure must not stop the walk --
+// this runs during finalize, where leaving teams linked would leak.
+TEST_F(SymTeamDestroyAllTest, DriverCallsFail_StillEmptiesList) {
+  PushTeam(reinterpret_cast<void*>(0x400000));
+  PushTeam(reinterpret_cast<void*>(0x500000));
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipErrorInvalidValue; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipErrorInvalidValue; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+
+  symTeamDestroyAll(comm);
+  EXPECT_EQ(comm->devrState.teamHead, nullptr);
+  EXPECT_EQ(unmap.calls, 2);  // both teams attempted, not abandoned after the first
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:

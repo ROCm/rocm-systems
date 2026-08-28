@@ -282,10 +282,15 @@ HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t align, 
                                          unsigned long long flags) {
   return g_hipMemAddressReserve(ptr, size, align, addr, flags);
 }
-HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
+static hipError_t DefaultMemAddressFree(void* devPtr, size_t size) {
   assert(size != 0);
   munmap(devPtr, size);
   return hipSuccess;
+}
+std::function<hipError_t(void*, size_t)> g_hipMemAddressFree = DefaultMemAddressFree;
+
+HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
+  return g_hipMemAddressFree(devPtr, size);
 }
 HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t, const hipMemAllocationProp*,
                                  unsigned long long) {
@@ -364,7 +369,10 @@ HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDe
   return g_hipMemSetAccess(ptr, size, desc, count);
 }
 
-HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
+static hipError_t DefaultMemUnmap(void*, size_t) { return hipSuccess; }
+std::function<hipError_t(void*, size_t)> g_hipMemUnmap = DefaultMemUnmap;
+
+HIP_FAKE hipError_t hipMemUnmap(void* ptr, size_t size) { return g_hipMemUnmap(ptr, size); }
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -440,5 +448,7 @@ void ResetDevRuntimeFakes() {
   g_hipMemAddressReserve                    = DefaultMemAddressReserve;
   g_bootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_bootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
+  g_hipMemAddressFree                       = DefaultMemAddressFree;
+  g_hipMemUnmap                             = DefaultMemUnmap;
   g_loadParam                               = DefaultLoadParam;
 }
