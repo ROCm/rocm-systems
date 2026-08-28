@@ -513,7 +513,11 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan indirect-island proof found no target profile");
+    return errors;
+  }
   for (const ConSanPatchInfo &island : result.patches) {
     if (island.kind != ConSanPatchKind::TrampolineScIndirectBranchIsland)
       continue;
@@ -534,7 +538,9 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
-    const uint16_t vcc_save_width = is_flat_body || consan_uses_gfx9_cdna_encoding(arch) ? 2u : 1u;
+    const bool gfx9_cdna = target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+                           target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+    const uint16_t vcc_save_width = is_flat_body || gfx9_cdna ? 2u : 1u;
     const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                    uint16_t rhs_width) {
       return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
@@ -550,10 +556,11 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     std::vector<uint32_t> expected_return;
     const bool encoded =
         append_lds_check_trap_indirect_jump(expected_entry, island.trampoline_offset,
-                                            body->trampoline_offset, pc, scc_save, arch) &&
+                                            body->trampoline_offset, pc, scc_save,
+                                            *target_profile) &&
         append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
                                               body->anchor_offset + body->original_size, pc,
-                                              scc_save, arch);
+                                              scc_save, *target_profile);
     const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
       const uint64_t size = words.size() * sizeof(uint32_t);
       return offset <= replacement_text.size() && size <= replacement_text.size() - offset &&
@@ -864,7 +871,12 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan dense-call proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   const uint32_t nop = build_s_nop(0, arch);
   const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
     const uint64_t size = words.size() * sizeof(uint32_t);
@@ -937,8 +949,9 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
                      : instrumentation::build_s_call_i64(dispatch_key, 0, arch);
     std::vector<uint32_t> island_words;
     if (!host_entry ||
-        !append_lds_check_trap_indirect_jump(
-            island_words, island_offset, dispatcher.trampoline_offset, jump_pc, saved_scc, arch) ||
+        !append_lds_check_trap_indirect_jump(island_words, island_offset,
+                                             dispatcher.trampoline_offset, jump_pc, saved_scc,
+                                             *target_profile) ||
         island_words.size() != kLdsCheckTrapIndirectJumpWords) {
       errors.emplace_back("ConSan dense-call proof could not reconstruct its entry host");
       continue;
@@ -956,7 +969,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
                 host->original_size);
     if (!append_lds_check_trap_indirect_jump(expected_host_body, host->trampoline_offset,
                                              host->anchor_offset + host->original_size, jump_pc,
-                                             saved_scc, arch) ||
+                                             saved_scc, *target_profile) ||
         !matches(host->trampoline_offset, expected_host_body)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted relocated entry host");
       continue;
@@ -987,7 +1000,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
       const uint64_t matched_offset =
           dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
       if (!append_lds_check_trap_indirect_return(matched, matched_offset, target, jump_pc,
-                                                 saved_scc, arch))
+                                                 saved_scc, *target_profile))
         return false;
       const auto skip =
           instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched.size()), arch);
@@ -1022,7 +1035,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
                body->indirect_return_offset &&
                append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
                                                      body->anchor_offset + body->original_size,
-                                                     jump_pc, saved_scc, arch) &&
+                                                     jump_pc, saved_scc, *target_profile) &&
                matches(*body->indirect_return_offset, expected_return) &&
                append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
                                           : static_cast<uint32_t>(body->anchor_offset +
@@ -1077,7 +1090,12 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan relay donor proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan relay donor proof could not create a pristine decoder");
@@ -1317,7 +1335,12 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan relay reservoir proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan relay reservoir proof could not create a pristine decoder");
@@ -1603,13 +1626,13 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     if (!append_lds_check_trap_indirect_jump(
             expected_entry, patch->anchor_offset, patch->trampoline_offset,
             *patch->indirect_pc_sgpr, wave32_vcc ? kRdna4ExecHi : *patch->indirect_saved_scc_sgpr,
-            arch) ||
+            *target_profile) ||
         !append_lds_check_trap_indirect_jump(
             expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
             patch->anchor_offset + patch->original_size -
                 kScRelayTailRestoreWords * sizeof(uint32_t),
             *patch->indirect_return_pc_sgpr,
-            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr, arch) ||
+            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr, *target_profile) ||
         std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
                     expected_entry.size() * sizeof(uint32_t)) != 0 ||
         read_word(replacement_text, patch->trampoline_offset) !=
@@ -3796,10 +3819,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              publication_begin < store_positions.front() &&
-             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
-               return store_positions.front() < owner_position &&
-                      owner_position < cas_positions.back();
-             });
+             std::ranges::any_of(
+                 owner_positions,
+                 [&](size_t owner_position) {
+                   return store_positions.front() < owner_position &&
+                          owner_position < cas_positions.back();
+                 });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),

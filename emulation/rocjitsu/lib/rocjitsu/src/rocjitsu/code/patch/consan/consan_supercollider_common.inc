@@ -458,29 +458,6 @@ constexpr uint16_t kRdna4ExecHi = 127u;
   return true;
 }
 
-// Stage 10 validation still reconstructs expected relay bytes from an
-// architecture enum. Keep that compatibility call narrow and fail closed;
-// production SuperCollider lowering passes its selected immutable profile.
-[[nodiscard]] bool append_lds_check_trap_indirect_jump(std::vector<uint32_t> &words,
-                                                       uint64_t words_text_offset,
-                                                       uint64_t target_text_offset,
-                                                       uint16_t pc_sgpr, uint16_t saved_scc_sgpr,
-                                                       rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  return target && append_lds_check_trap_indirect_jump(words, words_text_offset, target_text_offset,
-                                                       pc_sgpr, saved_scc_sgpr, *target);
-}
-
-[[nodiscard]] bool
-append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t words_text_offset,
-                                      uint64_t target_text_offset, uint16_t pc_sgpr,
-                                      uint16_t captured_scc_sgpr, rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  return target &&
-         append_lds_check_trap_indirect_return(words, words_text_offset, target_text_offset,
-                                               pc_sgpr, captured_scc_sgpr, *target);
-}
-
 [[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_pc_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t search_start = 0) {
