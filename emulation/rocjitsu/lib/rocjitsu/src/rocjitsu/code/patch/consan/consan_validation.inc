@@ -1,5 +1,10 @@
 namespace {
 
+[[nodiscard]] constexpr bool validation_uses_gfx9_cdna_encoding(const ConSanTargetProfile &target) {
+  return target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+         target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+}
+
 enum class BranchRelayReservoirShape : uint8_t {
   GeneratedBank,
   DirectInstruction,
@@ -477,7 +482,12 @@ validate_patch_decoding(const AmdGpuCodeObject &replacement,
   std::vector<std::string> errors;
   if (replacement.text_sections().size() != 1)
     return errors;
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan final validation found no target profile while decoding patches");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan final validation could not create a replacement decoder");
@@ -597,7 +607,12 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
   const auto text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan branch-only continuation proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   const auto read_word = [](std::span<const uint8_t> bytes,
                             uint64_t offset) -> std::optional<uint32_t> {
     if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
@@ -731,7 +746,9 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
         !append_pc_delta_builder(
             expected_entry, arch, *patch.indirect_pc_sgpr,
             static_cast<int64_t>(patch.trampoline_offset) - static_cast<int64_t>(pc_after_getpc),
-            /*minimum_words=*/3u, /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+            /*minimum_words=*/3u,
+            /*prefer_literal64=*/
+            target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)) {
       return false;
     }
     const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
@@ -1727,7 +1744,12 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan mutation proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan mutation proof could not create a replacement decoder");
@@ -3271,7 +3293,12 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     }
     return common;
   };
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan exact-shadow proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
@@ -3279,7 +3306,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
                !result.moi_operating_point.moi_dispatch_id_sgpr &&
                !result.moi_operating_point.moi_dispatch_id_vgpr &&
                !owner_local_dispatch_vgpr(patch) &&
-               !consan_arch_uses_literal_dispatch_identity(arch);
+               target_profile->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral;
       });
   if (replacement.text_sections().size() != 1 || has_exact_patch_without_dispatch) {
     errors.emplace_back(
@@ -3403,7 +3430,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_compact_loop ? 1u : 0u);
-      const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
+      const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
@@ -3644,7 +3671,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     return errors;
   }
 
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan release-transaction proof found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back(
@@ -3725,7 +3757,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
+    const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
     const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
@@ -3903,7 +3935,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
     return errors;
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
+  if (target_profile == nullptr) {
+    errors.emplace_back("ConSan resource validation found no target profile");
+    return errors;
+  }
+  const rj_code_arch_t arch = target_profile->arch;
   std::unordered_map<uint64_t, std::string> owner_names;
   for (const AmdGpuKernelInfo &kernel : original.kernels())
     owner_names.emplace(kernel.descriptor_file_offset, kernel.name);
@@ -4208,11 +4245,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           std::max(requirement.required_private_bytes, unscoped_required_private_bytes);
     }
     KernelDescriptor normalized = replacement_descriptor;
-    const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
-    const bool requires_full_workgroup_id =
-        requirement.require_full_workgroup_id &&
-        (cdna || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA5);
+    const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
+    const bool requires_full_workgroup_id = requirement.require_full_workgroup_id;
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                       AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
@@ -4351,7 +4385,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     if (requirement.allow_resource_delta || has_unscoped_resource_growth) {
       normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
       normalized.compute_pgm_rsrc2 = original_descriptor.compute_pgm_rsrc2;
-      if (consan_uses_gfx9_cdna_encoding(arch)) {
+      if (validation_uses_gfx9_cdna_encoding(*target_profile)) {
         AMDHSA_BITS_SET(normalized.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                         AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                                         kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
