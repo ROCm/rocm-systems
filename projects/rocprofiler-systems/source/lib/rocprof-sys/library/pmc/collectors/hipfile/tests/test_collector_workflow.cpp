@@ -6,7 +6,6 @@
 #include "library/pmc/collectors/hipfile/collector.hpp"
 #include "library/pmc/collectors/hipfile/device.hpp"
 #include "library/pmc/collectors/hipfile/hipfile_traits.hpp"
-#include "library/pmc/collectors/hipfile/perfetto_policy.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <gtest/gtest.h>
@@ -459,17 +458,6 @@ TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
     // track. What must hold either way is that the PMC output is unchanged.
     EXPECT_EQ(stub_perfetto::store_count, 1U);
     EXPECT_EQ(stub_cache::samples.size(), HIPFILE_METRICS_COUNT);
-}
-
-TEST_F(HipFileCollectorTest, production_perfetto_policy_is_inert)
-{
-    // Compiles against the same call base::collector makes, and does nothing.
-    metrics values{};
-    values.read_bytes = test_bytes::kb4;
-
-    perfetto_policy::store_sample(0, values, TS_1);
-
-    SUCCEED();
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────
