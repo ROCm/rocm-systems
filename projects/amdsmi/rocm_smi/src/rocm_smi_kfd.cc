@@ -1256,8 +1256,9 @@ int KFDNode::get_total_memory(uint64_t* total) {
 
   // mem_banks topology is fixed for the life of the node, so compute the sum
   // once and reuse it; this runs on every VRAM-total query (e.g. amd-smi monitor).
-  if (total_memory_ != 0) {
-    *total = total_memory_;
+  uint64_t cached = total_memory_.load(std::memory_order_relaxed);
+  if (cached != 0) {
+    *total = cached;
     return 0;
   }
 
@@ -1322,7 +1323,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
   }
 
   *total = sum_public_vram_bytes(banks);
-  total_memory_ = *total;
+  total_memory_.store(*total, std::memory_order_relaxed);
   return 0;
 }
 
