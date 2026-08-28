@@ -988,7 +988,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         request.search_start = site_context.owner_descriptor_file_offsets.size() > 1u
                                    ? 0u
                                    : min_auto_scratch_vgpr.value_or(0u);
-        request.current_allocation_count = allocation_limit.value_or(REGISTER_SET_MAX_VGPRS);
+        // RegisterSet also represents selectable target banks, while these
+        // probe operands directly encode only the ordinary low VGPR bank.
+        request.current_allocation_count =
+            std::min(allocation_limit.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit);
         request.architecture_limit = request.current_allocation_count;
         request.allow_spill = false;
         const uint16_t data_vgprs = lds_dword_count(site).value_or(1u);

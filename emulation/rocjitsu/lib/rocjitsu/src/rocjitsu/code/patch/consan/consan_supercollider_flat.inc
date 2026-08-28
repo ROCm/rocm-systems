@@ -162,7 +162,12 @@ choose_flat_check_trap_indirect_scalar_scratch(
       flat_dword_count(access).value_or(0u) > 1u && target.requires_even_vgpr_tuples ? 2u : 1u;
   request.search_start =
       std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
-  request.current_allocation_count = max_auto_scratch_vgpr.value_or(REGISTER_SET_MAX_VGPRS);
+  // RegisterSet can represent target-specific VGPR banks above 255, but the
+  // SuperCollider probe ABI directly encodes only ordinary low-bank VGPRs.
+  // LivenessAnalysis::find_free_run enforced this bound through its configured
+  // max_free_vgpr; preserve it explicitly at the shared planner boundary.
+  request.current_allocation_count =
+      std::min(max_auto_scratch_vgpr.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit);
   request.max_referenced_count = min_auto_scratch_vgpr.value_or(0u);
   request.architecture_limit = request.current_allocation_count;
   request.allow_spill = false;
