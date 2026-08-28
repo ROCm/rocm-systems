@@ -1722,7 +1722,161 @@ TEST_F(SymMemoryRegisterRmaTest, RegisterFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
-// symMemoryObtain / symMemoryDestroy.
+// symMemoryObtain allocates an ncclDevrMemory, agrees a layout with the other
+// ranks, reserves space, maps the LSA team, binds existing teams, registers
+// with GIN/RMA where enabled, and links the result onto devrState.memHead.
+//
+// This suite covers the setup half: the aggregation of the all-gathered
+// per-rank info, and the failure arms before anything is mapped. The
+// register-and-bind half and the rollback paths follow below.
+
+class SymMemoryObtainSetupTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+  std::vector<hipMemGenericAllocationHandle_t> memHandles;
+  ncclDevrMemory* obtained = nullptr;
+
+  // Mirrors the anonymous struct symMemoryObtain all-gathers. Layout must match
+  // for the hook to populate what the function then reads back.
+  struct SegmentInfo {
+    int numSegments;
+    bool hasSysmemSegment;
+    size_t totalSize;
+  };
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 2;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 2;
+    devr->nLsaTeams = 1;
+    devr->bigSize = 1u << 20;
+    devr->granularity = 4096;
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x200000);
+    lsaRankList.assign({0, 1});
+    devr->lsaRankList = lsaRankList.data();
+
+    memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+  }
+
+  void TearDown() override {
+    if (obtained != nullptr) symMemoryDestroy(comm, obtained);
+    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    g_callocCallIndex = 0;                  // TU-local, not covered by the reset below
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+
+  ncclResult_t Obtain(int numSegments = 1, size_t size = 4096, bool hasSysmem = false) {
+    return symMemoryObtain(comm, memHandles.data(), numSegments, reinterpret_cast<void*>(0x100000), size,
+                           /*winFlags=*/0, &obtained, hasSysmem);
+  }
+
+  // Publish per-rank info back through the all-gather, as peers would.
+  std::function<ncclResult_t(void*, void*, int)> GatherReporting(std::vector<SegmentInfo> perRank) {
+    return [perRank](void*, void* buf, int) {
+      auto* info = static_cast<SegmentInfo*>(buf);
+      for (size_t r = 0; r < perRank.size(); r++) info[r] = perRank[r];
+      return ncclSuccess;
+    };
+  }
+};
+
+// maxGlobalNumSegments is the max across every rank, not just ours -- a peer
+// with more segments raises it.
+TEST_F(SymMemoryObtainSetupTest, AggregatesMaxSegmentsAcrossRanks) {
+  ScopedHook gather(g_bootstrapAllGather, GatherReporting({{1, false, 4096}, {3, false, 4096}}));
+
+  ASSERT_EQ(Obtain(/*numSegments=*/1), ncclSuccess);
+  EXPECT_EQ(obtained->maxGlobalNumSegments, 3);
+  EXPECT_EQ(obtained->numSegments, 1);  // our own count is unchanged
+}
+
+// globalHasSysmemSegment is an OR across ranks: one peer with CPU-backed memory
+// puts everyone on the elastic path.
+TEST_F(SymMemoryObtainSetupTest, PeerSysmemSegment_SetsGlobalFlag) {
+  ScopedHook gather(g_bootstrapAllGather, GatherReporting({{1, false, 4096}, {1, true, 4096}}));
+
+  ASSERT_EQ(Obtain(/*numSegments=*/1, /*size=*/4096, /*hasSysmem=*/false), ncclSuccess);
+  EXPECT_FALSE(obtained->hasSysmemSegment);       // ours
+  EXPECT_TRUE(obtained->globalHasSysmemSegment);  // the communicator's
+}
+
+// No rank reporting sysmem leaves the flag clear.
+TEST_F(SymMemoryObtainSetupTest, NoSysmemAnywhere_LeavesGlobalFlagClear) {
+  ScopedHook gather(g_bootstrapAllGather, GatherReporting({{1, false, 4096}, {1, false, 4096}}));
+
+  ASSERT_EQ(Obtain(), ncclSuccess);
+  EXPECT_FALSE(obtained->globalHasSysmemSegment);
+}
+
+// lsaMin/MaxSize come from the LSA slice of the gathered info, so asymmetric
+// peer sizes widen the range the space allocation has to cover.
+TEST_F(SymMemoryObtainSetupTest, AsymmetricPeerSizes_TrackMinAndMax) {
+  ScopedHook gather(g_bootstrapAllGather, GatherReporting({{1, false, 4096}, {2, false, 16384}}));
+  int64_t allocSize = 0;
+  ScopedHook alloc(g_spaceAlloc, [&](ncclSpace*, int64_t, int64_t size, int, int64_t* out) {
+    allocSize = size;
+    *out = 0;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(Obtain(/*numSegments=*/1, /*size=*/4096), ncclSuccess);
+  EXPECT_EQ(obtained->lsaMinSize, 4096u);
+  EXPECT_EQ(obtained->lsaMaxSize, 16384u);
+  EXPECT_EQ(obtained->lsaNumSegments[1], 2);  // the peer's count, from its slice
+  EXPECT_EQ(allocSize, 16384);                // reserved for the largest LSA rank
+}
+
+// Branch: the space allocation fails, so nothing is mapped or linked.
+TEST_F(SymMemoryObtainSetupTest, SpaceAllocFails_ReturnsErrorWithoutLinking) {
+  ScopedHook gather(g_bootstrapAllGather, GatherReporting({{1, false, 4096}, {1, false, 4096}}));
+  ScopedHook alloc(g_spaceAlloc,
+                   [](ncclSpace*, int64_t, int64_t, int, int64_t*) { return ncclSystemError; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Branch: the all-gather fails before any aggregation happens.
+TEST_F(SymMemoryObtainSetupTest, AllGatherFails_ReturnsErrorWithoutLinking) {
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Branch: populating our own segment sizes fails.
+TEST_F(SymMemoryObtainSetupTest, PopulateSegmentSizesFails_ReturnsError) {
+  ScopedHook populate(g_devrPopulateSegmentSizes,
+                      [](ncclDevrMemory*, int) { return ncclSystemError; });
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// Branch: the very first allocation fails, before any member is written.
+TEST_F(SymMemoryObtainSetupTest, MemoryAllocFails_ReturnsErrorWithoutLinking) {
+  g_callocFailAt = g_callocCallIndex;  // fail the next ncclCalloc
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
+// symMemoryObtain / symMemoryDestroy: the original lifecycle regression.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.

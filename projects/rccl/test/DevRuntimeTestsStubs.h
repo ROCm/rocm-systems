@@ -55,6 +55,10 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
     g_ginRegister;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_ginDeregister;
 
+extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_spaceAlloc;
+extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_spaceFree;
+extern std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSizes;
+
 extern std::function<ncclResult_t(struct ncclComm*)> g_rmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>
     g_rmaProxyRegister;

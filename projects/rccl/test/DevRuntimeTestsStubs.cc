@@ -147,11 +147,24 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
 // ---------------------------------------------------------------------------
 void         ncclSpaceConstruct(struct ncclSpace*) {}
 void         ncclSpaceDestruct(struct ncclSpace*) {}
-ncclResult_t ncclSpaceAlloc(struct ncclSpace*, int64_t, int64_t, int, int64_t* outOffset) {
+// Seams: symMemoryObtain NCCLCHECKGOTOs the alloc, and its rollback is only
+// observable through the matching free.
+static ncclResult_t DefaultSpaceAlloc(struct ncclSpace*, int64_t, int64_t, int, int64_t* outOffset) {
   if (outOffset) *outOffset = 0;
   return ncclSuccess;
 }
-ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_spaceAlloc = DefaultSpaceAlloc;
+
+ncclResult_t ncclSpaceAlloc(struct ncclSpace* sp, int64_t total, int64_t size, int align, int64_t* outOffset) {
+  return g_spaceAlloc(sp, total, size, align, outOffset);
+}
+
+static ncclResult_t DefaultSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_spaceFree = DefaultSpaceFree;
+
+ncclResult_t ncclSpaceFree(struct ncclSpace* sp, int64_t offset, int64_t size) {
+  return g_spaceFree(sp, offset, size);
+}
 
 // ---------------------------------------------------------------------------
 // Shadow pool.
@@ -259,7 +272,12 @@ ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECT
 // ---------------------------------------------------------------------------
 // devr internal helpers (defined elsewhere in the real build).
 // ---------------------------------------------------------------------------
-ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
+static ncclResult_t DefaultPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSizes = DefaultPopulateSegmentSizes;
+
+ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments) {
+  return g_devrPopulateSegmentSizes(mem, numSegments);
+}
 ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
                                                     struct ncclSegmentWindow** out) {
   if (out) *out = nullptr;
@@ -490,5 +508,8 @@ void ResetDevRuntimeFakes() {
   g_ginDeregister                           = DefaultGinDeregister;
   g_rmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
   g_rmaProxyRegister                        = DefaultRmaProxyRegister;
+  g_spaceAlloc                              = DefaultSpaceAlloc;
+  g_spaceFree                               = DefaultSpaceFree;
+  g_devrPopulateSegmentSizes                = DefaultPopulateSegmentSizes;
   g_loadParam                               = DefaultLoadParam;
 }
