@@ -797,4 +797,58 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
     );
 }
 
+// A wrapped (0 -> 256) collective whose channels do not all report must NOT
+// finalize at coll-stop. Finalizing frees the pool slot and destroys its mutex
+// while the proxy thread is still delivering KernelCh events into it, which is
+// a use-after-free on a recycled slot. Leaking the slot is the safe direction.
+TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerNChannels.Wrapped256DoesNotFinalizeEarly",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x2602, &mask, "nch_early_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t d;
+            MakeCollDescr(&d, /*nChannels=*/0, /*seqNumber=*/71, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
+            ASSERT_NE(coll, nullptr);
+
+            // Only channel 0 reports — the other 255 are skipped, as they are
+            // when RCCL's profiler transport drains during teardown.
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = ncclProfileKernelCh;
+            kd.parentObj = coll;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch0 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch0, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out =
+                ReadProfilerOutput("/tmp/accl_test_nch_early", "0x2602");
+            ASSERT_FALSE(out.empty()) << "Summary line should still be written";
+            EXPECT_EQ(out.find("\"coll_perf\""), std::string::npos)
+                << "1 of 256 channels reported: the collective must not be "
+                   "finalized, because its slot is still live for RCCL";
+            EXPECT_NE(out.find("\"leaked_collectives\":1"), std::string::npos)
+                << "The unfinalized slot must be counted as leaked, not hidden";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch_early"}}
+    );
+}
+
 } // namespace RcclUnitTesting
