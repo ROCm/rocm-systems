@@ -1935,3 +1935,109 @@ TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, /*gfx950Default=*/2048, 0));
   DeleteCommWithArch(comm);
 }
+
+// ===========================================================================
+// rcclSymkQuery -- rccl_wrap.cc:547-568 (static). Only the four early-return
+// guards, reachable through plain comm/arg setup: everything past
+// ncclSymkInitOnce() is an abort-floor stub (ncclSymkInitOnce/Available/
+// PickKernel), deferred to a future batch that upgrades the whole
+// DDA/CE/symmetric-kernel abort-floor surface to controllable hooks.
+// rcclSymKGetInfo -- rccl_wrap.cc:571-583. Only the null-arg-check arm: its
+// success path calls rcclSymkQuery (fine, low-tier), but the fall-through
+// path calls rcclGetCollImplInfo, itself High-tier (same deferred surface).
+// ===========================================================================
+
+// Isolated (not just plain TEST()): every guard here is one mutation away
+// from falling through into the ncclSymkInitOnce()/etc. abort floor, which
+// would crash the whole binary in an in-process test instead of just
+// failing one case.
+TEST(WrapMicrotestIsolated, SymkQuery_NullCommReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_NullCommReturnsFalse",
+      []() {
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(rcclSymkQuery(nullptr, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol,
+                                    &maxChannels));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_NoSymmetricSupportReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_NoSymmetricSupportReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 0;
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(
+            rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_UnsupportedCollectiveReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_UnsupportedCollectiveReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(
+            rcclSymkQuery(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_UnmappedRedOpReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_UnmappedRedOpReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        // ncclFuncAllReduce routes op through symkHostRedOpToDev; an op it maps to
+        // -1 short-circuits before any abort-floor symk function is reached.
+        EXPECT_FALSE(rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, (ncclRedOp_t)9999, &algo, &protocol,
+                                    &maxChannels));
+        delete comm;
+      });
+}
+
+// Mutation-testing note: removing any single arm of this null check (e.g.
+// dropping the algo==nullptr check) is an equivalent mutant --
+// rcclGetCollImplInfo (rccl_wrap.cc:484, what this function falls through
+// to whenever rcclSymkQuery returns false) performs the exact same
+// algo/protocol/maxChannels null check redundantly, so no input can
+// observe the difference. Confirmed by re-applying the mutation directly
+// against this build and observing the test still pass, then reverting.
+TEST(WrapMicrotestIsolated, SymKGetInfo_NullOutParamReturnsInvalidArgument) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_NullOutParamReturnsInvalidArgument",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        int protocol, maxChannels;
+        EXPECT_EQ(ncclInvalidArgument,
+                  rcclSymKGetInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, /*algo=*/nullptr, &protocol,
+                                  &maxChannels));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// getFirmwareVersion -- rccl_wrap.cc:1726-1733. amd_smi_getFirmwareVersion
+// upgraded to a settable hook (fakes/wrap_stubs.h) for this batch.
+// ===========================================================================
+
+TEST(WrapMicrotest, GetFirmwareVersion_SuccessReturnsReportedVersion) {
+  g_amdSmiGetFirmwareVersion = [](uint32_t, uint64_t* fw) {
+    *fw = 42;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(42, getFirmwareVersion());
+  g_amdSmiGetFirmwareVersion = [](uint32_t, uint64_t* fw) { *fw = 0; return ncclSuccess; };
+}
+
+TEST(WrapMicrotest, GetFirmwareVersion_FailureReturnsNegativeOne) {
+  g_amdSmiGetFirmwareVersion = [](uint32_t, uint64_t*) { return ncclInternalError; };
+  EXPECT_EQ(-1, getFirmwareVersion());
+  g_amdSmiGetFirmwareVersion = [](uint32_t, uint64_t* fw) { *fw = 0; return ncclSuccess; };
+}

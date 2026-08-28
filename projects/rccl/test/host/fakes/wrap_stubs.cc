@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -337,10 +338,17 @@ int rcclKernelPackedChannels(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_
 // rcclLL128ElemsPerThreadFromArch is `inline` in archinfo.h (transitively
 // included), so no stub is needed here.
 
-// getFirmwareVersion()'s sole dependency; getFirmwareVersion() itself is not
-// in the current test batch (Structural: needs a mock AMD-SMI response, not
-// just a comm/task struct -- a future test's seam, not an abort-floor gap).
-ncclResult_t amd_smi_getFirmwareVersion(uint32_t, uint64_t*) { ::abort(); }
+// getFirmwareVersion()'s sole dependency. Settable hook, same std::function
+// shape as fakes/nccl_fakes.cc's, so a test can script a canned firmware
+// response or a failure without touching the real AMD-SMI layer.
+static ncclResult_t DefaultAmdSmiGetFirmwareVersion(uint32_t /*devIdx*/, uint64_t* fwVersion) {
+  *fwVersion = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersion = DefaultAmdSmiGetFirmwareVersion;
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t devIdx, uint64_t* fwVersion) {
+  return g_amdSmiGetFirmwareVersion(devIdx, fwVersion);
+}
 
 // --- AllReduce DDA (dda_all_reduce.h) ---
 bool ncclAllReduceDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { ::abort(); }

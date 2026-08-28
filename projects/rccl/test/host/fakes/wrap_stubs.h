@@ -7,6 +7,11 @@
 #ifndef RCCL_TEST_HOST_WRAP_STUBS_H_
 #define RCCL_TEST_HOST_WRAP_STUBS_H_
 
+#include <cstdint>
+#include <functional>
+
+#include "nccl.h"  // ncclResult_t
+
 // Test-control API for wrap_stubs.cc's env-var fake. Same shape as
 // fakes/init_fakes.h's micro_getenv/SetMicroEnv family, replicated here
 // rather than shared, since this file's fakes stay self-contained (see
@@ -18,5 +23,9 @@ const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);
 void SetMicroEnvAbsent(const char* name);
 void ClearMicroEnv();
+
+// getFirmwareVersion()'s sole dependency, made settable so a test can script
+// a canned firmware response or a failure.
+extern std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersion;
 
 #endif  // RCCL_TEST_HOST_WRAP_STUBS_H_
