@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef __AMDSMI_H__
 #define __AMDSMI_H__
@@ -1790,7 +1771,27 @@ typedef enum {
   AMDSMI_GPU_BLOCK_JPEG = (1ULL << 16),           //!< JPEG block
   AMDSMI_GPU_BLOCK_IH = (1ULL << 17),             //!< IH block
   AMDSMI_GPU_BLOCK_MPIO = (1ULL << 18),           //!< MPIO block
-  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_MPIO,
+  AMDSMI_GPU_BLOCK_MMSCH = (1ULL << 19),          //!< MMSCH block
+  AMDSMI_GPU_BLOCK_MP5 = (1ULL << 20),            //!< MP5 block
+  AMDSMI_GPU_BLOCK_ATU = (1ULL << 21),            //!< ATU block
+  AMDSMI_GPU_BLOCK_DACC_BE = (1ULL << 22),        //!< DACC_BE block
+  AMDSMI_GPU_BLOCK_ECLR = (1ULL << 23),           //!< ECLR block
+  AMDSMI_GPU_BLOCK_KPX_SERDES = (1ULL << 24),     //!< KPX_SERDES block
+  AMDSMI_GPU_BLOCK_LSDMA = (1ULL << 25),          //!< LSDMA block
+  AMDSMI_GPU_BLOCK_MPART = (1ULL << 26),          //!< MPART block
+  AMDSMI_GPU_BLOCK_MPIFOE = (1ULL << 27),         //!< MPIFOE block
+  AMDSMI_GPU_BLOCK_MPRAS = (1ULL << 28),          //!< MPRAS block
+  AMDSMI_GPU_BLOCK_NBIF = (1ULL << 29),           //!< NBIF block
+  AMDSMI_GPU_BLOCK_NBIO = (1ULL << 30),           //!< NBIO block
+  AMDSMI_GPU_BLOCK_OXRP = (1ULL << 31),           //!< OXRP block
+  AMDSMI_GPU_BLOCK_PCIE_PL = (1ULL << 32),        //!< PCIE_PL block
+  AMDSMI_GPU_BLOCK_PCS_XGMI = (1ULL << 33),       //!< PCS_XGMI block
+  AMDSMI_GPU_BLOCK_PIE = (1ULL << 34),            //!< PIE block
+  AMDSMI_GPU_BLOCK_CS = (1ULL << 35),             //!< CS block
+  AMDSMI_GPU_BLOCK_SHUB = (1ULL << 36),           //!< SHUB block
+  AMDSMI_GPU_BLOCK_SSBDCI = (1ULL << 37),         //!< SSBDCI block
+  AMDSMI_GPU_BLOCK_UCIE_PCS = (1ULL << 38),       //!< UCIE_PCS block
+  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_UCIE_PCS,
   AMDSMI_GPU_BLOCK_RESERVED = (1ULL << 63)
 } amdsmi_gpu_block_t;
 

@@ -158,9 +158,17 @@ if(_deps_met)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-  # LibVA
+  # LibVA - headers always needed for VA-API type definitions.
+  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
+  # RTLD_LOCAL | RTLD_DEEPBIND (see vaapi_loader.cpp) to prevent symbol
+  # collision with any system libva.so.2 in the same process; no direct
+  # link-time dependency is needed in that case.
+  #On non-TheRock builds, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+  if(NOT (USING_THE_ROCK AND UNIX))
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  endif()
 
   if(WIN32)
     # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
@@ -234,6 +242,12 @@ if(_deps_met)
 
   if(USING_THE_ROCK AND NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+    if(UNIX)
+      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
+      # dlopen is Linux-only.
+      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
+      target_link_libraries(${PROJECT_NAME} dl)
+    endif()
   endif()
 
   # rocprofiler

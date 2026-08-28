@@ -29,6 +29,7 @@ from amdisa.isa_profile import (
     CdnaProfile,
     Cdna5Profile,
     DppOpcodeRule,
+    DppCtrlDialect,
     MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
@@ -37,7 +38,32 @@ from amdisa.isa_profile import (
     Rdna3_5Profile,
     Rdna4Profile,
     SwmmacLayout,
+    WaveStateLayout,
 )
+
+
+@pytest.mark.parametrize(
+    (
+        'profile',
+        'renders_halves',
+        'opsel_field',
+        'vop3p_hi_high_field',
+        'dpp_dialect',
+    ),
+    [
+        (CdnaProfile(), False, 'op_sel', 'op_sel_hi_2', DppCtrlDialect.GFX9),
+        (Rdna4Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+        (Cdna5Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+    ],
+)
+def test_vop3_disassembly_profile(
+    profile, renders_halves, opsel_field, vop3p_hi_high_field, dpp_dialect
+):
+    assert profile.uses_true16_vop3_opsel
+    assert profile.renders_true16_vop3_operands is renders_halves
+    assert profile.vop3_opsel_field == opsel_field
+    assert profile.vop3p_opsel_hi_high_field == vop3p_hi_high_field
+    assert profile.dpp_ctrl_dialect == dpp_dialect
 
 
 @pytest.mark.parametrize(
@@ -65,6 +91,34 @@ def test_supports_wgp_mode(profile, expected):
 def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
     assert profile.uses_ttmp_workgroup_ids is uses_ttmp
     assert profile.uses_cluster_ttmp_workgroup_ids is uses_cluster_ttmp
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), WaveStateLayout.LEGACY),
+        (Rdna3Profile(), WaveStateLayout.LEGACY),
+        (Rdna4Profile(), WaveStateLayout.GFX12),
+        (Cdna5Profile(), WaveStateLayout.GFX12_5),
+    ],
+)
+def test_wave_state_layout(profile, expected):
+    assert profile.wave_state_layout is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'granule', 'bits'),
+    [
+        (CdnaProfile(), 1024, 13),
+        (Rdna2Profile(), 1024, 13),
+        (Rdna3Profile(), 256, 15),
+        (Rdna4Profile(), 256, 18),
+        (Cdna5Profile(), 256, 18),
+    ],
+)
+def test_compute_tmpring_wavesize_properties(profile, granule, bits):
+    assert profile.compute_tmpring_wavesize_granule == granule
+    assert profile.compute_tmpring_wavesize_bits == bits
 
 
 @pytest.mark.parametrize(
@@ -431,6 +485,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
     assert 'bool mode_has_gpr_idx_en = false;' in output
+    assert 'enum class WaveStateLayout : uint8_t {' in output
+    assert 'uint32_t compute_tmpring_wavesize_granule = 0;' in output
+    assert 'uint32_t compute_tmpring_wavesize_bits = 0;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
@@ -444,6 +501,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_state_layout = WaveStateLayout::Legacy,\n'
+        '        .compute_tmpring_wavesize_granule = 1024,\n'
+        '        .compute_tmpring_wavesize_bits = 13,\n'
         '        .wave_size = 64,\n'
         '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
@@ -459,6 +519,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_state_layout = WaveStateLayout::Gfx12,\n'
+        '        .compute_tmpring_wavesize_granule = 256,\n'
+        '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
@@ -474,6 +537,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .wave_state_layout = WaveStateLayout::Gfx12_5,\n'
+        '        .compute_tmpring_wavesize_granule = 256,\n'
+        '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 32,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'

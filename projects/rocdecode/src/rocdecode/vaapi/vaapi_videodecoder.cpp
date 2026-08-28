@@ -26,6 +26,51 @@ THE SOFTWARE.
 #include <cctype>
 #include <stdlib.h>
 
+#ifdef ROCDECODE_USE_DLOPEN_VA
+// ---------------------------------------------------------------------------
+// VA-API call redirection through the dlopen vtable.
+//
+// All va*() calls in this translation unit are macro-redirected through
+// g_va_loader->fn.*, which resolves to the isolated librocm_sysdeps_va.so.2
+// loaded with dlopen(RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND). This prevents system libva.so.2
+// (e.g. loaded by libavcodec in the same process) from winning the symbol
+// table and intercepting rocdecode's VA calls.
+//
+// Macros are defined here, after the headers, so that:
+//  - Type declarations from <va/va.h> are still visible for the compiler.
+//  - The CHECK_VAAPI macro (which calls vaErrorStr at invocation time, not
+//    definition time) is also transparently redirected.
+// ---------------------------------------------------------------------------
+static VaapiLoader *g_va_loader = nullptr;
+
+// clang-format off
+#define vaGetDisplayDRM(...)          (g_va_loader->fn.vaGetDisplayDRM(__VA_ARGS__))
+#define vaInitialize(...)             (g_va_loader->fn.vaInitialize(__VA_ARGS__))
+#define vaTerminate(...)              (g_va_loader->fn.vaTerminate(__VA_ARGS__))
+#define vaSetInfoCallback(...)        (g_va_loader->fn.vaSetInfoCallback(__VA_ARGS__))
+#define vaQueryVendorString(...)      (g_va_loader->fn.vaQueryVendorString(__VA_ARGS__))
+#define vaErrorStr(...)               (g_va_loader->fn.vaErrorStr(__VA_ARGS__))
+#define vaMaxNumProfiles(...)         (g_va_loader->fn.vaMaxNumProfiles(__VA_ARGS__))
+#define vaQueryConfigProfiles(...)    (g_va_loader->fn.vaQueryConfigProfiles(__VA_ARGS__))
+#define vaGetConfigAttributes(...)    (g_va_loader->fn.vaGetConfigAttributes(__VA_ARGS__))
+#define vaCreateConfig(...)           (g_va_loader->fn.vaCreateConfig(__VA_ARGS__))
+#define vaDestroyConfig(...)          (g_va_loader->fn.vaDestroyConfig(__VA_ARGS__))
+#define vaQuerySurfaceAttributes(...) (g_va_loader->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
+#define vaCreateSurfaces(...)         (g_va_loader->fn.vaCreateSurfaces(__VA_ARGS__))
+#define vaDestroySurfaces(...)        (g_va_loader->fn.vaDestroySurfaces(__VA_ARGS__))
+#define vaCreateContext(...)          (g_va_loader->fn.vaCreateContext(__VA_ARGS__))
+#define vaDestroyContext(...)         (g_va_loader->fn.vaDestroyContext(__VA_ARGS__))
+#define vaCreateBuffer(...)           (g_va_loader->fn.vaCreateBuffer(__VA_ARGS__))
+#define vaDestroyBuffer(...)          (g_va_loader->fn.vaDestroyBuffer(__VA_ARGS__))
+#define vaBeginPicture(...)           (g_va_loader->fn.vaBeginPicture(__VA_ARGS__))
+#define vaRenderPicture(...)          (g_va_loader->fn.vaRenderPicture(__VA_ARGS__))
+#define vaEndPicture(...)             (g_va_loader->fn.vaEndPicture(__VA_ARGS__))
+#define vaQuerySurfaceStatus(...)     (g_va_loader->fn.vaQuerySurfaceStatus(__VA_ARGS__))
+#define vaSyncSurface(...)            (g_va_loader->fn.vaSyncSurface(__VA_ARGS__))
+#define vaExportSurfaceHandle(...)    (g_va_loader->fn.vaExportSurfaceHandle(__VA_ARGS__))
+// clang-format on
+#endif // ROCDECODE_USE_DLOPEN_VA
+
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
     va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false},
@@ -561,8 +606,25 @@ rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
 
     // Wait for copy to complete.
     d3d12_fence_value_++;
-    d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
-    if (d3d12_fence_->GetCompletedValue() < d3d12_fence_value_) {
+    HRESULT signal_hr = d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
+    if (FAILED(signal_hr)) {
+        CriticalLog(g_rocdec_logger, "ID3D12CommandQueue::Signal failed, HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(signal_hr));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    uint64_t completed = d3d12_fence_->GetCompletedValue();
+    // On device removal (TDR/hang), GetCompletedValue() returns UINT64_MAX, which would
+    // otherwise satisfy the completion check and let the copy be treated as done — returning
+    // silently corrupt frame data. Detect that explicitly and fail instead. (Full TDR recovery
+    // and a finite-timeout wait are deferred; see follow-up.)
+    if (completed == UINT64_MAX) {
+        CriticalLog(g_rocdec_logger, "D3D12 device removed during staging copy, reason HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(d3d12_device_->GetDeviceRemovedReason()));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    if (completed < d3d12_fence_value_) {
         d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_);
         WaitForSingleObject(d3d12_fence_event_, INFINITE);
     }
@@ -1095,6 +1157,13 @@ rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
 }
 
 VaContext::VaContext() {
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Create the loader before any VA call so the redirect macros are valid.
+    // Throws std::runtime_error on failure (propagates to the first caller of
+    // VaContext::GetInstance()).
+    va_loader_ = std::make_unique<VaapiLoader>();
+    g_va_loader = va_loader_.get();
+#endif
 #ifndef _WIN32
     GetGpuUuids();
 #endif
@@ -1113,6 +1182,13 @@ VaContext::~VaContext() {
             }
         }
     }
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Null the global pointer before destroying the loader so that any
+    // accidental post-destruction macro invocation fails visibly rather than
+    // silently calling through a dangling pointer.
+    g_va_loader = nullptr;
+    va_loader_.reset();
+#endif
 };
 
 rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
