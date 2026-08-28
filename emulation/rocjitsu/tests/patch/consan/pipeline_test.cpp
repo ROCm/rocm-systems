@@ -824,7 +824,7 @@ TEST(ConSanPipeline, ExtendedBarrierInventoryShapeUsesOnlyTypedSemanticInputs) {
   EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
 }
 
-TEST(ConSanPipeline, PristineMoiInventoryUsesTypedRequestShapeWithoutBinding) {
+TEST(ConSanPipeline, AutomaticMoiPreparationUsesTypedRequestShapeWithoutBinding) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
   std::fill(text_words.begin() + 1, text_words.begin() + 15,
@@ -839,20 +839,22 @@ TEST(ConSanPipeline, PristineMoiInventoryUsesTypedRequestShapeWithoutBinding) {
   TransformPolicy transform_policy;
   transform_policy.max_patches = 16;
 
-  const TransformResult inventory = transform_consan_pristine_moi_inventory(
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities());
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  const ConSanDeferredBinding &inventory = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(inventory.well_formed());
 
-  const auto sync = inventory.program_inventory.sync().sync_sequences;
+  const auto sync = inventory.program_inventory().sync().sync_sequences;
   EXPECT_EQ(
       std::ranges::count(sync, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
       0u);
-  EXPECT_TRUE(inventory.replacement.empty());
   ASSERT_FALSE(sync.empty());
-  EXPECT_TRUE(inventory.evidence_requirements);
+  EXPECT_TRUE(inventory.evidence_requirements());
 }
 
-TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
+TEST(ConSanPipeline, AutomaticMoiResumeRemainsInsideTypedPipelineBoundary) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   const TransformPolicy transform_policy;
@@ -861,20 +863,21 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   const MutationRequest mutation;
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
 
-  TransformResult inventory = transform_consan_pristine_moi_inventory(
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities);
-  ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.errors);
-  ASSERT_TRUE(inventory.evidence_requirements);
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  const ConSanDeferredBinding &inventory = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(inventory.well_formed());
+  ASSERT_TRUE(inventory.evidence_requirements());
   const auto &requirements =
-      std::get<ConSanRecordReplayEvidenceRequirements>(*inventory.evidence_requirements);
+      std::get<ConSanRecordReplayEvidenceRequirements>(*inventory.evidence_requirements());
 
   BoundRuntimeResources resources;
   resources.scope = ConSanRuntimeResourceScope::Executable;
   resources.moi_report_buffer_address = 0x123456780000ull;
   resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
-  TransformResult retried = retry_transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
-      std::move(inventory));
+  TransformResult retried = resume_consan_automatic_transform(
+      bytes, resources, std::move(std::get<ConSanDeferredBinding>(preparation)));
   const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
                                                   debug, capabilities, resources);
 
@@ -1004,31 +1007,25 @@ TEST(ConSanPipeline, AutomaticResumeRejectsDifferentInputIdentity) {
   }));
 }
 
-TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutPristineProvenance) {
+TEST(ConSanPipeline, AutomaticMoiCancellationPublishesCoherentNonInstallableResult) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   const RuntimePolicy runtime_policy = enabled_runtime_policy();
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
-  TransformResult ordinary =
-      transform_consan(bytes, request, TransformPolicy{}, runtime_policy, ConSanDebugOverrides{},
-                       capabilities, BoundRuntimeResources{});
-  ASSERT_TRUE(ordinary.evidence_requirements);
-  const auto &requirements =
-      std::get<ConSanRecordReplayEvidenceRequirements>(*ordinary.evidence_requirements);
+  ConSanAutomaticTransformPreparation preparation =
+      prepare_consan_automatic_transform(bytes, request, TransformPolicy{}, runtime_policy,
+                                         ConSanDebugOverrides{}, MutationRequest{}, capabilities);
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  const TransformResult cancelled = cancel_consan_automatic_transform(
+      std::move(std::get<ConSanDeferredBinding>(preparation)), "test allocation failure");
 
-  BoundRuntimeResources resources;
-  resources.scope = ConSanRuntimeResourceScope::Executable;
-  resources.moi_report_buffer_address = 0x123456780000ull;
-  resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
-  const TransformResult retried = retry_transform_consan_pristine_moi_inventory(
-      bytes, request, TransformPolicy{}, runtime_policy, ConSanDebugOverrides{}, MutationRequest{},
-      capabilities, resources, std::move(ordinary));
-
-  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.errors);
-  EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_TRUE(std::ranges::any_of(retried.errors, [](const std::string &error) {
-    return error.find("requires a pristine inventory result") != std::string::npos;
-  })) << testing::PrintToString(retried.errors);
+  ASSERT_TRUE(cancelled.well_formed()) << testing::PrintToString(cancelled.errors);
+  EXPECT_EQ(cancelled.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(cancelled.install_action(false), ConSanInstallAction::LoadOriginal);
+  EXPECT_TRUE(cancelled.replacement.empty());
+  EXPECT_TRUE(std::ranges::any_of(cancelled.warnings, [](const std::string &warning) {
+    return warning.find("test allocation failure") != std::string::npos;
+  }));
 }
 
 TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) {

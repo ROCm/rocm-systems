@@ -224,7 +224,17 @@ struct ConSanTransformDebugReport {
   std::span<const ConSanPatchInfo> patches;
 };
 
+class TransformResult;
 class ConSanDeferredBinding;
+
+/// Optional injected transform executor used by test/runtime adapters while
+/// the library retains automatic preparation and resume ownership.
+using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
+                                                    const TransformPolicy &, const RuntimePolicy &,
+                                                    const ConSanDebugOverrides &,
+                                                    const MutationRequest &,
+                                                    const RuntimeCapabilities &,
+                                                    const BoundRuntimeResources &);
 
 /// Static output of one typed ConSan transformation attempt.
 ///
@@ -293,7 +303,7 @@ public:
 
   /// Demote an otherwise installable transform after a runtime-owned resource
   /// operation fails. This keeps the outcome, stage records, replacement
-  /// storage, patch inventory, and private retry state coherent without
+  /// storage, and private proof inventory coherent without
   /// allowing the runtime adapter to mutate either representation field by
   /// field.
   void discard_replacement(std::string warning);
@@ -301,15 +311,6 @@ public:
 private:
   friend struct TransformResultTestAccess;
   friend class ConSanDeferredBinding;
-  friend TransformResult
-  transform_consan_pristine_moi_inventory(std::span<const uint8_t>, const ConSanRequest &,
-                                          const TransformPolicy &, const RuntimePolicy &,
-                                          const ConSanDebugOverrides &, const MutationRequest &,
-                                          const RuntimeCapabilities &);
-  friend TransformResult retry_transform_consan_pristine_moi_inventory(
-      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
-      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
-      const RuntimeCapabilities &, const BoundRuntimeResources &, TransformResult);
   friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
                                           const ConSanDebugOverrides &, const RuntimeCapabilities &,
@@ -335,8 +336,8 @@ private:
   /// diagnostic storage. Only the transaction publication boundary calls it.
   void publish_lowering_artifacts(ConSanTransformArtifacts lowering);
 
-  /// Reconstitute a lowerer aggregate for the temporary typed inventory retry
-  /// implementation. The caller consumes this result object completely.
+  /// Reconstitute a lowerer aggregate for the transaction-owned MOI resume
+  /// strategy. The caller consumes this result object completely.
   [[nodiscard]] ConSanTransformArtifacts take_lowering_artifacts();
 
   struct PrivateLoweringArtifacts {
@@ -349,25 +350,7 @@ private:
     std::vector<ConSanCommittedLowering> staged_moi_sync_lowerings;
     std::vector<ConSanPatchInfo> patches;
   } private_lowering_;
-
-  /// Provenance marker set only by the pristine MOI inventory entry point.
-  ///
-  /// It authorizes the bound retry to consume the typed artifacts already
-  /// published by this result. It carries no duplicate inventory, planning,
-  /// patch, diagnostic, or lowering state. An ordinary transform remains
-  /// ineligible even if its public fields happen to resemble an unbound
-  /// inventory result.
-  bool moi_retry_inventory_available_ = false;
 };
-
-/// Optional injected transform executor used by test/runtime adapters while
-/// the library retains automatic preparation and resume ownership.
-using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
-                                                    const TransformPolicy &, const RuntimePolicy &,
-                                                    const ConSanDebugOverrides &,
-                                                    const MutationRequest &,
-                                                    const RuntimeCapabilities &,
-                                                    const BoundRuntimeResources &);
 
 /// Immutable pre-binding product for one automatic ConSan transform.
 ///
@@ -473,21 +456,6 @@ resume_consan_automatic_transform(std::span<const uint8_t> code_object_bytes,
 /// same coherent non-installable result shape as other binding failures.
 [[nodiscard]] TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding deferred,
                                                                 std::string warning);
-
-/// Run the non-installable MOI inventory pass before runtime resources exist.
-[[nodiscard]] TransformResult transform_consan_pristine_moi_inventory(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-    const RuntimeCapabilities &capabilities);
-
-/// Bind runtime resources and lower a previously typed pristine MOI inventory.
-[[nodiscard]] TransformResult retry_transform_consan_pristine_moi_inventory(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    TransformResult inventory);
 
 /// Run the ordinary observation pipeline. Fault mutation and timing
 /// perturbation are deliberately absent from this entry point.
