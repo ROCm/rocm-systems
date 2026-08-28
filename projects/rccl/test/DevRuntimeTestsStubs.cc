@@ -43,6 +43,9 @@ thread_local int             ncclDebugNoWarn = 0;
 // shareable-handle export/import needed).
 hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
+// This host-only binary always exercises the fake VMM implementation below.
+int ncclCuMemEnable() { return 1; }
+
 thread_local int             ncclGroupDepth = 0;
 thread_local ncclResult_t    ncclGroupError = ncclSuccess;
 thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
