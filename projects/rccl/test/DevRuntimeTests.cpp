@@ -13,11 +13,21 @@
  * dev_runtime.cc.
  *************************************************************************/
 
+#include "DevRuntimeTestsStubs.h"
+
+// param.h's NCCL_PARAM caches its value in a function-local static, so a param
+// read once is frozen for the process. Replace the generated body with one that
+// calls g_loadParam every time, so tests can vary a param between cases. Must
+// precede the unit under test, which is where the bodies are emitted.
+#include "param.h"
+#undef NCCL_PARAM
+#define NCCL_PARAM(name, env, deftVal) \
+  int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
+
 #include DEV_RUNTIME_CC_PATH
 
 #include <gtest/gtest.h>
 
-#include "DevRuntimeTestsStubs.h"
 #include "host/ScopedHook.h"
 
 #include <initializer_list>

@@ -25,6 +25,15 @@ extern std::function<hipError_t(void*, hipMemGenericAllocationHandle_t, hipMemAl
 
 extern std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> g_hipMemSetAccess;
 
+extern std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
+    g_hipMemGetAllocationGranularity;
+
+// Backs every NCCL_PARAM in the unit under test. DevRuntimeTests.cpp redefines
+// the macro to call this instead of param.h's caching body, so a param's value
+// can differ between tests; the default returns the param's own default.
+// Takes the bare env name (no "NCCL_" prefix) and that default.
+extern std::function<int64_t(const char*, int64_t)> g_loadParam;
+
 // Restore every seam above to its default. Call from a fixture TearDown so a
 // test cannot leak behaviour into the next one.
 void ResetDevRuntimeFakes();

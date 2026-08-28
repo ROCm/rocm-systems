@@ -255,10 +255,17 @@ HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp*,
-                                                   hipMemAllocationGranularity_flags) {
+static hipError_t DefaultMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp*,
+                                                     hipMemAllocationGranularity_flags) {
   if (granularity) *granularity = 4096;
   return hipSuccess;
+}
+std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
+    g_hipMemGetAllocationGranularity = DefaultMemGetAllocationGranularity;
+
+HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp* prop,
+                                                   hipMemAllocationGranularity_flags flags) {
+  return g_hipMemGetAllocationGranularity(granularity, prop, flags);
 }
 // Seams, not plain stubs: these three sit on error paths a test needs to drive.
 // Each default lives in a named function so the hook's initialiser and
@@ -305,10 +312,17 @@ HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDe
   return g_hipMemSetAccess(ptr, size, desc, count);
 }
 
+// Params are not cached here (see DevRuntimeTestsStubs.h), so the default just
+// hands back the value the NCCL_PARAM declaration was written with.
+static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
+std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
 void ResetDevRuntimeFakes() {
   g_hipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
   g_hipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
   g_hipMemSetAccess                         = DefaultMemSetAccess;
+  g_hipMemGetAllocationGranularity          = DefaultMemGetAllocationGranularity;
+  g_loadParam                               = DefaultLoadParam;
 }
 HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
