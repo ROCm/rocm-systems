@@ -73,6 +73,8 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    make package
    ```
 
+   To build with AddressSanitizer instrumentation, see [Build with AddressSanitizer](#build_asan).
+
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
 
@@ -146,9 +148,14 @@ Preload the runtime the library was linked against. Leak detection has to be off
 because CPython does not free everything at shutdown.
 
 ```bash
-ASAN_RT=$(ldd build/lib/libamd_smi.so | awk '/libclang_rt\.asan|libasan/ {print $3}')
+ASAN_RT=$(ldd build/lib/libamd_smi.so | awk '/libclang_rt\.asan|libasan/ && $3 ~ /^\// {print $3}')
+[ -n "$ASAN_RT" ] || echo "No ASAN runtime resolved; rebuild with -DADDRESS_SANITIZER=ON."
 LD_PRELOAD=$ASAN_RT ASAN_OPTIONS=detect_leaks=0 amd-smi static
 ```
+
+An empty `ASAN_RT` means the library is either uninstrumented or instrumented
+against a runtime that is not on the search path, which `ldd` reports as
+`=> not found`.
 
 This applies to any Python process that imports `amdsmi`, not just the CLI. C and
 C++ consumers linked with `-fsanitize=address` need no preload, because the
