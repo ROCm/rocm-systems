@@ -43,6 +43,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel(scratch_spill_probe gfx950)
 rj_add_device_kernel(virtual_lds_smoke gfx950)
 rj_add_device_kernel(cvt_pk_bf16_f32 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch gfx950)
@@ -140,6 +141,7 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
+        ${KERNEL_OUTPUT_DIR}/scratch_spill_probe.o
         ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
         ${KERNEL_OUTPUT_DIR}/cvt_pk_bf16_f32.o
         ${KERNEL_OUTPUT_DIR}/hipkittens_bf16fp32_256_256_64_32_with16x32.hsaco
@@ -233,6 +235,7 @@ add_custom_target(
         kernel_vector_add_gfx90a
         kernel_vector_add_probe_gfx90a
         kernel_dynamic_copy_loop
+        kernel_scratch_spill_probe
         kernel_virtual_lds_smoke
         kernel_cvt_pk_bf16_f32
         kernel_multikernel_indirect_branch

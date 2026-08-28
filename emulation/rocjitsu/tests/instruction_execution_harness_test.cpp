@@ -367,7 +367,6 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_sethalt",
       "s_sendmsg",
       "s_sendmsghalt",
-      "s_icache_inv",
       "s_nop",
       "s_getpc",
       "s_getreg",
@@ -2984,8 +2983,8 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   };
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, add_f16_dpp8_words));
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_dpp");
-  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2, v3.l dpp8:[7,0,3,2,5,4,1,6]");
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_e32");
+  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2.l, v3.l dpp8:[7,0,3,2,5,4,1,6]");
   cu->execute_instruction(inst.get(), *wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -4327,8 +4326,8 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
     std::unique_ptr<Instruction> inst(
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16_e64_dpp");
-    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2, v0 dpp8:[7,0,5,2,3,6,1,4] fi:1");
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
+    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2.l, v0.l dpp8:[7,0,5,2,3,6,1,4] fi:1");
     cu->execute_instruction(inst.get(), *wf);
     for (uint32_t lane = 0; lane < kWaveSize; ++lane)
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
@@ -5184,6 +5183,44 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   cu->execute_instruction(inst.get(), *wf);
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
+  amdgpu::GpuMemory gpu_mem("rdna35_true16_vop1_mem");
+  amdgpu::L2Cache l2("rdna35_true16_vop1_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_5", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 5, 0, 0xAAAA1111u);
+  cu->write_vgpr(vb + 1, 0, 0x2222BBBBu);
+
+  // v_swap_b16 v5.l, v1.h
+  const uint32_t words[] = {0x7E0ACD81u, 0u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->disassemble(), "v_swap_b16 v5.l, v1.h");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
+  EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
 
   if (!wf->is_halted())
     wf->halt();
@@ -7141,7 +7178,7 @@ TEST(HwregHelperTest, ReportsReadWriteResultContracts) {
             amdgpu::HwregAccessResult::ReadOnly);
   EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(4), 1u),
             amdgpu::HwregAccessResult::Privileged);
-  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(18), 1u),
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(63), 1u),
             amdgpu::HwregAccessResult::Unsupported);
   EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(63), value),
             amdgpu::HwregAccessResult::Unsupported);
@@ -7184,6 +7221,116 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
             amdgpu::HwregAccessResult::Success);
   EXPECT_EQ(wf->wave_sched_mode_raw(), 0xA5A55A3Au);
 
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(HwregHelperTest, Gfx1250TrapHandlerRegistersRoundTripArchitectedFields) {
+  amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_trap_regs_mem");
+  amdgpu::L2Cache l2("hwreg_helper_gfx1250_trap_regs_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kExcpPriv = 0xC0001FFFu;
+  constexpr uint32_t kExcpUser = 0xC000007Fu;
+  constexpr uint32_t kTrapCtrl = 0x3FFu;
+  constexpr uint32_t kMode = (1u << 25) | (0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT) | 0xF0u;
+  constexpr uint32_t kXnackState = 0x00057F7Fu;
+  constexpr uint32_t kXnackMask = 0xA5A55A5Au;
+  uint32_t value = 0;
+
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Privileged);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Privileged);
+
+  wf->set_in_trap_handler(true);
+  wf->set_mode_raw(kMode);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(18), kExcpUser),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(wf->mode_raw(), kMode);
+  EXPECT_EQ(wf->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(0xA5u));
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33), kXnackState),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(34), kXnackMask),
+            amdgpu::HwregAccessResult::Success);
+
+  for (const auto &[id, expected] :
+       std::array<std::pair<uint32_t, uint32_t>, 5>{{{17, kExcpPriv},
+                                                     {18, kExcpUser},
+                                                     {19, kTrapCtrl},
+                                                     {33, kXnackState},
+                                                     {34, kXnackMask}}}) {
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(id), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected) << "HWREG id " << id;
+  }
+
+  // Partial writes are what ROCr's gfx12.5 trap handler uses to restore
+  // SAVE_CONTEXT and the XNACK replay fields before S_RFE_I64.
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17, 5, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(17, 5, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33, 16, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(33, 16, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+
+  wf->set_in_trap_handler(false);
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(HwregHelperTest, Rdna4UsesTheCommonGfx12WaveStateRegisters) {
+  amdgpu::GpuMemory gpu_mem("hwreg_helper_rdna4_trap_regs_mem");
+  amdgpu::L2Cache l2("hwreg_helper_rdna4_trap_regs_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_trap_regs", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_TRUE(wf->uses_separate_trap_ctrl());
+
+  constexpr uint32_t kExcpPriv = 0x00001FFFu;
+  constexpr uint32_t kExcpUser = 0xC000007Fu;
+  constexpr uint32_t kTrapCtrl = 0x3FFu;
+  uint32_t value = 0;
+  wf->set_in_trap_handler(true);
+
+  for (const auto &[id, expected] : std::array<std::pair<uint32_t, uint32_t>, 3>{
+           {{17, kExcpPriv}, {18, kExcpUser}, {19, kTrapCtrl}}}) {
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(id), expected),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(id), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected) << "HWREG id " << id;
+  }
+
+  wf->set_in_trap_handler(false);
   if (!wf->is_halted())
     wf->halt();
 }

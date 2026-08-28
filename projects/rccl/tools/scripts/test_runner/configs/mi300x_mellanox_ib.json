@@ -953,6 +953,20 @@
         {"name": "Rma_ExternalPluginIssuesPutSignalToStub", "description": "rank 0 ncclPutSignal + ncclSignal (no wait) must invoke the external stub plugin's iput/iputSignal primitives", "test_filter": "RmaExternalPluginPutSignalTest.IssuesPutSignalToStub"}
       ]
     },
+    "host_api_custom_gin_plugin": {
+      "extends": "host_api_tests_symmem",
+      "env_variables": {
+        "NCCL_GIN_PLUGIN": "example",
+        "NCCL_GIN_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "HostApi_CustomGinPluginPutSignal",
+          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression)",
+          "test_filter": "HostApiCustomGinPluginTest.PutSignalWithExternalGinPlugin"
+        }
+      ]
+    },
 
     "unit_tests_standard": {
       "is_gtest": true,
@@ -4642,6 +4656,12 @@
       "num_nodes": 2,
       "num_gpus": 1,
       "timeout": 180,
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - Custom GIN Plugin",
+      "description": "Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs",
+      "config": "host_api_custom_gin_plugin",
       "enabled": true
     },
     {

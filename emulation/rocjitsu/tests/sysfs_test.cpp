@@ -108,6 +108,9 @@ constexpr DebugCapExpectation kDebugCapExpectations[] = {
     {120000u, "gfx1200", 7, 29, true, false, true, false, false, 0u, 0u, 0u},
     // gfx1201 (R9700): rocprofiler-sdk tests/data/topology node 6.
     {120001u, "gfx1201", 7, 29, true, false, true, false, false, 1745068672u, 0u, 1495u},
+    // TODO(hanchung): Replace the inferred gfx1250 feature row and pin its
+    // capability/capability2/debug_prop words after capturing a physical MI455X
+    // KFD topology.
     // gfx1250: GC 12.1.0 — precise ALU + memory, per-queue reset, LDS OOR (no dump yet).
     {120500u, "gfx1250", 7, 29, true, true, true, true, true, 0u, 0u, 0u},
 };
@@ -395,6 +398,29 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
     EXPECT_EQ(loaded.device.num_cp_queues, 24u);
     EXPECT_EQ(loaded.device.max_engine_clk_fcompute, 2200u);
   }
+}
+
+// TODO(hanchung): Pin the physical CU geometry, active-CU mask, memory-bank
+// size, clocks, GPU/unique IDs, SDMA engine/queue counts, CP queue count, family
+// ID, and ASIC/PCI revisions after capturing a physical MI455X KFD topology.
+// Until then, this test covers only the checked-in physical device identity and
+// must not be treated as exact rocminfo parity.
+TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
+  const std::string config_dir = CONFIG_DIR;
+  auto loaded = config::load_config(config_dir + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  ASSERT_NE(loaded.soc(), nullptr);
+
+  Sysfs sysfs;
+  std::string topology_dir =
+      sysfs.generate(gpu_info_from_config(loaded.device, loaded.soc()->num_xcds()));
+  ASSERT_FALSE(topology_dir.empty());
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+
+  ASSERT_TRUE(props.count("vendor_id"));
+  ASSERT_TRUE(props.count("device_id"));
+  EXPECT_EQ(props["vendor_id"], 4098u);
+  EXPECT_EQ(props["device_id"], 30145u);
 }
 
 // Every shipped config must describe the machine it actually simulates.
