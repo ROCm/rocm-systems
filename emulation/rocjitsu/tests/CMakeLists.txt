@@ -579,6 +579,7 @@ target_link_libraries(
         util
         flatbuffers
         Threads::Threads
+        GTest::gmock
         GTest::gtest_main
 )
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2630,6 +2631,11 @@ if(RJ_ENABLE_HIP_TESTS)
             ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
             @ONLY
         )
+        target_compile_definitions(
+            rocjitsu_tests
+            PRIVATE
+                RJ_DAEMON_LOGGING_CONFIG_PATH="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
+        )
         if(RJ_INSTALL_TESTS)
             install(
                 FILES ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
@@ -2857,6 +2863,12 @@ if(RJ_ENABLE_HIP_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
             ${LOGGING_INSTALLED_CONFIG}
             @ONLY
+        )
+        target_compile_definitions(
+            rocjitsu_tests
+            PRIVATE
+                RJ_LOGGING_CONFIG_PATH="${LOGGING_SINK_DIR}/config.json"
+                RJ_INSTALLED_LOGGING_CONFIG_PATH="${LOGGING_INSTALLED_CONFIG}"
         )
         if(RJ_INSTALL_TESTS)
             install(

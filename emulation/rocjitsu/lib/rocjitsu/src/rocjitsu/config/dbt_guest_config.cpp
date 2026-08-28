@@ -115,7 +115,7 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
     config.host.simulator_config_path = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
-  config.guest_device = kfd_device_from_fb(guest->guest_device());
+  config.guest_device = kfd_device_from_fb(guest->guest_device(), "dbt_guest.guest_device");
   config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
   config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);

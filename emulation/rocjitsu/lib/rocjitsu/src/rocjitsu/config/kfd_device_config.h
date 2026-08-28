@@ -51,7 +51,7 @@ struct KfdDeviceConfig {
   uint32_t l2_size_kb = 4096;                ///< L2 cache size in KiB.
   uint32_t l2_line_size = 128;               ///< L2 cache line size in bytes.
   uint32_t l2_assoc = 16;                    ///< L2 cache associativity.
-  uint32_t num_sdma_engines = 2;             ///< SDMA engine count.
+  uint32_t num_sdma_engines = 0;             ///< SDMA engine count.
   uint32_t num_sdma_xgmi_engines = 0;        ///< XGMI SDMA engine count.
   uint32_t num_cp_queues = 128;              ///< Hardware queue count.
   uint32_t max_engine_clk_fcompute = 2100;   ///< Maximum compute clock in MHz.
@@ -62,10 +62,7 @@ struct KfdDeviceConfig {
   uint32_t capability2 = 0;                  ///< KFD debug capability2 bits, or 0 to derive.
   uint64_t debug_prop = 0;                   ///< KFD debug_prop bits, or 0 to derive.
   bool present = false;                      ///< True if device section existed in config.
-
-  // TODO(hanchung): Set this in every GPU config, reject zero when regular SDMA engines are
-  // present, and remove the legacy fallback.
-  uint32_t num_sdma_queues_per_engine = 2; ///< Regular SDMA queues; 2 preserves legacy configs.
+  uint32_t num_sdma_queues_per_engine = 0;   ///< Regular SDMA queues per engine.
 };
 
 } // namespace rocjitsu::config
