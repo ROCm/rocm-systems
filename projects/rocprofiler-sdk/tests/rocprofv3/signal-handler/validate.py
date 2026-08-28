@@ -25,16 +25,24 @@
 """
 Validation for signal handler integration tests.
 
-Both good and bad cases must produce VALID, COMPLETE JSON output.
-The profiler intercepts signals to flush cleanly — truncated JSON is a bug.
+Every scenario must produce valid and complete JSON output. The profiler intercepts
+signals to flush cleanly, so a truncated or invalid JSON is a bug in signal handler.
 
-Good case: exit_marker present in JSON (proves clean atexit finalization).
-Bad case: valid JSON with >10 marker entries (proves profiler flushed before death).
+The per-scenario expectation is passed explicitly via --expect:
+  clean-exit      : exit_marker present in JSON (proves clean atexit finalization). Used
+                    when the app handles signals and rocprofv3 doesn't (--disable-signal-handlers)
+  flushed-markers : valid JSON with >10 marker entries (proves the profiler flushed before
+                    the process died on the signal). Covers both the "app doesn't handle
+                    signals" case and the coordinated-shutdown case. For the latter,
+                    simply reaching this validator proves there was no deadlock (a
+                    regression trips the execute-step ctest TIMEOUT instead).
 """
 
 import json
 import os
 import glob
+
+import pytest
 
 
 def find_json_files(output_dir):
@@ -63,13 +71,13 @@ def count_markers_in_json(data):
     return count
 
 
-def test_output_files_exist(output_dir, mode, process_type):
+def test_output_files_exist(output_dir):
     """JSON output files must exist."""
     files = find_json_files(output_dir)
     assert len(files) > 0, f"No JSON output files found in {output_dir}"
 
 
-def test_json_is_valid(output_dir, mode, process_type):
+def test_json_is_valid(output_dir):
     """All JSON output files must be valid (not truncated)."""
     files = find_json_files(output_dir)
     assert len(files) > 0, f"No JSON files in {output_dir}"
@@ -85,10 +93,11 @@ def test_json_is_valid(output_dir, mode, process_type):
             )
 
 
-def test_good_case_exit_marker(output_dir, mode, process_type):
-    """Good case: mode-specific exit_marker must be present."""
-    if mode != "good":
-        return
+def test_clean_exit(output_dir, expect, process_type):
+    """clean-exit: the app-specific exit_marker must be present (proves the app reached
+    atexit and finalized cleanly)."""
+    if expect != "clean-exit":
+        pytest.skip(f"expectation is '{expect}', not clean-exit")
 
     files = find_json_files(output_dir)
     assert len(files) > 0
@@ -106,10 +115,14 @@ def test_good_case_exit_marker(output_dir, mode, process_type):
     )
 
 
-def test_bad_case_markers_flushed(output_dir, mode, process_type):
-    """Bad case: JSON must contain >10 marker entries (proves profiler flushed)."""
-    if mode != "bad":
-        return
+def test_flushed_markers(output_dir, expect):
+    """flushed-markers: JSON must contain >10 marker entries, proving the profiler flushed
+    before the process died on the signal. Covers the "app doesn't handle signals" case and
+    the coordinated-shutdown case (reaching this validator at all already proves the
+    coordinated case did not deadlock -- a regression trips the execute-step ctest
+    TIMEOUT). exit_marker is intentionally NOT required here."""
+    if expect != "flushed-markers":
+        pytest.skip(f"expectation is '{expect}', not flushed-markers")
 
     files = find_json_files(output_dir)
     assert len(files) > 0
@@ -122,34 +135,5 @@ def test_bad_case_markers_flushed(output_dir, mode, process_type):
     assert total_markers > 10, (
         f"Expected >10 marker events in JSON output, got {total_markers}. "
         f"Profiler may not have flushed marker data before signal death. "
-        f"Files: {files}"
-    )
-
-
-def test_coordinated_shutdown_no_deadlock(output_dir, mode, process_type):
-    """Coordinated-shutdown case: profiler signal handlers are ACTIVE while the app runs its
-    own coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern -- worker
-    children ignore SIGINT and only exit once the parent tells them to).
-
-    The profiler must re-raise to the app's handler BEFORE waiting for children to exit,
-    otherwise it deadlocks: the parent waits for children that are waiting for the parent.
-    Reaching this validator at all means the execute step did not hang (a regression trips the
-    ctest TIMEOUT); here we additionally require the profiler flushed marker data. exit_marker
-    is intentionally NOT required -- finalization runs on the signal, before the app's
-    coordinated shutdown emits it."""
-    if mode != "coordinated":
-        return
-
-    files = find_json_files(output_dir)
-    assert len(files) > 0
-
-    total_markers = 0
-    for path in files:
-        data = load_json(path)
-        total_markers += count_markers_in_json(data)
-
-    assert total_markers > 10, (
-        f"Expected >10 marker events in JSON output, got {total_markers}. "
-        f"Profiler may not have flushed marker data during coordinated shutdown. "
         f"Files: {files}"
     )

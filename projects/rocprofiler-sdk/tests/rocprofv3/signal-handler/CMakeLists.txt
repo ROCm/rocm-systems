@@ -10,8 +10,6 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-find_program(SH_EXECUTABLE NAMES sh REQUIRED)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
@@ -27,110 +25,142 @@ set(TIMEOUT_CMD timeout --preserve-status --signal=INT ${SIGNAL_DELAY})
 # Output directory base
 set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
-# Process types to test
-set(PROCESS_TYPES single-process fork fork-exec spawn)
+# cmake-format: off
+# add_signal_handler_test(<name> [keyword args])
+#
+#   <name>                            : scenario name; ctest is registered as "app-<name>-<type>"
+#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn
+#   VALIDATE_EXPECT <outcome>         : what validate.py asserts:
+#                                          clean-exit: app exits cleanly via atexit, exit_marker present
+#                                          flushed-markers: profiler flushed >10 markers before signal death
+#   PASS_REGEX <regex>                : execute PASS_REGULAR_EXPRESSION
+#   APP_EXTRA_FLAGS <flags...>        : appended to the signal-handler-test command
+#                                       (e.g. --app-signal-handler / --no-app-signal-handler)
+#   ROCPROFV3_EXTRA_FLAGS <flags...>  : inserted into the rocprofv3 command
+#                                       (e.g. --disable-signal-handlers)
+#
+# Registers the {cleanup, execute, validate} triad for one scenario:
+#   cleanup wipes the output dir (FIXTURES_SETUP <name>-clean)
+#   before execute runs (FIXTURES_REQUIRED <name>-clean), and
+#   validate runs after execute (FIXTURES_REQUIRED <name>).
+# cmake-format: on
+function(add_signal_handler_test NAME)
+    cmake_parse_arguments(arg "" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
+                          "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
 
-# ===========================================================================
-# Generate all 8 test combos: {good, bad} x {single-process, fork, fork-exec, spawn}
-# ===========================================================================
+    set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
+    set(_subdir "${NAME}-${arg_PROCESS_TYPE}")
+    set(_outdir ${BASE_OUT_DIR}/${_subdir})
 
-foreach(PROC_TYPE ${PROCESS_TYPES})
-    # --- GOOD CASE: app handles signals, profiler uses --disable-signal-handlers ---
-    set(WITH_HANDLING_NAME "app-with-signal-handling-${PROC_TYPE}")
+    rocprofiler_add_integration_cleanup_test(
+        ${_name}
+        DIRECTORIES ${_outdir}
+        LABELS "integration-tests;signal-handler"
+        FIXTURES_SETUP ${_name}-clean)
 
     rocprofiler_add_integration_execute_test(
-        ${WITH_HANDLING_NAME}
+        ${_name}
         COMMAND
-            ${SH_EXECUTABLE} -c
-            "rm -rf '${BASE_OUT_DIR}/good-${PROC_TYPE}' && exec \"$@\"" ${SH_EXECUTABLE}
             ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
-            --marker-trace --output-format json --disable-signal-handlers -d
-            ${BASE_OUT_DIR}/good-${PROC_TYPE} -o out_%pid% --
-            $<TARGET_FILE:signal-handler-test> --${PROC_TYPE} --app-signal-handler
+            --marker-trace --output-format json ${arg_ROCPROFV3_EXTRA_FLAGS} -d ${_outdir}
+            -o out_%pid% -- $<TARGET_FILE:signal-handler-test> --${arg_PROCESS_TYPE}
+            ${arg_APP_EXTRA_FLAGS}
         DEPENDS signal-handler-test
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
         PRELOAD "${PRELOAD_ENV}"
-        PASS_REGULAR_EXPRESSION "clean exit"
-        FIXTURES_SETUP ${WITH_HANDLING_NAME})
+        PASS_REGULAR_EXPRESSION "${arg_PASS_REGEX}"
+        FIXTURES_REQUIRED ${_name}-clean
+        FIXTURES_SETUP ${_name})
 
     rocprofiler_add_integration_validate_test(
-        ${WITH_HANDLING_NAME}
-        TEST_PATHS validate.py
-        COPY conftest.py
-        CONFIG pytest.ini
-        TIMEOUT 30
-        LABELS "integration-tests;signal-handler"
-        FIXTURES_REQUIRED ${WITH_HANDLING_NAME}
-        ARGS --output-dir ${BASE_OUT_DIR}/good-${PROC_TYPE} --mode good --process-type
-             ${PROC_TYPE})
-
-    # --- BAD CASE: app does NOT handle signals, profiler handles them ---
-    set(NO_HANDLING_NAME "app-without-signal-handling-${PROC_TYPE}")
-
-    rocprofiler_add_integration_execute_test(
-        ${NO_HANDLING_NAME}
-        COMMAND
-            ${SH_EXECUTABLE} -c "rm -rf '${BASE_OUT_DIR}/bad-${PROC_TYPE}' && exec \"$@\""
-            ${SH_EXECUTABLE} ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
-            --hip-trace --marker-trace --output-format json -d
-            ${BASE_OUT_DIR}/bad-${PROC_TYPE} -o out_%pid% --
-            $<TARGET_FILE:signal-handler-test> --${PROC_TYPE} --no-app-signal-handler
-        DEPENDS signal-handler-test
-        TIMEOUT ${CTEST_TIMEOUT}
-        LABELS "integration-tests;signal-handler"
-        PRELOAD "${PRELOAD_ENV}"
-        PASS_REGULAR_EXPRESSION "tool finalization"
-        FIXTURES_SETUP ${NO_HANDLING_NAME})
-
-    rocprofiler_add_integration_validate_test(
-        ${NO_HANDLING_NAME}
+        ${_name}
         TEST_PATHS validate.py
         COPY conftest.py
         CONFIG pytest.ini
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
-        FIXTURES_REQUIRED ${NO_HANDLING_NAME}
-        ARGS --output-dir ${BASE_OUT_DIR}/bad-${PROC_TYPE} --mode bad --process-type
-             ${PROC_TYPE})
-endforeach()
+        FIXTURES_REQUIRED ${_name}
+        ARGS --output-dir ${_outdir} --expect ${arg_VALIDATE_EXPECT} --process-type
+             ${arg_PROCESS_TYPE})
+endfunction()
 
-# ===========================================================================
-# Coordinated-shutdown case: profiler signal handlers are ACTIVE while the app runs its
-# own coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern). Worker
+# good case: app installs its own signal handler, rocprofv3 runs with
+# --disable-signal-handlers, so the app exits cleanly through atexit.
+add_signal_handler_test(
+    with-signal-handling
+    PROCESS_TYPE single-process
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
+
+add_signal_handler_test(
+    with-signal-handling
+    PROCESS_TYPE fork
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
+
+add_signal_handler_test(
+    with-signal-handling
+    PROCESS_TYPE fork-exec
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
+
+add_signal_handler_test(
+    with-signal-handling
+    PROCESS_TYPE spawn
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler
+    ROCPROFV3_EXTRA_FLAGS --disable-signal-handlers)
+
+# bad case: app does NOT handle signals, so rocprofv3's handler catches the signal and
+# flushes profiling data before the process dies.
+add_signal_handler_test(
+    without-signal-handling
+    PROCESS_TYPE single-process
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "tool finalization"
+    APP_EXTRA_FLAGS --no-app-signal-handler)
+
+add_signal_handler_test(
+    without-signal-handling
+    PROCESS_TYPE fork
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "tool finalization"
+    APP_EXTRA_FLAGS --no-app-signal-handler)
+
+add_signal_handler_test(
+    without-signal-handling
+    PROCESS_TYPE fork-exec
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "tool finalization"
+    APP_EXTRA_FLAGS --no-app-signal-handler)
+
+add_signal_handler_test(
+    without-signal-handling
+    PROCESS_TYPE spawn
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "tool finalization"
+    APP_EXTRA_FLAGS --no-app-signal-handler)
+
+# Coordinated-shutdown case: profiler signal handlers are ON while the app runs its own
+# coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern). Worker
 # children ignore SIGINT and only exit once the parent tells them to. The profiler must
-# re-raise to the app's handler BEFORE waiting for children to exit, else it deadlocks
-# (parent waits for children that are waiting for the parent) and the test hangs -> ctest
-# TIMEOUT.
+# re-raise to the app's handler before waiting for children to exit, else it deadlocks
+# because parent waits for children that are waiting for the parent and the test hangs,
+# which triggers a ctest TIMEOUT.
 #
 # NOTE: unlike the good case, this does NOT pass --disable-signal-handlers, so the
-# profiler's handlers are exercised alongside the app's own (`--fork
-# --app-signal-handler`).
-# ===========================================================================
-set(COORD_NAME "app-coordinated-shutdown-fork")
-
-rocprofiler_add_integration_execute_test(
-    ${COORD_NAME}
-    COMMAND
-        ${SH_EXECUTABLE} -c "rm -rf '${BASE_OUT_DIR}/coordinated-fork' && exec \"$@\""
-        ${SH_EXECUTABLE} ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
-        --hip-trace --marker-trace --output-format json -d
-        ${BASE_OUT_DIR}/coordinated-fork -o out_%pid% --
-        $<TARGET_FILE:signal-handler-test> --fork --app-signal-handler
-    DEPENDS signal-handler-test
-    TIMEOUT ${CTEST_TIMEOUT}
-    LABELS "integration-tests;signal-handler"
-    PRELOAD "${PRELOAD_ENV}"
-    PASS_REGULAR_EXPRESSION "clean exit"
-    FIXTURES_SETUP ${COORD_NAME})
-
-rocprofiler_add_integration_validate_test(
-    ${COORD_NAME}
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    TIMEOUT ${CTEST_TIMEOUT}
-    LABELS "integration-tests;signal-handler"
-    FIXTURES_REQUIRED ${COORD_NAME}
-    ARGS --output-dir ${BASE_OUT_DIR}/coordinated-fork --mode coordinated --process-type
-         fork)
+# profiler's handlers are exercised alongside the app's own --app-signal-handler.
+add_signal_handler_test(
+    coordinated-shutdown
+    PROCESS_TYPE fork
+    VALIDATE_EXPECT flushed-markers
+    PASS_REGEX "clean exit"
+    APP_EXTRA_FLAGS --app-signal-handler)

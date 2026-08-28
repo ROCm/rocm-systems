@@ -217,30 +217,44 @@ struct signal_worker_state
     std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
     int                   signo         = {0};               // signal handled (0 == normal exit)
     std::thread           thread        = {};                // the finalization worker
+
+    ~signal_worker_state() { join(); }
+
+    // Join the finalization worker and close the eventfd. Idempotent and self-safe (a call from the
+    // worker itself skips the join). Called from finalize_rocprofv3 (atexit/main teardown) and from
+    // the destructor, so the worker is never left joinable at static destruction
+    void join()
+    {
+        if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
+        {
+            // Wake the worker's blocking read() so it can exit
+            // closing the fd while read() blocks is UB.
+            if(eventfd >= 0)
+            {
+                uint64_t val = 1;
+                if(write(eventfd, &val, sizeof(val)) < 0)
+                    ROCP_WARNING << "signal worker: eventfd wake before join failed: "
+                                 << strerror(errno);
+            }
+            thread.join();
+            if(eventfd >= 0)
+            {
+                if(close(eventfd) < 0)
+                    ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
+                eventfd = -1;
+            }
+        }
+    }
 };
 
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
               "rocprofv3 signal path requires lock-free finalize_done atomic support");
 
 auto&
-get_signal_worker(bool reset = false)
+get_signal_worker()
 {
     static auto*& _v = common::static_object<signal_worker_state>::construct();
     auto&         sw = *CHECK_NOTNULL(_v);
-
-    if(reset)
-    {
-        // Post-fork child: the parent's eventfd/thread are invalid here. Close the fd and reset
-        // in place (never run ~std::thread() on the parent's still-joinable thread).
-        if(sw.eventfd >= 0 && ::close(sw.eventfd) != 0)
-        {
-            ROCP_WARNING << "signal worker: close(eventfd) after fork failed: " << strerror(errno);
-        }
-
-        std::memset(static_cast<void*>(&sw), 0, sizeof(sw));
-        ::new(static_cast<void*>(&sw)) signal_worker_state{};
-    }
-
     return sw;
 }
 
@@ -2410,28 +2424,8 @@ finalize_rocprofv3(std::string_view context)
         client_identifier = nullptr;
     }
 
-    // Join the worker thread if called from a non-worker context (atexit / rocprofv3_main).
-    if(sw.thread.joinable() && sw.thread.get_id() != std::this_thread::get_id())
-    {
-        if(sw.eventfd >= 0)
-        {
-            // Write to unblock the worker's read() — closing the fd is UB while read() blocks
-            uint64_t val = 1;
-            if(write(sw.eventfd, &val, sizeof(val)) < 0)
-            {
-                ROCP_WARNING << "failed to write to signal worker eventfd: " << strerror(errno);
-            }
-        }
-        sw.thread.join();
-        if(sw.eventfd >= 0)
-        {
-            if(close(sw.eventfd) < 0)
-            {
-                ROCP_WARNING << "failed to close signal worker eventfd: " << strerror(errno);
-            }
-            sw.eventfd = -1;
-        }
-    }
+    // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).
+    sw.join();
 }
 
 bool
@@ -4919,7 +4913,14 @@ rocprofv3_main(int argc, char** argv, char** envp)
             atfork_registered = true;
             pthread_atfork(nullptr, nullptr, []() {
                 // Child handler: reset stale state and spawn a fresh worker.
-                auto& child_sw   = get_signal_worker(true);
+                auto& child_sw = get_signal_worker();
+                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
+                {
+                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
+                                 << strerror(errno);
+                }
+
+                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
                 child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
                 if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
             });

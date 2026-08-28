@@ -24,12 +24,20 @@
 
 import pytest
 
+# Recognized --expect outcomes. An unknown value must fail loudly rather than silently skip
+# every check (which would let a scenario pass with zero assertions run).
+VALID_EXPECT = ("clean-exit", "flushed-markers")
+
 
 def pytest_addoption(parser):
     parser.addoption(
         "--output-dir", action="store", help="Output directory from rocprofv3"
     )
-    parser.addoption("--mode", action="store", help="Test mode: good or bad")
+    parser.addoption(
+        "--expect",
+        action="store",
+        help="Expected outcome to assert: clean-exit or flushed-markers",
+    )
     parser.addoption("--process-type", action="store", help="Process type tested")
 
 
@@ -37,15 +45,17 @@ def pytest_addoption(parser):
 def output_dir(request):
     val = request.config.getoption("--output-dir")
     if val is None:
-        pytest.skip("--output-dir not provided")
+        pytest.fail("--output-dir not provided")
     return val
 
 
 @pytest.fixture
-def mode(request):
-    val = request.config.getoption("--mode")
+def expect(request):
+    val = request.config.getoption("--expect")
     if val is None:
-        pytest.skip("--mode not provided")
+        pytest.fail("--expect not provided")
+    if val not in VALID_EXPECT:
+        pytest.fail(f"invalid --expect '{val}'; expected one of {list(VALID_EXPECT)}")
     return val
 
 
@@ -53,5 +63,5 @@ def mode(request):
 def process_type(request):
     val = request.config.getoption("--process-type")
     if val is None:
-        pytest.skip("--process-type not provided")
+        pytest.fail("--process-type not provided")
     return val

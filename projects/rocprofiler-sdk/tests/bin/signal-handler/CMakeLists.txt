@@ -32,9 +32,9 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(signal-handler-test.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(signal-handler.cpp PROPERTIES LANGUAGE HIP)
 add_executable(signal-handler-test)
-target_sources(signal-handler-test PRIVATE signal-handler-test.cpp)
+target_sources(signal-handler-test PRIVATE signal-handler.cpp)
 target_compile_options(signal-handler-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow)
 
 find_package(Threads REQUIRED)

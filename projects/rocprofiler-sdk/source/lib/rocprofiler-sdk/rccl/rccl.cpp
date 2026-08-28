@@ -189,7 +189,8 @@ rccl_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto  buffer_record = common::init_public_api_struct(buffered_api_data_t{});
     auto  tracer_data   = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id       = tracing::correlation_service::construct(ref_count);
-    RETURN_UNTRACED_ON_NULL_CORRELATION_ID(corr_id, info_type::get_table_func());
+    RETURN_UNTRACED_ON_NULL_CORRELATION_ID(
+        corr_id, RetT, exec(info_type::get_table_func(), std::forward<Args>(args)...));
     auto internal_corr_id = corr_id->internal;
     auto ancestor_corr_id = corr_id->internal;
 

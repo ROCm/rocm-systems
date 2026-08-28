@@ -270,12 +270,13 @@ correlation_id_finalize()
             if(!retirement_ctxs.empty())
             {
                 ROCP_CI_LOG_IF(INFO, ndangling > 0)
-                    << "retired dangling correlation IDs: " << ndangling;
+                    << fmt::format("retired dangling correlation IDs: {}", ndangling);
             }
             else
             {
-                ROCP_INFO << "retired dangling correlation IDs: " << ndangling
-                          << " (no retirement consumer active)";
+                ROCP_INFO << fmt::format(
+                    "retired dangling correlation IDs: {} (no retirement consumer active)",
+                    ndangling);
             }
         }
     });

@@ -33,16 +33,16 @@
 
 #include <functional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // construct() returns nullptr once finalization has begun. Rather than dereference it, run the
-// underlying API untraced and return. Use inside an interceptor functor (needs `exec`, `RetT`,
-// `args`).
-#define RETURN_UNTRACED_ON_NULL_CORRELATION_ID(CORRELATION_ID, TABLE_FUNC)                         \
-    if(!(CORRELATION_ID))                                                                          \
+// underlying API untraced and return
+#define RETURN_UNTRACED_ON_NULL_CORRELATION_ID(CORR_ID, RETURN_T, UNTRACED_CALL)                   \
+    if(!(CORR_ID))                                                                                 \
     {                                                                                              \
-        [[maybe_unused]] auto _untraced_ret = exec((TABLE_FUNC), std::forward<Args>(args)...);     \
-        if constexpr(!std::is_void<RetT>::value)                                                   \
+        [[maybe_unused]] auto _untraced_ret = (UNTRACED_CALL);                                     \
+        if constexpr(!std::is_void<RETURN_T>::value)                                               \
             return _untraced_ret;                                                                  \
         else                                                                                       \
             return;                                                                                \

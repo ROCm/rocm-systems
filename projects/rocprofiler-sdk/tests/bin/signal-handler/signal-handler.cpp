@@ -43,22 +43,31 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstdarg>
+#include <cstring>
+#include <sstream>
+#include <string>
 
 #include <atomic>
 #include <stdexcept>
-#include <string>
 
 namespace
 {
 std::atomic<bool> g_shutdown{false};
 
+template <typename... Args>
+std::string
+str_join(Args&&... _args)
+{
+    auto _ss = std::stringstream{};
+    ((_ss << std::forward<Args>(_args)), ...);
+    return _ss.str();
+}
+
+template <typename... Args>
 void
 emit_roctx_marker(const char* fmt, ...)
 {
@@ -112,9 +121,7 @@ sigint_handler(int)
 void
 run_kernels(const char* label)
 {
-    char range_name[128];
-    snprintf(range_name, sizeof(range_name), "%s_pid_%d", label, getpid());
-    roctxRangePush(range_name);
+    roctxRangePush(str_join(label, "_pid_", getpid()).c_str());
 
     float* d_buf = nullptr;
     HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
@@ -122,10 +129,7 @@ run_kernels(const char* label)
     int iter = 0;
     while(!g_shutdown.load(std::memory_order_relaxed))
     {
-        char iter_name[128];
-        snprintf(iter_name, sizeof(iter_name), "%s_iter_%d", label, iter);
-
-        roctxRangePush(iter_name);
+        roctxRangePush(str_join(label, "_iter_", iter).c_str());
         test_kernel<<<4, 256>>>(d_buf, 1024);
         roctxRangePop();
 
@@ -151,16 +155,12 @@ fork_child_worker(int id, int pipe_rd)
     float* d_buf = nullptr;
     HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
 
-    char range_name[128];
-    snprintf(range_name, sizeof(range_name), "child_%d_pid_%d", id, getpid());
-    roctxRangePush(range_name);
+    roctxRangePush(str_join("child_", id, "_pid_", getpid()).c_str());
 
     int iter = 0;
     while(true)
     {
-        char iter_name[64];
-        snprintf(iter_name, sizeof(iter_name), "child_%d_iter_%d", id, iter);
-        roctxRangePush(iter_name);
+        roctxRangePush(str_join("child_", id, "_iter_", iter).c_str());
 
         test_kernel<<<4, 256>>>(d_buf, 1024);
 
@@ -353,9 +353,7 @@ mode_bad_fork()
         pid_t pid = fork();
         if(pid == 0)
         {
-            char label[32];
-            snprintf(label, sizeof(label), "child_%d", i);
-            run_kernels(label);
+            run_kernels(str_join("child_", i).c_str());
             emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
             exit(0);
         }
@@ -443,16 +441,16 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; i++)
     {
-        if(strcmp(argv[i], "--single-process") == 0 || strcmp(argv[i], "--fork") == 0 ||
-           strcmp(argv[i], "--fork-exec") == 0 || strcmp(argv[i], "--spawn") == 0)
+        if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
+           std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0)
         {
             mode = argv[i];
         }
-        else if(strcmp(argv[i], "--app-signal-handler") == 0)
+        else if(std::strcmp(argv[i], "--app-signal-handler") == 0)
         {
             app_handles_signals = true;
         }
-        else if(strcmp(argv[i], "--no-app-signal-handler") == 0)
+        else if(std::strcmp(argv[i], "--no-app-signal-handler") == 0)
         {
             app_handles_signals = false;
         }
@@ -466,17 +464,17 @@ main(int argc, char** argv)
 
     if(app_handles_signals)
     {
-        if(strcmp(mode, "--single-process") == 0) return mode_good_single_process();
-        if(strcmp(mode, "--fork") == 0) return mode_good_fork();
-        if(strcmp(mode, "--fork-exec") == 0) return mode_good_fork_exec(argv[0]);
-        if(strcmp(mode, "--spawn") == 0) return mode_good_spawn(argv[0]);
+        if(std::strcmp(mode, "--single-process") == 0) return mode_good_single_process();
+        if(std::strcmp(mode, "--fork") == 0) return mode_good_fork();
+        if(std::strcmp(mode, "--fork-exec") == 0) return mode_good_fork_exec(argv[0]);
+        if(std::strcmp(mode, "--spawn") == 0) return mode_good_spawn(argv[0]);
     }
     else
     {
-        if(strcmp(mode, "--single-process") == 0) return mode_bad_single_process();
-        if(strcmp(mode, "--fork") == 0) return mode_bad_fork();
-        if(strcmp(mode, "--fork-exec") == 0) return mode_bad_fork_exec(argv[0]);
-        if(strcmp(mode, "--spawn") == 0) return mode_bad_spawn(argv[0]);
+        if(std::strcmp(mode, "--single-process") == 0) return mode_bad_single_process();
+        if(std::strcmp(mode, "--fork") == 0) return mode_bad_fork();
+        if(std::strcmp(mode, "--fork-exec") == 0) return mode_bad_fork_exec(argv[0]);
+        if(std::strcmp(mode, "--spawn") == 0) return mode_bad_spawn(argv[0]);
     }
 
     fprintf(stderr, "Unknown mode: %s\n", mode);
