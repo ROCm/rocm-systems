@@ -226,6 +226,7 @@ struct ConSanTransformDebugReport {
 
 class TransformResult;
 class ConSanDeferredBinding;
+class ConSanTransformTransaction;
 
 /// Optional injected transform executor used by test/runtime adapters while
 /// the library retains automatic preparation and resume ownership.
@@ -311,6 +312,7 @@ public:
 private:
   friend struct TransformResultTestAccess;
   friend class ConSanDeferredBinding;
+  friend class ConSanTransformTransaction;
   friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
                                           const ConSanDebugOverrides &, const RuntimeCapabilities &,
@@ -325,12 +327,15 @@ private:
                                                            ConSanDeferredBinding);
   friend TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding, std::string);
 
+  /// Test-only ingress for a synthetic lowerer product. Production entry
+  /// points construct the same transaction directly.
   [[nodiscard]] static TransformResult
-  publish_optional(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-                   const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-                   const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                   const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-                   std::optional<ConSanTransformArtifacts> lowering_artifacts);
+  execute_test_transaction(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+                           const TransformPolicy &transform_policy,
+                           const RuntimePolicy &runtime_policy, const ConSanDebugOverrides &debug,
+                           const MutationRequest &mutation, const RuntimeCapabilities &capabilities,
+                           const BoundRuntimeResources &resources,
+                           ConSanTransformArtifacts lowering_artifacts);
 
   /// Move a lowerer aggregate into the reviewed public products and private
   /// diagnostic storage. Only the transaction publication boundary calls it.

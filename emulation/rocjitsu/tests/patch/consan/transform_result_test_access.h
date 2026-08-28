@@ -22,9 +22,9 @@ struct TransformResultTestAccess {
           const ConSanDebugOverrides &debug, const MutationRequest &mutation,
           const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
           ConSanTransformArtifacts artifacts) {
-    return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
-                                             runtime_policy, debug, mutation, capabilities,
-                                             resources, std::move(artifacts));
+    return TransformResult::execute_test_transaction(code_object_bytes, request, transform_policy,
+                                                     runtime_policy, debug, mutation, capabilities,
+                                                     resources, std::move(artifacts));
   }
 
   static void corrupt_first_fault_plan_code_object(TransformResult &result) {
