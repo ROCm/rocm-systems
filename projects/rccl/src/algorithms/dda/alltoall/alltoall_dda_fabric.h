@@ -46,8 +46,8 @@ __launch_bounds__(512)
 #pragma unroll kUnroll
     for (int r = 0; r < nRanksEff; ++r) {
       int srcRank = r;
-      int srcIdx = idx + selfRank * idxEnd;
-      int destIdx = idx + r * idxEnd;
+      size_t srcIdx = idx + selfRank * idxEnd;
+      size_t destIdx = idx + r * idxEnd;
       *reinterpret_cast<uint4*>(&recvbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
   }

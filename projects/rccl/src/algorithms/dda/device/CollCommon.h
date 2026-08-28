@@ -150,12 +150,12 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
 #pragma unroll kUnroll
     for (int r = 0; r < nRanks; ++r) {
       int srcRank = (selfRank + r) % nRanks;
-      int destIdx = idx + srcRank * idxEnd;
-      int srcIdx;
+      size_t destIdx = idx + srcRank * idxEnd;
+      size_t srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
       } else {
-        srcIdx = static_cast<int>(idx);
+        srcIdx = idx;
       }
       *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }

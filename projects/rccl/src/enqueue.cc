@@ -2498,8 +2498,12 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
                                         float** collCostTable) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
-  if (comm->nRanks == 1 || info->func == ncclFuncAlltoAllPivot || info->func == ncclFuncAlltoAllGda ||
-      info->func == ncclFuncAlltoAllvGda) {
+  // comm->latencies[]/bandwidths[] only hold the NCCL_NUM_FUNCTIONS kernel
+  // collectives, so ncclTopoGetAlgoTime() must never be reached with a func
+  // beyond that (AllToAll and friends run as p2p or addon kernels, not as a
+  // tuned ring/tree kernel); indexing the tables with those would read past
+  // their end.
+  if (comm->nRanks == 1 || (int)info->func >= NCCL_NUM_FUNCTIONS) {
     table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0;
     return ncclSuccess;
   }
