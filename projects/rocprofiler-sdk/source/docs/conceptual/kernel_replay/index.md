@@ -9,9 +9,14 @@ application run, restoring device memory between executions so every pass sees i
 
 | Approach | Scope | Memory handling | Cost |
 |---|---|---|---|
-| Application replay (multiple `--pmc` groups) | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
+| Application replay | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
 | **Kernel replay** | one dispatch, re-executed in place | device memory snapshot and restore between passes | `O(N ×` kernel time `+ N ×` snap/restore`)` |
-| Counter group rotation | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
+| Counter group rotation (multiple `--pmc` groups) | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
+
+Only the first two collect every group on every dispatch, so only those two are comparable on the
+data they produce. Group rotation is cheaper because it collects less: passing several `--pmc` flags
+without enabling replay rotates the group every few dispatches rather than running the application
+again. See [Benchmarking](kernel_replay_benchmarking.md).
 
 Kernel replay is **experimental**. The public header lives under
 `rocprofiler-sdk/experimental/`. Both the API and any later command-line flag are expected to
@@ -71,6 +76,9 @@ the stacked tool integration PR.
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
   performance problems visible in the implementation, and how the cost behaves as device capacity
   outpaces host-link bandwidth across accelerator generations.
+- **[Benchmarking](kernel_replay_benchmarking.md)** — how to measure replay against application
+  replay and against no replay at all, what the benchmark suite records about a run, what it still
+  cannot express, and how the dispatches-per-range axis prepares for range replay.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for
