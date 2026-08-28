@@ -75,16 +75,40 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 #     compiled without the flag could therefore supply the copy the library
 #     calls, which is the miscompile this flag exists to prevent.
 #
-# Moving fma_f64/finish_f64/scale_u53_f64_rtz out of line into a single strict
-# translation unit would narrow this to one file and drop the ODR concern, but
-# simd_glue.h holds a ScopedFenv inside a template that cannot follow them.
+# ROCJITSU_STRICT_FP_ROUNDING travels with the flag, so the header boundary and
+# the option boundary cannot drift apart. fp_mode.h refuses to compile without
+# it; the helpers that never touch the host FP environment -- effective_omod and
+# the rest of the OMOD plumbing -- live in fp_mode_no_fenv.h and carry no such
+# requirement. That is what lets vm/amdgpu/compute_unit.cpp reach the OMOD
+# helpers through alu_exceptions.h from outside this option set: it can no
+# longer emit an unflagged inline definition of fma_f64 or finish_f64 by
+# accident, because it can no longer see one.
 if(
     CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
 )
-    set(RJ_STRICT_FP_ROUNDING_OPTIONS -frounding-math)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS
+        -frounding-math
+        -DROCJITSU_STRICT_FP_ROUNDING=1
+    )
+elseif(MSVC)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS
+        /fp:strict
+        -DROCJITSU_STRICT_FP_ROUNDING=1
+    )
 else()
-    set(RJ_STRICT_FP_ROUNDING_OPTIONS "")
+    # Unknown compiler: nothing to spell "the rounding mode is dynamic" with, so
+    # the miscompile above may well be present. Define the guard anyway rather
+    # than failing the build -- that is the behaviour such a toolchain already
+    # had -- but say so, because otherwise the only report is the f64
+    # directed-rounding tests failing.
+    message(
+        WARNING
+        "No strict floating-point rounding option known for "
+        "${CMAKE_CXX_COMPILER_ID}; the guest's MODE.FP_ROUND may not reach f64 "
+        "arithmetic. See fp_mode.h."
+    )
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS -DROCJITSU_STRICT_FP_ROUNDING=1)
 endif()
 
 find_package(Threads REQUIRED)

@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode_no_fenv.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>

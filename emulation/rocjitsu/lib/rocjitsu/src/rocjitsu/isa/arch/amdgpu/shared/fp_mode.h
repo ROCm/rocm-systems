@@ -4,9 +4,33 @@
 #pragma once
 
 /// @file fp_mode.h
-/// @brief Shared MODE-aware floating-point execution helpers.
+/// @brief Shared MODE-aware floating-point execution helpers that run the
+/// arithmetic under the guest's MODE.FP_ROUND.
+///
+/// @details Everything here delegates rounding to the host FPU: an operation is
+/// wrapped in a detail::ScopedFenv, which calls fesetround() and restores the
+/// previous environment on the way out. That is only correct if the compiler
+/// has been told the rounding mode is dynamic; otherwise it is entitled to
+/// assume round-to-nearest and move the arithmetic across the fesetround call,
+/// which silently returns the round-to-nearest answer under every directed
+/// mode. See RJ_STRICT_FP_ROUNDING_OPTIONS in emulation/rocjitsu/CMakeLists.txt.
+///
+/// Helpers that do not touch the host FP environment live in fp_mode_no_fenv.h,
+/// which this header pulls in, and carry no such requirement.
 
-#include "rocjitsu/code/rj_code.h"
+// The definition travels with the flag in RJ_STRICT_FP_ROUNDING_OPTIONS, so a
+// target that has not opted in fails here. Because these helpers are `inline`,
+// the alternative to failing is worse than an unflagged call site: the linker
+// picks one of the emitted copies, so a single unflagged translation unit can
+// supply the definition the whole image uses and reintroduce the miscompile
+// everywhere. Include fp_mode_no_fenv.h instead if the fenv-free helpers are
+// all that is needed.
+#ifndef ROCJITSU_STRICT_FP_ROUNDING
+#error                                                                                             \
+    "fp_mode.h requires the strict rounding-mode build options (RJ_STRICT_FP_ROUNDING_OPTIONS); include fp_mode_no_fenv.h for the helpers that do not use the host FP environment"
+#endif
+
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode_no_fenv.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
 
@@ -18,26 +42,6 @@
 namespace rocjitsu::amdgpu::fp_mode {
 
 namespace detail {
-
-inline uint16_t modify_f16(uint16_t value, bool absolute, bool negate) {
-  if (absolute)
-    value &= 0x7fffu;
-  if (negate)
-    value ^= 0x8000u;
-  return value;
-}
-
-inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
-  if ((denorm_mode & 1u) == 0 && (value & 0x7c00u) == 0 && (value & 0x03ffu) != 0)
-    return value & 0x8000u;
-  return value;
-}
-
-inline uint64_t flush_f64(uint64_t value) {
-  if ((value & 0x7ff0000000000000ULL) == 0 && (value & 0x000fffffffffffffULL) != 0)
-    return value & 0x8000000000000000ULL;
-  return value;
-}
 
 inline int host_round_mode(uint32_t round_mode) {
   switch (round_mode & 3u) {
@@ -74,72 +78,11 @@ private:
 
 } // namespace detail
 
-/// @brief Return the OMOD value supported by an ordinary floating-point result.
-inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
-                               uint32_t omod) {
-  if (omod == 0)
-    return 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return omod;
-  return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
-}
-
-/// @brief Return the OMOD value that applies to an F16 result on the selected ISA.
-/// @details GFX11+ packed-F16 results explicitly ignore OMOD. Older profiles expose
-/// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
-/// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
-/// non-packed F16 results regardless of output-denormal mode.
-inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
-                                   bool packed_result, uint32_t omod) {
-  if (omod == 0)
-    return 0;
-  if (packed_result && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
-    return 0;
-  return effective_omod(arch, denorm_mode, ieee_mode, omod);
-}
-
-/// @brief Apply the result-format rules required by an active OMOD.
-/// @details OMOD always flushes an output subnormal and maps either signed zero
-/// to positive zero. These helpers operate after the result has been rounded to
-/// its architectural destination format.
-inline uint16_t finalize_omod_f16(uint16_t value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  if ((value & 0x7c00u) == 0 && (value & 0x03ffu) != 0)
-    value &= 0x8000u;
-  return (value & 0x7fffu) == 0 ? 0 : value;
-}
-
-inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  if ((value & 0x7f80u) == 0 && (value & 0x007fu) != 0)
-    value &= 0x8000u;
-  return (value & 0x7fffu) == 0 ? 0 : value;
-}
-
-inline float finalize_omod_f32(float value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
-    bits &= 0x80000000u;
-  if ((bits & 0x7fffffffu) == 0)
-    bits = 0;
-  return std::bit_cast<float>(bits);
-}
-
-inline double finalize_omod_f64(double value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  uint64_t bits = detail::flush_f64(std::bit_cast<uint64_t>(value));
-  if ((bits & 0x7fffffffffffffffULL) == 0)
-    bits = 0;
-  return std::bit_cast<double>(bits);
-}
-
 /// @brief Execute an F16 fused multiply-add and return its raw F16 encoding.
+/// @details The intermediate is computed in double and rounded to F16 in
+/// software by pseudo_scalar, but the double fma is still subject to whatever
+/// rounding mode is in effect when this runs, so it belongs on this side of the
+/// split.
 inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
                         bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
                         uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl,
