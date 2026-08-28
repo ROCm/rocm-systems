@@ -22,7 +22,7 @@ on:
         description: 'ROCm/TheRock git ref for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: '2e7c190b99caa226a8644eda6eca720b3db102d5'
+        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -60,7 +60,7 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref || '2e7c190b99caa226a8644eda6eca720b3db102d5' }}
+      therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -82,7 +82,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref || '2e7c190b99caa226a8644eda6eca720b3db102d5' }}
+      therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # Gates GIN on build/infra failures only; test failures stay non-gating (red

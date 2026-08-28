@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef __AMDSMI_H__
 #define __AMDSMI_H__
@@ -46,14 +27,21 @@ extern "C" {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{cpu_bm} @tag{guest_windows} @endcond
  */
 typedef enum {
-  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors
-  AMDSMI_INIT_AMD_CPUS = (1 << 0),          //!< Initialize AMD CPUS
-  AMDSMI_INIT_AMD_GPUS = (1 << 1),          //!< Initialize AMD GPUS
-  AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),      //!< Initialize Non-AMD CPUS
-  AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),      //!< Initialize Non-AMD GPUS
-  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUS and
-                                                                           GPUS (Default option) */
-  AMDSMI_INIT_AMD_NICS = (1 << 4)                                       //!< Initialize NIC's
+  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors.
+  AMDSMI_INIT_AMD_CPUS = (1 << 0),          /**< Initialize AMD CPUs. Requires the `amd_hsmp` kernel
+                                                 module (with HSMP enabled in BIOS). CPU discovery
+                                                 is skipped non-fatally if `amd_hsmp` is
+                                                 unavailable. */
+  AMDSMI_INIT_AMD_GPUS = (1 << 1),          /**< Initialize AMD GPUs. Requires the `amdgpu` kernel
+                                                 driver. */
+  AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),      //!< Initialize non-AMD CPUs.
+  AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),      //!< Initialize non-AMD GPUs.
+  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUs and
+                                                 GPUs. Default flag for ::amdsmi_init(). Requires
+                                                 the `amdgpu` driver and optionally `amd_hsmp`. CPU
+                                                 discovery is skipped non-fatally if `amd_hsmp` is
+                                                 unavailable. */
+  AMDSMI_INIT_AMD_NICS = (1 << 4)                                       //!< Initialize NICs.
 } amdsmi_init_flags_t;
 
 /**
