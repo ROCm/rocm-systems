@@ -826,6 +826,56 @@ Stage 8 exits when the remaining SuperCollider-specific code can be explained
 as sanitizer semantics or unavoidable native lowering, and not historical
 duplication of the common transform pipeline.
 
+#### Stage 8 exit evidence
+
+Stage 8 is complete. SuperCollider now starts from the shared immutable
+observation plan and program inventory, including the inventory-owned canonical
+execution/container owner projection. FLAT and native-LDS scratch selection use
+`plan_consan_registers`; descriptor VGPR/SGPR and private-segment growth use the
+shared growth operations; inline, local-cave, appended, indirect, and relay
+placement use the shared byte-range and `DbiPatchPlacementPlanner` contracts.
+The common placement unit, rather than a SuperCollider include, owns generic
+byte ranges and existing-patch reservations.
+
+One `ConSanTargetProfile` is resolved at composition and passed immutably to
+both SuperCollider lowerers. The profile now owns branch-only availability,
+inline FLAT-trap support, runtime group-FLAT gating, dense-route identity, and
+the existing encoding/ABI facts. A lexical exit audit of all three
+SuperCollider implementation files found no legacy architecture-helper or raw
+`ROCJITSU_CODE_ARCH_*` policy selection. The remaining product vocabulary is
+confined to native instruction builders and register ABI constants, decoded
+selectable-bank state, target-specific diagnostics, and comments that explain
+those unavoidable encodings. The Stage 1 target-boundary gate therefore exits
+with this stage; validation's narrow architecture-to-profile overload remains
+explicitly owned by the Stage 10 validation migration.
+
+The residual file responsibilities are deliberate. The 1,009-line common body
+owns SuperCollider coverage publication, mismatch actions, scalar preservation,
+and shared FLAT/LDS probe fragments. The 1,965-line FLAT body owns group-FLAT
+provenance gating, effective-address reconstruction, delayed reread/compare,
+and FLAT spill realization. The 4,308-line LDS body owns native-LDS reread and
+instability comparison, multi-owner spill-frame realization, dense shared
+routers, and target-native relay emission. These are SuperCollider's repeated-
+observation race semantics or native lowering constraints, not copies of MOI
+evidence/replay policy.
+
+Across the Stage 7 exit to Stage 8 implementation, six implementation commits
+add 442 and delete 273 lines across eight files. The three SuperCollider bodies
+shrink from 7,306 to 7,282 physical lines; the net growth elsewhere records the
+new typed target facts, independent profile tests, and shared placement and
+inventory operations. The first complete gate exposed that `RegisterSet` can
+represent target banks above VGPR 255 even though SuperCollider's probe ABI
+directly encodes only the ordinary low bank. Making the 256-register emission
+bound explicit at the shared planner boundary repaired all 17 full-pressure
+FLAT/LDS spill tests without weakening bank-aware guest decoding.
+
+At code revision `68d68e2036`, the final checked-in Stage 8 gate passed all
+5,302 tests. The `-j16` nonphysical tier passed 4,667/4,667 in 253.84 seconds,
+including all 2,908 device-emulation rows across gfx942, gfx950, gfx1250,
+gfx1100, and gfx1201. The serialized `-j1` physical gfx1201 tier passed 635/635
+in 109.56 seconds, including 102 SuperCollider rows. Focused pre-gate evidence
+also included all 552 five-target SuperCollider emulation rows.
+
 ### Stage 9: narrow the hook boundary without preempting DBI
 
 The hook and reporting layer is 9,044 lines, but DBI is expected eventually to
