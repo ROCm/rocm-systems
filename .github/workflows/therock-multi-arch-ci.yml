@@ -80,11 +80,15 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
+      build_stages: ${{ steps.build_stages.outputs.build_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/repos-config.json
+          sparse-checkout: |
+            .github/repos-config.json
+            .github/scripts/compute_build_stages.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -93,7 +97,12 @@ jobs:
           repository: ROCm/TheRock
           ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           path: _therock
-          sparse-checkout: build_tools/github_actions
+          # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
+          # build_tools/project_mappings.json are needed to map changed projects
+          # to build stages. Keep this ref in sync with the setup job's ref.
+          sparse-checkout: |
+            build_tools/github_actions
+            build_tools/_therock_utils
           sparse-checkout-cone-mode: true
 
       - name: Configure CI
@@ -108,6 +117,18 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
+      # Map the changed projects to the minimal allowlist of TheRock build
+      # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
+      # this only reads it). Empty output = build all (fan-out / unknown project
+      # / run_all_tests CI-infra change).
+      - name: Compute build-stage allowlist
+        id: build_stages
+        run: |
+          python3 .github/scripts/compute_build_stages.py \
+            --changed-projects "${{ steps.configure.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure.outputs.run_all_tests }}" \
+            --therock-path "_therock"
+
   setup:
     needs: configure
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
@@ -119,9 +140,12 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
-      # which cascades to ALL downstream stages. No stages can be reused.
-      # Hard-coding to empty for now.
+      # Per-PR selective build: the configure job maps the changed projects to
+      # the minimal allowlist of build stages via TheRock's build topology.
+      # TheRock (ROCm/TheRock#7600) builds only these stages and skips every
+      # other stage outright (no build, no artifact copy). Empty = build all,
+      # the fail-safe for fan-out / unknown-project / CI-infra changes.
+      build_stages: ${{ needs.configure.outputs.build_stages }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
