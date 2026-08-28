@@ -401,6 +401,9 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+// dst/src must be genuine global addresses (symmetric heap, or an IPC/RDMA-
+// mapped remote of it) -- the tail loop below uses AsmAccess::load/store,
+// which emit global_load_*/global_store_* and are not address-space-agnostic.
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
@@ -437,6 +440,9 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
 // ==============================================================================
 // REMAINDER COPY (< 16 Bytes Fast Path)
 // ==============================================================================
+// dst/src must be genuine global addresses; see copy_bulk. Scalar p()/g() use
+// memcpy_lane_scalar instead, which never takes the address of the local
+// value/return.
 template <CachePolicy LP, CachePolicy SP>
 __device__ __forceinline__ void copy_remainder(uint8_t* dst,
                                                uint8_t* src,
@@ -473,6 +479,74 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
     AsmAccess<8, LP, SP>::store(dst, val);
+  }
+}
+
+// ==============================================================================
+// SCALAR LANE COPY (p()/g() fast path)
+// ==============================================================================
+// Same (dst, src, size) shape as memcpy_lane: dst is remote for Put, src is
+// remote for Get. Only the remote side is ever touched by AsmAccess
+// (global_*) and must be a genuine global address (IPC peer / RDMA-mapped
+// remote of the symmetric heap), same requirement as copy_bulk/copy_remainder
+// above. 
+template <MemcpyKind Kind> 
+__device__ __forceinline__ void memcpy_lane_scalar(void* dst, void* src, size_t size) {
+  constexpr CachePolicy LP =
+    is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+    is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+
+  switch (size) {
+  case 1: {
+    using Acc = AsmAccess<1, LP, SP>;
+    if constexpr (is_put(Kind)) {
+      Acc::store(dst, *static_cast<typename Acc::type*>(src));
+    } else {
+      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
+    }
+    break;
+  }
+  case 2: {
+    using Acc = AsmAccess<2, LP, SP>;
+    if constexpr (is_put(Kind)) {
+      Acc::store(dst, *static_cast<typename Acc::type*>(src));
+    } else {
+      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
+    }
+    break;
+  }
+  case 4: {
+    using Acc = AsmAccess<4, LP, SP>;
+    if constexpr (is_put(Kind)) {
+      Acc::store(dst, *static_cast<typename Acc::type*>(src));
+    } else {
+      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
+    }
+    break;
+  }
+  case 8: {
+    using Acc = AsmAccess<8, LP, SP>;
+    if constexpr (is_put(Kind)) {
+      Acc::store(dst, *static_cast<typename Acc::type*>(src));
+    } else {
+      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
+    }
+    break;
+  }
+  case 16: {
+    using Acc = AsmAccess<16, LP, SP>;
+    if constexpr (is_put(Kind)) {
+      Acc::store(dst, *static_cast<typename Acc::type*>(src));
+    } else {
+      *static_cast<typename Acc::type*>(dst) = Acc::load(src);
+    }
+    break;
+  }
+  default:
+    LOGD_ERROR_ABORT("memcpy_lane_scalar backs scalar p()/g() and only supports "
+                     "rocSHMEM's <=16-byte scalar RMA types (size=%zd)", size);
+    break;
   }
 }
 
