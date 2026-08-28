@@ -304,7 +304,7 @@ __global__ void kernelFlushQuiet(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 
@@ -330,17 +330,17 @@ __global__ void kernelCounterSignalApi(TemplateHarness* h, uint64_t* outCtr, uin
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
-  uint64_t* ctr = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  if (ctr) ctr[0] = 99;
+  ncclGinOffsetPtr ctrOff = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  if (ctrOff.ptr) ctrOff.ptr[0] = 99;
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  outCtr[0] = ctr ? ctr[0] : 0;
-  uint64_t* sig = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  if (sig) sig[0] = 11;
+  outCtr[0] = ctrOff.ptr ? ctrOff.ptr[0] : 0;
+  ncclGinOffsetPtr sigOff = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  if (sigOff.ptr) sigOff.ptr[0] = 11;
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   desc.indexedSignal.signalId = 0;
   ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, desc);
-  outSig[0] = sig ? sig[0] : 0;
+  outSig[0] = sigOff.ptr ? sigOff.ptr[0] : 0;
 }
 
 TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
@@ -373,7 +373,7 @@ __global__ void kernelInvalidCtxApis(bool* ok) {
   ncclGinAnvilSdmaGPUContext bad{};
   bad.layoutMagic = 0;
   ginCtx.handle = &bad;
-  ok[0] = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0) == nullptr;
+  ok[0] = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr == nullptr;
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
   ok[1] = true;
 }
@@ -428,7 +428,7 @@ __global__ void kernelFlushMultiDirty(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 

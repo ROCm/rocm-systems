@@ -507,8 +507,13 @@ host_function_data_vec_t
 metadata::get_host_symbols() const
 {
     return host_functions.rlock([](const auto& _data_v) {
+        auto _data_size = uint64_t{0};
+        for(const auto& itr : _data_v)
+            _data_size = std::max(_data_size, itr.first);
+
         auto _info = std::vector<host_function_info>{};
-        _info.resize(_data_v.size() + 1, host_function_info{});
+        _info.resize(_data_size + 1, host_function_info{});
+        // index by the host function id
         for(const auto& itr : _data_v)
             _info.at(itr.first) = itr.second;
         return _info;

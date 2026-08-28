@@ -120,6 +120,17 @@ static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, uns
 std::function<hipError_t(void**, std::size_t, unsigned)>
     g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
 
+static hipError_t DefaultHipHostMalloc(void** ptr, std::size_t size, unsigned)
+{
+    if (ptr) {
+        *ptr = std::malloc(size);
+        return *ptr ? hipSuccess : hipErrorOutOfMemory;
+    }
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipHostMalloc = DefaultHipHostMalloc;
+
 static hipError_t DefaultHipFree(void* ptr)
 {
     std::free(ptr);
@@ -181,6 +192,7 @@ void ResetHipFakes()
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
+    g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipFree                       = DefaultHipFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
@@ -296,12 +308,15 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void*) { return hipErrorInvalidValue; }
-
-hipError_t hipHostMalloc(void** ptr, size_t, unsigned int)
+hipError_t hipHostFree(void* ptr)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    std::free(ptr);
+    return hipSuccess;
+}
+
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
+{
+    return g_hipHostMalloc(ptr, size, flags);
 }
 
 hipError_t hipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }

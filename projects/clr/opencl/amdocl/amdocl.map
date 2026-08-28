@@ -5,20 +5,17 @@ global:
     clCreateCommandQueue;
     clCreateContext;
     clCreateContextFromType;
-    clCreateFromD3D10Buffer;
     clCreateFromGLBuffer;
     clCreateFromGLRenderbuffer;
     clCreateFromGLTexture2D;
     clCreateFromGLTexture3D;
     clCreateImage2D;
     clCreateImage3D;
-    clCreateImageFromD3D10Resource;
     clCreateKernel;
     clCreateKernelsInProgram;
     clCreateProgramWithBinary;
     clCreateProgramWithSource;
     clCreateSampler;
-    clEnqueueAcquireExternalObjects;
     clEnqueueAcquireGLObjects;
     clEnqueueBarrier;
     clEnqueueCopyBuffer;
@@ -32,7 +29,6 @@ global:
     clEnqueueNativeKernel;
     clEnqueueReadBuffer;
     clEnqueueReadImage;
-    clEnqueueReleaseExternalObjects;
     clEnqueueReleaseGLObjects;
     clEnqueueTask;
     clEnqueueUnmapMemObject;
@@ -94,26 +90,6 @@ global:
     clEnqueueReadBufferRect;
     clEnqueueWriteBufferRect;
     clEnqueueCopyBufferRect;
-
-    aclGetTargetInfo;
-    aclCompilerInit;
-    aclCompilerFini;
-    aclReadFromMem;
-    aclReadFromFile;
-    aclBinaryInit;
-    aclBinaryFini;
-    aclWriteToMem;
-    aclInsertSection;
-    aclExtractSection;
-    aclRemoveSection;
-    aclQueryInfo;
-    aclDbgAddArgument;
-    aclExtractSymbol;
-    aclInsertSymbol;
-    aclRemoveSymbol;
-    aclCompile;
-    aclInsertKernelStatistics;
-    aclDisassemble;
 } OPENCL_1.0;
 
 OPENCL_1.2 {

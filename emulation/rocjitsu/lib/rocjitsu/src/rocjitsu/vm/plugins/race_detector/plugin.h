@@ -94,6 +94,8 @@ public:
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
+  bool observes_sgpr_reads() const override { return true; }
+
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
