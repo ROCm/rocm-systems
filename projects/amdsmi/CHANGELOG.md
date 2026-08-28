@@ -10,9 +10,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
+  - Such values were previously narrowed to a negative number and returned as data.
+
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
+  - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
+
+- **Fixed an out-of-bounds write when a GPU's NUMA or local CPU list names a CPU beyond the bitmask**.  
+  - `get_bitmask_from_numa_node()` and `get_bitmask_from_local_cpulist()` indexed the bitmask with the parsed CPU number without checking it against the allocated word count. Ranges are now clamped to the bitmask, and negative entries are skipped.
+
+- **Fixed `vram_bit_width` never being reported as `N/A`**.  
+  - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
