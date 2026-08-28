@@ -929,8 +929,20 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  //
+  // GIN AllReduce is selected first in ncclAllReduce_impl and requires symmetric
+  // windows. By default it only claims messages >= 256 MiB, so DDA must still be
+  // allowed for smaller symmetric AllReduces (otherwise they would hit the
+  // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
+  // !symEligible gate because GIN already returned early for those sizes.
+  bool ddaSymEligible = symEligible;
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
+    ddaSymEligible = false;
+  }
+#endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {

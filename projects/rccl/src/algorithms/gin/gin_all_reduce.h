@@ -1,9 +1,11 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host entry points for the GIN-SDMA AllReduce path (LSA one-shot <= 16 MiB,
- * LSA two-shot > 16 MiB, GIN two-shot >= 128 MiB) launched from ncclAllReduce
- * when symmetric windows are used.
+ * Host entry points for the GIN-SDMA AllReduce path launched from ncclAllReduce
+ * when symmetric windows are used. By default only messages >= 256 MiB
+ * (GIN two-shot) take this path; smaller messages use DDA AllReduce.
+ * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables LSA one-shot (<= 8 MiB) and
+ * LSA two-shot ((8 MiB, 256 MiB)).
  * See LICENSE.txt for license information.
  ******************************************************************************/
 
@@ -15,8 +17,9 @@
 
 struct ncclComm;
 
-// LSA one-shot for messages <= kGinAllReduceLsaOneShotMaxBytes.
-// LSA two-shot for (16 MiB, 128 MiB); GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes.
+// LSA one-shot for messages <= kGinAllReduceLsaOneShotMaxBytes (force-enable only).
+// LSA two-shot for (8 MiB, 256 MiB) (force-enable only).
+// GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes (default path).
 constexpr int kGinAllReduceLsaCtas = 56;
 constexpr int kGinAllReduceLsaTwoShotCtasPerPeer = 8;
 constexpr int kGinAllReduceLsaTwoShotMaxCtas = kGinAllReduceLsaTwoShotCtasPerPeer * 16;
@@ -44,8 +47,16 @@ struct ncclGinAllReduceState {
 
 #if defined(ENABLE_ROCSHMEM_GIN)
 
+// RCCL_GIN_ALLREDUCE_FORCE_ENABLE. Defined in gin_all_reduce_sdma.cu.
+int64_t rcclParamGinAllReduceForceEnable();
+
 bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op);
+
+// True when this AllReduce is a GIN-SDMA candidate that the default size policy
+// left for DDA (message < 256 MiB and RCCL_GIN_ALLREDUCE_FORCE_ENABLE is not 1).
+bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                    ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                   ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
