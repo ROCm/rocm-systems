@@ -83,79 +83,75 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
   return true;
 }
 
-template <typename Supported>
-void publish_sc_access_coverage_support(ConSanTransformArtifacts &result, ConSanAccessOrigin origin,
-                                        Supported &&supported) {
+[[nodiscard]] std::vector<ConSanProbeIntentId>
+sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const PhysicalSiteId &site) {
+  std::vector<ConSanProbeIntentId> intent_ids;
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    const auto site = std::ranges::find_if(result.program_inventory.access_sites(),
-                                           [&](const ConSanAccessInventorySite &candidate) {
-                                             return candidate.physical_id == intent.physical_site;
-                                           });
-    if (site == result.program_inventory.access_sites().end() || site->origin != origin)
+    if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation ||
+        intent.physical_site != site)
       continue;
     const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
-    if (entry == nullptr || entry->lowering == ConSanLoweringOutcomeKind::ResourceRejected ||
-        supported(site->file_offset))
-      continue;
-    (void)result.coverage_ledger.set_lowering_outcome(
-        intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
-        "SuperCollider lowerer found no complete planning context");
+    if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending)
+      intent_ids.push_back(intent.id);
   }
+  return intent_ids;
 }
 
-void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result,
-                                          ConSanAccessOrigin origin, uint64_t file_offset,
-                                          std::string detail) {
-  const auto site = std::ranges::find_if(
-      result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
-        return candidate.origin == origin && candidate.file_offset == file_offset;
-      });
-  if (site == result.program_inventory.access_sites().end())
-    return;
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    if (intent.physical_site != site->physical_id)
-      continue;
-    (void)result.coverage_ledger.set_lowering_outcome(
-        intent.id, ConSanLoweringOutcomeKind::ResourceRejected, detail);
+[[nodiscard]] bool publish_sc_access_rejection(ConSanTransformArtifacts &result,
+                                               const PhysicalSiteId &site,
+                                               ConSanLoweringOutcomeKind outcome,
+                                               std::string detail) {
+  std::vector<ConSanProbeIntentId> intent_ids = sc_pending_access_intent_ids(result, site);
+  if (intent_ids.empty())
+    return true;
+  auto commit = make_consan_committed_lowering(result.observation_plan, intent_ids,
+                                               std::span<const ConSanCommittedLoweringLocation>{},
+                                               outcome, std::move(detail));
+  if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+    result.errors.emplace_back(
+        "ConSan SuperCollider could not publish an intent-bound access rejection");
+    return false;
   }
+  return true;
 }
 
-/// Project final native-lowering results into the production ledger. Patch
-/// kinds identify the realized mechanism; policy applicability has already
-/// been fixed by `ConSanObservationPlan` and is never inferred here.
-void finalize_sc_access_coverage_ledger(ConSanTransformArtifacts &result) {
-  const auto is_access_patch = [](ConSanPatchKind kind) {
-    switch (kind) {
-    case ConSanPatchKind::InlineLdsLoadCheckTrap:
-    case ConSanPatchKind::InlineLdsStoreCheckTrap:
-    case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
-    case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
-    case ConSanPatchKind::InlineFlatLoadCheckTrap:
-    case ConSanPatchKind::InlineFlatStoreCheckTrap:
-    case ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
-    case ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
-      return true;
-    default:
-      return false;
-    }
-  };
+[[nodiscard]] std::optional<ConSanCommittedLowering> make_sc_access_lowering_commit(
+    const ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
+    const ConSanAccessInventorySite &site, const ConSanPatchInfo &patch) {
+  std::vector<ConSanCommittedLoweringLocation> locations;
+  locations.push_back({
+      .original_site = site.physical_id,
+      .emitted_text_offset = patch.anchor_offset,
+      .emitted_size = patch.original_size,
+      .relocated_guest_text_offset =
+          patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
+  });
+  if (patch.trampoline_size != 0u) {
+    locations.push_back({
+        .original_site = site.physical_id,
+        .emitted_text_offset = patch.trampoline_offset,
+        .emitted_size = patch.trampoline_size,
+        .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
+    });
+  }
+  return make_consan_committed_lowering(result.observation_plan, intent_ids, locations,
+                                        ConSanLoweringOutcomeKind::Instrumented);
+}
+
+/// Publish an explicit placement rejection for every SuperCollider access
+/// intent that no site-local lowering transaction consumed. This fallback
+/// consults only immutable intent identity and the ledger's pending state; it
+/// never reconstructs success or failure from patch telemetry.
+void publish_unplaced_sc_access_rejections(ConSanTransformArtifacts &result) {
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    const bool instrumented =
-        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-          return patch.phase == ConSanPatchPhase::Instrumentation && is_access_patch(patch.kind) &&
-                 patch.anchor_offset == intent.physical_site.original_text_offset;
-        });
-    if (instrumented) {
-      (void)result.coverage_ledger.set_lowering_outcome(intent.id,
-                                                        ConSanLoweringOutcomeKind::Instrumented);
+    if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation)
       continue;
-    }
     const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
-    if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::ResourceRejected)
+    if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
-    (void)result.coverage_ledger.set_lowering_outcome(
-        intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
-        "SuperCollider lowerer emitted no access patch");
+    (void)publish_sc_access_rejection(result, intent.physical_site,
+                                      ConSanLoweringOutcomeKind::PlacementRejected,
+                                      "SuperCollider lowerer selected no access placement");
   }
 }
 

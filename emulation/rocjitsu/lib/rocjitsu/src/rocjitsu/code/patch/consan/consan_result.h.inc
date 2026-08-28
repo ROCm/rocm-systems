@@ -208,9 +208,21 @@ struct ConSanTransformArtifacts {
   }
   /// Publish and retain one authoritative intent-bound lowering result.
   [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit) {
-    if (!coverage_ledger.publish_lowering_commit(commit))
-      return false;
-    committed_lowerings.push_back(std::move(commit));
+    std::vector<ConSanCommittedLowering> commits;
+    commits.push_back(std::move(commit));
+    return publish_lowering_commits(std::move(commits));
+  }
+  /// Atomically publish and retain a complete group of lowering results.
+  [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits) {
+    committed_lowerings.reserve(committed_lowerings.size() + commits.size());
+    ConSanCoverageLedger next_ledger = coverage_ledger;
+    for (const ConSanCommittedLowering &commit : commits) {
+      if (!next_ledger.publish_lowering_commit(commit))
+        return false;
+    }
+    coverage_ledger = std::move(next_ledger);
+    committed_lowerings.insert(committed_lowerings.end(), std::make_move_iterator(commits.begin()),
+                               std::make_move_iterator(commits.end()));
     return true;
   }
   /// Discard the candidate image and its patch telemetry without changing the
@@ -218,6 +230,12 @@ struct ConSanTransformArtifacts {
   void discard_candidate_modification() {
     replacement.clear();
     patches.clear();
+    std::erase_if(committed_lowerings, [](const ConSanCommittedLowering &commit) {
+      return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
+    });
+    coverage_ledger = ConSanCoverageLedger(observation_plan);
+    for (const ConSanCommittedLowering &commit : committed_lowerings)
+      (void)coverage_ledger.publish_lowering_commit(commit);
   }
 };
 

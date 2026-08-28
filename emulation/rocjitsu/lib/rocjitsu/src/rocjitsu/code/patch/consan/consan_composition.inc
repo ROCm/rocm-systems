@@ -1089,7 +1089,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     }
   }
 
-  finalize_sc_access_coverage_ledger(result);
+  publish_unplaced_sc_access_rejections(result);
 
   return result;
 }

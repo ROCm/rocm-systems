@@ -1042,14 +1042,33 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0x00000000u, // v_mov_b32_e64 v0, s0
       0xD5810001u,
       0x00000001u, // v_mov_b32_e64 v1, s1
-      0xEC05007Cu, 0x00000002u,
+      0xEC05007Cu,
+      0x00000002u,
       0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xEC05007Cu,
+      0x00000006u,
       0x00000000u, // flat_load_b32
                    // v6, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -1148,6 +1167,17 @@ TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
+  ASSERT_EQ(result.committed_lowerings.size(), 2u);
+  const auto instrumented =
+      std::ranges::find(result.committed_lowerings, ConSanLoweringOutcomeKind::Instrumented,
+                        &ConSanCommittedLowering::outcome);
+  ASSERT_NE(instrumented, result.committed_lowerings.end());
+  EXPECT_FALSE(instrumented->intent_ids.empty());
+  EXPECT_FALSE(instrumented->locations.empty());
+  EXPECT_EQ(std::ranges::count(result.committed_lowerings,
+                               ConSanLoweringOutcomeKind::PlacementRejected,
+                               &ConSanCommittedLowering::outcome),
+            1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             1u);
@@ -5579,6 +5609,17 @@ TEST(ConSan, ProbeLdsCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
+  ASSERT_EQ(result.committed_lowerings.size(), 2u);
+  const auto instrumented =
+      std::ranges::find(result.committed_lowerings, ConSanLoweringOutcomeKind::Instrumented,
+                        &ConSanCommittedLowering::outcome);
+  ASSERT_NE(instrumented, result.committed_lowerings.end());
+  EXPECT_FALSE(instrumented->intent_ids.empty());
+  EXPECT_FALSE(instrumented->locations.empty());
+  EXPECT_EQ(std::ranges::count(result.committed_lowerings,
+                               ConSanLoweringOutcomeKind::PlacementRejected,
+                               &ConSanCommittedLowering::outcome),
+            1u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
                             [](const ConSanPatchInfo &patch) {

@@ -416,6 +416,77 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
   EXPECT_EQ(result.committed_lowerings.size(), 1u);
 }
 
+TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ConSanTransformArtifacts result;
+  result.observation_plan = plan;
+  result.coverage_ledger = ConSanCoverageLedger(plan);
+
+  const std::array first_id = {ConSanProbeIntentId{0}};
+  const std::array second_id = {ConSanProbeIntentId{1}};
+  auto first = make_consan_committed_lowering(plan, first_id,
+                                              std::span<const ConSanCommittedLoweringLocation>{},
+                                              ConSanLoweringOutcomeKind::ResourceRejected, "first");
+  auto second = make_consan_committed_lowering(
+      plan, second_id, std::span<const ConSanCommittedLoweringLocation>{},
+      ConSanLoweringOutcomeKind::PlacementRejected, "second");
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  second->intent_ids.assign(first_id.begin(), first_id.end());
+
+  std::vector commits = {std::move(*first), std::move(*second)};
+  EXPECT_FALSE(result.publish_lowering_commits(std::move(commits)));
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering, ConSanLoweringOutcomeKind::Pending);
+  EXPECT_TRUE(result.committed_lowerings.empty());
+}
+
+TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommits) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ConSanTransformArtifacts result;
+  result.observation_plan = plan;
+  result.coverage_ledger = ConSanCoverageLedger(plan);
+
+  const std::array rejected_id = {ConSanProbeIntentId{0}};
+  auto rejection = make_consan_committed_lowering(
+      plan, rejected_id, std::span<const ConSanCommittedLoweringLocation>{},
+      ConSanLoweringOutcomeKind::ResourceRejected, "retained planning failure");
+  const std::array instrumented_id = {ConSanProbeIntentId{1}};
+  const std::array location = {ConSanCommittedLoweringLocation{
+      .original_site = plan.probe_intents[1].physical_site,
+      .emitted_text_offset = 0x200,
+      .emitted_size = 16,
+      .relocated_guest_text_offset = 0x208,
+  }};
+  auto instrumentation = make_consan_committed_lowering(plan, instrumented_id, location,
+                                                        ConSanLoweringOutcomeKind::Instrumented);
+  ASSERT_TRUE(rejection);
+  ASSERT_TRUE(instrumentation);
+  std::vector commits = {std::move(*rejection), std::move(*instrumentation)};
+  ASSERT_TRUE(result.publish_lowering_commits(std::move(commits)));
+  result.replacement.push_back(0u);
+  result.patches.emplace_back();
+
+  result.discard_candidate_modification();
+
+  EXPECT_TRUE(result.replacement.empty());
+  EXPECT_TRUE(result.patches.empty());
+  ASSERT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.committed_lowerings.front().outcome,
+            ConSanLoweringOutcomeKind::ResourceRejected);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
+            ConSanLoweringOutcomeKind::ResourceRejected);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering, ConSanLoweringOutcomeKind::Pending);
+}
+
 TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDecisions) {
   const ConSanAccessPolicyResult access = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));

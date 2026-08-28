@@ -31,8 +31,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         });
       });
   if (!has_plannable_supported_site) {
-    publish_sc_access_coverage_support(result, ConSanAccessOrigin::NativeLds,
-                                       [](uint64_t) { return false; });
+    for (const auto &[file_offset, site] : admitted_sites) {
+      (void)file_offset;
+      (void)publish_sc_access_rejection(
+          result, site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          "SuperCollider LDS lowerer found no complete execution owner");
+    }
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
                                  "native-LDS load or store site with complete owners");
     return;
@@ -704,8 +708,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                     std::vector<uint64_t> owners) {
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
-    if (owners.empty())
+    if (owners.empty()) {
+      (void)publish_sc_access_rejection(result, site.physical_id,
+                                        ConSanLoweringOutcomeKind::ResourceRejected,
+                                        "SuperCollider LDS lowerer found no execution owner");
       return;
+    }
 
     LdsSitePlanningContext context;
     context.container_name = site.container.name;
@@ -766,8 +774,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       context.every_owner_can_grow_ordinary_vgprs &= allocated_vgprs == unified_vgprs;
       first_owner = false;
     }
-    if (!complete)
+    if (!complete) {
+      (void)publish_sc_access_rejection(
+          result, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          "SuperCollider LDS lowerer found no complete planning context");
       return;
+    }
     if (max_owner_vgpr_ref && *max_owner_vgpr_ref < 255u)
       context.min_auto_scratch_vgpr = static_cast<uint16_t>(*max_owner_vgpr_ref + 1u);
     if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -779,27 +791,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     add_site_context(*site, site->execution_and_container_owner_descriptor_file_offsets());
   }
 
-  // Coverage is a physical decoded-site inventory, not an inventory of sites
-  // that happened to survive owner, CFG, liveness, or placement planning.
-  // Retain every canonical native-LDS access in the denominator and advertise
-  // support only after its complete planning context has been established.
-  std::unordered_set<const ConSanAccessInventorySite *> sites_with_complete_context;
-  sites_with_complete_context.reserve(site_contexts.size());
-  for (const LdsSitePlanningContext &context : site_contexts) {
-    if (context.site != nullptr && !context.owner_contexts.empty())
-      sites_with_complete_context.insert(context.site);
-  }
-  std::unordered_set<uint64_t> supported_physical_sites;
-  supported_physical_sites.reserve(sites_with_complete_context.size());
-  if (decoder != nullptr) {
-    for (const ConSanAccessInventorySite *site : sites_with_complete_context) {
-      if (site != nullptr)
-        supported_physical_sites.insert(site->file_offset);
-    }
-  }
-  publish_sc_access_coverage_support(
-      result, ConSanAccessOrigin::NativeLds,
-      [&](uint64_t file_offset) { return supported_physical_sites.contains(file_offset); });
   if (options.max_patches_is_expert_limit && options.max_patches == 0u) {
     result.warnings.emplace_back(
         "ConSan LDS check/trap proof skipped: shared patch budget consumed");
@@ -3198,6 +3189,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   struct PlannedLdsCheckTrapPatch {
     const ConSanAccessInventorySite *site = nullptr;
+    std::vector<ConSanProbeIntentId> intent_ids;
     const LocalNopCave *local_cave = nullptr;
     const LocalNopCave *entry_island = nullptr;
     std::vector<uint32_t> words;
@@ -3342,6 +3334,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedLdsCheckTrapPatch planned;
     planned.site = &site;
+    planned.intent_ids = sc_pending_access_intent_ids(result, site.physical_id);
+    if (planned.intent_ids.empty()) {
+      result.errors.emplace_back(
+          "ConSan LDS check/trap proof selected a site without a pending semantic intent");
+      return;
+    }
     planned.local_cave = candidate.local_cave;
     planned.entry_island = candidate.entry_island;
     planned.words = std::move(*words);
@@ -3725,6 +3723,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
+  const auto publish_planned_lowerings = [&]() {
+    std::vector<ConSanCommittedLowering> lowering_commits;
+    lowering_commits.reserve(planned_patches.size());
+    for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
+      auto commit =
+          make_sc_access_lowering_commit(result, planned.intent_ids, *planned.site, planned.info);
+      if (!commit) {
+        result.errors.emplace_back(
+            "ConSan LDS check/trap proof produced an invalid intent-bound lowering");
+        return false;
+      }
+      lowering_commits.push_back(std::move(*commit));
+    }
+    if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+      result.errors.emplace_back(
+          "ConSan LDS check/trap proof could not commit its semantic lowerings");
+      return false;
+    }
+    return true;
+  };
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_vgpr_growths_to_patcher(patcher, original_bytes, descriptor_growths, arch,
@@ -4263,6 +4281,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
     result.replacement = std::move(patcher).emit();
+    if (!publish_planned_lowerings()) {
+      result.discard_candidate_modification();
+      return;
+    }
     result.mark_modified();
     return;
   }
@@ -4303,6 +4325,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                   static_cast<size_t>(patch_bytes));
     }
     result.patches.push_back(planned.info);
+  }
+  if (!publish_planned_lowerings()) {
+    result.discard_candidate_modification();
+    return;
   }
   result.mark_modified();
 }

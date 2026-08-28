@@ -201,8 +201,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     admitted_sites.try_emplace(access.file_offset, &access);
   }
   if (admitted_sites.empty()) {
-    publish_sc_access_coverage_support(result, ConSanAccessOrigin::Flat,
-                                       [](uint64_t) { return false; });
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no supported likely group-FLAT load/store site");
     return;
@@ -409,8 +407,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
     }
     if (!vcc_save) {
-      publish_sc_access_resource_rejection(
-          result, ConSanAccessOrigin::Flat, site.file_offset,
+      (void)publish_sc_access_rejection(
+          result, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no safe VCC-save scalar pair");
       return;
     }
@@ -473,8 +471,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       requested_words += 8u;
     }
     if (!scratch) {
-      publish_sc_access_resource_rejection(
-          result, ConSanAccessOrigin::Flat, site.file_offset,
+      (void)publish_sc_access_rejection(
+          result, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no encodable scratch or spill plan");
       return;
     }
@@ -661,8 +659,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return &owner_contexts.emplace(descriptor_file_offset, std::move(context)).first->second;
   };
 
-  std::unordered_set<uint64_t> supported_physical_sites;
-  supported_physical_sites.reserve(admitted_sites.size());
   for (const auto &[file_offset, access] : admitted_sites) {
     (void)file_offset;
     const ConSanAccessInventorySite &site = *access;
@@ -745,10 +741,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       else
         any_owner_uses_fixed_stack = true;
     }
-    if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count)
+    if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count) {
+      (void)publish_sc_access_rejection(
+          result, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          "SuperCollider FLAT lowerer found no complete planning context");
       continue;
-
-    supported_physical_sites.insert(site.file_offset);
+    }
 
     const bool selected_by_filter =
         options.test_kernel_name_filter.empty() ||
@@ -775,9 +773,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                common_allocated_sgpr_count, max_owner_private_segment_size, owner_stack_kind,
                owner_liveness, std::move(owners));
   }
-  publish_sc_access_coverage_support(result, ConSanAccessOrigin::Flat, [&](uint64_t file_offset) {
-    return supported_physical_sites.contains(file_offset);
-  });
   if (!result.errors.empty())
     return;
   if (options.max_patches_is_expert_limit && options.max_patches == 0u) {
@@ -1116,6 +1111,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   struct PlannedFlatCheckTrapPatch {
     const ConSanAccessInventorySite *site = nullptr;
+    std::vector<ConSanProbeIntentId> intent_ids;
     const LocalNopCave *local_cave = nullptr;
     const LocalNopCave *entry_island = nullptr;
     std::vector<uint32_t> words;
@@ -1191,6 +1187,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedFlatCheckTrapPatch planned;
     planned.site = &site;
+    planned.intent_ids = sc_pending_access_intent_ids(result, site.physical_id);
+    if (planned.intent_ids.empty()) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof selected a site without a pending semantic intent");
+      return;
+    }
     planned.local_cave = candidate.local_cave;
     planned.entry_island = candidate.entry_island;
     planned.use_local_cave = candidate.use_local_cave;
@@ -1887,6 +1889,25 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
     result.replacement = std::move(patched_bytes);
+  }
+  std::vector<ConSanCommittedLowering> lowering_commits;
+  lowering_commits.reserve(planned_patches.size());
+  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    auto commit =
+        make_sc_access_lowering_commit(result, planned.intent_ids, *planned.site, planned.info);
+    if (!commit) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof produced an invalid intent-bound lowering");
+      result.discard_candidate_modification();
+      return;
+    }
+    lowering_commits.push_back(std::move(*commit));
+  }
+  if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+    result.errors.emplace_back(
+        "ConSan flat check/trap proof could not commit its semantic lowerings");
+    result.discard_candidate_modification();
+    return;
   }
   result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());
   result.mark_modified();
