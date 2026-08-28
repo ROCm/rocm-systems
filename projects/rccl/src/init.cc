@@ -1102,7 +1102,9 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
         (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
         int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
                     strncmp(deviceClass, "0x03", 4) == 0;
-        if (!isGpu) info->mloPart = fn;
+        if (!isGpu) {
+          info->mloPart = fn;
+        }
       }
     }
   }
