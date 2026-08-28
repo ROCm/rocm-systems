@@ -146,8 +146,8 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 struct hipfile_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    // hipFile counter tracks reach Perfetto through the PMC path, so the legacy
-    // per-collector Perfetto policy is a no-op rather than a second producer.
+    // hipFile counter tracks reach Perfetto from hipfile_pmc_sample records, so
+    // the legacy per-collector Perfetto policy is a no-op rather than a second producer.
     using PerfettoApi = collectors::hipfile::perfetto_policy;
     using CacheApi    = collectors::hipfile::cache_policy;
 };
