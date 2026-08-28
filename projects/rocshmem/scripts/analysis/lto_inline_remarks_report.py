@@ -23,21 +23,22 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-PASSED_KINDS = ("Inlined", "AlwaysInline")
-MISSED_KINDS = ("NeverInline", "TooCostly")
+import lto_inline_remarks_diff as lrd  # reuse PASSED_KINDS/MISSED_KINDS/COLOR_*/wrap_label
 
-COLOR_GOOD = "#2ca02c"
-COLOR_BAD = "#d62728"
-COLOR_NEUTRAL = "#9aa5b1"
-COLOR_STRIPE = "#f2f2f2"
+PASSED_KINDS = lrd.PASSED_KINDS
+MISSED_KINDS = lrd.MISSED_KINDS
+COLOR_GOOD = lrd.COLOR_GOOD
+COLOR_BAD = lrd.COLOR_BAD
+COLOR_NEUTRAL = lrd.COLOR_NEUTRAL
+COLOR_STRIPE = lrd.COLOR_STRIPE
 
 # Fixed, non-cycled color per remark name: Passed kinds are green-toned,
 # Missed kinds are red-toned, regardless of plotting order.
 KIND_COLOR = {
     "Inlined": COLOR_GOOD,
-    "AlwaysInline": "#98df8a",
+    "AlwaysInline": "#8fcf9d",
     "NeverInline": COLOR_BAD,
-    "TooCostly": "#ff9896",
+    "TooCostly": "#dd8b8e",
 }
 
 COST_BUCKETS = [
@@ -158,26 +159,22 @@ def _hbar_panel(ax, title, labels, values, color, value_fmt="{:d}"):
         ax.text(0.5, 0.5, "(no data)", ha="center", va="center", color=COLOR_NEUTRAL)
         ax.axis("off")
         return
-    y = list(range(n))
-    for i in y:
-        if i % 2 == 0:
-            ax.axhspan(i - 0.5, i + 0.5, color=COLOR_STRIPE, zorder=0)
+    row_spacing = lrd.ROW_SPACING
+    y = [i * row_spacing for i in range(n)]
+    for yy in y[::2]:
+        ax.axhspan(yy - row_spacing / 2, yy + row_spacing / 2, color=COLOR_STRIPE, zorder=0)
     ax.barh(y, values, height=0.6, color=color, zorder=2)
     xmax = max(values + [1])
-    for i, v in enumerate(values):
-        ax.text(v + xmax * 0.02, i, value_fmt.format(v), va="center", fontsize=7.5, color="#333333")
+    for yy, v in zip(y, values):
+        ax.text(v + xmax * 0.02, yy, value_fmt.format(v), va="center", fontsize=7.5, color="#333333")
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=8)
-    ax.set_ylim(-0.5, n - 0.5)
+    ax.set_ylim(-row_spacing / 2, y[-1] + row_spacing / 2)
     ax.invert_yaxis()
     ax.set_xlim(0, xmax * 1.2)
     ax.tick_params(axis="x", labelsize=8)
     ax.set_title(title, fontsize=10, fontweight="bold")
     _style_axes(ax)
-
-
-def _wrap(name, width=38):
-    return name if len(name) <= width else name[: width - 1] + "…"
 
 
 def make_dashboard(summary, chart_path, top_n, commit_label):
@@ -224,7 +221,7 @@ def make_dashboard(summary, chart_path, top_n, commit_label):
     _hbar_panel(
         axes[0][1],
         "Top callers by inlined-callee count",
-        [_wrap(n) for n, _ in top_callers],
+        [lrd.wrap_label(n) for n, _ in top_callers],
         [c for _, c in top_callers],
         COLOR_GOOD,
     )
@@ -234,7 +231,7 @@ def make_dashboard(summary, chart_path, top_n, commit_label):
     _hbar_panel(
         axes[0][2],
         "Top callees by distinct-caller count",
-        [_wrap(n) for n, _ in top_callees],
+        [lrd.wrap_label(n) for n, _ in top_callees],
         [c for _, c in top_callees],
         COLOR_NEUTRAL,
     )
@@ -268,7 +265,7 @@ def make_dashboard(summary, chart_path, top_n, commit_label):
     _hbar_panel(
         axes[1][1],
         "NeverInline reasons",
-        [_wrap(r) for r, _ in reasons],
+        [lrd.wrap_label(r) for r, _ in reasons],
         [c for _, c in reasons],
         COLOR_BAD,
     )
@@ -279,17 +276,18 @@ def make_dashboard(summary, chart_path, top_n, commit_label):
     _hbar_panel(
         axes[1][2],
         "TooCostly near-misses (cost − threshold, smallest gap first)",
-        [_wrap(f"{callee}") for _caller, callee, _m in near],
+        [lrd.wrap_label(f"{callee}") for _caller, callee, _m in near],
         [m for _c, _ce, m in near],
-        "#ff9896",
+        KIND_COLOR["TooCostly"],
     )
 
+    title = f"LTO inline remarks — {commit_label}" if commit_label else "LTO inline remarks"
     fig.suptitle(
-        f"LTO inline remarks — {commit_label}" if commit_label else "LTO inline remarks",
+        f"{title}\ngreen = Passed (Inlined/AlwaysInline), red = Missed (NeverInline/TooCostly), gray = neutral",
         fontsize=14,
         fontweight="bold",
     )
-    fig.savefig(chart_path, dpi=160)
+    fig.savefig(chart_path, dpi=160, bbox_inches="tight")
     print(f"Wrote chart to {chart_path}")
 
 

@@ -190,6 +190,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   }}
   .commit-toggle button.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
   .diff-summary {{ color: var(--ink-secondary); font-size: 13px; margin-bottom: 10px; }}
+  .legend {{ color: var(--ink-secondary); font-size: 12px; margin-bottom: 10px; }}
 </style>
 </head>
 <body>
@@ -198,12 +199,14 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     <h1>{title}</h1>
     <div class="sub">{arch} / {build_config}</div>
   </header>
+  {notes}
   {comparison_section}
   <section class="commit-section">
     {commit_toggle}
     <div id="commitStats"></div>
     <div class="table-section">
       <h2>All kernels</h2>
+      <p class="legend">Click a column header to sort.</p>
       <div class="controls">
         <input type="text" id="searchBox" placeholder="Filter by kernel name...">
       </div>
@@ -215,7 +218,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       </div>
     </div>
   </section>
-  {notes}
 </div>
 <script>
 const KERNELS_BY_COMMIT = {kernels_by_commit_json};
@@ -374,6 +376,7 @@ def render_comparison_section(diff_rows, baseline_commit, branch_commit):
     return f"""
   <section class="comparison-section">
     <h2>Baseline vs Branch &mdash; {html.escape(baseline_commit[:12])} &rarr; {html.escape(branch_commit[:12])}</h2>
+    <p class="legend">Each cell shows the branch value with &Delta; from baseline; background: green = improved, red = regressed, gray = unchanged (lower is better except Occupancy, where higher is better).</p>
     <div class="controls">
       <select id="diffMetricPicker"></select>
       <input type="text" id="diffSearchBox" placeholder="Filter by kernel name...">

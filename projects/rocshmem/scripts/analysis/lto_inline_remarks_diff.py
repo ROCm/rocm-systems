@@ -39,12 +39,12 @@ from pathlib import Path
 PASSED_KINDS = ("Inlined", "AlwaysInline")
 MISSED_KINDS = ("NeverInline", "TooCostly")
 
-COLOR_GOOD = "#2ca02c"
-COLOR_BAD = "#d62728"
+COLOR_GOOD = "#55a868"
+COLOR_BAD = "#c44e52"
 COLOR_NEUTRAL = "#9aa5b1"
 COLOR_STRIPE = "#f2f2f2"
-COLOR_BASELINE = "#6699cc"
-COLOR_BRANCH = "#336699"
+COLOR_BASELINE = "#8fa8c7"
+COLOR_BRANCH = "#4c72b0"
 
 _INTERN_SUFFIX_RE = re.compile(r"\.intern\.[0-9a-f]+$")
 
@@ -255,8 +255,34 @@ def write_summary_csv(ordered, cliffs, transitions, baseline_rows, branch_rows, 
     print(f"Wrote summary to {out_path}")
 
 
-def wrap(name, width=38):
-    return name if len(name) <= width else name[: width - 1] + "…"
+ROW_SPACING = 1.6
+
+
+def wrap_label(name, width=32, max_lines=2):
+    """Wrap a long name onto up to max_lines lines, breaking on a natural
+    boundary (::, (, ", ", space) near the width limit rather than a hard
+    mid-token cut. Only the final line is hard-truncated (with an ellipsis)
+    if it's still too long -- mirrors lto_inline_remarks_dashboard.py's JS
+    wrapLabel() so the PNG and HTML dashboard treat long names the same way.
+    """
+    lines, remaining = [], name
+    for _ in range(max_lines - 1):
+        if len(remaining) <= width:
+            break
+        break_at = -1
+        for sep in ("::", "(", ", ", " "):
+            idx = remaining.rfind(sep, 0, width)
+            if idx > width * 0.3:
+                break_at = idx + len(sep)
+                break
+        if break_at == -1:
+            break_at = width
+        lines.append(remaining[:break_at])
+        remaining = remaining[break_at:]
+    if len(remaining) > width:
+        remaining = remaining[: width - 1] + "…"
+    lines.append(remaining)
+    return "\n".join(lines)
 
 
 def make_dashboard(ordered, cliffs, transitions, baseline_rows, branch_rows, chart_path, top_n, match_re=None):
@@ -305,20 +331,21 @@ def make_dashboard(ordered, cliffs, transitions, baseline_rows, branch_rows, cha
     if shown:
         shown = list(reversed(shown))
         n = len(shown)
-        y = list(range(n))
-        for i in y:
-            if i % 2 == 0:
-                ax.axhspan(i - 0.5, i + 0.5, color=COLOR_STRIPE, zorder=0)
+        y = [i * ROW_SPACING for i in range(n)]
+        for yy in y[::2]:
+            ax.axhspan(yy - ROW_SPACING / 2, yy + ROW_SPACING / 2, color=COLOR_STRIPE, zorder=0)
         colors = [COLOR_BAD if r["regression_signal"] else COLOR_GOOD for r in shown]
         cost_b = [r["cost_baseline"] if r["cost_baseline"] != "" else 0 for r in shown]
         cost_n = [r["cost_branch"] if r["cost_branch"] != "" else 0 for r in shown]
         bar_h = 0.34
-        ax.barh([i + bar_h / 2 for i in y], cost_b, height=bar_h, color=COLOR_NEUTRAL, zorder=2, label="baseline cost")
-        ax.barh([i - bar_h / 2 for i in y], cost_n, height=bar_h, color=colors, zorder=2, label="branch cost")
+        ax.barh([yy + bar_h / 2 for yy in y], cost_b, height=bar_h, color=COLOR_NEUTRAL, zorder=2, label="baseline cost")
+        ax.barh([yy - bar_h / 2 for yy in y], cost_n, height=bar_h, color=colors, zorder=2, label="branch cost")
         ax.set_yticks(y)
         ax.set_yticklabels(
-            [f"{wrap(r['caller_demangled'])} → {wrap(r['callee_demangled'])}" for r in shown], fontsize=7.5
+            [wrap_label(f"{r['caller_demangled']} → {r['callee_demangled']}", width=40) for r in shown],
+            fontsize=7.5,
         )
+        ax.set_ylim(-ROW_SPACING / 2, y[-1] + ROW_SPACING / 2)
         ax.legend(fontsize=8, frameon=False, loc="lower right")
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
@@ -360,22 +387,22 @@ def make_dashboard(ordered, cliffs, transitions, baseline_rows, branch_rows, cha
     if top_cliffs:
         top_cliffs = list(reversed(top_cliffs))
         n = len(top_cliffs)
-        y = list(range(n))
-        for i in y:
-            if i % 2 == 0:
-                ax.axhspan(i - 0.5, i + 0.5, color=COLOR_STRIPE, zorder=0)
+        y = [i * ROW_SPACING for i in range(n)]
+        for yy in y[::2]:
+            ax.axhspan(yy - ROW_SPACING / 2, yy + ROW_SPACING / 2, color=COLOR_STRIPE, zorder=0)
         bar_h = 0.34
         ax.barh(
-            [i + bar_h / 2 for i in y], [cb for _n, cb, _cn, _d in top_cliffs],
+            [yy + bar_h / 2 for yy in y], [cb for _n, cb, _cn, _d in top_cliffs],
             height=bar_h, color=COLOR_NEUTRAL, zorder=2, label="baseline callers",
         )
         colors = [COLOR_BAD if d > 0 else COLOR_GOOD for _n, _cb, _cn, d in top_cliffs]
         ax.barh(
-            [i - bar_h / 2 for i in y], [cn for _n, _cb, cn, _d in top_cliffs],
+            [yy - bar_h / 2 for yy in y], [cn for _n, _cb, cn, _d in top_cliffs],
             height=bar_h, color=colors, zorder=2, label="branch callers",
         )
         ax.set_yticks(y)
-        ax.set_yticklabels([wrap(name) for name, _cb, _cn, _d in top_cliffs], fontsize=7.5)
+        ax.set_yticklabels([wrap_label(name) for name, _cb, _cn, _d in top_cliffs], fontsize=7.5)
+        ax.set_ylim(-ROW_SPACING / 2, y[-1] + ROW_SPACING / 2)
         ax.legend(fontsize=8, frameon=False, loc="lower right")
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
@@ -385,8 +412,13 @@ def make_dashboard(ordered, cliffs, transitions, baseline_rows, branch_rows, cha
         ax.axis("off")
     ax.set_title("Callees crossing the 1↔2+ caller-count cliff", fontsize=10, fontweight="bold")
 
-    fig.suptitle("LTO inline remarks — baseline vs branch", fontsize=14, fontweight="bold")
-    fig.savefig(chart_path, dpi=160)
+    fig.suptitle(
+        "LTO inline remarks — baseline vs branch\n"
+        "green = improved / Passed, red = regressed / Missed, blue = baseline vs branch counts",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.savefig(chart_path, dpi=160, bbox_inches="tight")
     print(f"Wrote chart to {chart_path}")
 
 

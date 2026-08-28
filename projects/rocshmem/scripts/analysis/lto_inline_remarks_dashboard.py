@@ -256,7 +256,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     background: var(--surface-panel); color: var(--ink-secondary); cursor: pointer;
   }}
   .commit-toggle button.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
-  svg text {{ fill: var(--ink-secondary); font-size: 10px; }}
+  .legend {{ color: var(--ink-secondary); font-size: 12px; margin-bottom: 10px; }}
+  svg text {{ fill: var(--ink-secondary); font-size: 12px; }}
 </style>
 </head>
 <body>
@@ -265,12 +266,14 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     <h1>{title}</h1>
     <div class="sub">{arch} / {build_config}</div>
   </header>
+  {notes}
   {comparison_section}
   <section class="commit-section">
     {commit_toggle}
     <div id="commitStats"></div>
     <div class="chart-section">
       <h2>Callers / callees / reasons</h2>
+      <p class="legend">Bar length = count/cost-gap for the selected view; green bars = negative value (e.g. cost under threshold).</p>
       <div class="controls">
         <select id="viewPicker"></select>
       </div>
@@ -278,6 +281,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     </div>
     <div class="table-section">
       <h2>All remarks</h2>
+      <p class="legend">Kind = raw LLVM remark tag (Passed/Missed/Analysis); Name = specific reason (Inlined, AlwaysInline, NeverInline, TooCostly).</p>
       <div class="controls">
         <input type="text" id="searchBox" placeholder="Filter by caller/callee name...">
         <select id="kindFilter"></select>
@@ -290,7 +294,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       </div>
     </div>
   </section>
-  {notes}
 </div>
 <script>
 const REMARKS_BY_COMMIT = {remarks_by_commit_json};
@@ -389,6 +392,20 @@ function el(tag, attrs) {{
   return e;
 }}
 
+function wrapLabel(label, maxChars) {{
+  if (label.length <= maxChars) return [label];
+  let breakAt = -1;
+  for (const sep of ["::", "(", ", ", " "]) {{
+    const idx = label.lastIndexOf(sep, maxChars);
+    if (idx > maxChars * 0.3) {{ breakAt = idx + sep.length; break; }}
+  }}
+  if (breakAt === -1) breakAt = maxChars;
+  const line1 = label.slice(0, breakAt);
+  let line2 = label.slice(breakAt);
+  if (line2.length > maxChars) line2 = line2.slice(0, maxChars - 1) + "…";
+  return [line1, line2];
+}}
+
 function drawChart(viewKey) {{
   const container = document.getElementById("chartContainer");
   container.textContent = "";
@@ -400,8 +417,7 @@ function drawChart(viewKey) {{
     container.appendChild(p);
     return;
   }}
-  const maxLabelLen = Math.max(...items.map(it => it[0].length));
-  const marginL = Math.min(600, 100 + maxLabelLen * 6), marginR = 60, rowH = 20, plotW = 780;
+  const marginL = 360, marginR = 60, rowH = 40, plotW = 780, maxChars = 44;
   const W = marginL + plotW + marginR;
   const H = items.length * rowH + 20;
   const vmax = Math.max(...items.map(it => Math.abs(it[1])), 1);
@@ -411,9 +427,16 @@ function drawChart(viewKey) {{
     const y = i * rowH;
     const barW = (Math.abs(value) / vmax) * plotW;
     const color = value < 0 ? COLOR_GOOD : COLOR_NEUTRAL;
-    svg.appendChild(el("rect", {{ x: marginL, y: y + 3, width: Math.max(barW, 1), height: rowH - 6, fill: color }}));
-    const lbl = el("text", {{ x: marginL - 8, y: y + rowH / 2 + 4, "text-anchor": "end" }});
-    lbl.textContent = label;
+    svg.appendChild(el("rect", {{ x: marginL, y: y + rowH / 2 - 7, width: Math.max(barW, 1), height: 14, fill: color }}));
+    const lines = wrapLabel(label, maxChars);
+    const lbl = el("text", {{ x: marginL - 8, y: y + rowH / 2 - (lines.length - 1) * 6 + 4, "text-anchor": "end" }});
+    lines.forEach((line, li) => {{
+      const tspan = document.createElementNS(ns, "tspan");
+      tspan.setAttribute("x", marginL - 8);
+      tspan.setAttribute("dy", li === 0 ? 0 : 13);
+      tspan.textContent = line;
+      lbl.appendChild(tspan);
+    }});
     svg.appendChild(lbl);
     const val = el("text", {{ x: marginL + barW + 6, y: y + rowH / 2 + 4 }});
     val.textContent = value;
@@ -454,8 +477,8 @@ if (PAIR_ROWS.length) {{
     "Name (branch)", "Cost (branch)", "Threshold (branch)",
     "Δ Cost", "Δ Threshold"];
   const STATUS_RANK = {{ removed: 0, added: 1, common: 2 }};
-  const STATUS_ROW_COLOR = {{ removed: "#d8b4b4", added: "#bccdb8", common: "" }};
-  const STATUS_ROW_TEXT = {{ removed: "#3a1f1f", added: "#1f3a1f", common: "" }};
+  const STATUS_CELL_COLOR = {{ removed: "#dba3a3", added: "#a9d1b2", common: "#a3bedb" }};
+  const STATUS_CELL_TEXT = {{ removed: "#4a1414", added: "#173a22", common: "#15304a" }};
   let pairSortCol = "status", pairSortDesc = false;
   let pairView = "all";
 
@@ -501,13 +524,14 @@ if (PAIR_ROWS.length) {{
     tbody.textContent = "";
     for (const r of rows) {{
       const tr = document.createElement("tr");
-      if (STATUS_ROW_COLOR[r.status]) {{
-        tr.style.backgroundColor = STATUS_ROW_COLOR[r.status];
-        tr.style.color = STATUS_ROW_TEXT[r.status];
-      }}
       for (const col of PAIR_COLUMNS) {{
         const td = document.createElement("td");
         td.textContent = r[col] ?? "";
+        if (col === "status") {{
+          td.style.backgroundColor = STATUS_CELL_COLOR[r.status] || "";
+          td.style.color = STATUS_CELL_TEXT[r.status] || "";
+          td.style.fontWeight = "600";
+        }}
         if (col === "cost_delta" || col === "threshold_delta") {{
           if (isTrue(r.regression_signal)) td.style.color = COLOR_BAD;
           else if (isTrue(r.improvement_signal)) td.style.color = COLOR_GOOD;
@@ -536,6 +560,7 @@ def render_comparison_section(pair_rows, baseline_commit, branch_commit):
     return f"""
   <section class="comparison-section">
     <h2>Baseline vs Branch &mdash; {html.escape(baseline_commit[:12])} &rarr; {html.escape(branch_commit[:12])}</h2>
+    <p class="legend">Status cell color: green = added, red = removed, blue = common (present in both). &Delta; Cost/&Delta; Threshold text: green = improvement, red = regression.</p>
     {render_comparison_stat_cards(pair_rows)}
     <div class="controls">
       <select id="pairViewPicker">
