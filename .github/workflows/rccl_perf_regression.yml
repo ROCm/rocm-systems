@@ -70,11 +70,11 @@ on:
   # the supported way to ask for A==A, and it yields usable run-to-run noise
   # data instead of a non-answer:
   #
-  #   config=/it-share/rccl-ci/configs/ci_control_prod8.json
+  #   config=$RCCL_CI_ROOT/configs/ci_control_prod8.json
   #
   # That file is ci_detect_prod.json with control_mode flipped and nothing else
   # changed, so it exercises the production matrix rather than a drifted
-  # sibling. Verified on 2026-08-27, run 33112770514: 8/8 groups scored,
+  # sibling. Verified by a control dispatch on 2026-08-27: 8/8 groups scored,
   # trustworthy, 0 regressions, 184 comparison keys, ~26min.
   workflow_dispatch:
     inputs:
@@ -157,9 +157,9 @@ jobs:
     # X64. Asking for self-hosted as well matches no runner at all, and the
     # failure is silent in the worst way: the job sits queued while the runner
     # sits Idle, until timeout-minutes below kills it. Confirmed by dispatch on
-    # 2026-08-26 (run 33015416535: build queued 8min, runner_name empty, while
-    # all three role runners showed Idle and had never run a single job since
-    # they were registered on 2026-08-19).
+    # 2026-08-26: build sat queued 8min with runner_name empty, while all three
+    # role runners showed Idle and had never run a single job since they were
+    # registered on 2026-08-19.
     #
     # The role label is unique to these hosts, so it is sufficient by itself.
     # If they are ever re-registered with default labels, self-hosted may be
