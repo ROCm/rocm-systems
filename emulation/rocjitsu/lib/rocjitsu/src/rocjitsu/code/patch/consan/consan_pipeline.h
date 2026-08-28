@@ -148,6 +148,10 @@ static_assert(kConSanPipelineStageStatuses.size() ==
 struct ConSanPipelineStageState {
   /// Completion, deferral, exclusion, or failure state of the contract.
   ConSanPipelineStageStatus status = ConSanPipelineStageStatus::Invalid;
+  /// Number of times this stage actually executed across all transaction
+  /// passes. A blocked stage is therefore distinguishable from an executed
+  /// stage whose typed result is unsupported or invalid.
+  uint32_t execution_count = 0;
   /// Narrow configuration/capability failure, or `None` for other outcomes.
   ConSanContractIssue contract_issue = ConSanContractIssue::None;
 

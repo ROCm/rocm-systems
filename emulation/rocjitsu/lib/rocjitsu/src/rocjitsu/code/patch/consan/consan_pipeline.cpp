@@ -101,8 +101,10 @@ ConSanPipelineStageState &stage_record(TransformResult &result, ConSanPipelineSt
 void block_pipeline_after(TransformResult &result, ConSanPipelineStage completed_or_failed) {
   const size_t first_blocked = static_cast<size_t>(completed_or_failed) + 1u;
   const size_t publication = static_cast<size_t>(ConSanPipelineStage::ResultPublication);
-  for (size_t index = first_blocked; index < publication; ++index)
+  for (size_t index = first_blocked; index < publication; ++index) {
     result.stages[index].status = ConSanPipelineStageStatus::Blocked;
+    result.stages[index].execution_count = 0;
+  }
 }
 
 [[nodiscard]] ConSanDispatchRequirements
@@ -245,6 +247,12 @@ private:
 
 bool ConSanPipelineStageState::well_formed(ConSanPipelineStage stage) const {
   if (!valid_stage(stage) || !valid_stage_status(status) || !valid_contract_issue(contract_issue)) {
+    return false;
+  }
+  if (status == ConSanPipelineStageStatus::Blocked && execution_count != 0u)
+    return false;
+  if (status != ConSanPipelineStageStatus::Blocked &&
+      status != ConSanPipelineStageStatus::NotApplicable && execution_count == 0u) {
     return false;
   }
   if (contract_issue == ConSanContractIssue::None)
@@ -638,27 +646,33 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       request, transform_policy, runtime_policy, debug, mutation, resources);
   ConSanPipelineStageState &configuration =
       stage_record(result, ConSanPipelineStage::Configuration);
+  configuration.execution_count = 1;
   if (configuration_issue != ConSanContractIssue::None) {
     configuration.status = ConSanPipelineStageStatus::Invalid;
     configuration.contract_issue = configuration_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
     block_pipeline_after(result, ConSanPipelineStage::Configuration);
-    stage_record(result, ConSanPipelineStage::ResultPublication).status =
-        ConSanPipelineStageStatus::Completed;
+    ConSanPipelineStageState &publication =
+        stage_record(result, ConSanPipelineStage::ResultPublication);
+    publication.status = ConSanPipelineStageStatus::Completed;
+    publication.execution_count = 1;
     return result;
   }
   configuration.status = ConSanPipelineStageStatus::Completed;
 
   ConSanPipelineStageState &capability_stage =
       stage_record(result, ConSanPipelineStage::TargetAndRuntimeCapabilities);
+  capability_stage.execution_count = 1;
   const ConSanContractIssue backend_issue = validate_runtime_capabilities(capabilities);
   if (backend_issue != ConSanContractIssue::None) {
     capability_stage.status = ConSanPipelineStageStatus::Invalid;
     capability_stage.contract_issue = backend_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
     block_pipeline_after(result, ConSanPipelineStage::TargetAndRuntimeCapabilities);
-    stage_record(result, ConSanPipelineStage::ResultPublication).status =
-        ConSanPipelineStageStatus::Completed;
+    ConSanPipelineStageState &publication =
+        stage_record(result, ConSanPipelineStage::ResultPublication);
+    publication.status = ConSanPipelineStageStatus::Completed;
+    publication.execution_count = 1;
     return result;
   }
 
@@ -690,6 +704,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
 
   ConSanPipelineStageState &inventory_stage =
       stage_record(result, ConSanPipelineStage::ProgramInventory);
+  inventory_stage.execution_count = execution.program_inventory_passes;
   if (flavor == ConSanFlavor::None) {
     inventory_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (execution.program_inventory_passes == 0u) {
@@ -705,6 +720,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
 
   ConSanPipelineStageState &observation_stage =
       stage_record(result, ConSanPipelineStage::ObservationPlan);
+  observation_stage.execution_count = execution.observation_plan_passes;
   if (flavor == ConSanFlavor::None) {
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (execution.observation_plan_passes == 0u) {
@@ -762,8 +778,10 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
   } else if (result.evidence_intent_plan && result.evidence_intent_plan->well_formed() &&
              result.evidence_requirements &&
              consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
+    evidence_stage.execution_count = 1;
     evidence_stage.status = ConSanPipelineStageStatus::Completed;
   } else {
+    evidence_stage.execution_count = 1;
     evidence_stage.status = ConSanPipelineStageStatus::Invalid;
   }
 
@@ -775,12 +793,16 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
              !result.evidence_requirements) {
     binding_stage.status = ConSanPipelineStageStatus::Blocked;
   } else if (!evidence_is_complete(*result.evidence_requirements)) {
+    binding_stage.execution_count = 1;
     binding_stage.status = ConSanPipelineStageStatus::Unsupported;
   } else if (!evidence_requires_binding(*result.evidence_requirements)) {
+    binding_stage.execution_count = 1;
     binding_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (!resources.bound()) {
+    binding_stage.execution_count = 1;
     binding_stage.status = ConSanPipelineStageStatus::Deferred;
   } else {
+    binding_stage.execution_count = 1;
     const ConSanContractIssue requirement_issue = validate_runtime_capabilities(
         capabilities, runtime_requirements(*result.evidence_requirements));
     const ConSanContractIssue resource_issue =
@@ -830,6 +852,8 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       stage_record(result, ConSanPipelineStage::ResourceSolvingAndLowering);
   ConSanPipelineStageState &validation_stage =
       stage_record(result, ConSanPipelineStage::FinalValidation);
+  lowering_stage.execution_count = execution.resource_solving_and_lowering_passes;
+  validation_stage.execution_count = execution.final_validation_passes;
   if (flavor == ConSanFlavor::None) {
     lowering_stage.status = ConSanPipelineStageStatus::NotApplicable;
     validation_stage.status = ConSanPipelineStageStatus::NotApplicable;
@@ -841,8 +865,10 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
                                   ? ConSanPipelineStageStatus::Blocked
                                   : terminal_stage_status(lowerer_outcome);
   }
-  stage_record(result, ConSanPipelineStage::ResultPublication).status =
-      ConSanPipelineStageStatus::Completed;
+  ConSanPipelineStageState &publication =
+      stage_record(result, ConSanPipelineStage::ResultPublication);
+  publication.status = ConSanPipelineStageStatus::Completed;
+  publication.execution_count = 1;
 
   return result;
 }

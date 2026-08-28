@@ -93,6 +93,7 @@ TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues)
 TEST(ConSanPipeline, StageStateValidatesPositionStatusAndContractPayload) {
   const ConSanPipelineStageState record{
       .status = ConSanPipelineStageStatus::Completed,
+      .execution_count = 1,
   };
   EXPECT_TRUE(record.well_formed(ConSanPipelineStage::Configuration));
 
@@ -100,6 +101,13 @@ TEST(ConSanPipeline, StageStateValidatesPositionStatusAndContractPayload) {
   malformed.status = ConSanPipelineStageStatus::Count;
   EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
   EXPECT_FALSE(record.well_formed(ConSanPipelineStage::Count));
+  malformed = record;
+  malformed.execution_count = 0;
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
+  malformed.status = ConSanPipelineStageStatus::Blocked;
+  EXPECT_TRUE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
+  malformed.execution_count = 1;
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
   malformed = record;
   malformed.contract_issue = ConSanContractIssue::MissingFlavor;
   EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
