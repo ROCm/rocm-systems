@@ -43,6 +43,12 @@
 #define ODL_HANDLE_MAGIC       0x4F444C00u  /* 'O','D','L',0 */
 #define ODL_HANDLE_VERSION     1
 #define ODL_WAIT_PEER_MS       10000
+/* Bound unconsumed RX data without adding a round trip to small messages. */
+#define ODL_ACK_MIN_MESSAGE    (64 * 1024)
+#define ODL_ACK_WINDOW_BYTES   (4 * 1024 * 1024)
+#define ODL_ACK_VALUE          0xA5
+/* Stay below both the vendored and protocol-v2 4096-frame message limits. */
+#define ODL_WIRE_CHUNK_BYTES   (8 * 1024 * 1024)
 #define ODL_FORCE_DEV_ENV      "ODL_TB5_FORCE_DEV_INDEX"
 #define ODL_PROFILE_ENV        "ODL_TB5_PROFILE"
 #define ODL_PROFILE_INTERVAL_ENV "ODL_TB5_PROFILE_INTERVAL"
@@ -167,7 +173,7 @@ struct odl_comm {
 	odl_tb5_t       handle;       /* shared device, ref held */
 	int             dev_id;
 	uint8_t         stream_id;    /* local stream */
-	uint8_t         dst_id;       /* peer stream id (sends only) */
+	uint8_t         dst_id;       /* peer stream id for data or ACKs */
 	bool            is_send;
 	bool            stream_owned; /* true => closeXxx must close stream */
 
@@ -175,6 +181,7 @@ struct odl_comm {
 	pthread_mutex_t mu;
 	pthread_cond_t  cv;
 	bool            shutdown;
+	uint64_t        ack_bytes;    /* worker-owned flow-control counter */
 
 	/* Ring buffer of pending jobs. Producer = proxy thread (isend/irecv),
 	 * consumer = worker thread. comm_submit blocks only if the ring is
@@ -496,6 +503,75 @@ static int stream_recv_timed(struct odl_comm *c, void *buf, uint32_t len,
 				   src_id, actual);
 }
 
+static int stream_send_payload(struct odl_comm *c, const void *data,
+			       uint32_t len)
+{
+	uint32_t sent = 0;
+
+	while (sent < len) {
+		uint32_t chunk = len - sent;
+		int ret;
+
+		if (chunk > ODL_WIRE_CHUNK_BYTES)
+			chunk = ODL_WIRE_CHUNK_BYTES;
+		ret = odl_tb5_stream_send(c->handle, c->stream_id, c->dst_id,
+					  (const uint8_t *)data + sent, chunk);
+		if (ret != 0)
+			return ret;
+		sent += chunk;
+	}
+	return 0;
+}
+
+static int stream_recv_payload(struct odl_comm *c, void *data, uint32_t len)
+{
+	uint32_t recvd = 0;
+
+	while (recvd < len) {
+		uint32_t chunk = len - recvd;
+		uint32_t actual = 0;
+		int ret;
+
+		if (chunk > ODL_WIRE_CHUNK_BYTES)
+			chunk = ODL_WIRE_CHUNK_BYTES;
+		ret = stream_recv_timed(c, (uint8_t *)data + recvd, chunk,
+					NULL, &actual);
+		if (ret != 0)
+			return ret;
+		if (actual != chunk) {
+			fprintf(stderr,
+				"[odl_tb5] payload boundary mismatch sid=%u expected=%u actual=%u\n",
+				c->stream_id, chunk, actual);
+			return -EBADMSG;
+		}
+		recvd += actual;
+	}
+	return 0;
+}
+
+static int stream_drain_payload(struct odl_comm *c, uint32_t len)
+{
+	uint8_t scratch[4096];
+	uint32_t drained = 0;
+
+	while (drained < len) {
+		uint32_t chunk = len - drained;
+		uint32_t copy_len, actual = 0;
+		int ret;
+
+		if (chunk > ODL_WIRE_CHUNK_BYTES)
+			chunk = ODL_WIRE_CHUNK_BYTES;
+		copy_len = chunk < sizeof(scratch) ? chunk : sizeof(scratch);
+		ret = stream_recv_timed(c, scratch, copy_len, NULL, &actual);
+		if (ret != 0)
+			return ret;
+		if (actual != copy_len)
+			return -EBADMSG;
+		drained += chunk;
+	}
+	return 0;
+}
+
 static void *worker_fn(void *arg)
 {
 	struct odl_comm *c = arg;
@@ -538,8 +614,7 @@ static void *worker_fn(void *arg)
 					t0 = mono_ns();
 				TRACE("TX pay_pre sid=%u dst=%u size=%d",
 				      c->stream_id, c->dst_id, j.size);
-				ret = odl_tb5_stream_send(c->handle, c->stream_id,
-							  c->dst_id, j.data,
+				ret = stream_send_payload(c, j.data,
 							  (uint32_t)j.size);
 				if (g_profile) {
 					t1 = mono_ns();
@@ -549,12 +624,31 @@ static void *worker_fn(void *arg)
 				TRACE("TX pay_post sid=%u dst=%u size=%d ret=%d",
 				      c->stream_id, c->dst_id, j.size, ret);
 			}
+			if (ret == 0 && j.size >= ODL_ACK_MIN_MESSAGE)
+				c->ack_bytes += (uint64_t)j.size;
+			if (ret == 0 &&
+			    c->ack_bytes >= ODL_ACK_WINDOW_BYTES) {
+				uint8_t ack = 0;
+				uint32_t actual = 0;
+
+				c->ack_bytes = 0;
+				ret = stream_recv_timed(c, &ack, sizeof(ack),
+							NULL, &actual);
+				if (ret == 0 &&
+				    (actual != sizeof(ack) ||
+				     ack != ODL_ACK_VALUE)) {
+					fprintf(stderr,
+						"[odl_tb5] invalid RX ack sid=%u actual=%u value=0x%02x\n",
+						c->stream_id, actual, ack);
+					ret = -EBADMSG;
+				}
+			}
 			if (ret == 0) {
 				xferred = j.size;
 				stats_tx(xferred);
 			}
 		} else {
-			uint32_t hdr = 0, actual = 0, recvd = 0;
+			uint32_t hdr = 0, actual = 0;
 			int ret = 0;
 			uint64_t t0 = 0, t1 = 0;
 
@@ -562,30 +656,21 @@ static void *worker_fn(void *arg)
 				t0 = mono_ns();
 			TRACE("RX hdr_pre sid=%u jsize=%d",
 			      c->stream_id, j.size);
-			while (recvd < sizeof(hdr)) {
-				actual = 0;
-				ret = stream_recv_timed(
-					c,
-					(uint8_t *)&hdr + recvd,
-					sizeof(hdr) - recvd, NULL, &actual);
-				if (ret != 0)
-					break;
-				if (actual == 0) {
-					fprintf(stderr,
-						"[odl_tb5] FATAL: hdr EOF sid=%u recvd=%u expected=%zu peer closed\n",
-						c->stream_id, recvd, sizeof(hdr));
-					ret = -EBADMSG;
-					break;
-				}
-				recvd += actual;
+			ret = stream_recv_timed(c, &hdr, sizeof(hdr), NULL,
+						&actual);
+			if (ret == 0 && actual != sizeof(hdr)) {
+				fprintf(stderr,
+					"[odl_tb5] header boundary mismatch sid=%u expected=%zu actual=%u\n",
+					c->stream_id, sizeof(hdr), actual);
+				ret = -EBADMSG;
 			}
 			if (g_profile) {
 				t1 = mono_ns();
 				prof_add_u64(&prof->hdr_ops, 1);
 				prof_add_u64(&prof->hdr_ns, t1 - t0);
 			}
-			TRACE("RX hdr_post sid=%u ret=%d recvd=%u hdr=%u",
-			      c->stream_id, ret, recvd, hdr);
+			TRACE("RX hdr_post sid=%u ret=%d actual=%u hdr=%u",
+			      c->stream_id, ret, actual, hdr);
 
 			if (ret == 0 && hdr > 32u * 1024u * 1024u) {
 				fprintf(stderr,
@@ -594,41 +679,44 @@ static void *worker_fn(void *arg)
 				ret = -EBADMSG;
 			} else if (ret == 0 && hdr > 0) {
 				if ((int)hdr > j.size) {
+					int drain_ret = stream_drain_payload(c, hdr);
+
+					if (drain_ret != 0)
+						fprintf(stderr,
+							"[odl_tb5] payload drain failed sid=%u size=%u rc=%d\n",
+							c->stream_id, hdr,
+							drain_ret);
 					ret = -EMSGSIZE;
 				} else {
-					uint32_t prx = 0;
 					if (g_profile)
 						t0 = mono_ns();
 					TRACE("RX pay_pre sid=%u hdr=%u jsize=%d",
 					      c->stream_id, hdr, j.size);
-					while (prx < hdr) {
-						actual = 0;
-						ret = stream_recv_timed(
-							c,
-							(uint8_t *)j.data + prx,
-							hdr - prx, NULL, &actual);
-						if (ret != 0)
-							break;
-						if (actual == 0) {
-							fprintf(stderr,
-								"[odl_tb5] FATAL: payload EOF sid=%u prx=%u expected=%u peer closed\n",
-								c->stream_id, prx, hdr);
-							ret = -EBADMSG;
-							break;
-						}
-						prx += actual;
-					}
+					ret = stream_recv_payload(c, j.data, hdr);
 					if (g_profile) {
 						t1 = mono_ns();
 						prof_add_u64(&prof->pay_ops, 1);
 						prof_add_u64(&prof->pay_ns, t1 - t0);
 					}
-					TRACE("RX pay_post sid=%u ret=%d prx=%u",
-					      c->stream_id, ret, prx);
-					actual = prx;
+					TRACE("RX pay_post sid=%u ret=%d size=%u",
+					      c->stream_id, ret, hdr);
+					actual = ret == 0 ? hdr : 0;
 				}
 			} else if (ret == 0 && hdr == 0) {
 				actual = 0;
+			}
+			if (ret == 0 && hdr >= ODL_ACK_MIN_MESSAGE)
+				c->ack_bytes += hdr;
+			if (ret == 0 &&
+			    c->ack_bytes >= ODL_ACK_WINDOW_BYTES) {
+				uint8_t ack = ODL_ACK_VALUE;
+
+				c->ack_bytes = 0;
+				ret = odl_tb5_stream_send(c->handle,
+							  c->stream_id,
+							  c->dst_id,
+							  &ack,
+							  sizeof(ack));
 			}
 			if (ret == 0) {
 				xferred = (int)actual;
@@ -1021,7 +1109,7 @@ static ncclResult_t odl_accept(void *listenComm, void **recvComm)
 	if (device_acquire(l->ports[idx].dev_id, &handle) < 0)
 		return ncclSystemError;
 	c = comm_new(handle, l->ports[idx].dev_id, l->ports[idx].stream_id,
-		     0, false, true);
+		     l->accepted_src, false, true);
 	if (!c) {
 		device_release(l->ports[idx].dev_id);
 		return ncclSystemError;
