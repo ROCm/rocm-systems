@@ -43,6 +43,9 @@ thread_local int             ncclDebugNoWarn = 0;
 // shareable-handle export/import needed).
 hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
+// This host-only binary always exercises the fake VMM implementation below.
+int ncclCuMemEnable() { return 1; }
+
 thread_local int             ncclGroupDepth = 0;
 thread_local ncclResult_t    ncclGroupError = ncclSuccess;
 thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
@@ -90,10 +93,12 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 // ---------------------------------------------------------------------------
 // Param loader.
 // ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
+int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
+  const char* value = env == nullptr ? nullptr : getenv(env);
+  int64_t loaded = value == nullptr ? deftVal : strtoll(value, nullptr, 0);
+  if (cache) *cache = loaded;
   if (noCache) *noCache = 0;
-  return deftVal;
+  return loaded;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,16 +192,6 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GI
   return ncclSuccess;
 }
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
-
-// ---------------------------------------------------------------------------
-// devr internal helpers (defined elsewhere in the real build).
-// ---------------------------------------------------------------------------
-ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
-ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
-                                                    struct ncclSegmentWindow** out) {
-  if (out) *out = nullptr;
-  return ncclSuccess;
-}
 
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).

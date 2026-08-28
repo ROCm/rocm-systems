@@ -183,9 +183,6 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
-  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
-  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
 #if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
@@ -204,18 +201,26 @@ int ncclCuMemHostEnable() {
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
+#if !defined(__HIP_PLATFORM_AMD__)
       CUdevice currentDev;
       int cpuNumaNodeId = -1;
+#endif
       CUmemAllocationProp prop = {};
       size_t granularity = 0;
       size_t size;
       CUmemGenericAllocationHandle handle;
       CUDACHECK(cudaGetDevice(&cudaDev));
+#if !defined(__HIP_PLATFORM_AMD__)
       CUCHECK(cuDeviceGet(&currentDev, cudaDev));
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
+#endif
       // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+#if defined(__HIP_PLATFORM_AMD__)
       prop.location.type = hipMemLocationTypeHost;
+#else
+      prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#endif
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
       // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.

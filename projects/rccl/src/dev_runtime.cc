@@ -40,9 +40,12 @@ NCCL_PARAM(RMADisable, "RMA_DISABLE", 0);
 // alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
 // consumer paths recognize AMD host segments.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
+#if defined(__HIP_PLATFORM_AMD__)
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+  if (type == hipMemLocationTypeHost) return true;
+#endif
+#else
   if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
-  if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
 #endif
   return false;
 }
@@ -384,6 +387,9 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
     bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    if (r != devr->lsaSelf && reuseLocal) {
+      INFO(NCCL_REG, "Symmetric window reusing system-memory handle rank %d segment %d", r, segment);
+    }
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
                                                      reuseLocal),
@@ -419,6 +425,38 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages,
                                             sizeof(symLsaMessage) * maxSegments),
                 ret, fail);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // TODO(ROCM-29810): Remove this workaround when the runtime preserves imported VMM location metadata.
+  // HIP reports imported host VMM handles as device memory. For symmetric
+  // layouts, propagate the owner's host classification so peer segments use
+  // the system-memory handle-reuse path.
+  if (ncclParamSymReuseSysmemHandles()) {
+    for (int segment = 0; segment < numSegments; segment++) {
+#if defined(__HIP_PLATFORM_AMD__)
+      CUmemLocationType hostType = hipMemLocationTypeHost;
+#else
+      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#endif
+      bool foundHost = false;
+      for (int r = 0; r < devr->lsaSize; r++) {
+        symLsaMessage* msg = messages + r * maxSegments + segment;
+        if (segment < segmentCounts[r] && ncclSymIsHostSegment(msg->type)) {
+          hostType = msg->type;
+          foundHost = true;
+          break;
+        }
+      }
+      if (foundHost) {
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment < segmentCounts[r]) {
+            messages[r * maxSegments + segment].type = hostType;
+          }
+        }
+      }
+    }
+  }
+#endif
 
   if (devr->lsaFlatBase == nullptr) {
     // Create on first need.
@@ -663,7 +701,13 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     size_t offset = 0;
     for (int segment = 0; segment < mem->numSegments; segment++) {
       CUmemLocationType locType = segmentTypes[segment];
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // AMD host-backed VMM uses DMA-BUF, so register every segment through
+      // NCCL_PTR_CUDA; ordinary ibv_reg_mr page pinning fails with EFAULT.
+      int ptrType = NCCL_PTR_CUDA;
+#else
       int ptrType = ncclSymIsHostSegment(locType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+#endif
       NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->segmentSizes[segment],
                                     mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
@@ -1287,6 +1331,19 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   // RCCL: when sym VMM is unavailable (no cuMem), route through the non-sym
   // helper which lays out IPC for intra-node and proxy/GIN MR for inter-node
   if (!comm->symmetricSupport) {
+    // Host-backed VMM cannot be exported through the non-symmetric IPC
+    // fallback. Probe its segment layout first so the common support check can
+    // reject it before windowRegisterNonSym attempts cudaIpcGetMemHandle. Do
+    // not probe ordinary allocations when cuMem is disabled: ROCm 7.0.2.2
+    // faults in hipMemRetainAllocationHandle instead of returning an error.
+    if (ncclCuMemEnable()) {
+      ncclResult_t probeRet =
+          ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments,
+                                   &hasSysmemSegment);
+      if (probeRet == ncclSuccess) {
+        NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
+      }
+    }
     NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
     return ncclSuccess;
   }
@@ -1303,31 +1360,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                 ret, fail_locReg);
   NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
 
-  if (hasSysmemSegment) {
-    if (!ncclParamElasticBufferRegister()) {
-      WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but "
-           "NCCL_ELASTIC_BUFFER_REGISTER is set to 0. Please set NCCL_ELASTIC_BUFFER_REGISTER=1 and retry window "
-           "registration",
-           userPtr, userSize);
-      ret = ncclInvalidArgument;
-      goto fail_locReg;
-    }
-#if CUDART_VERSION >= 12080
-    else if (comm->MNNVL) {
-      int multiNodeLsaSupported = 0;
-      CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED,
-                                       comm->cudaDev),
-                  ret, fail_locReg);
-      if (!multiNodeLsaSupported) {
-        WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team "
-             "does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0",
-             userPtr, userSize);
-        ret = ncclInvalidArgument;
-        goto fail_locReg;
-      }
-    }
-#endif
-  }
+  NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
 
   memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
   if (memOffset % NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
