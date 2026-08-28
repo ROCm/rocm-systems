@@ -36,14 +36,23 @@ enum class ConSanPipelineStage : uint8_t {
   ObservationPlan,
   EvidenceRequirements,
   RuntimeBinding,
+  ResourceSolvingAndLowering,
+  FinalValidation,
+  ResultPublication,
   Count,
 };
 
 /// Complete dependency-ordered set of ConSan transformation stages.
-inline constexpr std::array<ConSanPipelineStage, 6> kConSanPipelineStages = {
-    ConSanPipelineStage::Configuration,        ConSanPipelineStage::TargetAndRuntimeCapabilities,
-    ConSanPipelineStage::ProgramInventory,     ConSanPipelineStage::ObservationPlan,
-    ConSanPipelineStage::EvidenceRequirements, ConSanPipelineStage::RuntimeBinding,
+inline constexpr std::array<ConSanPipelineStage, 9> kConSanPipelineStages = {
+    ConSanPipelineStage::Configuration,
+    ConSanPipelineStage::TargetAndRuntimeCapabilities,
+    ConSanPipelineStage::ProgramInventory,
+    ConSanPipelineStage::ObservationPlan,
+    ConSanPipelineStage::EvidenceRequirements,
+    ConSanPipelineStage::RuntimeBinding,
+    ConSanPipelineStage::ResourceSolvingAndLowering,
+    ConSanPipelineStage::FinalValidation,
+    ConSanPipelineStage::ResultPublication,
 };
 
 /// Return the stable diagnostic spelling of a pipeline stage. Sentinels and
@@ -62,6 +71,12 @@ inline constexpr std::array<ConSanPipelineStage, 6> kConSanPipelineStages = {
     return "evidence-requirements";
   case ConSanPipelineStage::RuntimeBinding:
     return "runtime-binding";
+  case ConSanPipelineStage::ResourceSolvingAndLowering:
+    return "resource-solving-and-lowering";
+  case ConSanPipelineStage::FinalValidation:
+    return "final-validation";
+  case ConSanPipelineStage::ResultPublication:
+    return "result-publication";
   case ConSanPipelineStage::Count:
     break;
   }

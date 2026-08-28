@@ -402,6 +402,12 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeTargetLoweringWithTypedIssue
   EXPECT_TRUE(result.errors.empty());
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+            ConSanPipelineStageStatus::NotApplicable);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
+            ConSanPipelineStageStatus::NotApplicable);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::ResultPublication)->status,
+            ConSanPipelineStageStatus::Completed);
 
   EXPECT_TRUE(result.program_inventory.empty());
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
@@ -603,6 +609,12 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), bound);
   ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
+            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->status,
+            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResultPublication)->status,
             ConSanPipelineStageStatus::Completed);
 
   RuntimeCapabilities missing_visibility = complete_runtime_capabilities();
