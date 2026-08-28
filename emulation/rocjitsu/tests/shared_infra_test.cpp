@@ -5101,7 +5101,7 @@ TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp64RejectsDpp) {
   EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)).failed());
 }
 
-TEST(DppPermuteTest, Rdna4GeneratedRejectsOpcodeIllegalDppFamilies) {
+TEST(DppPermuteTest, Rdna4GeneratedDppOwnershipFollowsLogicalSource) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
 
@@ -5109,7 +5109,7 @@ TEST(DppPermuteTest, Rdna4GeneratedRejectsOpcodeIllegalDppFamilies) {
   vop1.src0 = amdgpu::SRC_DPP;
   vop1.op = rdna4::kVNopVop1;
   vop1.encoding = 63;
-  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop1)).failed());
+  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop1)).succeeded());
 
   rdna4::Vop2VopDpp16MachineInst vop2{};
   vop2.src0 = amdgpu::SRC_DPP;
@@ -5135,7 +5135,7 @@ TEST(DppPermuteTest, Rdna4GeneratedRejectsOpcodeIllegalDppFamilies) {
   EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p)).failed());
 }
 
-TEST(DppPermuteTest, Rdna4GeneratedValidatesDppOpselAlignment) {
+TEST(DppPermuteTest, Rdna4GeneratedAllowsIndependentDppOpsel) {
   auto make_vop3 = [](uint32_t opsel) {
     rdna4::Vop3VopDpp16MachineInst raw{};
     raw.src0 = amdgpu::SRC_DPP;
@@ -5152,7 +5152,7 @@ TEST(DppPermuteTest, Rdna4GeneratedValidatesDppOpselAlignment) {
   auto vop3_mixed = make_vop3(0x9);
   EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3_low)).succeeded());
   EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3_high)).succeeded());
-  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3_mixed)).failed());
+  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3_mixed)).succeeded());
 
   auto make_vop3p = [](uint32_t opsel, uint32_t opsel_hi) {
     rdna4::Vop3pVopDpp16MachineInst raw{};
@@ -5169,8 +5169,8 @@ TEST(DppPermuteTest, Rdna4GeneratedValidatesDppOpselAlignment) {
   auto vop3p_mixed_low = make_vop3p(0x1, 0x7);
   auto vop3p_mixed_high = make_vop3p(0x0, 0x3);
   EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p_aligned)).succeeded());
-  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p_mixed_low)).failed());
-  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p_mixed_high)).failed());
+  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p_mixed_low)).succeeded());
+  EXPECT_TRUE(decoder->decode(reinterpret_cast<const uint32_t *>(&vop3p_mixed_high)).succeeded());
 }
 
 TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
@@ -5212,7 +5212,8 @@ TEST(DppPermuteTest, Cdna3And4GeneratedVop1Dpp64AcceptOnlyRowSelectControls) {
 }
 
 template <typename RawInst>
-void expect_legacy_dpp_opcode_rejected(rj_code_arch_t arch, uint32_t opcode, uint32_t encoding) {
+void expect_legacy_dpp_opcode_result(rj_code_arch_t arch, uint32_t opcode, uint32_t encoding,
+                                     bool rejected = true) {
   std::array<uint32_t, 3> words{};
   auto *raw = reinterpret_cast<RawInst *>(words.data());
   raw->src0 = amdgpu::SRC_DPP;
@@ -5220,26 +5221,26 @@ void expect_legacy_dpp_opcode_rejected(rj_code_arch_t arch, uint32_t opcode, uin
   raw->encoding = encoding;
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr);
-  EXPECT_TRUE(decoder->decode(words.data()).failed());
+  EXPECT_EQ(decoder->decode(words.data()).failed(), rejected);
 }
 
-TEST(DppPermuteTest, LegacyGeneratedDecodersRejectProhibitedDppOpcodes) {
-  expect_legacy_dpp_opcode_rejected<cdna1::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA1,
-                                                                  cdna1::kVCvtI32F64Vop1, 63);
-  expect_legacy_dpp_opcode_rejected<cdna2::Vop1VopDppMachineInst>(
-      ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVReadfirstlaneB32Vop1, 63);
-  expect_legacy_dpp_opcode_rejected<cdna3::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA3,
-                                                                  cdna3::kVSwapB32Vop1, 63);
-  expect_legacy_dpp_opcode_rejected<cdna3::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA3,
-                                                                  cdna3::kVCvtI32F64Vop1, 63);
-  expect_legacy_dpp_opcode_rejected<cdna4::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA4,
-                                                                  cdna4::kVClrexcpVop1, 63);
-  expect_legacy_dpp_opcode_rejected<cdna4::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA4,
-                                                                  cdna4::kVCvtI32F64Vop1, 63);
-  expect_legacy_dpp_opcode_rejected<rdna1::Vop2VopDpp16MachineInst>(ROCJITSU_CODE_ARCH_RDNA1,
-                                                                    rdna1::kVMadmkF32Vop2, 0);
-  expect_legacy_dpp_opcode_rejected<rdna2::VopcMachineInst>(ROCJITSU_CODE_ARCH_RDNA2,
-                                                            rdna2::kVCmpEqF64Vopc, 62);
+TEST(DppPermuteTest, LegacyGeneratedDppOwnershipFollowsLogicalSource) {
+  expect_legacy_dpp_opcode_result<cdna1::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA1,
+                                                                cdna1::kVCvtI32F64Vop1, 63);
+  expect_legacy_dpp_opcode_result<cdna2::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA2,
+                                                                cdna2::kVReadfirstlaneB32Vop1, 63);
+  expect_legacy_dpp_opcode_result<cdna3::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA3,
+                                                                cdna3::kVSwapB32Vop1, 63);
+  expect_legacy_dpp_opcode_result<cdna3::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA3,
+                                                                cdna3::kVCvtI32F64Vop1, 63);
+  expect_legacy_dpp_opcode_result<cdna4::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA4,
+                                                                cdna4::kVClrexcpVop1, 63, false);
+  expect_legacy_dpp_opcode_result<cdna4::Vop1VopDppMachineInst>(ROCJITSU_CODE_ARCH_CDNA4,
+                                                                cdna4::kVCvtI32F64Vop1, 63);
+  expect_legacy_dpp_opcode_result<rdna1::Vop2VopDpp16MachineInst>(ROCJITSU_CODE_ARCH_RDNA1,
+                                                                  rdna1::kVMadmkF32Vop2, 0);
+  expect_legacy_dpp_opcode_result<rdna2::VopcMachineInst>(ROCJITSU_CODE_ARCH_RDNA2,
+                                                          rdna2::kVCmpEqF64Vopc, 62);
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
