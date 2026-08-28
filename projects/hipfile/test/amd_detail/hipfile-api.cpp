@@ -152,6 +152,7 @@ struct HipFileIoParam : public TestWithParam<IoType> {
     const void                      *unreg_bufptr{reinterpret_cast<void *>(0xFACEFEED)};
     shared_ptr<StrictMock<MBackend>> mbackend{make_shared<StrictMock<MBackend>>()};
     vector<shared_ptr<Backend>>      mbackends{mbackend};
+    vector<hipMemoryType>            unsupported_memory_types;
 
     HipFileIoParam()
     {
@@ -167,6 +168,9 @@ struct HipFileIoParam : public TestWithParam<IoType> {
             expect_buffer_registration(mhip, hipMemoryTypeDevice);
             Context<DriverState>::get()->registerBuffer(bufptr, buflen, 0);
         }
+
+        vector supported_memory_types = set_union(SupportedFastpathMemoryTypes, SupportedHostMemoryTypes);
+        unsupported_memory_types      = set_difference(KnownHipMemoryTypes, supported_memory_types);
     }
 };
 
@@ -179,7 +183,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
 
 TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
 {
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : unsupported_memory_types) {
         StrictMock<MHip>      mhip;
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;

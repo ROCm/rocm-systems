@@ -134,7 +134,7 @@ TEST_F(HostScoring, ScoreRejectsIoTargetingDeviceMemory)
 TEST_F(HostScoring, ScoreRejectsIoTargetingUnsupportedMemoryTypes)
 {
     EXPECT_CALL(mcfg, host()).WillRepeatedly(Return(true));
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : set_difference(KnownHipMemoryTypes, SupportedHostMemoryTypes)) {
         EXPECT_CALL(*mbuffer, getType).WillOnce(Return(memoryType));
         ASSERT_EQ(Host().score(mfile, mbuffer, io_size, file_offset, buffer_offset), -1);
     }
@@ -294,8 +294,7 @@ TEST_P(HostParam, HostIoTruncatesSizeToMAX_RW_COUNT)
             FAIL();
     }
 
-    ASSERT_EQ(hipFile::getMaxRwCount(),
-              Host().io(io_type, file, std::move(big_buffer), SIZE_MAX, 0, 0));
+    ASSERT_EQ(hipFile::getMaxRwCount(), Host().io(io_type, file, std::move(big_buffer), SIZE_MAX, 0, 0));
 }
 
 INSTANTIATE_TEST_SUITE_P(Host, HostParam, ::testing::Values(IoType::Read, IoType::Write));
@@ -445,7 +444,8 @@ TEST_F(HostWrite, HostWriteToFileSubregion)
     randomize_host_buffer();
     expect_host_write();
 
-    ASSERT_EQ(buffer->getLength(), Host().io(IoType::Write, file, buffer, buffer->getLength(), file_offset, 0));
+    ASSERT_EQ(buffer->getLength(),
+              Host().io(IoType::Write, file, buffer, buffer->getLength(), file_offset, 0));
     ASSERT_TRUE(file_contains_expected_data(file_offset, 0, buffer->getLength()));
 }
 
@@ -615,7 +615,8 @@ TEST_F(HostRead, HostReadWithNonZeroFileOffset)
     hoff_t file_offset{static_cast<hoff_t>(buffer->getLength())};
 
     expect_host_read();
-    ASSERT_EQ(buffer->getLength(), Host().io(IoType::Read, file, buffer, buffer->getLength(), file_offset, 0));
+    ASSERT_EQ(buffer->getLength(),
+              Host().io(IoType::Read, file, buffer, buffer->getLength(), file_offset, 0));
     ASSERT_TRUE(host_buffer_contains_expected_data(file_offset, 0, buffer->getLength()));
 }
 
@@ -626,7 +627,8 @@ TEST_F(HostRead, HostReadToEofWithNonZeroFileOffset)
     hoff_t file_offset{static_cast<hoff_t>(buffer->getLength())};
 
     expect_host_read();
-    ASSERT_EQ(buffer->getLength(), Host().io(IoType::Read, file, buffer, buffer->getLength(), file_offset, 0));
+    ASSERT_EQ(buffer->getLength(),
+              Host().io(IoType::Read, file, buffer, buffer->getLength(), file_offset, 0));
     ASSERT_TRUE(host_buffer_contains_expected_data(file_offset, 0, buffer->getLength()));
 }
 
