@@ -554,6 +554,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
+    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
@@ -927,6 +928,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
   // Multi-segment adds one segmented multi-recv chain to the 2*MAX budget.
   qpCreateAttrs.maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
+  if (meta->isRMA) qpCreateAttrs.maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
@@ -1383,6 +1385,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   comm->base.isP2p = isP2p;
+  comm->base.isRma = handle->isRMA;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
   IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
@@ -1882,7 +1885,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest = IbCastFlushQpSendDepth();
+      qpCreateAttrs.maxSendWorkRequest = remMeta->isRMA ? NCCL_IB_RMA_MAX_FLUSH_WRS : IbCastFlushQpSendDepth();
       qpCreateAttrs.qpContext = &rComm->base.stats;
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
@@ -2310,6 +2313,7 @@ ib_recv:
   rComm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   rComm->base.isP2p = remMeta.isP2p;
+  rComm->base.isRma = remMeta.isRMA;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);

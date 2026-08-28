@@ -133,7 +133,6 @@ static inline void ncclRmaWrCreditsRecord(struct ncclRmaWrCredits* c, uint64_t i
   c->trackedWrs += nWrs - *wrs;
   *wrs = (uint8_t)nWrs;
 }
-
 // True when ibv_post_send accepted a prefix that did not include the signaled last WR.
 static inline int ncclRmaPrefixPostLostSignaledTail(int posted, int nWr) {
   return posted > 0 && posted < nWr;
@@ -147,6 +146,14 @@ static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) 
 // Equal nSegments in [1, NCCL_RMA_MAX_SEGMENTS]. Terminal sizes may differ.
 static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
   return lhsSegments == rhsSegments && lhsSegments >= 1 && lhsSegments <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets, int rhsSegments,
+                                      const size_t* rhsOffsets) {
+  if (lhsSegments != rhsSegments || lhsSegments < 1 || lhsSegments > NCCL_RMA_MAX_SEGMENTS) return 0;
+  for (int s = 0; s <= lhsSegments; s++)
+    if (lhsOffsets[s] != rhsOffsets[s]) return 0;
+  return 1;
 }
 
 // Peer segOff tables feed unsigned offset math: they must start at 0 and never decrease.
