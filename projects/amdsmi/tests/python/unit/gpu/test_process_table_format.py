@@ -63,7 +63,7 @@ class TestProcessTableFormat(unittest.TestCase):
     def setUpClass(cls):
         if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
             raise unittest.SkipTest(
-                f"amd-smi CLI not found ({LOGGER_PATH or _CLI_DIR}): amdsmi_logger.py not present"
+                f"amd-smi CLI amdsmi_logger.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         stub_modules(cls, {"amdsmi_helpers": _fake_helpers()})
         cls.logger = _load_logger_module()

@@ -19,39 +19,18 @@ import unittest
 
 # ``common.common`` bootstraps the real amdsmi package at import time (sys.path
 # insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
-# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself and
-# only needs ``amdsmi_path`` to locate the *installed* CLI fallback, so degrade
-# gracefully: if the shared harness cannot load, drop to ``None`` and rely on
-# the in-tree source checkout (resolved first below). Keeps this file runnable
-# from a plain checkout even when no matching amdsmi is installed.
+# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself, so
+# degrade gracefully rather than erroring at import; without the harness there is
+# no resolver, and the suite skips with the reason below.
 try:
-    from common.common import amdsmi_path, stub_modules
+    from common.common import amdsmi_path, find_cli_dir, stub_modules
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
+    find_cli_dir = None
 
-# set_value.py lives in the amd-smi CLI, which exists in two layouts:
-#   * source checkout: <repo>/projects/amdsmi/amdsmi_cli (sibling of tests/)
-#   * installed:       <rocm>/libexec/amdsmi_cli (amdsmi_path is the sibling
-#                      <rocm>/share/amd_smi)
-# Prefer the in-tree source when running from a checkout so the test exercises
-# the code under review; fall back to the installed CLI otherwise.
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
+_CLI_DIR = (
+    find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__))) if find_cli_dir else None
 )
-
-
-def _resolve_cli_dir():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "set_value.py")):
-            return cli_dir
-    return None
-
-
-_CLI_DIR = _resolve_cli_dir()
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
 
 # AMDSMI_STATUS_NOT_SUPPORTED sentinel used by the stubbed library-error path.
@@ -129,8 +108,10 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
+        if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -293,8 +274,10 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
+        if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
