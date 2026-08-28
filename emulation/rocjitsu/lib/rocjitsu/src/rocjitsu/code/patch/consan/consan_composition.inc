@@ -803,7 +803,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   const size_t malformed_kernel_metadata_note_count =
       code_object->malformed_kernel_metadata_note_count();
   const rj_code_target_id_t target = code_object->target_id();
-  const rj_code_arch_t arch = consan_arch_for_target(target);
+  const ConSanTargetProfile *target_profile = consan_target_profile(target);
+  const rj_code_arch_t arch = target_profile ? target_profile->arch : ROCJITSU_CODE_ARCH_INVALID;
   inventory_builder.set_code_object_facts(kernel_metadata_trustworthy,
                                           malformed_kernel_metadata_note_count, arch, target);
   result.errors = validate_consan_input_layout(*code_object);
@@ -1025,10 +1026,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   if (has_redundant_access) {
     if (options.probe_lds_check_trap)
-      try_apply_lds_load_check_trap_patch(*code_object, arch, redundant_options, result);
+      try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
     if (options.probe_flat_check_trap && result.errors.empty()) {
       if (!result.modified()) {
-        try_apply_flat_check_trap_patch(*code_object, arch, redundant_options, result);
+        try_apply_flat_check_trap_patch(*code_object, *target_profile, redundant_options, result);
       } else {
         const uint32_t max_patches = redundant_options.max_patches;
         const uint32_t access_patches = static_cast<uint32_t>(
@@ -1050,19 +1051,19 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         if (access_patches >= max_patches && redundant_options.max_patches_is_expert_limit) {
           ConSanOptions flat_options = redundant_options;
           flat_options.max_patches = 0u;
-          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result);
+          try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result);
         } else if (auto reserved_ranges =
                        reserved_ranges_for_existing_patches(*code_object, result)) {
           ConSanOptions flat_options = redundant_options;
           if (flat_options.max_patches_is_expert_limit)
             flat_options.max_patches = max_patches - access_patches;
-          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result,
+          try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result,
                                           *reserved_ranges);
         } else {
           ConSanOptions flat_options = redundant_options;
           flat_options.max_patches = 0u;
           flat_options.max_patches_is_expert_limit = true;
-          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result);
+          try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result);
           result.warnings.emplace_back(
               "ConSan flat check/trap proof skipped after native LDS patching: "
               "existing patch ranges could not be mapped in the original code object");
@@ -1070,7 +1071,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       }
     }
   } else if (!has_perturbation && options.probe_flat_trap)
-    try_apply_flat_trap_patch(*code_object, arch, options, result);
+    try_apply_flat_trap_patch(*code_object, *target_profile, options, result);
   else if (!has_perturbation && options.probe_lds_endpgm)
     try_apply_lds_endpgm_patch(*code_object, arch, result);
   else if (!has_perturbation && options.probe_endpgm)

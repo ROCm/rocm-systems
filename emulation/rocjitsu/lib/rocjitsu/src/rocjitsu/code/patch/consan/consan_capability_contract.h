@@ -170,6 +170,19 @@ enum class ConSanDirectCallForm : uint8_t {
   SCallI64,
 };
 
+/// Selects the identity carried by a SuperCollider dense access route.
+///
+/// `None` means the target has no admitted dense route. `ExplicitInlineKey`
+/// materializes a bounded site index in the access anchor, while `ReturnPc`
+/// uses the target's direct-call return address as the site identity. This is
+/// a routing capability, not a request to use dense routing for any particular
+/// code object.
+enum class ConSanScDenseRouteIdentity : uint8_t {
+  None,
+  ExplicitInlineKey,
+  ReturnPc,
+};
+
 /// Describes what may happen to patched code before the target executes it.
 ///
 /// `DirectCodeObject` means the byte layout emitted by RocJitsu is the layout
@@ -333,6 +346,10 @@ struct ConSanTargetProfile {
   bool supports_moi_far_dense_atomic_route = false;
   bool supports_moi_far_dense_barrier_route = false;
   bool supports_moi_dense_s_call_b64 = false;
+  bool supports_sc_branch_only_route = false;
+  bool supports_sc_inline_flat_trap_rewrite = false;
+  bool requires_sc_runtime_flat_group_gate = false;
+  ConSanScDenseRouteIdentity sc_dense_route_identity = ConSanScDenseRouteIdentity::None;
   /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
   bool requires_raw_memory_order_qualifier = false;
 };
@@ -429,6 +446,10 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = true,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::None,
         .requires_raw_memory_order_qualifier = false,
     },
     {
@@ -476,6 +497,10 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = true,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey,
         .requires_raw_memory_order_qualifier = false,
     },
     {
@@ -523,6 +548,10 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = false,
         .supports_moi_dense_s_call_b64 = false,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::None,
         .requires_raw_memory_order_qualifier = true,
     },
     {
@@ -570,6 +599,10 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = true,
+        .supports_sc_inline_flat_trap_rewrite = true,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey,
         .requires_raw_memory_order_qualifier = true,
     },
     {
@@ -617,6 +650,10 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = false,
         .supports_moi_dense_s_call_b64 = false,
+        .supports_sc_branch_only_route = true,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = true,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ReturnPc,
         .requires_raw_memory_order_qualifier = true,
     },
 }};
@@ -721,6 +758,18 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         (profile.supports_moi_far_dense_atomic_route &&
          !profile.supports_moi_far_dense_barrier_route) ||
         (profile.supports_moi_dense_s_call_b64 &&
+         profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
+        (profile.supports_sc_branch_only_route &&
+         profile.encoding_family != ConSanEncodingFamily::Gfx12) ||
+        (profile.supports_sc_inline_flat_trap_rewrite &&
+         (profile.encoding_family != ConSanEncodingFamily::Gfx12 ||
+          profile.architecture_family != ConSanArchitectureFamily::Rdna)) ||
+        (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
+        static_cast<uint8_t>(profile.sc_dense_route_identity) >
+            static_cast<uint8_t>(ConSanScDenseRouteIdentity::ReturnPc) ||
+        (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ReturnPc &&
+         profile.direct_call_form != ConSanDirectCallForm::SCallI64) ||
+        (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ExplicitInlineKey &&
          profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
         (profile.requires_raw_memory_order_qualifier !=
          (profile.encoding_family == ConSanEncodingFamily::Gfx11 ||

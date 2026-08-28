@@ -63,6 +63,10 @@ struct ExpectedTargetProfile {
   bool supports_moi_far_dense_atomic_route;
   bool supports_moi_far_dense_barrier_route;
   bool supports_moi_dense_s_call_b64;
+  bool supports_sc_branch_only_route;
+  bool supports_sc_inline_flat_trap_rewrite;
+  bool requires_sc_runtime_flat_group_gate;
+  ConSanScDenseRouteIdentity sc_dense_route_identity;
   bool requires_raw_memory_order_qualifier;
 };
 
@@ -112,6 +116,10 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = true,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::None,
         .requires_raw_memory_order_qualifier = false,
     },
     {
@@ -159,6 +167,10 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = true,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey,
         .requires_raw_memory_order_qualifier = false,
     },
     {
@@ -206,6 +218,10 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = false,
         .supports_moi_dense_s_call_b64 = false,
+        .supports_sc_branch_only_route = false,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::None,
         .requires_raw_memory_order_qualifier = true,
     },
     {
@@ -253,6 +269,10 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = true,
         .supports_moi_dense_s_call_b64 = true,
+        .supports_sc_branch_only_route = true,
+        .supports_sc_inline_flat_trap_rewrite = true,
+        .requires_sc_runtime_flat_group_gate = false,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey,
         .requires_raw_memory_order_qualifier = true,
     },
     {
@@ -300,6 +320,10 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .supports_moi_far_dense_atomic_route = false,
         .supports_moi_far_dense_barrier_route = false,
         .supports_moi_dense_s_call_b64 = false,
+        .supports_sc_branch_only_route = true,
+        .supports_sc_inline_flat_trap_rewrite = false,
+        .requires_sc_runtime_flat_group_gate = true,
+        .sc_dense_route_identity = ConSanScDenseRouteIdentity::ReturnPc,
         .requires_raw_memory_order_qualifier = true,
     },
 }};
@@ -353,6 +377,12 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.supports_moi_far_dense_barrier_route,
             expected.supports_moi_far_dense_barrier_route);
   EXPECT_EQ(actual.supports_moi_dense_s_call_b64, expected.supports_moi_dense_s_call_b64);
+  EXPECT_EQ(actual.supports_sc_branch_only_route, expected.supports_sc_branch_only_route);
+  EXPECT_EQ(actual.supports_sc_inline_flat_trap_rewrite,
+            expected.supports_sc_inline_flat_trap_rewrite);
+  EXPECT_EQ(actual.requires_sc_runtime_flat_group_gate,
+            expected.requires_sc_runtime_flat_group_gate);
+  EXPECT_EQ(actual.sc_dense_route_identity, expected.sc_dense_route_identity);
   EXPECT_EQ(actual.requires_raw_memory_order_qualifier,
             expected.requires_raw_memory_order_qualifier);
 }
@@ -439,6 +469,21 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].supports_moi_far_dense_barrier_route = false; });
   expect_invalid("dense s_call_b64 support without the target call form",
                  [](auto &profiles) { profiles[4].supports_moi_dense_s_call_b64 = true; });
+  expect_invalid("SC branch-only route on a non-gfx12 encoding",
+                 [](auto &profiles) { profiles[0].supports_sc_branch_only_route = true; });
+  expect_invalid("SC inline FLAT trap on a non-gfx12 RDNA target",
+                 [](auto &profiles) { profiles[0].supports_sc_inline_flat_trap_rewrite = true; });
+  expect_invalid("SC runtime group gate without selectable VGPR banks",
+                 [](auto &profiles) { profiles[0].requires_sc_runtime_flat_group_gate = true; });
+  expect_invalid("unknown SC dense-route identity", [](auto &profiles) {
+    profiles[0].sc_dense_route_identity = static_cast<ConSanScDenseRouteIdentity>(255u);
+  });
+  expect_invalid("SC return-PC identity without s_call_i64", [](auto &profiles) {
+    profiles[0].sc_dense_route_identity = ConSanScDenseRouteIdentity::ReturnPc;
+  });
+  expect_invalid("SC explicit-key identity without s_call_b64", [](auto &profiles) {
+    profiles[4].sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey;
+  });
   expect_invalid("raw memory-order qualifier disagrees with encoding",
                  [](auto &profiles) { profiles[0].requires_raw_memory_order_qualifier = true; });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {

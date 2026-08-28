@@ -1,10 +1,8 @@
-void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
+                                         const ConSanTargetProfile &target,
                                          const ConSanOptions &options,
                                          ConSanTransformArtifacts &result) {
-  if (!consan_is_capability_arch(arch)) {
-    result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported architecture");
-    return;
-  }
+  const rj_code_arch_t arch = target.arch;
 
   const auto delay_words =
       delay_instruction_word_count(options, result.errors, "ConSan LDS check/trap proof");
@@ -880,7 +878,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const ConSanAccessInventorySite &site = *site_context.site;
       ++supported_candidate_count;
       const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+          target.has_selectable_vgpr_bank &&
                   site.file_offset >= site.physical_id.original_text_offset
               ? consan_gfx1250_vgpr_msb_mode_at(
                     original_bytes, site.file_offset - site.physical_id.original_text_offset,
@@ -891,20 +889,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ++missing_width_plan_site_count;
         continue;
       }
-      const auto gfx1250_two_address =
-          gfx1250_two_address_expansion_plan(original_bytes, site, arch);
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      const auto split_two_address =
+          split_two_address_lds_expansion_plan(original_bytes, site, target);
+      if (target.requires_split_two_address_lds_relocation &&
           (is_two_address_lds_load(site.mnemonic) || is_two_address_lds_store(site.mnemonic)) &&
-          !gfx1250_two_address) {
+          !split_two_address) {
         ++missing_width_plan_site_count;
         continue;
       }
       auto action_words =
-          mismatch_action_word_count(options, arch, result.errors, "ConSan LDS check/trap proof");
+          mismatch_action_word_count(options, target, result.errors, "ConSan LDS check/trap proof");
       if (!action_words)
         return;
       const uint32_t report_alignment_padding =
-          options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) ? 1u : 0u;
+          options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
       const Instruction *site_inst = site_context.instruction;
       if (site_inst == nullptr) {
         ++missing_instruction_site_count;
@@ -920,10 +918,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           allocated_sgpr_count
               ? choose_sc_dead_vcc_save_sgpr(site_inst, owner_liveness, *allocated_sgpr_count,
                                              min_preferred_vcc_save_sgpr, dead_vcc_selection_limit,
-                                             arch, options)
+                                             target, options)
               : std::nullopt;
       std::optional<uint16_t> scalar_vcc_spill_sgpr;
-      if (!vcc_save && consan_uses_gfx12_encoding(arch) && allocated_sgpr_count) {
+      if (!vcc_save && target.encoding_family == ConSanEncodingFamily::Gfx12 &&
+          allocated_sgpr_count) {
         scalar_vcc_spill_sgpr = choose_sc_borrowed_scalar_sgpr(*allocated_sgpr_count, options);
         vcc_save = scalar_vcc_spill_sgpr;
       }
@@ -932,11 +931,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ++missing_vcc_save_site_count;
         continue;
       }
-      const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(arch);
+      const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(target);
       const bool reuse_readback_for_report =
           lds_report_action_reuses_readback(options, static_cast<uint16_t>(*required_vgprs));
       const uint32_t probe_scratch_vgprs =
-          *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address) +
+          *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, split_two_address) +
           (reuse_readback_for_report
                ? 0u
                : report_alignment_padding + report_action_scratch_vgprs(options)) +
@@ -947,15 +946,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  static_cast<uint64_t>(*delay_words) + 2u + 1u +
                                  lds_check_trap_precompare_words(site) + 1u +
                                  (2u + *action_words) * *required_vgprs + 1u;
-      if (gfx1250_two_address)
-        requested_words += gfx1250_two_address->total_additional_word_count();
-      if (site.operands.destination_accvgpr && (consan_uses_gfx9_cdna_encoding(arch)))
+      if (split_two_address)
+        requested_words += split_two_address->total_additional_word_count();
+      if (site.operands.destination_accvgpr &&
+          target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned)
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 4u;
       if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
         requested_words += 2u;
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.kind == ConSanLdsAccessKind::Read &&
+      if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read &&
           site.operands.destination_vgpr) {
         const uint32_t dst_bank =
             static_cast<uint32_t>((gfx1250_vgpr_msb_mode.value_or(0u) >> 6u) & 0x3u);
@@ -1224,7 +1224,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           }
           if (!indirect_pc_sgpr || !indirect_scc_save_sgpr) {
             if (auto joint_scratch = choose_lds_check_trap_indirect_scalar_scratch(
-                    site_inst, owner_liveness, min_preferred_vcc_save_sgpr, arch)) {
+                    site_inst, owner_liveness, min_preferred_vcc_save_sgpr, target)) {
               indirect_vcc_save_sgpr = joint_scratch->vcc_save_sgpr;
               indirect_pc_sgpr = joint_scratch->pc_sgpr_pair;
               indirect_scc_save_sgpr = joint_scratch->scc_save_sgpr;
@@ -1235,7 +1235,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           // maximally allocated kernels until scalar spilling is available.
           if ((!indirect_pc_sgpr || !indirect_scc_save_sgpr) && min_preferred_vcc_save_sgpr) {
             if (auto joint_scratch = choose_lds_check_trap_indirect_scalar_scratch(
-                    site_inst, owner_liveness, std::nullopt, arch)) {
+                    site_inst, owner_liveness, std::nullopt, target)) {
               indirect_vcc_save_sgpr = joint_scratch->vcc_save_sgpr;
               indirect_pc_sgpr = joint_scratch->pc_sgpr_pair;
               indirect_scc_save_sgpr = joint_scratch->scc_save_sgpr;
@@ -1488,7 +1488,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // Reserving its appended bodies on another architecture would leave phantom
   // planner allocations when that route is not emitted, shifting every later
   // body away from the emitter's append cursor.
-  if (consan_uses_gfx12_encoding(arch)) {
+  if (target.supports_sc_branch_only_route) {
     for (LdsCheckTrapCandidate &candidate : branch_only_candidates) {
       DbiPatchPlacementPlanner tentative_planner = placement_planner;
       auto placement = tentative_planner.plan_indirect_appended(
@@ -1522,7 +1522,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
   const bool supports_dense_call =
-      arch == ROCJITSU_CODE_ARCH_CDNA4 || consan_uses_gfx12_encoding(arch);
+      target.sc_dense_route_identity != ConSanScDenseRouteIdentity::None;
   if (supports_dense_call && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
       uint64_t container_entry_text_offset = 0;
@@ -1565,7 +1565,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             std::max<uint16_t>(highest_instrumentation_sgpr, candidate.vcc_save_sgpr);
       const uint16_t fresh_call_return_sgpr =
           static_cast<uint16_t>((highest_instrumentation_sgpr + 2u) & ~uint16_t{1u});
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      if (target.sc_dense_route_identity == ConSanScDenseRouteIdentity::ReturnPc &&
           fresh_call_return_sgpr + 1u < REGISTER_SET_ALLOCATABLE_SGPRS) {
         normalized_seed_groups.push_back(std::move(seed_group));
         continue;
@@ -1634,8 +1634,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             std::max<uint16_t>(highest_instrumentation_sgpr, candidate.vcc_save_sgpr);
       const uint16_t call_return_sgpr =
           static_cast<uint16_t>((highest_instrumentation_sgpr + 2u) & ~uint16_t{1u});
-      const bool use_explicit_key = arch != ROCJITSU_CODE_ARCH_CDNA5 ||
-                                    call_return_sgpr + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS;
+      const bool use_explicit_key =
+          target.sc_dense_route_identity != ConSanScDenseRouteIdentity::ReturnPc ||
+          call_return_sgpr + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS;
       const std::optional<uint16_t> explicit_key_sgpr =
           use_explicit_key && !seed_group.candidates.empty()
               ? std::optional<uint16_t>(seed_group.candidates.front().vcc_save_sgpr)
@@ -2812,7 +2813,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // the same proven straight-line relay reservoirs used by ordinary entry
   // islands.  The two chains are disjoint, preserve every ordinary return,
   // and never make a live guest scalar carry a continuation.
-  if (consan_uses_gfx12_encoding(arch) && !branch_only_candidates.empty() &&
+  if (target.supports_sc_branch_only_route && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
     std::string branch_only_route_error;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
@@ -3201,9 +3202,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
     const ConSanAccessInventorySite &site = *candidate.site;
-    const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
+    const auto split_two_address =
+        split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words = build_lds_check_trap_words(original_bytes, site, arch, options, *delay_words,
+    auto words = build_lds_check_trap_words(original_bytes, site, target, options, *delay_words,
                                             candidate.scratch_vgpr, candidate.vcc_save_sgpr,
                                             candidate.gfx1250_vgpr_msb_mode.value_or(0u),
                                             guest_instruction_word_offset, result.errors);
@@ -3229,7 +3231,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch);
       const size_t original_access_words =
-          gfx1250_two_address ? gfx1250_two_address->access_word_count() : 2u;
+          split_two_address ? split_two_address->access_word_count() : 2u;
       const size_t guest_prefix_words =
           original_access_words + (lds_load_clobbers_address(site) ? 1u : 0u);
       if (!select_low || !restore_guest || words->size() < guest_prefix_words) {
@@ -3348,7 +3350,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
     planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr ? 1u : 0u;
     planned.info.required_sgpr_count =
-        static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(arch));
+        static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(target));
     if (const auto plan = private_spill_plans.find(&site);
         plan != private_spill_plans.end() && plan->second.uses_dynamic_stack_frame) {
       planned.info.required_sgpr_count = std::max<uint16_t>(
@@ -3418,7 +3420,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         const uint16_t required_sgpr_count = std::max<uint16_t>(
             std::max<uint16_t>(
                 static_cast<uint16_t>(*candidate.indirect_pc_sgpr + 2u),
-                static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(arch))),
+                static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(target))),
             static_cast<uint16_t>(*candidate.indirect_scc_save_sgpr + 1u));
         planned.info.indirect_pc_sgpr = *candidate.indirect_pc_sgpr;
         planned.info.indirect_saved_scc_sgpr = *candidate.indirect_scc_save_sgpr;
@@ -3439,7 +3441,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         if (!append_lds_check_trap_indirect_return(
                 planned.cave_words, candidate.placement->body_offset,
                 candidate.placement->return_target, *candidate.indirect_pc_sgpr,
-                *candidate.indirect_scc_save_sgpr, arch) ||
+                *candidate.indirect_scc_save_sgpr, target) ||
             planned.cave_words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
           result.errors.emplace_back(
               "ConSan LDS check/trap proof could not encode its long return");
@@ -3452,7 +3454,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           if (!append_lds_check_trap_indirect_jump(
                   planned.entry_island_words, candidate.entry_island->text_offset,
                   candidate.placement->body_offset, *candidate.indirect_pc_sgpr,
-                  *candidate.indirect_scc_save_sgpr, arch) ||
+                  *candidate.indirect_scc_save_sgpr, target) ||
               planned.entry_island_words.size() != kLdsCheckTrapIndirectJumpWords) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap proof could not encode its entry island");
@@ -3861,7 +3863,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         if (!append_lds_check_trap_indirect_jump(
                 entry_words, reservoir.anchor_offset, reservoir.placement.body_offset,
                 reservoir.pc_sgpr_pair, wave32_vcc ? kRdna4ExecHi : reservoir.saved_scc_sgpr,
-                arch) ||
+                target) ||
             entry_words.size() != kScRelayEntryWords ||
             reservoir.original_size < entry_words.size() * sizeof(uint32_t) ||
             reservoir.placement.return_target != reservoir.anchor_offset + reservoir.original_size -
@@ -3894,7 +3896,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                 return_words,
                 reservoir.placement.body_offset + sizeof(uint32_t) + reservoir.original_size,
                 reservoir.placement.return_target, reservoir.return_pc_sgpr_pair,
-                wave32_vcc ? kRdna4ExecHi : reservoir.return_saved_scc_sgpr, arch) ||
+                wave32_vcc ? kRdna4ExecHi : reservoir.return_saved_scc_sgpr, target) ||
             return_words.size() + 1u != kScRelayAppendedOverheadWords) {
           result.errors.emplace_back(
               "ConSan LDS check/trap could not encode its relay-reservoir return");
@@ -3936,7 +3938,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::vector<uint32_t> island_words;
         if (!append_lds_check_trap_indirect_jump(island_words, island_offset,
                                                  group.dispatcher_offset, group.jump_pc_sgpr,
-                                                 group.saved_scc_sgpr, arch) ||
+                                                 group.saved_scc_sgpr, target) ||
             island_words.size() != kLdsCheckTrapIndirectJumpWords) {
           result.errors.emplace_back(
               "ConSan LDS check/trap could not encode its dense-call entry host");
@@ -3975,7 +3977,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
               static_cast<uint32_t>(group.dispatcher_offset - island_offset));
         }
 
-        const auto append_target = [&](uint32_t key, uint64_t target) -> bool {
+        const auto append_target = [&](uint32_t key, uint64_t destination) -> bool {
           const bool explicit_key = group.explicit_key_sgpr.has_value();
           const auto compare = instrumentation::build_s_cmp_eq_u32(
               dispatch_key_sgpr, explicit_key || key == 0u ? scalar_positive_inline_u32(key) : 255u,
@@ -3988,9 +3990,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           std::vector<uint32_t> matched_words;
           const uint64_t matched_offset =
               group.dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-          if (!append_lds_check_trap_indirect_return(matched_words, matched_offset, target,
+          if (!append_lds_check_trap_indirect_return(matched_words, matched_offset, destination,
                                                      group.jump_pc_sgpr, group.saved_scc_sgpr,
-                                                     arch) ||
+                                                     target) ||
               matched_words.size() != kLdsCheckTrapIndirectJumpWords)
             return false;
           const auto skip = instrumentation::build_s_cbranch_scc0(
@@ -4036,7 +4038,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         if (!append_lds_check_trap_indirect_jump(
                 host_body, group.entry_host_body_offset,
                 group.entry_host_offset + group.displaced_host_words.size() * sizeof(uint32_t),
-                group.jump_pc_sgpr, group.saved_scc_sgpr, arch) ||
+                group.jump_pc_sgpr, group.saved_scc_sgpr, target) ||
             host_body.size() !=
                 group.displaced_host_words.size() + kLdsCheckTrapIndirectJumpWords) {
           result.errors.emplace_back(

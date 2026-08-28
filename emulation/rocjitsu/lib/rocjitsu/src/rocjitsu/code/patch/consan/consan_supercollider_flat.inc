@@ -177,13 +177,11 @@ choose_flat_check_trap_indirect_scalar_scratch(
   return std::nullopt;
 }
 
-void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
+                                     const ConSanTargetProfile &target,
                                      const ConSanOptions &options, ConSanTransformArtifacts &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
-  if (!consan_is_capability_arch(arch)) {
-    result.warnings.emplace_back("ConSan flat check/trap proof has unsupported architecture");
-    return;
-  }
+  const rj_code_arch_t arch = target.arch;
 
   const std::unordered_set<uint64_t> admitted_file_offsets =
       sc_admitted_access_file_offsets(result, ConSanAccessOrigin::Flat);
@@ -369,13 +367,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!required_vgprs)
       return;
     auto action_words =
-        mismatch_action_word_count(options, arch, result.errors, "ConSan flat check/trap proof");
+        mismatch_action_word_count(options, target, result.errors, "ConSan flat check/trap proof");
     if (!action_words)
       return;
     const uint32_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
-        options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) ? 1u : 0u;
+        options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
     const uint32_t instrumentation_scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
     const uint64_t comparison_setup_words = flat_check_trap_comparison_setup_words(site);
@@ -384,7 +382,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                              : comparison_setup_words + (2u + *action_words) * *required_vgprs;
     const uint64_t access_words = site.instruction_size / sizeof(uint32_t);
     const bool needs_runtime_group_gate =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        target.requires_sc_runtime_flat_group_gate &&
         site.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
     uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
                                (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
@@ -396,7 +394,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(site_inst, owner_liveness, min_fresh_sgpr,
                                                          options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
-    if (!vcc_save && consan_uses_gfx12_encoding(arch) && allocated_sgpr_count) {
+    if (!vcc_save && target.encoding_family == ConSanEncodingFamily::Gfx12 &&
+        allocated_sgpr_count) {
       vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options,
                                                           preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
@@ -1125,7 +1124,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::vector<uint32_t> displaced_tail_words;
   };
 
-  const auto wait_flat = consan_uses_gfx9_cdna_encoding(arch)
+  const auto wait_flat = target.wait_counter_family == ConSanWaitCounterFamily::Gfx9
                              ? instrumentation::build_s_wait_flat_load_lds0(arch)
                              : build_s_wait_dscnt_word(0, arch);
   if (!wait_flat) {
@@ -1236,7 +1235,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                             "ConSan flat check/trap proof"))
       return;
     const bool needs_runtime_group_gate =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        target.requires_sc_runtime_flat_group_gate &&
         site.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
     std::optional<size_t> runtime_group_gate_branch_index;
     if (needs_runtime_group_gate) {
@@ -1262,11 +1261,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const uint16_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
-    if (options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) &&
+    if (options.report_buffer_address && target.requires_even_vgpr_tuples &&
         report_scratch_vgpr % 2u != 0)
       ++report_scratch_vgpr;
     auto mismatch_action = build_mismatch_action_words(
-        options, arch, report_scratch_vgpr, result.errors, "ConSan flat check/trap proof");
+        options, target, report_scratch_vgpr, result.errors, "ConSan flat check/trap proof");
     if (!mismatch_action)
       return;
     if (mismatch_action->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
@@ -1576,19 +1575,19 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                         ? append_lds_check_trap_indirect_jump(
                                               planned.cave_words, candidate.placement->body_offset,
                                               candidate.placement->return_target,
-                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, arch)
+                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target)
                                         : append_lds_check_trap_indirect_return(
                                               planned.cave_words, candidate.placement->body_offset,
                                               candidate.placement->return_target,
-                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, arch);
+                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target);
         const uint64_t entry_island_offset = candidate.entry_island_at_anchor
                                                  ? site.physical_id.original_text_offset
                                                  : candidate.entry_island->text_offset;
         if (!return_encoded ||
             planned.cave_words.size() * sizeof(uint32_t) != candidate.placement->body_size ||
-            !append_lds_check_trap_indirect_jump(planned.entry_island_words, entry_island_offset,
-                                                 candidate.placement->body_offset,
-                                                 scalar.pc_sgpr_pair, scalar.scc_save_sgpr, arch)) {
+            !append_lds_check_trap_indirect_jump(
+                planned.entry_island_words, entry_island_offset, candidate.placement->body_offset,
+                scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target)) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode indirect relay");
           return;
@@ -1885,9 +1884,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   result.mark_modified();
 }
 
-void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanOptions &options, ConSanTransformArtifacts &result) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
+void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
+                               const ConSanTargetProfile &target, const ConSanOptions &options,
+                               ConSanTransformArtifacts &result) {
+  const rj_code_arch_t arch = target.arch;
+  if (!target.supports_sc_inline_flat_trap_rewrite) {
     result.warnings.emplace_back("ConSan flat trap proof currently supports only RDNA4");
     return;
   }
