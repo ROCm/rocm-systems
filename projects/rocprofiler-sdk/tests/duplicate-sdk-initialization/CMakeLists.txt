@@ -16,8 +16,9 @@ if(TARGET rocprofiler-sdk-test-duplicate-shared-library)
         rocprofiler-sdk-duplicate-initialization-test rocprofiler-sdk-shared-library
         rocprofiler-sdk-test-duplicate-shared-library)
 else()
+    find_package(rocprofiler-sdk-tests REQUIRED)
     set(_duplicate_sdk
-        "${ROCPROFILER_SDK_TESTS_SOURCE_DIR}/duplicate-sdk/librocprofiler-sdk.so")
+        "${rocprofiler-sdk-tests_ROOT_DIR}/duplicate-sdk/librocprofiler-sdk.so")
     if(NOT EXISTS "${_duplicate_sdk}")
         message(
             FATAL_ERROR "Missing installed duplicate rocprofiler-sdk: ${_duplicate_sdk}")
