@@ -39,6 +39,12 @@ click==8.1.7
     #   sphinx-external-toc
 click-log==0.4.0
     # via doxysphinx
+colorama==0.4.6
+    # via
+    #   click
+    #   ipython
+    #   sphinx
+    #   tqdm
 comm==0.2.2
     # via ipykernel
 cryptography==43.0.1
@@ -150,16 +156,12 @@ packaging==24.1
     #   sphinx
 parso==0.8.4
     # via jedi
-pexpect==4.9.0
-    # via ipython
 platformdirs==4.3.6
     # via jupyter-core
 prompt-toolkit==3.0.50
     # via ipython
 psutil==6.1.1
     # via ipykernel
-ptyprocess==0.7.0
-    # via pexpect
 pure-eval==0.2.3
     # via stack-data
 pycparser==2.22
@@ -191,6 +193,10 @@ python-dateutil==2.9.0.post0
     # via
     #   jupyter-client
     #   sphinxcontrib-doxylink
+pywin32==312
+    # via
+    #   jupyter-core
+    #   mpire
 pyyaml==6.0.2
     # via
     #   jupyter-cache
@@ -210,7 +216,7 @@ requests==2.32.3
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference,llms]==1.38.0
+rocm-docs-core[api-reference,llms] @ git+https://github.com/ROCm/rocm-docs-core.git@fix/banner-latest-page-link
     # via -r requirements.in
 rpds-py==0.22.3
     # via
