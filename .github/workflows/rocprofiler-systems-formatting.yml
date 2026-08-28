@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-formatting.yml'
+      - '.pre-commit-config.yaml'
       - 'projects/rocprofiler-systems/**'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -65,86 +66,41 @@ jobs:
         run: |
           echo "Please check for spelling mistakes or add them to '.wordlist.txt' in either the root of this project or in rocm-docs-core."
 
-  python:
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: ['3.10']
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: projects/rocprofiler-systems
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install black
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-    - name: black format
-      run: |
-        cd projects/rocprofiler-systems
-        black --diff --check .
-
-  cmake:
-    runs-on: ubuntu-24.04
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: projects/rocprofiler-systems
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-pip
-        python3 -m pip install gersemi==0.25.1
-    - name: gersemi
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        set +e
-        gersemi -i $(find . -type f ! -path '*/external/*' | grep -E 'CMakeLists.txt|\.cmake$')
-        if [ $(git diff | wc -l) -gt 0 ]; then
-          echo -e "\nError! CMake code not formatted. Run gersemi ...\n"
-          echo -e "\nFiles:\n"
-          git diff --name-only
-          echo -e "\nFull diff:\n"
-          git diff
-          exit 1
-        fi
-
-  source:
+  pre-commit:
+    name: "pre-commit (shared + project hooks)"
     runs-on: ubuntu-latest
 
     steps:
+    # Full checkout: the project config delegates the shared formatters to the
+    # repository-root .pre-commit-config.yaml, which must be present on disk.
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-systems
+        fetch-depth: 0
 
-    - name: Install dependencies
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    - name: Install pre-commit
+      run: pip install pre-commit
+
+    # Checks the whole project tree rather than just the changed files, which
+    # preserves the coverage of the find-based black/gersemi/clang-format jobs
+    # this replaced. Tool versions come from the root config, so this project
+    # no longer pins clang-format/gersemi/black separately.
+    - name: Run pre-commit
       run: |
-        DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
-        sudo apt-get update
-        sudo apt-get install -y software-properties-common wget curl clang-format-18
-    - name: clang-format
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        set +e
-        FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
-        FORMAT_OUT=$(clang-format-18 -output-replacements-xml ${FILES})
-        RET=$(echo ${FORMAT_OUT} | grep -c '<replacement ')
-        if [ "${RET}" -ne 0 ]; then
-          echo -e "\nError! Code not formatted. Detected ${RET} lines\n"
-          clang-format-18 -i ${FILES}
-          git diff
-          exit ${RET}
+        FILES=$(git ls-files projects/rocprofiler-systems/ \
+          | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+        if [ -z "$FILES" ]; then
+          echo "No files to check."
+          exit 0
         fi
+        pre-commit run \
+          --config projects/rocprofiler-systems/.pre-commit-config.yaml \
+          --show-diff-on-failure \
+          --color=always \
+          --files $FILES
 
   includes:
     runs-on: ubuntu-22.04
