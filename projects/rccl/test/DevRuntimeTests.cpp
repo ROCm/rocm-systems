@@ -2182,6 +2182,120 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
 
 
 // ---------------------------------------------------------------------------
+// symWindowTableInitOnce allocates the device-side window table the first time
+// it is needed and caches it on devrState.
+
+class SymWindowTableInitOnceTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+  }
+  void TearDown() override {
+    free(comm->devrState.windowTable);  // the shadow-pool fake hands out calloc'd memory
+    comm->devrState.windowTable = nullptr;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: no table yet, so one is allocated and cached.
+TEST_F(SymWindowTableInitOnceTest, FirstCall_AllocatesAndCaches) {
+  ASSERT_EQ(symWindowTableInitOnce(comm, nullptr), ncclSuccess);
+  EXPECT_NE(comm->devrState.windowTable, nullptr);
+}
+
+// Branch: a cached table is reused rather than reallocated.
+TEST_F(SymWindowTableInitOnceTest, SecondCall_ReusesCachedTable) {
+  ASSERT_EQ(symWindowTableInitOnce(comm, nullptr), ncclSuccess);
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSuccess; });
+  ASSERT_EQ(symWindowTableInitOnce(comm, nullptr), ncclSuccess);
+  EXPECT_EQ(alloc.calls, 0);
+  EXPECT_EQ(comm->devrState.windowTable, first);
+}
+
+// Branch: the allocation fails, so nothing is cached and a later call retries.
+TEST_F(SymWindowTableInitOnceTest, AllocFails_LeavesTableUnset) {
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+
+  EXPECT_NE(symWindowTableInitOnce(comm, nullptr), ncclSuccess);
+  EXPECT_EQ(comm->devrState.windowTable, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
+// allocAndPopulateSegmentWindows allocates the per-segment window array from
+// the shadow pool, and when GIN is on fills the host copy from the memory's
+// per-segment info and pushes it to the device.
+
+class AllocAndPopulateSegmentWindowsTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrMemory mem{};
+  std::vector<ncclDevrGinSegmentInfo> ginInfos;
+  ncclSegmentWindow* dev = nullptr;
+  ncclSegmentWindow* host = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+
+    ginInfos.assign(2, ncclDevrGinSegmentInfo{});
+    ginInfos[0].memType = hipMemLocationTypeDevice;
+    ginInfos[0].segmentSize = 4096;
+    ginInfos[1].memType = hipMemLocationTypeHostNuma;
+    ginInfos[1].segmentSize = 8192;
+    mem.ginSegmentInfos = ginInfos.data();
+    mem.numGinSegments = 2;
+  }
+  void TearDown() override {
+    free(dev);  // the shadow-pool fake hands out calloc'd memory; dev == host
+    dev = host = nullptr;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: GIN off, so the array is allocated but left untouched -- it is filled
+// later, once GIN is activated.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinDisabled_AllocatesWithoutPopulating) {
+  ASSERT_EQ(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
+  ASSERT_NE(host, nullptr);
+  EXPECT_EQ(host[0].segmentSize, 0u);  // still zeroed
+}
+
+// Branch: GIN on, so each segment's type and size are copied across.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegment) {
+  comm->devrState.ginEnabled = true;
+
+  ASSERT_EQ(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
+  ASSERT_NE(host, nullptr);
+  EXPECT_EQ(host[0].segmentSize, 4096u);
+  EXPECT_EQ(host[0].memType, hipMemLocationTypeDevice);
+  EXPECT_EQ(host[1].segmentSize, 8192u);
+  EXPECT_EQ(host[1].memType, hipMemLocationTypeHostNuma);
+}
+
+// Branch: the shadow-pool allocation fails, so no windows are reported back.
+TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs) {
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+  ScopedHook poolFree(g_shadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  EXPECT_NE(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
+  EXPECT_EQ(dev, nullptr);
+  EXPECT_EQ(host, nullptr);
+  EXPECT_EQ(poolFree.calls, 0);  // nothing was allocated, so nothing to release
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

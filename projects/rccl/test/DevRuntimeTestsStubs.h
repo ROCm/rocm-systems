@@ -45,6 +45,7 @@ extern std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemReleas
 extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_hipMemAddressReserve;
 extern std::function<hipError_t(void*, size_t)> g_hipMemAddressFree;
 extern std::function<hipError_t(void*, size_t)> g_hipMemUnmap;
+extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_hipMemcpyAsync;
 
 extern std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;
@@ -58,6 +59,9 @@ extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIO
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_spaceAlloc;
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_spaceFree;
 extern std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSizes;
+
+extern std::function<ncclResult_t(struct ncclShadowPool*, size_t, void**, void**, hipStream_t)> g_shadowPoolAlloc;
+extern std::function<ncclResult_t(struct ncclShadowPool*, void*, hipStream_t)> g_shadowPoolFree;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_rmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>

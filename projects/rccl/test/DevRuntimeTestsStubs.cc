@@ -32,6 +32,7 @@
 #include <cassert>
 #include <cstdarg>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <functional>
 #include <sys/mman.h>
@@ -171,14 +172,38 @@ ncclResult_t ncclSpaceFree(struct ncclSpace* sp, int64_t offset, int64_t size) {
 // ---------------------------------------------------------------------------
 void         ncclShadowPoolConstruct(struct ncclShadowPool*) {}
 ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t, void** outDevObj, void** outHostObj, hipStream_t) {
-  if (outDevObj) *outDevObj = nullptr;
-  if (outHostObj) *outHostObj = nullptr;
+// The real pool hands out a device object plus a host shadow of it. Here one
+// zeroed host buffer stands in for both, so ToHost is the identity: callers
+// that write through the host pointer (allocAndPopulateSegmentWindows) get real
+// storage rather than the nullptr the previous stub returned.
+static ncclResult_t DefaultShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj,
+                                           hipStream_t) {
+  void* p = calloc(1, size != 0 ? size : 1);
+  if (p == nullptr) return ncclSystemError;
+  if (outDevObj) *outDevObj = p;
+  if (outHostObj) *outHostObj = p;
   return ncclSuccess;
 }
-ncclResult_t ncclShadowPoolFree(struct ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void*, void** outHostObj) {
-  if (outHostObj) *outHostObj = nullptr;
+std::function<ncclResult_t(struct ncclShadowPool*, size_t, void**, void**, hipStream_t)> g_shadowPoolAlloc =
+    DefaultShadowPoolAlloc;
+
+ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool* pool, size_t size, void** outDevObj, void** outHostObj,
+                                 hipStream_t stream) {
+  return g_shadowPoolAlloc(pool, size, outDevObj, outHostObj, stream);
+}
+
+static ncclResult_t DefaultShadowPoolFree(struct ncclShadowPool*, void* devObj, hipStream_t) {
+  free(devObj);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclShadowPool*, void*, hipStream_t)> g_shadowPoolFree = DefaultShadowPoolFree;
+
+ncclResult_t ncclShadowPoolFree(struct ncclShadowPool* pool, void* devObj, hipStream_t stream) {
+  return g_shadowPoolFree(pool, devObj, stream);
+}
+
+ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** outHostObj) {
+  if (outHostObj) *outHostObj = devObj;  // same buffer, see above
   return ncclSuccess;
 }
 
@@ -426,6 +451,21 @@ static hipError_t DefaultMemUnmap(void*, size_t) { return hipSuccess; }
 std::function<hipError_t(void*, size_t)> g_hipMemUnmap = DefaultMemUnmap;
 
 HIP_FAKE hipError_t hipMemUnmap(void* ptr, size_t size) { return g_hipMemUnmap(ptr, size); }
+
+// Not faked until now, and its absence did not show as a link error: this
+// target links the HIP runtime, so an unfaked call reaches the real driver and
+// fails at run time without a GPU. The shadow-pool fake gives the same buffer
+// for device and host, so a self-copy is skipped.
+static hipError_t DefaultMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
+  if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, n);
+  return hipSuccess;
+}
+std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_hipMemcpyAsync =
+    DefaultMemcpyAsync;
+
+HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind kind, hipStream_t stream) {
+  return g_hipMemcpyAsync(dst, src, n, kind, stream);
+}
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -511,5 +551,8 @@ void ResetDevRuntimeFakes() {
   g_spaceAlloc                              = DefaultSpaceAlloc;
   g_spaceFree                               = DefaultSpaceFree;
   g_devrPopulateSegmentSizes                = DefaultPopulateSegmentSizes;
+  g_shadowPoolAlloc                         = DefaultShadowPoolAlloc;
+  g_shadowPoolFree                          = DefaultShadowPoolFree;
+  g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_loadParam                               = DefaultLoadParam;
 }
