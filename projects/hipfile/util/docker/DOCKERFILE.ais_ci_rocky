@@ -152,7 +152,8 @@ RUN . /etc/rocm-build.env && \
 # this toolchain. Append --gcc-install-dir to the ROCm config file that
 # amdclang++ auto-loads so it selects the gcc-toolset-13 libstdc++.
 RUN . /etc/rocm-build.env && \
-    echo '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
+    printf '\n%s\n' \
+        '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
         >> "${ROCM_INSTALL_PATH}/lib/llvm/bin/rocm.cfg"
 
 # Configure system linker for ROCm
