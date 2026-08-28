@@ -274,6 +274,19 @@ ExecTest() {
       return
     fi
 
+    if ! command -v rocminfo >/dev/null 2>&1 ||
+       ! rocminfo 2>/dev/null |
+         awk -F ':' '
+           /^[[:space:]]*VMM Support[[:space:]]*:/ {
+             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+             if (toupper($2) == "YES") found = 1
+           }
+           END { exit !found }
+         '; then
+      echo "Skip:   buffer_register_symmetric (HIP VMM is unavailable)"
+      return
+    fi
+
     if [ $USE_SLR -ne 1 ]; then
       if ! command -v nm >/dev/null ||
          ! nm -D "$APP" 2>/dev/null |
@@ -328,10 +341,7 @@ ExecTest_SLR() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # Build command as an array using SLR instead of MPI
   local -a cmd
@@ -340,7 +350,7 @@ ExecTest_SLR() {
   # Build environment variable list
   env_vars=(
     "ROCSHMEM_SLR_NP=$NUM_RANKS"
-    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
     "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
   )
 
@@ -352,7 +362,13 @@ ExecTest_SLR() {
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
   fi
   if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
-    env_vars+=("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix")
+    env_vars+=(
+      "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
+      "ROCSHMEM_GDA_ENABLE_DMABUF=1"
+    )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
   fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
@@ -472,10 +488,7 @@ ExecTest_MPI() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # MPI Parameters
   LAUNCHER=mpirun
@@ -498,14 +511,18 @@ ExecTest_MPI() {
     test_env_args+=(
       -x "ROCSHMEM_TEST_UUID=1"
       -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
+      -x "ROCSHMEM_GDA_ENABLE_DMABUF=1"
     )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
   fi
 
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
         -mca osc "${OMPI_MCA_osc:-ucx}"
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
@@ -977,7 +994,9 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "library_info"     2       1            1
-  ExecTest  "buffer_register_symmetric" 2  1         1
+  ExecTest  "buffer_register_symmetric" 2  1         1       64
+  ExecTest  "buffer_register_symmetric" 2  2        64       64
+  ExecTest  "buffer_register_symmetric" 4  2        64       64
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
