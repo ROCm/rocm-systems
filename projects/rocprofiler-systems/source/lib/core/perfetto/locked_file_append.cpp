@@ -33,7 +33,7 @@ append_with_file_lock(const std::string& filename, const char* data, std::size_t
         }
     }
 
-    int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    const int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if(fd < 0) return locked_append_status::open_failed;
 
     if(::flock(fd, LOCK_EX) != 0)

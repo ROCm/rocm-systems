@@ -10,11 +10,29 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
-set(RJ_AMDGPU_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated")
-
 function(rj_add_split_amdgpu_isa_library arch)
+    set(options NO_BUILTIN)
+    set(one_value_args GENERATED_ROOT INCLUDE_BASE)
+    cmake_parse_arguments(ARG "${options}" "${one_value_args}" "" ${ARGN})
+
+    file(
+        RELATIVE_PATH
+        _provider_header_dir
+        "${ROCJITSU_SRC_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    if(ARG_GENERATED_ROOT)
+        set(_generated_root "${ARG_GENERATED_ROOT}")
+    else()
+        set(_generated_root "${CMAKE_CURRENT_SOURCE_DIR}/../generated")
+    endif()
+    if(ARG_INCLUDE_BASE)
+        set(_provider_header_dir "${ARG_INCLUDE_BASE}/${arch}")
+    endif()
+
     set(_target rocjitsu_isa_${arch})
-    set(_generated_dir "${RJ_AMDGPU_GENERATED_DIR}/${arch}")
+    set(_generated_dir "${_generated_root}/${arch}")
 
     file(GLOB _model_sources CONFIGURE_DEPENDS "${_generated_dir}/*.cpp")
     list(FILTER _model_sources EXCLUDE REGEX "_exec.*\\.cpp$")
@@ -41,20 +59,29 @@ function(rj_add_split_amdgpu_isa_library arch)
     )
     target_link_libraries(${_target} INTERFACE ${_target}_model ${_target}_exec)
 
-    rj_add_isa_target_provider(
-        ${_target}
-        HEADER rocjitsu/isa/arch/amdgpu/${arch}/target_provider.h
-        BUILTIN
-    )
+    if(ARG_NO_BUILTIN)
+        rj_add_isa_target_provider(
+            ${_target}
+            HEADER ${_provider_header_dir}/target_provider.h
+        )
+    else()
+        rj_add_isa_target_provider(
+            ${_target}
+            HEADER ${_provider_header_dir}/target_provider.h
+            BUILTIN
+        )
+    endif()
     rj_add_isa_target_provider(
         ${_target}_model
-        HEADER rocjitsu/isa/arch/amdgpu/${arch}/model_target_provider.h
+        HEADER ${_provider_header_dir}/model_target_provider.h
     )
-    set_property(
-        GLOBAL
-        APPEND
-        PROPERTY RJ_BUILTIN_AMDGPU_ISA_MODEL_PROVIDERS ${_target}_model
-    )
+    if(NOT ARG_NO_BUILTIN)
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY RJ_BUILTIN_AMDGPU_ISA_MODEL_PROVIDERS ${_target}_model
+        )
+    endif()
 endfunction()
 
 add_subdirectory(arch/amdgpu/cdna1)
@@ -66,14 +93,14 @@ add_subdirectory(arch/amdgpu/rdna2)
 add_subdirectory(arch/amdgpu/rdna3)
 add_subdirectory(arch/amdgpu/rdna3_5)
 add_subdirectory(arch/amdgpu/rdna4)
-add_subdirectory(arch/amdgpu/gfx1250)
+add_subdirectory(arch/amdgpu/cdna5)
 
 # Narrow production composition for the fixed-profile gfx1250 B0-to-A0
 # library and other model-only consumers. It supplies the default enum entry
 # points for each final image that links it without pulling execution objects.
 rj_add_isa_target_registry(
-    rocjitsu_gfx1250_model_registry
-    PROVIDERS rocjitsu_isa_gfx1250_model
+    rocjitsu_cdna5_model_registry
+    PROVIDERS rocjitsu_isa_cdna5_model
 )
 
 get_property(

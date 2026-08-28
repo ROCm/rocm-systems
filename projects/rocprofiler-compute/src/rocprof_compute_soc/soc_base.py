@@ -7,7 +7,6 @@ import argparse
 import functools
 import os
 import shutil
-import sys
 from abc import abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,7 +14,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
-from utils import amdsmi_interface
+from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -36,7 +35,6 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
-    resolve_rocm_library_path,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -424,7 +422,7 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if bucket.name.endswith("_ACCUM"):
+                if _is_accum_counter(bucket.name):
                     continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
@@ -555,7 +553,7 @@ class OmniSoC_Base:
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
+            if _is_accum_counter(counter) and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
@@ -675,46 +673,9 @@ class OmniSoC_Base:
             sdk_config
         )
 
-        # Backward compatibility support for sdk avail module moved from
-        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
-        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
-        new_path = str(
-            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
+        counters = rocprofv3_avail_interface.get_counters(
+            args.rocprofiler_sdk_tool_path
         )
-        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
-        try:
-            sys.path.append(new_path)
-            from rocprofv3 import avail
-        except ImportError:
-            console_debug(
-                f"Could not import rocprofiler-sdk avail module from {new_path}, "
-                f"trying {old_path}"
-            )
-            try:
-                sys.path.remove(new_path)
-                sys.path.append(old_path)
-                from rocprofv3_avail_module import avail
-            except ImportError:
-                console_error("Failed to import rocprofiler-sdk avail module.")
-
-        # librocprofv3-list-avail.so location varies by ROCm version:
-        #   ROCm >= 7.1: <rocm_path>/lib/rocprofiler-sdk/
-        #   ROCm 7.0.x:  <rocm_path>/libexec/rocprofiler-sdk/
-        avail_lib_name = "librocprofv3-list-avail.so"
-        avail_lib_path = resolve_rocm_library_path(
-            str(Path(args.rocprofiler_sdk_tool_path).parent / avail_lib_name)
-        )
-        if not Path(avail_lib_path).exists():
-            avail_lib_path = resolve_rocm_library_path(
-                str(
-                    Path(args.rocprofiler_sdk_tool_path).parents[2]
-                    / "libexec"
-                    / "rocprofiler-sdk"
-                    / avail_lib_name
-                )
-            )
-        avail.loadLibrary.libname = avail_lib_path
-        counters = avail.get_counters()
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
@@ -826,7 +787,6 @@ class OmniSoC_Base:
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
-        # Roofline not supported on Strix Halo
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
@@ -920,6 +880,11 @@ class CounterFile:
         return self.blocks[counter_to_block(counter)].reserve(n)
 
 
+def _is_accum_counter(counter: str) -> bool:
+    """Return whether a counter requires a paired level-event slot."""
+    return counter.endswith("_ACCUM") or counter.endswith("_ACCUM_sum")
+
+
 def _trial_counter_file_with_extra(
     basis: CounterFile,
     perfmon_config: dict[str, int],
@@ -930,6 +895,11 @@ def _trial_counter_file_with_extra(
     for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
             msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
+            raise RuntimeError(msg)
+    for block, basis_set in basis.blocks.items():
+        reservation = trial.blocks[block].avail - basis_set.avail
+        if reservation < 0 or not trial.blocks[block].reserve(reservation):
+            msg = f"clone reservation failed for block {block!r} in {basis.name!r}"
             raise RuntimeError(msg)
     for ctr in extra_counters_sorted:
         if not trial.add(ctr):

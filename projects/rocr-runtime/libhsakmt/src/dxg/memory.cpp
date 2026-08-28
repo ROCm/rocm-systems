@@ -456,6 +456,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
+                                                HSAuint32 *GpuId) {
+  CHECK_DXG_OPEN();
+
+  if (!NodeId || !GpuId)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes) {
   CHECK_DXG_OPEN();
@@ -574,6 +584,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   GraphicsResourceInfo->MemoryAddress = RegisterFlags.ui32.requiresVAddr ?
                                           reinterpret_cast<void *>(gpu_mem->GpuAddress()):
                                           reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
+  // Populate swizzle metadata for the ROCr interop layer to use as a fallback when
+  // the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+  // is unavailable.
+  const HsaWddmSurfaceMetadata* meta = gpu_mem->GetSurfaceMetadata();
+  GraphicsResourceInfo->Metadata = meta;
+  GraphicsResourceInfo->MetadataSizeInBytes = meta ? sizeof(HsaWddmSurfaceMetadata) : 0;
 
   return ret;
 }

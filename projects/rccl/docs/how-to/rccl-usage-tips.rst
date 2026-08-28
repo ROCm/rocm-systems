@@ -38,10 +38,10 @@ Symmetric memory and ``NCCL_P2P_LEVEL``
 RCCL can accelerate some collectives (for example, allreduce, allgather, and
 reduce-scatter) through a *symmetric memory* path. This path uses
 :doc:`Virtual Memory Management <../api-reference/api-library>`-backed
-buffers that are registered as symmetric windows
-(``ncclCommWindowRegister`` with the ``NCCL_WIN_COLL_SYMMETRIC`` flag, or
-buffers allocated with ``ncclMemAlloc``) so that every participating rank can
-address the buffer directly.
+buffers that are registered as symmetric windows (``ncclCommWindowRegister``
+with the ``NCCL_WIN_COLL_SYMMETRIC`` flag) so that every participating rank can
+address the buffer directly. ``ncclMemAlloc`` allocates memory suitable for such
+a registration, but it does not create a symmetric window on its own.
 
 Whether a communicator can use symmetric memory is decided once at
 ``ncclCommInitRank`` time. The prerequisites are:
@@ -77,6 +77,123 @@ When symmetric memory is **not** available, RCCL logs a line that begins with
 missing (for example, ``cuMemEnable`` or ``globalGinSupport``). If you expect
 the symmetric path but it is disabled, check those prerequisites rather than
 ``NCCL_P2P_LEVEL``.
+
+.. _device-symmetric-memory:
+
+Device-side symmetric memory access (``ncclFindWindow``)
+========================================================
+
+In addition to the host-side collective API, RCCL exposes a *device-side* API
+that lets your own GPU kernels read and write peer ranks' symmetric buffers
+directly, without a host-driven collective. This is the mechanism that backs
+RCCL's fused symmetric kernels. It requires the same symmetric-memory
+prerequisites described above.
+
+Working with symmetric memory from a kernel involves three pieces:
+
+- A **device communicator** (``ncclDevComm``), created on the host with
+  ``ncclDevCommCreate`` and passed to the kernel by value. It carries the rank
+  layout, barriers, and the device-side window registry.
+- One or more **symmetric windows**, registered on the host with
+  ``ncclCommWindowRegister`` using the ``NCCL_WIN_COLL_SYMMETRIC`` flag.
+  ``ncclMemAlloc`` only allocates and maps symmetric-capable memory; it does not
+  populate the window registry, so the explicit registration call is required.
+- The **device API** (available through ``nccl_device.h``) that turns a window
+  plus an offset into a pointer to a specific peer's copy of the buffer.
+
+When a kernel already holds the ``ncclWindow_t`` handle (for example, because
+the host passed it as a launch argument), it can call ``ncclGetLsaPointer``
+directly. When a kernel only has a raw device pointer, it can resolve the
+backing window from the device-side registry with ``ncclFindWindow`` (introduced
+in NCCL 2.28.7), with no host round-trip:
+
+.. code-block:: cpp
+
+   template <typename Coop>
+   ncclWindow_t ncclFindWindow(Coop coop, ncclDevComm const& comm, void const* ptr);
+
+- ``coop`` is a cooperative-thread group (for example ``ncclCoopCta()``). The
+  lookup is warp-coalesced, so **every thread in the group must call it**; the
+  same window handle is returned to all participating threads.
+- ``comm`` is the device communicator passed to the kernel.
+- ``ptr`` is any address that falls within a registered symmetric window's
+  ``[base, base + size)`` range.
+
+``ncclFindWindow`` walks the communicator's window registry, which
+``ncclCommWindowRegister`` populates, and returns the matching ``ncclWindow_t``.
+``ncclDevCommCreate`` does not fill this registry; it only publishes a pointer
+to it into the device communicator. Passing a pointer that no registered
+window covers is undefined behavior rather than a recoverable error: the lookup
+returns only from its hit path, so a miss runs past the end of the registry and
+faults. Make sure the pointer is covered by a registration instead of testing
+the result against ``nullptr``. Once you have a window, resolve a specific
+peer's copy of the buffer with one of the pointer helpers:
+
+- ``ncclGetLsaPointer(window, offset, peer)`` returns a pointer to ``peer``'s
+  copy of the buffer at ``offset`` bytes into the window, for peers reachable
+  through Local Symmetric Access (LSA, that is, direct intra-node
+  peer-to-peer).
+- ``ncclGetPeerPointer(window, offset, team, peer)`` is the team-relative form.
+- ``ncclGetMultimemPointer`` / ``ncclGetLsaMultimemPointer`` return a multicast
+  pointer when multimem is available.
+
+The ``offset`` is measured from the window base, so a buffer registered at its
+base address is accessed at ``offset = 0``.
+
+The kernel below is handed only its local buffer pointer. It resolves the
+backing window on the device, then reads the value stored by its ring neighbor:
+
+.. code-block:: cpp
+
+   #include <nccl_device.h>
+
+   __global__ void readPeerValue(void* localPtr, int* out, ncclDevComm_t comm)
+   {
+       // Synchronize the local symmetric team before touching peer memory.
+       ncclLsaBarrierSession<ncclCoopCta> barrier(
+           ncclCoopCta(), comm, ncclTeamLsa(comm), comm.lsaBarrier, blockIdx.x);
+       barrier.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+       // Device-side registry lookup (all threads participate).
+       ncclWindow_t window = ncclFindWindow(ncclCoopCta(), comm, localPtr);
+
+       if (threadIdx.x == 0) {
+           // ncclGetLsaPointer indexes the LSA team, so the peer must be an LSA
+           // rank. Use ncclGetPeerPointer(window, 0, team, peer) to address a
+           // rank of some other team by its rank in that team.
+           int  peer     = (comm.lsaRank + 1) % comm.lsaSize;
+           int* peerData = reinterpret_cast<int*>(ncclGetLsaPointer(window, 0, peer));
+           out[0] = peerData[0];
+       }
+
+       barrier.sync(ncclCoopCta(), cuda::memory_order_release);
+   }
+
+On the host, register the buffer as a symmetric window and build the device
+communicator before launching:
+
+.. code-block:: cpp
+
+   ncclCommWindowRegister(comm, buffer, bytes, &window, NCCL_WIN_COLL_SYMMETRIC);
+
+   ncclDevCommRequirements_t req = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+   req.lsaBarrierCount = 1;
+   ncclDevComm_t devComm;
+   ncclDevCommCreate(comm, &req, &devComm);
+
+   readPeerValue<<<1, 64, 0, stream>>>(buffer, out, devComm);
+
+The device communicator holds a pointer to the communicator's live window
+registry, so ``ncclFindWindow`` resolves any window registered with
+``NCCL_WIN_COLL_SYMMETRIC``, whether it was registered before or after
+``ncclDevCommCreate``. The only ordering requirement is that the registration
+completes before the kernel that calls ``ncclFindWindow`` runs, on a
+communicator for which symmetric memory is available. If ``ncclDevCommCreate``
+returns ``ncclInvalidUsage``, or a kernel
+faults inside the lookup, confirm the prerequisites above
+(``NCCL_CUMEM_ENABLE=1``, ``NCCL_WIN_ENABLE=1``, peer-to-peer capable ranks),
+that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
+pointer passed to ``ncclFindWindow`` lies within that registration.
 
 Ignoring CPU affinity with multi-node
 =====================================
@@ -355,7 +472,8 @@ The relevant functions, declared in ``rccl.h``, are described in full in
 - ``ncclCommSuspend`` releases the resources selected by its ``flags``
   argument. Pass ``NCCL_SUSPEND_MEM`` to release dynamic GPU memory
   allocations. After this call, the communicator can't be used until it's
-  resumed.
+  resumed: a collective issued while it's suspended is rejected with
+  ``ncclInvalidUsage``.
 - ``ncclCommResume`` reacquires every resource that the matching
   ``ncclCommSuspend`` call released, after which the communicator can run
   collectives again.
@@ -418,4 +536,17 @@ To suspend or resume several communicators together, wrap the calls in
    NCCLCHECK(ncclCommSuspend(commA, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclGroupEnd());
+
+   // ... later, the matching resume ...
+
+   NCCLCHECK(ncclGroupStart());
+   NCCLCHECK(ncclCommResume(commA));
+   NCCLCHECK(ncclCommResume(commB));
+   NCCLCHECK(ncclGroupEnd());
+
+.. note::
+
+   When a single process owns one communicator per device through
+   ``ncclCommInitAll``, ``ncclCommSuspend`` and ``ncclCommResume`` need to be
+   wrapped around a group API.
 

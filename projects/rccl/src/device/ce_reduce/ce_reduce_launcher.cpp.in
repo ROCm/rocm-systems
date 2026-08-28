@@ -15,22 +15,42 @@ ${vec_define}#include "ce_reduce_impl.h"
 #endif
 #include "nccl.h"
 
-ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* tmpBuf, void* output, int nRanks,
-                                                     size_t chunkElems, hipStream_t stream) {
+ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* in, void* out, int nRanks, size_t baseChunkElems,
+                                                     size_t tailChunkElems, size_t chunksPerShard,
+                                                     size_t slotChunkElems, uint32_t* signalBuffer, size_t totalSteps,
+                                                     uint32_t* d_barrierSync, hipStream_t stream, int coopLaunch) {
   using T = $ctype;
   constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
   const int threads = 256;
-  // Cap blocks for CE DMA headroom (mirrors NCCL_CE_VEC_BLOCKS from the original single-file version).
-  const int blocks = (int)std::min((size_t)46, (chunkElems / VecTrait<T>::W + (size_t)threads * UnrollFactor - 1) /
-                                                    ((size_t)threads * UnrollFactor));
+  // Single source of the block geometry, shared with the host-side reporting
+  // wrapper (ncclCeLocalReduceBlocks_${tag}) so live dispatch and rcclGetCollImplInfo never drift.
+  const int blocks = ncclCeLocalReduceBlocksT<T>(baseChunkElems);
+
+  // hipLaunchCooperativeKernel takes an array of pointers to the arguments,
+  // so every kernel argument needs a stable host lvalue to point at.
+  const T* inT = static_cast<const T*>(in);
+  T* outT = static_cast<T*>(out);
+  bool useCoopLaunch = (coopLaunch != 0);
 
   (void)hipGetLastError();
-  hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, $redval, UnrollFactor>), dim3(blocks), dim3(threads), 0, stream,
-                     (const T*)tmpBuf, (T*)output, nRanks, chunkElems);
-  hipError_t e = hipGetLastError();
+  hipError_t e;
+  if (useCoopLaunch) {
+    void* kernelArgs[] = {
+      &inT,          &outT,       &nRanks,        &baseChunkElems, &tailChunkElems, &chunksPerShard, &slotChunkElems,
+      &signalBuffer, &totalSteps, &d_barrierSync, &useCoopLaunch,
+    };
+    e = hipLaunchCooperativeKernel(reinterpret_cast<const void*>(&ncclCeLocalReduceKernelVec<T, $redval, UnrollFactor>),
+                                   dim3(blocks), dim3(threads), kernelArgs, 0, stream);
+  } else {
+    hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, $redval, UnrollFactor>), dim3(blocks), dim3(threads), 0, stream,
+                       inT, outT, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems, signalBuffer,
+                       totalSteps, d_barrierSync, useCoopLaunch);
+    e = hipGetLastError();
+  }
   if (e != hipSuccess) {
     printf("[CE reduce] launch failed: %d (%s)\n", (int)e, hipGetErrorString(e));
     return ncclUnhandledCudaError;
   }
   return ncclSuccess;
 }
+$blocks_fn

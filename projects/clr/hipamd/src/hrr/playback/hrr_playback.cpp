@@ -1133,6 +1133,59 @@ int main(int argc, char** argv) {
   double wall_ms = std::chrono::duration<double, std::milli>(
                        wall_end - wall_start).count();
 
+  // Releases every GPU/host resource tracked in the PlaybackContext. Runs on
+  // both the normal exit and the divergence-abort exit (a clean stop while the
+  // GPU is still healthy), so the two paths free identical resources and no
+  // implementation can drift. Not called on the fatal-HIP-error path, where the
+  // device context may be dead and these calls could hang or error.
+  auto cleanup = [&]() {
+    for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
+    for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
+
+    // alloc_map mixes device and host allocations; each must be released with the
+    // matching API. Dispatch on AllocEntry::kind:
+    //   Device         -> hipFree
+    //   HostMalloc     -> hipHostFree
+    //   HostRegister   -> released below via host_reg_bufs (hipHostUnregister+free)
+    //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
+    for (auto& [rec, entry] : ctx.alloc_map) {
+      switch (entry.kind) {
+        case AllocKind::Device:        (void)hipFree(entry.live_ptr);     break;
+        case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
+        case AllocKind::HostRegister:                                     break;
+        case AllocKind::DevicePtrAlias:                                   break;
+      }
+    }
+    // Captures routinely end mid-stream with hipHostRegister'd buffers still live;
+    // playback_hipHostUnregister never ran for them, so unregister + free each
+    // remaining backing buffer here to avoid leaking both the pinned registration
+    // and the malloc'd buffer every run.
+    for (auto& [rec, buf] : ctx.host_reg_bufs) {
+      if (!buf) continue;
+      (void)hipHostUnregister(buf);
+#ifdef _WIN32
+      _aligned_free(buf);
+#else
+      free(buf);
+#endif
+    }
+    ctx.host_reg_bufs.clear();
+    for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
+    for (auto& [rec, ev2]   : ctx.event_map)   (void)hipEventDestroy(ev2);
+    for (hipEvent_t e : ctx.owned_timing_events) (void)hipEventDestroy(e);
+
+    // Unload all unique hipModule_t values across both maps.
+    // co_modules holds modules loaded from code objects (by hash).
+    // module_map holds fat-binary modules (not in co_modules) plus
+    // duplicates of modules from explicit hipModuleLoad calls (already in
+    // co_modules). The set deduplicates so each module is unloaded once.
+    std::unordered_set<hipModule_t> mods;
+    for (auto& [hex, mod] : ctx.co_modules) mods.insert(mod);
+    for (auto& [rec, mod] : ctx.module_map) mods.insert(mod);
+    for (hipModule_t m : ctx.replacement_modules) mods.insert(m);
+    for (hipModule_t m : mods) (void)hipModuleUnload(m);
+  };
+
   if (!pass_ok) {
     if (ctx.diverged.load(std::memory_order_acquire)) {
       fprintf(stderr,
@@ -1141,6 +1194,9 @@ int main(int argc, char** argv) {
               "limit (nondeterministic GPU reductions in an unstable workload), "
               "not an HRR bug — see the [HRR] replay DIVERGED message above.\n",
               ctx.d2h_fail.load(), ctx.d2h_attempted.load());
+      // Divergence is a clean stop with a healthy GPU: release everything the
+      // normal exit would, so LeakSanitizer stays quiet on this path too.
+      cleanup();
       return 2;
     }
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
@@ -1185,54 +1241,7 @@ int main(int argc, char** argv) {
 
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 
-  // Cleanup.
-  for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
-  for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
-
-  // alloc_map mixes device and host allocations; each must be released with the
-  // matching API. Dispatch on AllocEntry::kind:
-  //   Device         -> hipFree
-  //   HostMalloc     -> hipHostFree
-  //   HostRegister   -> released below via host_reg_bufs (hipHostUnregister+free)
-  //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
-  for (auto& [rec, entry] : ctx.alloc_map) {
-    switch (entry.kind) {
-      case AllocKind::Device:        (void)hipFree(entry.live_ptr);     break;
-      case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
-      case AllocKind::HostRegister:                                     break;
-      case AllocKind::DevicePtrAlias:                                   break;
-    }
-  }
-  // Captures routinely end mid-stream with hipHostRegister'd buffers still live;
-  // playback_hipHostUnregister never ran for them, so unregister + free each
-  // remaining backing buffer here to avoid leaking both the pinned registration
-  // and the malloc'd buffer every run.
-  for (auto& [rec, buf] : ctx.host_reg_bufs) {
-    if (!buf) continue;
-    (void)hipHostUnregister(buf);
-#ifdef _WIN32
-    _aligned_free(buf);
-#else
-    free(buf);
-#endif
-  }
-  ctx.host_reg_bufs.clear();
-  for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
-  for (auto& [rec, ev2]   : ctx.event_map)   (void)hipEventDestroy(ev2);
-  for (hipEvent_t e : ctx.owned_timing_events) (void)hipEventDestroy(e);
-
-  // Unload all unique hipModule_t values across both maps.
-  // co_modules holds modules loaded from code objects (by hash).
-  // module_map holds fat-binary modules (not in co_modules) plus
-  // duplicates of modules from explicit hipModuleLoad calls (already in
-  // co_modules). The set deduplicates so each module is unloaded once.
-  {
-    std::unordered_set<hipModule_t> mods;
-    for (auto& [hex, mod] : ctx.co_modules) mods.insert(mod);
-    for (auto& [rec, mod] : ctx.module_map) mods.insert(mod);
-    for (hipModule_t m : ctx.replacement_modules) mods.insert(m);
-    for (hipModule_t m : mods) (void)hipModuleUnload(m);
-  }
+  cleanup();
 
   return ok ? 0 : 1;
 }

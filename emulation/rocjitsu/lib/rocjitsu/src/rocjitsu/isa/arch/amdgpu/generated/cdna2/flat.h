@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -32,6 +33,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -43,6 +45,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -54,6 +57,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -65,6 +69,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -76,6 +81,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -87,6 +93,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -98,6 +105,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -108,6 +116,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -119,6 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -130,6 +140,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -141,6 +152,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -152,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -163,6 +176,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -174,6 +188,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -185,6 +200,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
   Operand m0;
   Operand saddr;
@@ -194,10 +210,10 @@ class FlatLoadUbyteD16Flat : public Flat {
 public:
   FlatLoadUbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -206,10 +222,10 @@ class FlatLoadUbyteD16HiFlat : public Flat {
 public:
   FlatLoadUbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -218,10 +234,10 @@ class FlatLoadSbyteD16Flat : public Flat {
 public:
   FlatLoadSbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -230,10 +246,10 @@ class FlatLoadSbyteD16HiFlat : public Flat {
 public:
   FlatLoadSbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -242,10 +258,10 @@ class FlatLoadShortD16Flat : public Flat {
 public:
   FlatLoadShortD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -254,10 +270,10 @@ class FlatLoadShortD16HiFlat : public Flat {
 public:
   FlatLoadShortD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
+  Operand gpumem;
   Operand m0;
   Operand saddr;
 };
@@ -269,7 +285,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -281,7 +299,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -293,7 +313,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -305,7 +327,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -317,7 +341,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -329,7 +355,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -341,7 +369,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -353,7 +383,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -365,7 +397,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -377,7 +411,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -389,7 +425,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -401,7 +439,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -413,7 +453,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -425,7 +467,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -437,7 +481,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -449,7 +495,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -461,7 +509,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -473,7 +523,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -485,7 +537,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -497,7 +551,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -509,7 +565,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -521,7 +579,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -533,7 +593,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -545,7 +607,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -557,7 +621,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -569,7 +635,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -581,7 +649,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -593,7 +663,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
@@ -605,7 +677,9 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
   Operand flat_scratch;
+  Operand gpumem_in;
   Operand m0;
   Operand saddr;
 };
