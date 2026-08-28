@@ -31,6 +31,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -63,6 +64,17 @@ inventory()
     return *_v;
 }
 
+common::Synchronized<tracked_map_t>&
+unsupported_executable_inventory()
+{
+    // Distinct ContextT so this singleton does not share storage with inventory().
+    struct unsupported_executable_tag
+    {};
+    static auto*& _v = common::static_object<common::Synchronized<tracked_map_t>,
+                                             unsupported_executable_tag>::construct();
+    return *_v;
+}
+
 namespace
 {
 // Saved "next" function pointers (the already-installed wrappers) we chain through. Types are taken
@@ -75,29 +87,105 @@ decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = n
 // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG is absent from older HSA headers
 constexpr uint32_t memory_pool_executable_flag = (1U << 2);
 
+void
+record_unsupported_executable(void* ptr, size_t size)
+{
+    // Same fini gate as record_alloc: the wrappers outlive this static object.
+    if(registration::get_fini_status() > 0) return;
+
+    const auto q = query_alloc(ptr);
+    // Only ordinary coarse device VRAM. HIP kernarg pools / fine-grained regions fail trackable and
+    // stay out of both inventories (silent omit is correct for those).
+    if(!q.trackable) return;
+    unsupported_executable_inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent};
+    });
+}
+
+// Inventory entries pulled out ahead of an HSA free. snap() copies from every address the
+// inventory lists, so the entry has to be retired *before* the device memory is released --
+// leaving it in place across the free lets a concurrent replay on another thread read a retired
+// allocation. The removed values are kept so the entry can be put back when the free itself fails
+// and the allocation is therefore still live.
+struct retired_alloc_t
+{
+    std::optional<alloc_info_t> tracked{};
+    std::optional<alloc_info_t> unsupported{};
+
+    bool any() const { return tracked.has_value() || unsupported.has_value(); }
+};
+
+retired_alloc_t
+retire_recorded_alloc(void* ptr)
+{
+    auto out = retired_alloc_t{};
+    if(registration::get_fini_status() > 0) return out;
+
+    inventory().wlock([&](auto& _map) {
+        if(auto itr = _map.find(ptr); itr != _map.end())
+        {
+            out.tracked = itr->second;
+            _map.erase(itr);
+        }
+    });
+    unsupported_executable_inventory().wlock([&](auto& _map) {
+        if(auto itr = _map.find(ptr); itr != _map.end())
+        {
+            out.unsupported = itr->second;
+            _map.erase(itr);
+        }
+    });
+    return out;
+}
+
+void
+reinstate_recorded_alloc(void* ptr, const retired_alloc_t& prev)
+{
+    if(registration::get_fini_status() > 0) return;
+
+    if(prev.tracked) inventory().wlock([&](auto& _map) { _map[ptr] = *prev.tracked; });
+    if(prev.unsupported)
+        unsupported_executable_inventory().wlock(
+            [&](auto& _map) { _map[ptr] = *prev.unsupported; });
+}
+
 hsa_status_t
 pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
 {
     auto st = next_pool_allocate(pool, size, flags, ptr);
-    // Never snapshot executable allocations. HIP places its per-stream/per-graph kernarg pools --
-    // and rocprofiler its trace buffers -- in the coarse-grained segment with the executable flag,
-    // so they slip past query_alloc's kernarg-pool check. They hold live kernel arguments / runtime
-    // state, not application data; snapshotting them means restore() clobbers the in-flight
-    // kernargs of a concurrent dispatch. We already have the flag here, so skip before
-    // query_alloc's hsa_amd_pointer_info query rather than re-deriving it.
-    const bool is_executable = (flags & memory_pool_executable_flag) != 0;
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr &&
-       !is_executable)
-        record_alloc(*ptr, size);
+    // Never snapshot executable allocations into the main inventory. HIP places its
+    // per-stream/per-graph kernarg pools -- and rocprofiler its trace buffers -- in the
+    // coarse-grained segment with the executable flag, so they slip past query_alloc's
+    // kernarg-pool check. They hold live kernel arguments / runtime state, not application
+    // data; snapshotting them means restore() clobbers the in-flight kernargs of a concurrent
+    // dispatch. We already have the flag here, so skip the main inventory before query_alloc.
+    //
+    // Direct-HSA apps can put ordinary writable device data behind the same flag. Those
+    // allocations are trackable (coarse VRAM); record them in the unsupported side inventory so
+    // tests and tools can detect the unsupported omitted class. Declining snap() whenever the side
+    // inventory is non-empty is not viable -- HIP and the SDK's own AQL pools routinely keep such
+    // allocations live -- so they remain documented as an unsupported omission for beta.
+    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr)
+    {
+        const bool is_executable = (flags & memory_pool_executable_flag) != 0;
+        if(is_executable)
+            record_unsupported_executable(*ptr, size);
+        else
+            record_alloc(*ptr, size);
+    }
     return st;
 }
 
 hsa_status_t
 pool_free_wrapper(void* ptr)
 {
+    const bool tracking = tracking_flag().load(std::memory_order_relaxed) && ptr != nullptr;
+    const auto retired  = tracking ? retire_recorded_alloc(ptr) : retired_alloc_t{};
+
     auto st = next_pool_free(ptr);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr)
-        record_free(ptr);
+
+    if(tracking && st != HSA_STATUS_SUCCESS && retired.any())
+        reinstate_recorded_alloc(ptr, retired);
     return st;
 }
 
@@ -113,9 +201,13 @@ memory_allocate_wrapper(hsa_region_t region, size_t size, void** ptr)
 hsa_status_t
 memory_free_wrapper(void* ptr)
 {
+    const bool tracking = tracking_flag().load(std::memory_order_relaxed) && ptr != nullptr;
+    const auto retired  = tracking ? retire_recorded_alloc(ptr) : retired_alloc_t{};
+
     auto st = next_memory_free(ptr);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr)
-        record_free(ptr);
+
+    if(tracking && st != HSA_STATUS_SUCCESS && retired.any())
+        reinstate_recorded_alloc(ptr, retired);
     return st;
 }
 }  // namespace
@@ -150,6 +242,7 @@ record_free(void* ptr)
 {
     if(registration::get_fini_status() > 0) return;
     inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
+    unsupported_executable_inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
 }
 
 alloc_map_t
@@ -165,6 +258,53 @@ snap_inventory(hsa_agent_t agent)
     return out;
 }
 
+alloc_map_t
+unsupported_executable(hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return {};
+
+    alloc_map_t out{};
+    unsupported_executable_inventory().rlock([&](const auto& _map) {
+        for(const auto& [ptr, info] : _map)
+            if(info.agent.handle == agent.handle) out.emplace(ptr, info.size);
+    });
+    return out;
+}
+
+bool
+agent_has_unsupported_executable(hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return false;
+
+    bool found = false;
+    unsupported_executable_inventory().rlock([&](const auto& _map) {
+        for(const auto& [ptr, info] : _map)
+        {
+            (void) ptr;
+            if(info.agent.handle == agent.handle)
+            {
+                found = true;
+                break;
+            }
+        }
+    });
+    return found;
+}
+
+hsa_status_t
+tracking_pool_allocate(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
+{
+    if(!next_pool_allocate) return HSA_STATUS_ERROR;
+    return pool_allocate_wrapper(pool, size, flags, ptr);
+}
+
+hsa_status_t
+tracking_pool_free(void* ptr)
+{
+    if(!next_pool_free) return HSA_STATUS_ERROR;
+    return pool_free_wrapper(ptr);
+}
+
 }  // namespace memory_tracker
 
 void
@@ -176,6 +316,11 @@ memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance)
     // as next_memory_allocate and recurse. (Keying on lib_instance matches the copy/update_table
     // convention -- see scratch_memory.cpp.)
     if(lib_instance > 0) return;
+
+    // Idempotent on this table: restore_table may call memory_tracker_init again after putting the
+    // original pointers back; std::call_once would skip that re-hook. Guard against a second
+    // install on an already-wrapped table (which would capture our wrapper as next_* and recurse).
+    if(table->hsa_memory_allocate_fn == memory_tracker::memory_allocate_wrapper) return;
 
     memory_tracker::next_memory_allocate = table->hsa_memory_allocate_fn;
     memory_tracker::next_memory_free     = table->hsa_memory_free_fn;
@@ -192,6 +337,9 @@ memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
     // as next_pool_allocate and recurse. (Keying on lib_instance matches the copy/update_table
     // convention -- see scratch_memory.cpp.)
     if(lib_instance > 0) return;
+
+    // Idempotent on this table -- see memory_tracker_init(hsa_core_table_t*) above.
+    if(table->hsa_amd_memory_pool_allocate_fn == memory_tracker::pool_allocate_wrapper) return;
 
     memory_tracker::next_pool_allocate     = table->hsa_amd_memory_pool_allocate_fn;
     memory_tracker::next_pool_free         = table->hsa_amd_memory_pool_free_fn;

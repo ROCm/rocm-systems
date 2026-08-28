@@ -15,7 +15,7 @@ set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES core.cpp spm_memory_pool_test.cpp
-                                             queue_hooks_test.cpp)
+                                             local_context.cpp queue_hooks_test.cpp)
 
 add_executable(spm-counter-test)
 

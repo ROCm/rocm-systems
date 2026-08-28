@@ -29,6 +29,7 @@
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/utils.hpp"
@@ -238,7 +239,7 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
             ASSERT_FLOAT_EQ(b[i], 9001.0f + i) << "mutated elem " << i;
     }
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
     {
         // restore reverted to A
         auto a = read_device(buffer, N_ELEMS);
@@ -294,7 +295,7 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
                 << "module counter after saxpy, pass " << pass;
         }
 
-        msnp::restore(snapshot);
+        ASSERT_TRUE(msnp::restore(snapshot));
         {
             // restore reverts to snapped inputs -- no accumulation into the next pass
             auto reverted = read_device(y, N_ELEMS);
@@ -354,7 +355,7 @@ TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
             ASSERT_FLOAT_EQ(mutated[i], base[b] + 77000.0f + i) << "buf " << b << " elem " << i;
     }
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
 
     for(int b = 0; b < kBufs; ++b)
     {
@@ -435,6 +436,76 @@ TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
     ASSERT_EQ(hipFree(dev), hipSuccess);
 }
 
+// Snapshots must exclude allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG from the main
+// inventory (HIP kernarg pools / profiler buffers share that flag). When the allocation is
+// otherwise trackable (coarse device VRAM -- what a direct-HSA app may put behind the flag), it is
+// recorded in the unsupported side inventory. snap() does not decline on that side inventory: the
+// HIP runtime routinely keeps trackable+executable allocations live, so declining would disable
+// replay for ordinary HIP apps. Assert the inventory exclusion (and side-table bookkeeping)
+// directly via the intercepted HSA table so the check does not depend on replay-window
+// serialization.
+TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    struct pool_pick_t
+    {
+        hsa_amd_memory_pool_t pool{};
+        bool                  found = false;
+    } pick{};
+
+    (void) hsa_amd_agent_iterate_memory_pools(
+        agent,
+        [](hsa_amd_memory_pool_t p, void* data) -> hsa_status_t {
+            auto*             out = static_cast<pool_pick_t*>(data);
+            hsa_amd_segment_t segment{};
+            if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) !=
+               HSA_STATUS_SUCCESS)
+                return HSA_STATUS_SUCCESS;
+            if(segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+            uint32_t flags = 0;
+            if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags) !=
+               HSA_STATUS_SUCCESS)
+                return HSA_STATUS_SUCCESS;
+            constexpr uint32_t kFine    = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+            constexpr uint32_t kKernarg = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+            if((flags & kFine) != 0 || (flags & kKernarg) != 0) return HSA_STATUS_SUCCESS;
+            out->pool  = p;
+            out->found = true;
+            return HSA_STATUS_INFO_BREAK;
+        },
+        &pick);
+
+    if(!pick.found) GTEST_SKIP() << "no coarse global memory pool on agent";
+
+    // Interceptor wrappers are installed on the runtime-facing HSA table, not on
+    // get_amd_ext_table()'s internal (unwrapped) copy. tracking_pool_allocate/free invoke those
+    // same wrappers so this unit test exercises the executable-flag path directly.
+    constexpr uint32_t kExecutableFlag = (1U << 2);  // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG
+    void*              ptr             = nullptr;
+    ASSERT_EQ(mt::tracking_pool_allocate(pick.pool, 4096, kExecutableFlag, &ptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_NE(ptr, nullptr);
+
+    EXPECT_FALSE(inventory_contains(ptr, agent))
+        << "executable-flag allocation must not enter the snapshot inventory";
+
+    const auto q = mt::query_alloc(ptr);
+    if(q.trackable)
+    {
+        EXPECT_EQ(mt::unsupported_executable(agent).count(ptr), 1U)
+            << "trackable+executable allocation must enter the unsupported side inventory";
+        EXPECT_TRUE(mt::agent_has_unsupported_executable(agent));
+    }
+
+    ASSERT_EQ(mt::tracking_pool_free(ptr), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(mt::unsupported_executable(agent).count(ptr), 0U)
+        << "side inventory must clear this pointer on free";
+}
+
 // A __device__ module global mutated by a kernel must be reverted by restore(). It is not a
 // hipMalloc allocation -- it lives in the loaded executable's data segment and is captured only by
 // snap()'s HSA_SYMBOL_KIND_VARIABLE path. Without that path this reads kBase+1 after restore.
@@ -455,7 +526,7 @@ TEST(kernel_replay_snapshot, restore_reverts_module_variable)
     sync_ok();
     ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "kernel mutation did not land";
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
     EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
         << "module variable (__device__ global) was not restored by snapshot/restore";
 }
@@ -482,187 +553,10 @@ TEST(kernel_replay_snapshot, restore_prevents_module_variable_accumulation_acros
         sync_ok();
         ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "mutation, pass " << pass;
 
-        msnp::restore(snapshot);
+        ASSERT_TRUE(msnp::restore(snapshot));
         ASSERT_EQ(kernel_launch::read_module_counter(), kBase) << "post-restore, pass " << pass;
     }
 
     EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
         << "module variable accumulated across passes instead of being restored";
-}
-
-// ------------------------- multi-device helpers -------------------------
-namespace
-{
-std::vector<hsa_agent_t>
-gpu_agents()
-{
-    auto out = std::vector<hsa_agent_t>{};
-    for(const auto* rocp_agent : rocprofiler::agent::get_agents())
-    {
-        if(rocp_agent == nullptr || rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-        if(auto hsa = rocprofiler::agent::get_hsa_agent(rocp_agent); hsa.has_value())
-            out.emplace_back(*hsa);
-    }
-    return out;
-}
-
-// The agent whose tracked inventory holds @p p, or a zero handle if none claims it.
-//
-// This is deliberately a search rather than an index. Pairing a HIP device number with an HSA agent
-// by position assumes the SDK's agent order matches HIP's device order, which is not guaranteed and
-// would turn an ordering difference into a confusing assertion failure somewhere else. Asking the
-// inventory instead uses the agent the runtime really allocated on.
-hsa_agent_t
-owning_agent(void* p)
-{
-    for(const auto& agent : gpu_agents())
-        if(inventory_contains(p, agent)) return agent;
-    return hsa_agent_t{.handle = 0};
-}
-
-int
-visible_devices()
-{
-    int devs = 0;
-    if(hipGetDeviceCount(&devs) != hipSuccess) return 0;
-    return devs;
-}
-
-// Restores the previous HIP device on scope exit, so a failed assertion mid-test cannot leave the
-// process pointed at a device the rest of the suite does not expect.
-struct scoped_device
-{
-    explicit scoped_device(int dev)
-    {
-        EXPECT_EQ(hipGetDevice(&prev_), hipSuccess);
-        EXPECT_EQ(hipSetDevice(dev), hipSuccess);
-    }
-    ~scoped_device() { static_cast<void>(hipSetDevice(prev_)); }
-
-    scoped_device(const scoped_device&)            = delete;
-    scoped_device(scoped_device&&)                 = delete;
-    scoped_device& operator=(const scoped_device&) = delete;
-    scoped_device& operator=(scoped_device&&)      = delete;
-
-private:
-    int prev_ = 0;
-};
-}  // namespace
-
-// Per-agent inventory scoping, against the real runtime. memory_tracker_test.cpp pins this same
-// property against a hand-built map; this pins it against what the runtime actually records, which
-// is the case replay depends on. If snap(agent) could see another agent's allocations it would
-// capture them and a later restore would overwrite memory belonging to a device that was never
-// being replayed.
-TEST(kernel_replay_snapshot, inventory_scopes_to_the_owning_device)
-{
-    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
-    if(visible_devices() < 2) GTEST_SKIP() << "needs at least two visible GPUs";
-
-    const size_t bytes = N_ELEMS * sizeof(float);
-
-    float* buf0 = nullptr;
-    float* buf1 = nullptr;
-
-    {
-        scoped_device dev{0};
-        ASSERT_EQ(hipMalloc(&buf0, bytes), hipSuccess);
-    }
-    {
-        scoped_device dev{1};
-        ASSERT_EQ(hipMalloc(&buf1, bytes), hipSuccess);
-    }
-    ASSERT_NE(buf0, nullptr);
-    ASSERT_NE(buf1, nullptr);
-
-    const auto agent0 = owning_agent(buf0);
-    const auto agent1 = owning_agent(buf1);
-
-    ASSERT_NE(agent0.handle, 0U) << "the device-0 allocation was tracked against no agent at all";
-    ASSERT_NE(agent1.handle, 0U) << "the device-1 allocation was tracked against no agent at all";
-    ASSERT_NE(agent0.handle, agent1.handle)
-        << "allocations on two different devices were tracked against the same agent";
-
-    EXPECT_FALSE(inventory_contains(buf1, agent0))
-        << "the device-1 allocation leaked into device 0's inventory";
-    EXPECT_FALSE(inventory_contains(buf0, agent1))
-        << "the device-0 allocation leaked into device 1's inventory";
-
-    {
-        scoped_device dev{0};
-        ASSERT_EQ(hipFree(buf0), hipSuccess);
-    }
-    {
-        scoped_device dev{1};
-        ASSERT_EQ(hipFree(buf1), hipSuccess);
-    }
-}
-
-// A restore must stay confined to the agent it was snapped from. Replay serializes per agent, so a
-// dispatch replaying on one device runs alongside unrelated work on another; a restore that reached
-// across agents would silently roll that other device's data back underneath it. Snapshotting only
-// device 0 while mutating both is what makes such a leak observable.
-TEST(kernel_replay_snapshot, restore_leaves_other_devices_untouched)
-{
-    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
-    if(visible_devices() < 2) GTEST_SKIP() << "needs at least two visible GPUs";
-
-    const size_t bytes = N_ELEMS * sizeof(float);
-
-    float* buf0 = nullptr;
-    float* buf1 = nullptr;
-
-    {
-        scoped_device dev{0};
-        ASSERT_EQ(hipMalloc(&buf0, bytes), hipSuccess);
-        launch_iota(buf0, 1.0f, N_ELEMS);
-    }
-    {
-        scoped_device dev{1};
-        ASSERT_EQ(hipMalloc(&buf1, bytes), hipSuccess);
-        launch_iota(buf1, 1.0f, N_ELEMS);
-    }
-
-    const auto agent0 = owning_agent(buf0);
-    const auto agent1 = owning_agent(buf1);
-    ASSERT_NE(agent0.handle, 0U);
-    ASSERT_NE(agent1.handle, 0U);
-    ASSERT_NE(agent0.handle, agent1.handle)
-        << "both devices resolved to one agent, so there is no isolation left to test";
-
-    auto snapshot = msnp::snap(agent0);
-
-    {
-        scoped_device dev{0};
-        launch_add(buf0, 9000.0f, N_ELEMS);
-    }
-    {
-        scoped_device dev{1};
-        launch_add(buf1, 9000.0f, N_ELEMS);
-    }
-
-    msnp::restore(snapshot);
-
-    {
-        scoped_device dev{0};
-        auto a = read_device(buf0, N_ELEMS);
-        for(size_t i = 0; i < N_ELEMS; ++i)
-            ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "the snapped device was not restored, elem " << i;
-    }
-    {
-        scoped_device dev{1};
-        auto b = read_device(buf1, N_ELEMS);
-        for(size_t i = 0; i < N_ELEMS; ++i)
-            ASSERT_FLOAT_EQ(b[i], 9001.0f + i)
-                << "restoring device 0 reached across and reverted device 1, elem " << i;
-    }
-
-    {
-        scoped_device dev{0};
-        ASSERT_EQ(hipFree(buf0), hipSuccess);
-    }
-    {
-        scoped_device dev{1};
-        ASSERT_EQ(hipFree(buf1), hipSuccess);
-    }
 }

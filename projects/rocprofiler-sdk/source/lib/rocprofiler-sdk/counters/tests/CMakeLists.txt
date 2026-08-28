@@ -67,6 +67,7 @@ set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     code_object_loader.cpp
     device_counting.cpp
     firmware_restrictions_test.cpp
+    local_context.cpp
     queue_hooks_test.cpp
     per_agent_scoping_test.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)

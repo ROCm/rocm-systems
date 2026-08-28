@@ -70,8 +70,11 @@ struct device_snapshot_t
 device_snapshot_t
 snap(hsa_agent_t agent);
 
-// Copy each saved region host->device. Returns the number of regions restored.
-size_t
+// Copy each saved region host->device. Returns true when every live region was restored.
+// A region that was freed after snap is skipped (benign). A failed host->device DMA copy
+// returns false immediately: the snapshot is then only partially applied, and the caller must
+// abort replay rather than submit another pass over corrupted device memory.
+bool
 restore(const device_snapshot_t& snapshot);
 }  // namespace memory_snapshot
 }  // namespace kernel_replay

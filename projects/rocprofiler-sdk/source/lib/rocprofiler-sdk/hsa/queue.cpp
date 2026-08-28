@@ -114,6 +114,9 @@ constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 {
+    // No get_fini_status() guard is needed here. Every caller reaches this only when
+    // has_active_replay_contexts() is true, and that returns false during finalization, so the
+    // static lock map below is never touched after teardown.
     using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
     static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
 
@@ -576,9 +579,9 @@ WriteInterceptor(const void* packets,
                                     rocprofiler_dispatch_id_t reserved_dispatch_id = 0) {
         auto transformed_packets = packet_vector_t{};
 
-        auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
-        auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
-        auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
+        auto thr_id           = corr_id->thread_idx;
+        auto internal_corr_id = corr_id->internal;
+        auto ancestor_corr_id = corr_id->ancestor;
 
         using packet_data_array_t = queue_info_session_t::packet_data_array_t;
 
@@ -979,16 +982,13 @@ WriteInterceptor(const void* packets,
     // callbacks and every record share it and the counter is bumped exactly once. 0 means "not a
     // replay dispatch"; the normal path then mints its own id.
     rocprofiler_dispatch_id_t replay_dispatch_id = 0;
-    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1)
+    // A graph node's dispatch is never replayed. Snapshot/restore around a graph's runtime-managed
+    // memory and ordering is undefined, and graph replay is future work. Excluding
+    // graph_launch_active from the gate declines the graph gracefully instead of aborting: it falls
+    // through to the ordinary path and runs once, and the one-shot warning above already told the
+    // tool. Non-graph single dispatches replay as usual below.
+    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
     {
-        // A graph node's dispatch must never be replayed -- snapshot/restore around a graph's
-        // runtime-managed memory and ordering is undefined. Graph replay is future work, so a graph
-        // launch reaching the replay path (even as a single-packet dispatch) is a hard error rather
-        // than something we silently mis-handle. Non-graph single dispatches replay as usual below.
-        ROCP_FATAL_IF(graph_launch_active) << fmt::format(
-            "kernel replay: attempted to replay a HIP graph dispatch (graph replay is not "
-            "supported)");
-
         const auto thr_id           = corr_id->thread_idx;
         const auto internal_corr_id = corr_id->internal;
         const auto ancestor_corr_id = corr_id->ancestor;
@@ -1083,10 +1083,14 @@ WriteInterceptor(const void* packets,
 
             // Localized context control for this replay loop. This guard installs the thread-local
             // routing that connects the tool's PASS toggle callbacks (writers, via
-            // replay_local_start/stop_context) to the services that read it at dispatch (via
+            // replay_local_enable/disable_context) to the services that read it at dispatch (via
             // kernel_replay::local_context_override). It lives for the whole loop and is torn down
-            // when the guard exits; global context state is never touched.
-            auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{};
+            // when the guard exits; global context state is never touched. It captures the contexts
+            // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
+            // those and a local start cannot promote a globally-stopped context
+            // (local_context.hpp).
+            auto local_ctx_tls_guard =
+                kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
@@ -1121,7 +1125,12 @@ WriteInterceptor(const void* packets,
                 if(!kernel_replay::should_continue_replay(replay_plan, pass, is_final)) break;
 
                 // Restore device memory between passes so the next pass sees identical inputs.
-                kernel_replay::memory_snapshot::restore(snapshot);
+                // A failed host->device copy leaves the snapshot only partially applied; continuing
+                // would submit the next pass over corrupted memory and (because the final pass
+                // skips restore) would also leave that corruption visible to the application.
+                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
+                    "kernel replay: restore failed between passes (partial host->device copy); "
+                    "aborting rather than continuing with corrupted device memory");
             }
 
             kernel_replay::execute_config_phase_exit(

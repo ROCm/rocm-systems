@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
@@ -161,6 +162,27 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(ctx->callback_tracer->callback_data.at(kind).callback)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
+    // Kernel replay runs one replay loop per dispatch (a single pass count + plan), so only one
+    // context may own it process-wide. Reject a second subscriber instead of silently sharing the
+    // planner -- otherwise pass_count_cb is last-writer-wins and one tool's user_data is delivered
+    // to another. Claimed atomically: an already-registered check followed by a later flag store
+    // would be a check-then-act pair that two concurrent configurations could both pass. Claimed
+    // before mutating ctx so a rejection leaves it unconfigured.
+    bool claimed_replay = false;
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
+    {
+        if(rocprofiler::kernel_replay::has_registered_replay_context() ||
+           !rocprofiler::kernel_replay::try_claim_replay_service())
+            return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+        claimed_replay = true;
+    }
+
+    // Hand the claim back if this configuration fails after taking it, so a rejected attempt does
+    // not leave replay owned by nobody for the rest of the process.
+    auto _replay_claim_guard = rocprofiler::common::scope_destructor{[&claimed_replay]() {
+        if(claimed_replay) rocprofiler::kernel_replay::release_replay_service_claim();
+    }};
+
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
     ctx->callback_tracer->callback_data.at(kind) = {callback, callback_args};
@@ -174,7 +196,8 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
     {
         rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
-        rocprofiler::kernel_replay::set_replay_service_configured(true);
+        // Configuration succeeded: keep the claim taken above.
+        claimed_replay = false;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

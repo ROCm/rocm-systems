@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -138,8 +139,18 @@ pre_kernel_call(const context::context*                                  ctx,
 
     if(!ctx || !ctx->dispatch_spm) return {nullptr, false};
 
-    bool is_enabled = false;
-    ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { is_enabled = collect_ctx; });
+    // Effective collection state for this dispatch: the context's enabled flag, then the kernel-
+    // replay per-pass override (a replay pass may force this context on/off; no-op outside a replay
+    // loop). Mirrors counters/dispatch_handlers.cpp. See kernel_replay/local_context.hpp.
+    // Local start must only undo a prior local stop: it cannot promote a globally stopped context.
+    // Mirrors counters/dispatch_handlers.cpp.
+    const bool is_enabled = [&] {
+        bool enabled = false;
+        ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { enabled = collect_ctx; });
+        if(auto ov = kernel_replay::local_context_override({.handle = ctx->context_idx}))
+            enabled = enabled && *ov;
+        return enabled;
+    }();
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
 

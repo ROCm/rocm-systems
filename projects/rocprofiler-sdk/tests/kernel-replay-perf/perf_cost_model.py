@@ -8,6 +8,10 @@
 
 import os
 
+# Optional[...] rather than the PEP 604 "float | None": these annotations are evaluated when the
+# module is imported, and the CI runners include distros whose system Python predates 3.10.
+from typing import Optional
+
 # Conservative host-link floor (GB/s). Intentionally low for heterogeneous CI
 # including older AMD GPUs. Override locally for tighter checks:
 #   ROCPROFILER_KR_MIN_SNAP_GBPS=8
@@ -20,11 +24,18 @@ DEFAULT_OVERHEAD_MARGIN = float(os.environ.get("ROCPROFILER_KR_OVERHEAD_MARGIN",
 KERNEL_OVERHEAD_PER_PASS_S = 0.002
 
 # End-to-end fixed cost (snap inventory, client attach, context) not in byte budget.
-FIXED_REPLAY_OVERHEAD_MS = float(os.environ.get("ROCPROFILER_KR_FIXED_OVERHEAD_MS", "120.0"))
+FIXED_REPLAY_OVERHEAD_MS = float(
+    os.environ.get("ROCPROFILER_KR_FIXED_OVERHEAD_MS", "120.0")
+)
 
 
-def model_max_ms(ballast_mb: int, launches: int, passes: int, min_gbps: float | None = None,
-                 margin: float | None = None) -> float:
+def model_max_ms(
+    ballast_mb: int,
+    launches: int,
+    passes: int,
+    min_gbps: Optional[float] = None,
+    margin: Optional[float] = None,
+) -> float:
     gbps = DEFAULT_MIN_GBPS if min_gbps is None else min_gbps
     overhead = DEFAULT_OVERHEAD_MARGIN if margin is None else margin
     footprint_bytes = ballast_mb * 1024 * 1024

@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
@@ -72,15 +73,51 @@ context_has_kernel_replay(const tracing::context_t* ctx)
 void
 set_replay_service_configured(bool enabled)
 {
+    // Skip during finalization: the flag is a static_object that may already be destroyed.
+    if(registration::get_fini_status() > 0) return;
     replay_service_configured_flag().store(enabled, std::memory_order_relaxed);
+}
+
+bool
+try_claim_replay_service()
+{
+    if(registration::get_fini_status() > 0) return false;
+
+    // Single atomic claim rather than "read has_registered_replay_context(), then set the flag
+    // later". Those were two separate operations, so two threads configuring KERNEL_REPLAY could
+    // both observe no owner and both register, which breaks the one-owner rule the replay planner
+    // depends on (pass_count_cb would be last-writer-wins across tools).
+    bool expected = false;
+    return replay_service_configured_flag().compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+}
+
+void
+release_replay_service_claim()
+{
+    if(registration::get_fini_status() > 0) return;
+    replay_service_configured_flag().store(false, std::memory_order_release);
 }
 
 bool
 has_active_replay_contexts()
 {
+    // Skip during finalization: the flag and the context registry are static_objects that may be
+    // destroyed by then, and WriteInterceptor can still call this from HIP/HSA teardown.
+    if(registration::get_fini_status() > 0) return false;
     // Cheap common-case rejection: if no replay service was ever configured, skip the context walk.
     if(!replay_service_configured_flag().load(std::memory_order_relaxed)) return false;
     return !context::get_active_contexts(context_has_kernel_replay).empty();
+}
+
+bool
+has_registered_replay_context()
+{
+    // Skip during finalization (the context registry is a static_object that may be gone); mirrors
+    // has_active_replay_contexts. Uses the registered set, not the active one, because replay
+    // services are configured before any context is started.
+    if(registration::get_fini_status() > 0) return false;
+    return !context::get_registered_contexts(context_has_kernel_replay).empty();
 }
 
 rocprofiler_kernel_dispatch_info_t
@@ -179,13 +216,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
-    // pass_count_cb and replay_continue_cb are written through the shared config_data payload;
-    // when multiple contexts are configured, each callback overwrites the field, so the last
-    // registered context wins.  Select user_data from the same (last) context so that
-    // pass_count_cb and the user_data it receives originate from the same registration, avoiding
-    // a mismatch where pass_count_cb comes from context N while user_data comes from context 0.
     plan.user_data                = plan.config_contexts.empty() ? tracing::empty_user_data
-                                                                 : plan.config_contexts.back().user_data;
+                                                                 : plan.config_contexts.front().user_data;
 
     if(!plan.pass_count_cb)
     {
@@ -256,8 +288,8 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
     // Localized context control: the tool may call these from its PASS PHASE_ENTER callback to
     // enable/disable a context for the current replay loop (see kernel_replay/local_context.hpp).
     // They are only legal while armed, so bracket the tool callback with the arm window.
-    pass_data.replay_local_start_context_cb = &replay_local_start_context;
-    pass_data.replay_local_stop_context_cb  = &replay_local_stop_context;
+    pass_data.replay_local_enable_context_cb  = &replay_local_enable_context;
+    pass_data.replay_local_disable_context_cb = &replay_local_disable_context;
 
     // Disarm through a scope guard: execute_phase_enter_callbacks can throw (std::out_of_range from
     // an .at() lookup, or a throwing tool callback), and the armed flag must not leak past this

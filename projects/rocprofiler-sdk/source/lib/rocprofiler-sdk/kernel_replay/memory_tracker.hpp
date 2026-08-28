@@ -75,6 +75,29 @@ record_free(void* ptr);
 alloc_map_t
 snap_inventory(hsa_agent_t agent);
 
+// Side inventory of live pool allocations that carried HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG and are
+// otherwise trackable (coarse device VRAM). The main inventory never records those pointers -- the
+// flag is shared by HIP kernarg pools and profiler buffers, which must not be snapshotted -- but a
+// direct-HSA application may put ordinary writable device data behind the same flag. Those app
+// buffers are omitted from snapshots (unsupported allocation class for beta). Declining replay
+// whenever this side inventory is non-empty is not viable: the HIP runtime and the SDK's own AQL
+// pools routinely keep trackable+executable allocations live. Exposed so tests can assert the
+// omission and so callers can detect the unsupported class.
+alloc_map_t
+unsupported_executable(hsa_agent_t agent);
+
+bool
+agent_has_unsupported_executable(hsa_agent_t agent);
+
+// Test/helper entry points that invoke the same allocate/free wrappers the HSA table interceptor
+// installs. get_amd_ext_table() returns the internal (unwrapped) table, so unit tests that need to
+// exercise the executable-flag path must call these rather than the internal table pointers.
+hsa_status_t
+tracking_pool_allocate(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr);
+
+hsa_status_t
+tracking_pool_free(void* ptr);
+
 // The Synchronized allocation inventory. Exposed so restore() can look up a block and copy it under
 // the read lock, which blocks a concurrent free for the copy. Callers reachable during finalization
 // must first gate on registration::get_fini_status(): the alloc/free wrappers outlive this static,

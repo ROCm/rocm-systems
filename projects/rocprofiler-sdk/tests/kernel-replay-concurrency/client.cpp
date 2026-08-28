@@ -217,9 +217,14 @@ counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
     std::vector<rocprofiler_counter_id_t> want;
     for(auto cc : all)
     {
-        rocprofiler_counter_info_v0_t info;
+        rocprofiler_counter_info_v0_t info{};
         RC(rocprofiler_query_counter_info(cc, ROCPROFILER_COUNTER_INFO_VERSION_0, &info));
-        if(std::string(info.name) == "SQ_WAVES") want.push_back(cc);
+        if(info.name && std::string{info.name} == "SQ_WAVES") want.push_back(cc);
+    }
+    if(want.empty())
+    {
+        fprintf(stderr, "[tool] SQ_WAVES not found\n");
+        std::abort();
     }
     rocprofiler_counter_config_id_t cfg{.handle = 0};
     RC(rocprofiler_create_counter_config(agent, want.data(), want.size(), &cfg));

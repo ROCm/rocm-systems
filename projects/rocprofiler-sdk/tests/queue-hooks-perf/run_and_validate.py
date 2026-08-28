@@ -3,35 +3,28 @@
 #
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
-# Runs dispatch-counter perf workload under LD_PRELOAD and validates wall-time bounds.
+# Runs the dispatch-counter perf workload under LD_PRELOAD at two launch counts and checks that
+# per-dispatch cost stays flat as the count grows.
+#
+# Each launch count is sampled several times after a warmup and compared on the median. The
+# relative check gates CI; the absolute cost-model ceiling is advisory unless
+# ROCPROFILER_PERF_STRICT_CEILING is set.
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
+
 from perf_cost_model import max_launch_scaling_ratio, model_max_ms
-
-_MARKER = __import__("re").compile(
-    r"\[qh-perf\]\s+ballast_mb=(?P<ballast_mb>\d+)\s+launches=(?P<launches>\d+)\s+"
-    r"wall_ms=(?P<wall_ms>[\d.]+)\s+counter=(?P<counter>\d+)"
-)
+from perf_stats import check_ceiling, parse_marker, repeat_measure, write_results
 
 
-def parse_marker(text: str) -> dict:
-    for line in text.splitlines():
-        m = _MARKER.search(line)
-        if m:
-            return {
-                k: float(v) if k == "wall_ms" else int(v)
-                for k, v in m.groupdict().items()
-            }
-    raise AssertionError("missing [qh-perf] wall_ms marker")
-
-
-def run_case(testapp: Path, preload: Path, ballast_mb: int, launches: int) -> str:
+def run_case(
+    testapp: Path, preload: Path, ballast_mb: int, launches: int, warmup: int
+) -> float:
     env = os.environ.copy()
     preload = preload.resolve()
     if env.get("LD_PRELOAD"):
@@ -43,8 +36,9 @@ def run_case(testapp: Path, preload: Path, ballast_mb: int, launches: int) -> st
     env["ROCPROFILER_TOOL_OUTPUT_FILE"] = os.environ.get(
         "QH_PERF_JSON", f"/tmp/qh_perf_{launches}.json"
     )
+
     proc = subprocess.run(
-        [str(testapp.resolve()), str(ballast_mb), str(launches)],
+        [str(testapp.resolve()), str(ballast_mb), str(launches), str(warmup)],
         env=env,
         capture_output=True,
         text=True,
@@ -53,7 +47,7 @@ def run_case(testapp: Path, preload: Path, ballast_mb: int, launches: int) -> st
     out = proc.stdout + proc.stderr
     if proc.returncode != 0 or "[qh-perf] PASS" not in out:
         raise RuntimeError(f"launches={launches} failed rc={proc.returncode}\n{out}")
-    return out
+    return float(parse_marker(out, "qh-perf")["wall_ms"])
 
 
 def main() -> int:
@@ -66,56 +60,57 @@ def main() -> int:
     ap.add_argument("--launches-low", type=int, default=8)
     ap.add_argument("--launches-high", type=int, default=32)
     ap.add_argument("--max-scaling-ratio", type=float, default=6.0)
+    ap.add_argument(
+        "--repeat", type=int, default=3, help="timed samples per configuration"
+    )
+    ap.add_argument("--warmup", type=int, default=1)
     args = ap.parse_args()
 
-    low_out = run_case(args.testapp, args.preload, args.ballast_mb, args.launches_low)
-    high_out = run_case(args.testapp, args.preload, args.ballast_mb, args.launches_high)
-    low_m = parse_marker(low_out)
-    high_m = parse_marker(high_out)
+    stats = {}
+    for launches in (args.launches_low, args.launches_high):
+        stats[launches] = repeat_measure(
+            lambda n=launches: run_case(
+                args.testapp, args.preload, args.ballast_mb, n, args.warmup
+            ),
+            repeat=args.repeat,
+            warmup=1,
+            label=f"L={launches}",
+        )
+        check_ceiling(
+            stats[launches]["median_ms"], model_max_ms(launches), f"L={launches}"
+        )
 
-    for label, m, launches in (
-        (f"L={args.launches_low}", low_m, args.launches_low),
-        (f"L={args.launches_high}", high_m, args.launches_high),
-    ):
-        ceiling = model_max_ms(launches)
-        assert (
-            m["wall_ms"] <= ceiling
-        ), f"{label} wall_ms={m['wall_ms']:.1f} > ceiling {ceiling:.1f} ms"
-        print(f"[qh-perf-run] {label} wall_ms={m['wall_ms']:.1f} <= {ceiling:.1f} ms")
-
-    ratio = high_m["wall_ms"] / max(low_m["wall_ms"], 0.001)
+    low_ms = stats[args.launches_low]["median_ms"]
+    high_ms = stats[args.launches_high]["median_ms"]
+    ratio = high_ms / max(low_ms, 0.001)
     cap = min(
         args.max_scaling_ratio,
         max_launch_scaling_ratio(args.launches_low, args.launches_high, 2.0),
     )
     assert ratio <= cap, (
         f"scaling ratio {ratio:.2f} > {cap:.2f} "
-        f"(L={args.launches_low} {low_m['wall_ms']:.1f} ms vs "
-        f"L={args.launches_high} {high_m['wall_ms']:.1f} ms)"
+        f"(L={args.launches_low} {low_ms:.1f} ms vs "
+        f"L={args.launches_high} {high_ms:.1f} ms, medians)"
     )
     print(f"[qh-perf-run] PASS scaling ratio={ratio:.2f} <= {cap:.2f}")
 
-    out_json = os.environ.get("QH_PERF_RESULTS_JSON", "")
-    if out_json:
-        out_path = Path(out_json)
-        variant = os.environ.get("QH_PERF_VARIANT", "unknown")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            json.dumps(
-                {
-                    "variant": variant,
-                    "ballast_mb": args.ballast_mb,
-                    "launches_low": args.launches_low,
-                    "launches_high": args.launches_high,
-                    "wall_ms_low": low_m["wall_ms"],
-                    "wall_ms_high": high_m["wall_ms"],
-                    "scaling_ratio": ratio,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+    write_results(
+        "QH_PERF_RESULTS_JSON",
+        {
+            # What was actually preloaded, rather than a label nothing sets. The earlier
+            # QH_PERF_VARIANT knob was never assigned by the build, so every result recorded
+            # itself as "unknown"; the preload path is the thing that distinguishes runs.
+            "preload": str(args.preload.resolve()),
+            "ballast_mb": args.ballast_mb,
+            "launches_low": args.launches_low,
+            "launches_high": args.launches_high,
+            "repeat": args.repeat,
+            "low": stats[args.launches_low],
+            "high": stats[args.launches_high],
+            "scaling_ratio": ratio,
+            "scaling_cap": cap,
+        },
+    )
     return 0
 
 

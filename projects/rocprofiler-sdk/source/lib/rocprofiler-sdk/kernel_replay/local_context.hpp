@@ -24,25 +24,29 @@
 
 // Localized context control for kernel replay (see experimental/kernel_replay.h). During a replay
 // loop the tool may enable/disable individual contexts per pass through the SDK-provided
-// replay_local_start_context / replay_local_stop_context callbacks. Those decisions are recorded in
-// a thread-local override that lives only for the loop and is never written to global context
-// state, so only the replaying thread's dispatches (this agent, serialized by the per-agent replay
-// lock) observe them. Service consumers query local_context_override() at dispatch time to honor
-// it.
+// replay_local_enable_context / replay_local_disable_context callbacks. Those decisions are
+// recorded in a thread-local override that lives only for the loop and is never written to global
+// context state, so only the replaying thread's dispatches (this agent, serialized by the per-agent
+// replay lock) observe them. Service consumers query local_context_override() at dispatch time to
+// honor it.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
 //    so services can query it while a pass dispatches. The map persists across passes, which gives
 //    the "sticky" semantics (a toggle stays in effect until changed within the same loop).
-//  - arm window (set_toggles_armed): the start/stop callbacks are only legal while the tool's PASS
+//  - arm window (set_toggles_armed): the enable/disable callbacks are only legal while the tool's
+//  PASS
 //    PHASE_ENTER callback runs; execute_pass_phase_enter() arms them around that callback and
 //    disarms after, so a call made outside that window fails.
+
+#include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -54,6 +58,11 @@ struct local_context_control_t
     // global context state". Owned by scoped_local_context_control for one replay loop and pointed
     // to by the thread-local routing while the loop runs.
     std::unordered_map<uint64_t, bool> overrides{};
+
+    // Handles of the contexts globally active when the replay loop began. A local start/stop is
+    // honored only for these; toggling any other context is rejected, so a local start cannot
+    // promote a globally-stopped context.
+    std::unordered_set<uint64_t> pre_active{};
 };
 
 // RAII: owns this replay loop's override map and installs it as the thread's active routing for the
@@ -64,7 +73,10 @@ struct local_context_control_t
 class scoped_local_context_control
 {
 public:
-    scoped_local_context_control();
+    // active_contexts = the contexts globally active when the replay loop begins (typically
+    // context::get_active_contexts()). Their handles become the pre-active mask: a local start/stop
+    // is only honored for one of these (see local_context_control_t::pre_active).
+    explicit scoped_local_context_control(const context::context_array_t& active_contexts);
     ~scoped_local_context_control();
 
     scoped_local_context_control(const scoped_local_context_control&) = delete;
@@ -85,12 +97,14 @@ set_toggles_armed(bool armed);
 // Tool-facing callbacks (signatures match the function pointers in
 // rocprofiler_callback_tracing_kernel_replay_data_t). Legal only while a loop scope is active and
 // toggles are armed (i.e. during PASS PHASE_ENTER); otherwise they return
-// ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR and record nothing.
+// ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR and record nothing. A toggle for a context that was not
+// globally active when the loop began returns ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED and
+// records nothing, so a local start cannot promote a globally-stopped context.
 rocprofiler_status_t
-replay_local_start_context(rocprofiler_context_id_t context_id);
+replay_local_enable_context(rocprofiler_context_id_t context_id);
 
 rocprofiler_status_t
-replay_local_stop_context(rocprofiler_context_id_t context_id);
+replay_local_disable_context(rocprofiler_context_id_t context_id);
 
 // Cheap fast-path gate: true only while a replay loop on this thread has recorded at least one
 // override. Per-dispatch consumers check this first so normal dispatches (and replay passes with no

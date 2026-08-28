@@ -76,6 +76,21 @@ set_replay_service_configured(bool enabled);
 bool
 has_active_replay_contexts();
 
+// True if any registered context already has a KERNEL_REPLAY service configured. Checked at
+// configuration time to reject a second subscriber: the replay loop runs a single plan (pass count
+// + user_data) per dispatch, so exactly one context may own replay process-wide.
+bool
+has_registered_replay_context();
+
+// Atomically claim replay ownership for the process. Returns false if another context already holds
+// it. Pairs with release_replay_service_claim() on any configuration path that fails after the
+// claim succeeded, so a rejected configuration does not leave replay permanently owned.
+bool
+try_claim_replay_service();
+
+void
+release_replay_service_claim();
+
 rocprofiler_kernel_dispatch_info_t
 make_dispatch_info(const hsa::Queue&              queue,
                    const hsa::rocprofiler_packet& pkt,

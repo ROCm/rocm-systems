@@ -77,6 +77,11 @@ struct module_variable_t
     size_t size     = 0;
 };
 
+// Upper bound on a single module-scope variable the snapshot will capture. This guards against a
+// mis-reported HSA symbol size turning into a huge host allocation; it is not a supported limit,
+// and exceeding it is reported rather than ignored (see collect_module_variable).
+constexpr uint64_t module_variable_size_cap = 1ULL << 30;  // 1 GiB
+
 // hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
 // (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
 // state is threaded through the void* argument.
@@ -101,8 +106,24 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS)
         return HSA_STATUS_SUCCESS;
 
-    // Skip empties; 1 GiB per-variable sanity cap.
-    if(addr == 0 || size == 0 || size > (1ULL << 30)) return HSA_STATUS_SUCCESS;
+    if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
+
+    // A variable above the cap is skipped, which means a kernel's writes to it leak across replay
+    // passes and passes 2..N see mutated inputs. That is a wrong-counters outcome, so it cannot be
+    // silent -- warn rather than drop it on the floor. The cap itself is a sanity bound against a
+    // mis-reported symbol size, not a supported limit.
+    if(size > module_variable_size_cap)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "kernel-replay snapshot: module-scope variable at 0x{:x} is {} bytes, above the {} "
+            "byte "
+            "per-variable cap, and is not captured. A kernel writing to it will observe values "
+            "accumulated across replay passes instead of identical inputs.",
+            addr,
+            size,
+            module_variable_size_cap);
+        return HSA_STATUS_SUCCESS;
+    }
 
     // HSA reports the variable's device address as an integer; converting to a pointer is required.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -137,14 +158,21 @@ snap(hsa_agent_t agent)
 {
     device_snapshot_t out{};
 
+    // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
+    // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining
+    // replay whenever that side inventory is non-empty is not viable -- the HIP runtime (and the
+    // SDK's own AQL pools) routinely keep such allocations live -- so they remain an unsupported
+    // omitted class for beta (documented in the public header). Direct-HSA apps that put ordinary
+    // writable device data behind the flag observe the same omission.
+
     const auto [inventory, module_vars] = [&]() {
         try
         {
-            auto inventory   = memory_tracker::snap_inventory(agent);
-            auto module_vars = discover_module_variables(agent);
+            auto inv   = memory_tracker::snap_inventory(agent);
+            auto mvars = discover_module_variables(agent);
 
-            out.blocks.reserve(inventory.size() + module_vars.size());
-            return std::pair{std::move(inventory), std::move(module_vars)};
+            out.blocks.reserve(inv.size() + mvars.size());
+            return std::pair{std::move(inv), std::move(mvars)};
         } catch(const std::bad_alloc&)
         {
             ROCP_FATAL << "kernel-replay snapshot: out of memory reserving metadata";
@@ -245,10 +273,10 @@ snap(hsa_agent_t agent)
     return out;
 }
 
-size_t
+bool
 restore(const device_snapshot_t& snapshot)
 {
-    size_t ok = 0;
+    size_t restored = 0;
     for(const auto& blk : snapshot.blocks)
     {
         hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -258,7 +286,7 @@ restore(const device_snapshot_t& snapshot)
             // Re-check liveness and copy under the read lock so a concurrent free cannot race the
             // check and the write (see with_inventory_check). A nullopt result means the region is
             // no longer a live allocation of at least its size. It was freed or reallocated after
-            // snap, so skip it.
+            // snap, so skip it (benign -- not a restore failure).
             const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
                 return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
             });
@@ -281,18 +309,24 @@ restore(const device_snapshot_t& snapshot)
 
         if(status != HSA_STATUS_SUCCESS)
         {
-            ROCP_WARNING << fmt::format(
-                "kernel-replay restore: host->device copy failed for region {} ({}B)",
+            // A live region failed to copy. Further passes would observe mutated state, and the
+            // final pass (which deliberately skips restore) would leave that corruption visible to
+            // the application. Abort: a partial restore cannot be undone.
+            ROCP_ERROR << fmt::format(
+                "kernel-replay restore: host->device copy failed for region {} ({}B); aborting "
+                "restore after {}/{} regions",
                 blk.gpu_addr,
-                blk.host_copy.size());
-            continue;
+                blk.host_copy.size(),
+                restored,
+                snapshot.blocks.size());
+            return false;
         }
-        ++ok;
+        ++restored;
     }
 
     ROCP_INFO << fmt::format(
-        "kernel-replay restore: restored {}/{} regions", ok, snapshot.blocks.size());
-    return ok;
+        "kernel-replay restore: restored {}/{} regions", restored, snapshot.blocks.size());
+    return true;
 }
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
