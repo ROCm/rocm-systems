@@ -216,7 +216,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     font-size: 14px;
     padding: 24px;
   }}
-  .dash-root {{ max-width: 1100px; margin: 0 auto; }}
+  .dash-root {{ max-width: 1800px; margin: 0 auto; }}
   header {{
     background: var(--surface-1);
     border-radius: 8px;
@@ -246,7 +246,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   th {{ cursor: pointer; color: var(--ink-secondary); font-weight: 600; user-select: none; }}
   th:hover {{ color: var(--ink-primary); }}
   tbody tr:hover {{ background: var(--surface-panel); }}
-  .scroll-box {{ max-height: 520px; overflow-y: auto; border: 1px solid var(--gridline); border-radius: 6px; }}
+  .scroll-box {{ max-height: 520px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--gridline); border-radius: 6px; }}
   .scroll-box table thead th {{ position: sticky; top: 0; background: var(--surface-1); z-index: 1; }}
   .scroll-box table {{ margin: 0; }}
   .notes p {{ color: var(--ink-secondary); font-size: 13px; line-height: 1.5; margin-bottom: 10px; }}
@@ -274,12 +274,13 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       <div class="controls">
         <select id="viewPicker"></select>
       </div>
-      <div id="chartContainer"></div>
+      <div id="chartContainer" class="scroll-box"></div>
     </div>
     <div class="table-section">
       <h2>All remarks</h2>
       <div class="controls">
         <input type="text" id="searchBox" placeholder="Filter by caller/callee name...">
+        <select id="kindFilter"></select>
       </div>
       <div class="scroll-box">
         <table id="remarkTable">
@@ -295,7 +296,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 const REMARKS_BY_COMMIT = {remarks_by_commit_json};
 const STATS_HTML_BY_COMMIT = {stats_html_by_commit_json};
 const VIEWS_BY_COMMIT = {views_by_commit_json};
-const TOP_N = {top_n};
 const COLOR_GOOD = "{color_good}", COLOR_BAD = "{color_bad}", COLOR_NEUTRAL = "{color_neutral}";
 const PAIR_ROWS = {pair_rows_json};
 
@@ -310,6 +310,7 @@ function setActiveCommit(commit) {{
     b.classList.toggle("active", b.dataset.commit === commit);
   }});
   document.getElementById("commitStats").innerHTML = STATS_HTML_BY_COMMIT[commit];
+  buildKindFilter();
   renderTable();
   drawChart(document.getElementById("viewPicker").value);
 }}
@@ -323,10 +324,26 @@ const COLUMNS = ["kind", "name", "caller_demangled", "callee_demangled", "cost",
 const HEAD_LABELS = ["Kind", "Name", "Caller", "Callee", "Cost", "Threshold", "Reason"];
 let sortCol = "name", sortDesc = false;
 
+function buildKindFilter() {{
+  const picker = document.getElementById("kindFilter");
+  picker.textContent = "";
+  const kinds = Array.from(new Set(REMARKS_BY_COMMIT[activeCommit].map(r => r.kind))).sort();
+  const allOpt = document.createElement("option");
+  allOpt.value = "all"; allOpt.textContent = "All kinds";
+  picker.appendChild(allOpt);
+  for (const k of kinds) {{
+    const opt = document.createElement("option");
+    opt.value = k; opt.textContent = k;
+    picker.appendChild(opt);
+  }}
+}}
+
 function renderTable() {{
   const filter = document.getElementById("searchBox").value.toLowerCase();
+  const kindFilter = document.getElementById("kindFilter").value;
   const rows = REMARKS_BY_COMMIT[activeCommit].filter(r =>
-    r.caller_demangled.toLowerCase().includes(filter) || r.callee_demangled.toLowerCase().includes(filter)
+    (r.caller_demangled.toLowerCase().includes(filter) || r.callee_demangled.toLowerCase().includes(filter)) &&
+    (kindFilter === "all" || r.kind === kindFilter)
   );
   rows.sort((a, b) => {{
     const av = a[sortCol] ?? "", bv = b[sortCol] ?? "";
@@ -362,6 +379,7 @@ function buildHeader() {{
 }}
 
 document.getElementById("searchBox").addEventListener("input", renderTable);
+document.getElementById("kindFilter").addEventListener("change", renderTable);
 
 // --- SVG horizontal bar chart for the selected view (active commit only) -
 const ns = "http://www.w3.org/2000/svg";
@@ -374,7 +392,7 @@ function el(tag, attrs) {{
 function drawChart(viewKey) {{
   const container = document.getElementById("chartContainer");
   container.textContent = "";
-  const items = (VIEWS_BY_COMMIT[activeCommit][viewKey] || []).slice(0, TOP_N);
+  const items = VIEWS_BY_COMMIT[activeCommit][viewKey] || [];
   if (!items.length) {{
     const p = document.createElement("p");
     p.textContent = "(no data)";
@@ -382,11 +400,12 @@ function drawChart(viewKey) {{
     container.appendChild(p);
     return;
   }}
-  const marginL = 260, marginR = 60, rowH = 20, W = 780, plotW = W - marginL - marginR;
+  const maxLabelLen = Math.max(...items.map(it => it[0].length));
+  const marginL = Math.min(600, 100 + maxLabelLen * 6), marginR = 60, rowH = 20, plotW = 780;
+  const W = marginL + plotW + marginR;
   const H = items.length * rowH + 20;
   const vmax = Math.max(...items.map(it => Math.abs(it[1])), 1);
-  const vmin = Math.min(...items.map(it => it[1]), 0);
-  const svg = el("svg", {{ viewBox: `0 0 ${{W}} ${{H}}`, width: "100%", height: H }});
+  const svg = el("svg", {{ viewBox: `0 0 ${{W}} ${{H}}`, width: W, height: H }});
   items.forEach((it, i) => {{
     const [label, value] = it;
     const y = i * rowH;
@@ -394,7 +413,7 @@ function drawChart(viewKey) {{
     const color = value < 0 ? COLOR_GOOD : COLOR_NEUTRAL;
     svg.appendChild(el("rect", {{ x: marginL, y: y + 3, width: Math.max(barW, 1), height: rowH - 6, fill: color }}));
     const lbl = el("text", {{ x: marginL - 8, y: y + rowH / 2 + 4, "text-anchor": "end" }});
-    lbl.textContent = label.length > 40 ? label.slice(0, 39) + "\\u2026" : label;
+    lbl.textContent = label;
     svg.appendChild(lbl);
     const val = el("text", {{ x: marginL + barW + 6, y: y + rowH / 2 + 4 }});
     val.textContent = value;
@@ -426,11 +445,18 @@ drawChart("top_callers");
 
 // --- comparison table (baseline vs branch, all pairs, no top-N cap) ------
 if (PAIR_ROWS.length) {{
-  const PAIR_COLUMNS = ["caller_demangled", "callee_demangled", "status", "name_baseline", "name_branch",
-    "cost_baseline", "cost_branch", "cost_delta", "threshold_baseline", "threshold_branch", "threshold_delta"];
-  const PAIR_HEAD_LABELS = ["Caller", "Callee", "Status", "Name (baseline)", "Name (branch)",
-    "Cost (baseline)", "Cost (branch)", "Δ Cost", "Thr. (baseline)", "Thr. (branch)", "Δ Thr."];
-  let pairSortCol = "cost_delta", pairSortDesc = true;
+  const PAIR_COLUMNS = ["callee_demangled", "caller_demangled", "status",
+    "name_baseline", "cost_baseline", "threshold_baseline",
+    "name_branch", "cost_branch", "threshold_branch",
+    "cost_delta", "threshold_delta"];
+  const PAIR_HEAD_LABELS = ["Callee", "Caller", "Status",
+    "Name (baseline)", "Cost (baseline)", "Threshold (baseline)",
+    "Name (branch)", "Cost (branch)", "Threshold (branch)",
+    "Δ Cost", "Δ Threshold"];
+  const STATUS_RANK = {{ removed: 0, added: 1, common: 2 }};
+  const STATUS_ROW_COLOR = {{ removed: "#d8b4b4", added: "#bccdb8", common: "" }};
+  const STATUS_ROW_TEXT = {{ removed: "#3a1f1f", added: "#1f3a1f", common: "" }};
+  let pairSortCol = "status", pairSortDesc = false;
   let pairView = "all";
 
   function isTrue(v) {{ return v === "True" || v === true; }}
@@ -462,6 +488,10 @@ if (PAIR_ROWS.length) {{
       r.caller_demangled.toLowerCase().includes(filter) || r.callee_demangled.toLowerCase().includes(filter)
     );
     rows.sort((a, b) => {{
+      if (pairSortCol === "status") {{
+        const cmp = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+        return pairSortDesc ? -cmp : cmp;
+      }}
       const av = a[pairSortCol] ?? "", bv = b[pairSortCol] ?? "";
       const an = toNum(av), bn = toNum(bv);
       const cmp = (an !== null && bn !== null) ? an - bn : String(av).localeCompare(String(bv));
@@ -471,6 +501,10 @@ if (PAIR_ROWS.length) {{
     tbody.textContent = "";
     for (const r of rows) {{
       const tr = document.createElement("tr");
+      if (STATUS_ROW_COLOR[r.status]) {{
+        tr.style.backgroundColor = STATUS_ROW_COLOR[r.status];
+        tr.style.color = STATUS_ROW_TEXT[r.status];
+      }}
       for (const col of PAIR_COLUMNS) {{
         const td = document.createElement("td");
         td.textContent = r[col] ?? "";
@@ -607,7 +641,11 @@ def main():
     )
     ap.add_argument("--out", required=True, type=Path, help="output HTML path")
     ap.add_argument(
-        "--top", type=int, default=15, help="rows shown in the per-commit charts"
+        "--top",
+        type=int,
+        default=15,
+        help="unused (kept for compatibility with existing callers) -- the "
+        "per-commit chart now shows every entry in a scrollable container",
     )
     args = ap.parse_args()
 

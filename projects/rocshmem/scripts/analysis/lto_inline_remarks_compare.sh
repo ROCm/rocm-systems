@@ -43,8 +43,8 @@
 #   --output-dir DIR      Where to write the report. Default:
 #                         $PROJECTS_DIR/lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/
 #
-# Also generates one self-contained interactive HTML dashboard (dashboard.html,
-# always on -- no flag needed): a baseline-vs-branch comparison table on top
+# Also generates one self-contained interactive HTML dashboard
+# (lto_inline_dashboard.html, always on -- no flag needed): a baseline-vs-branch comparison table on top
 # (scrollable, filterable) for two-commit runs, plus a per-commit stats/chart/
 # table view with an in-page commit selector.
 #
@@ -199,11 +199,11 @@ if [[ -z "$COMMIT_2" ]]; then
     --top "$TOP_N"
   python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
     --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
-    --top "$TOP_N" --out "$OUTDIR/dashboard.html"
+    --top "$TOP_N" --out "$OUTDIR/lto_inline_dashboard.html"
   echo ""
   echo "Single-commit snapshot -> $OUTDIR/"
   echo "  remarks-${SHA_1}.csv, summary-${SHA_1}.csv, dashboard-${SHA_1}.png"
-  echo "  Dashboard -> $OUTDIR/dashboard.html"
+  echo "  Dashboard -> $OUTDIR/lto_inline_dashboard.html"
   echo "  (raw YAML in cache: ${CSV_1%.csv}.yaml)"
   exit 0
 fi
@@ -227,10 +227,10 @@ python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
   --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
   --branch-csv "$OUTDIR/remarks-${SHA_2}.csv" --branch-commit "$SHA_2" \
   --pairs-csv "$OUTDIR/remarks_diff_pairs.csv" \
-  --top "$TOP_N" --out "$OUTDIR/dashboard.html"
+  --top "$TOP_N" --out "$OUTDIR/lto_inline_dashboard.html"
 
 echo ""
 echo "Done. Report -> $OUTDIR/"
 echo "  remarks-${SHA_1}.csv, remarks-${SHA_2}.csv,"
 echo "  remarks_diff_pairs.csv, remarks_diff_summary.csv, remarks_diff_dashboard.png"
-echo "  Dashboard -> $OUTDIR/dashboard.html"
+echo "  Dashboard -> $OUTDIR/lto_inline_dashboard.html"
