@@ -813,7 +813,8 @@ struct PluginFixture {
                          uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104) {
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
-      "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{}}}}}}},
+      "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{},
+        "num_sdma_engines":0}}}}}},
       "topology":{{"root":{{"name":"soc","type":"soc","children":[
         {{"name":"vram","type":"gpu_memory"}},
         {{"name":"xcd0","type":"xcd","children":[
