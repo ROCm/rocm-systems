@@ -931,6 +931,7 @@ set(RJ_CDNA4_KMD_2GPU_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
+set(RJ_CDNA2_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx90a_mi210_kmd.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
 )
@@ -951,6 +952,7 @@ set(RJ_HIP_TEST_2GPU_CONFIG
 )
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
+get_filename_component(RJ_CDNA2_KMD_CONFIG_NAME "${RJ_CDNA2_KMD_CONFIG}" NAME)
 get_filename_component(
     RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME
     "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}"
@@ -1416,9 +1418,7 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
 )
 target_link_libraries(
     interposer_dup_test
@@ -2084,7 +2084,15 @@ if(HSA_RUNTIME64)
             hsa_dbi_nop_asm_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_dbi_nop_asm_test device_kernels)
+        # rocjitsu_bin/rocjitsu_shared are needed by the Sim registrations
+        # below, which launch this binary through the CLI. A generator
+        # expression in a test COMMAND does not create a build dependency.
+        add_dependencies(
+            hsa_dbi_nop_asm_test
+            device_kernels
+            rocjitsu_bin
+            rocjitsu_shared
+        )
         rj_configure_target(hsa_dbi_nop_asm_test TEST)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(hsa_dbi_nop_asm_test)
@@ -2094,23 +2102,83 @@ if(HSA_RUNTIME64)
         # CTest entry. <group> is the part of the fixture name after
         # "HsaDbiNopAsm" (Static or Hardware). Scoped here because it's only
         # used by the calls immediately below.
+        #
+        # SIM runs the same gtest case through the rocjitsu CLI against a
+        # simulated gfx90a instead of the host GPU. find_gfx90a_agent() matches
+        # on the HSA ISA name, so it binds to whichever agent the launcher
+        # supplies and the test source needs no backend knowledge. Only the
+        # CTest name encodes the backend; the gtest filter still names the
+        # <group> fixture, as with Cdna4ToCdna3SimulatedDispatchTest.
         function(register_hsa_dbi_nop_asm_case group case)
-            set(oneValueArgs TIMEOUT)
-            cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
+            cmake_parse_arguments(RJ_DBI "SIM" "TIMEOUT" "" ${ARGN})
             set(name "HsaDbiNopAsm${group}.${case}")
-            rj_add_test(
-                NAME "${name}"
-                COMMAND hsa_dbi_nop_asm_test --gtest_filter=${name}
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                INSTALL_COMMAND
+            if(RJ_DBI_SIM)
+                set(_ctest_name "HsaDbiNopAsmSim.${case}")
+                set(_command
+                    ${CMAKE_COMMAND}
+                    "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_asm_test>"
+                    "-DTEST_FILTER=${name}"
+                    "-DTEST_LAUNCHER=${RJ_CLI}"
+                    "-DTEST_CONFIG=${RJ_CDNA2_KMD_CONFIG}"
+                    "-DFAIL_ON_SKIP=ON"
+                    -P
+                    "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+                )
+                set(_install_command
+                    "${CMAKE_COMMAND}"
+                    "-DTEST_EXECUTABLE=bin/hsa_dbi_nop_asm_test"
+                    "-DTEST_FILTER=${name}"
+                    "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA2_KMD_CONFIG_NAME}"
+                    "-DFAIL_ON_SKIP=ON"
+                    "-P"
+                    "rj_run_filtered_gtest.cmake"
+                )
+            else()
+                set(_ctest_name "${name}")
+                set(_command hsa_dbi_nop_asm_test --gtest_filter=${name})
+                set(_install_command
                     "bin/hsa_dbi_nop_asm_test"
                     "--gtest_filter=${name}"
-                ${ARGN}
+                )
+            endif()
+            set(_timeout)
+            if(RJ_DBI_TIMEOUT)
+                set(_timeout TIMEOUT ${RJ_DBI_TIMEOUT})
+            endif()
+            rj_add_test(
+                NAME "${_ctest_name}"
+                COMMAND ${_command}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                INSTALL_COMMAND ${_install_command}
+                ${_timeout}
             )
         endfunction()
 
         # Static-only test: no GPU needed, runs anywhere the binary is built.
         register_hsa_dbi_nop_asm_case(Static PatchedElfActuallyContainsInstrumentation)
+
+        # The same three cases on the simulator. Registered unconditionally so
+        # CI covers the DBI dispatch path without a CDNA2 host; the timeouts are
+        # the hardware ones scaled for simulated execution.
+        register_hsa_dbi_nop_asm_case(
+            Hardware
+            PatchedElfLoadsAndValidatesInHsaExecutable
+            SIM
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Hardware
+            PatchedKernelDispatchMatchesOriginal
+            SIM
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Hardware
+            TrampolineIsActuallyExecutedByGpu
+            SIM
+            TIMEOUT 300
+        )
 
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
@@ -2123,10 +2191,30 @@ if(HSA_RUNTIME64)
         else()
             message(
                 STATUS
-                "HSA DBI nop-asm test built but NOT registered with CTest "
-                "(no gfx90a)"
+                "HSA DBI nop-asm hardware cases NOT registered with CTest "
+                "(no gfx90a); the Sim cases still run"
             )
         endif()
+
+        # Pin the FAIL_ON_SKIP guard, the way GtestFilterGuard.RejectsMissingTest
+        # pins the zero-test guard. Launching the gfx90a fixture against a
+        # simulated gfx942 selects one test, find_gfx90a_agent() finds no match,
+        # and GoogleTest exits 0 after skipping it -- so success here means the
+        # wrapper turned that skip into a failure instead of a false pass.
+        add_test(
+            NAME GtestFilterGuard.RejectsSkippedTest
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_asm_test>"
+                "-DTEST_FILTER=HsaDbiNopAsmHardware.PatchedElfLoadsAndValidatesInHsaExecutable"
+                "-DTEST_LAUNCHER=${RJ_CLI}"
+                "-DTEST_CONFIG=${RJ_CDNA3_KMD_CONFIG}" -DFAIL_ON_SKIP=ON -P
+                "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        )
+        set_tests_properties(
+            GtestFilterGuard.RejectsSkippedTest
+            PROPERTIES WILL_FAIL TRUE TIMEOUT 300
+        )
 
         # --- HSA DBI nop-probe smoke test: gfx90a kernel patched to CALL the
         # compiled rj_nop_probe via an s_swappc_b64 trampoline (PC01-B). Needs
@@ -2162,8 +2250,16 @@ if(HSA_RUNTIME64)
                 hsa_dbi_nop_probe_test
                 PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
             )
-            add_dependencies(hsa_dbi_nop_probe_test device_kernels)
-            add_dependencies(hsa_dbi_nop_probe_test probe_rj_nop_probe_gfx90a)
+            # rocjitsu_bin/rocjitsu_shared are needed by the Sim registrations
+            # below, which launch this binary through the CLI. A generator
+            # expression in a test COMMAND does not create a build dependency.
+            add_dependencies(
+                hsa_dbi_nop_probe_test
+                device_kernels
+                probe_rj_nop_probe_gfx90a
+                rocjitsu_bin
+                rocjitsu_shared
+            )
             rj_configure_target(hsa_dbi_nop_probe_test TEST)
             if(RJ_INSTALL_TESTS)
                 rj_install_test_target(hsa_dbi_nop_probe_test)
@@ -2172,18 +2268,50 @@ if(HSA_RUNTIME64)
             # Local helper: register one TEST_F case as a CTest entry, in both the
             # build tree and (under RJ_INSTALL_TESTS) the installed CTest tree.
             # <group> is the part of the fixture name after "HsaDbiNopProbe".
+            # SIM behaves as in register_hsa_dbi_nop_asm_case above.
             function(register_hsa_dbi_nop_probe_case group case)
-                set(oneValueArgs TIMEOUT)
-                cmake_parse_arguments(RJ_DBIP "" "${oneValueArgs}" "" ${ARGN})
+                cmake_parse_arguments(RJ_DBIP "SIM" "TIMEOUT" "" ${ARGN})
                 set(name "HsaDbiNopProbe${group}.${case}")
-                rj_add_test(
-                    NAME "${name}"
-                    COMMAND hsa_dbi_nop_probe_test --gtest_filter=${name}
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    INSTALL_COMMAND
+                if(RJ_DBIP_SIM)
+                    set(_ctest_name "HsaDbiNopProbeSim.${case}")
+                    set(_command
+                        ${CMAKE_COMMAND}
+                        "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_probe_test>"
+                        "-DTEST_FILTER=${name}"
+                        "-DTEST_LAUNCHER=${RJ_CLI}"
+                        "-DTEST_CONFIG=${RJ_CDNA2_KMD_CONFIG}"
+                        "-DFAIL_ON_SKIP=ON"
+                        -P
+                        "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+                    )
+                    set(_install_command
+                        "${CMAKE_COMMAND}"
+                        "-DTEST_EXECUTABLE=bin/hsa_dbi_nop_probe_test"
+                        "-DTEST_FILTER=${name}"
+                        "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                        "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA2_KMD_CONFIG_NAME}"
+                        "-DFAIL_ON_SKIP=ON"
+                        "-P"
+                        "rj_run_filtered_gtest.cmake"
+                    )
+                else()
+                    set(_ctest_name "${name}")
+                    set(_command hsa_dbi_nop_probe_test --gtest_filter=${name})
+                    set(_install_command
                         "bin/hsa_dbi_nop_probe_test"
                         "--gtest_filter=${name}"
-                    ${ARGN}
+                    )
+                endif()
+                set(_timeout)
+                if(RJ_DBIP_TIMEOUT)
+                    set(_timeout TIMEOUT ${RJ_DBIP_TIMEOUT})
+                endif()
+                rj_add_test(
+                    NAME "${_ctest_name}"
+                    COMMAND ${_command}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    INSTALL_COMMAND ${_install_command}
+                    ${_timeout}
                 )
             endfunction()
 
@@ -2191,6 +2319,27 @@ if(HSA_RUNTIME64)
             register_hsa_dbi_nop_probe_case(
                 Static
                 PatchedElfContainsProbeCallInstrumentation
+            )
+
+            # The same three cases on the simulator, registered unconditionally
+            # so CI covers the probe-call dispatch path without a CDNA2 host.
+            register_hsa_dbi_nop_probe_case(
+                Hardware
+                PatchedElfLoadsAndValidatesInHsaExecutable
+                SIM
+                TIMEOUT 300
+            )
+            register_hsa_dbi_nop_probe_case(
+                Hardware
+                PatchedKernelDispatchMatchesOriginal
+                SIM
+                TIMEOUT 300
+            )
+            register_hsa_dbi_nop_probe_case(
+                Hardware
+                ProbeBodyIsActuallyCalledByGpu
+                SIM
+                TIMEOUT 300
             )
 
             if(HAS_CDNA2_GPU)
@@ -2218,8 +2367,8 @@ if(HSA_RUNTIME64)
             else()
                 message(
                     STATUS
-                    "HSA DBI nop-probe smoke test built but NOT registered "
-                    "with CTest (no gfx90a)"
+                    "HSA DBI nop-probe hardware cases NOT registered with "
+                    "CTest (no gfx90a); the Sim cases still run"
                 )
             endif()
         else()
