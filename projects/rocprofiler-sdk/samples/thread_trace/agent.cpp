@@ -101,11 +101,16 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
+uint64_t node_to_agent[64];
+
 void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
-    auto name = "agent_0_dispatch_0_shader_engine_" + std::to_string(shader_data.shader_engine_id) +".att";
+    int node_id = 64;
+    for (int i=0; i<64; i++) if (node_to_agent[i] == shader_data.agent.handle) node_id = i;
+
+    auto name = "agent_"+std::to_string(shader_data.agent.handle)+"_node_"+std::to_string(node_id)+"_dispatch_0_shader_engine_" + std::to_string(shader_data.shader_engine_id) +".att";
 
     std::cout << "Writing: " << name << std::endl;
     std::ofstream file(name, std::ios::out | std::ios::binary);
@@ -135,6 +140,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
     {
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        if (agent->node_id < 64) node_to_agent[agent->node_id] = agent->id.handle;
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {uint64_t(1)<<32}});
@@ -167,6 +174,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        tool_codeobj_tracing_callback,
                                                        nullptr),
         "code object tracing service configure");
+
+    for (int i=0; i<64; i++) node_to_agent[i] = 0;
 
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         &query_available_agents,
