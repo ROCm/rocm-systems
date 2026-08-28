@@ -30,6 +30,7 @@
 
 #include "host/ScopedHook.h"
 
+#include <cstdlib>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -289,15 +290,13 @@ TEST_F(DevrInitOnceTest, ProxyOnly_RebuildsTeamFromLocalRanks) {
 
 
 // ---------------------------------------------------------------------------
-// ncclDevrFinalize, AICOMRCCL-835 finalize-drain coverage.
+// ncclDevrFinalize tears down everything ncclDevrInitOnce built: the reg-task
+// queue, any windows still registered, the team and window tables, leftover
+// memory records, and finally the flat VA reservation.
 //
-// A Device-API consumer can create a symmetric-window resource (leaving an
-// ncclDevrMemory on devrState.memHead) without a matching destroy. ncclDevrFinalize
-// must drain those leftovers before freeing the LSA flat VA reservation. This
-// test drives the *real* init/finalize lifecycle (ncclDevrInitOnce pairs with
-// ncclDevrFinalize) so the state is self-consistent, then asserts the drain
-// empties memHead.
-class DevrFinalizeDrainTest : public ::testing::Test {
+// These tests drive the real init/finalize lifecycle so the state stays
+// self-consistent, rather than hand-building a half-initialised devrState.
+class DevrFinalizeTest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   std::unique_ptr<ncclPeerInfo> peerStorage;
@@ -320,14 +319,62 @@ protected:
     peerStorage = std::make_unique<ncclPeerInfo>();
     peerStorage->totalGlobalMem = 1 << 20;
     comm->peerInfo = peerStorage.get();
+
+    localRankToRank.assign({0});  // proxy-only init rebuilds the team from this
+    comm->localRankToRank = localRankToRank.data();
   }
+
+  std::vector<int> localRankToRank;
 };
 
-TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
+// Branch: bigSize == 0 means init never ran, so there is nothing to tear down.
+TEST_F(DevrFinalizeTest, NotInitialised_ReturnsImmediately) {
+  ASSERT_EQ(comm->devrState.bigSize, 0u);
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+}
+
+// The clean lifecycle: init then finalize with nothing left registered. Pairs
+// with the leftover case below, which is the same path with work to drain.
+TEST_F(DevrFinalizeTest, NoLeftovers_CompletesCleanly) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ASSERT_EQ(comm->devrState.memHead, nullptr);
+
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+}
+
+// Branch: the reg-task drain loop. Tasks are malloc'd because finalize frees
+// each one it dequeues.
+TEST_F(DevrFinalizeTest, DrainsRegTaskQueue) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  for (int i = 0; i < 2; i++) {
+    auto* task = static_cast<ncclDevrRegTask*>(calloc(1, sizeof(ncclDevrRegTask)));
+    ASSERT_NE(task, nullptr);
+    ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
+  }
+  ASSERT_FALSE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
+// Branch: proxy-only teardown. Non-sym windows are drained through
+// windowDeregisterNonSym rather than symWindowDestroy, and the whole symmetric
+// block -- teams, window table, memory drain, VA free -- is skipped.
+TEST_F(DevrFinalizeTest, ProxyOnly_SkipsSymmetricTeardown) {
+  comm->symmetricSupport = 0;
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ASSERT_EQ(comm->devrState.bigSize, 1u);
+
+  EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+}
+
+// AICOMRCCL-835: a Device-API consumer can create a symmetric-window resource
+// (leaving an ncclDevrMemory on memHead) without a matching destroy. Finalize
+// must drain those before freeing the flat VA reservation, or every per-rank
+// cuMemMap slice is still live when cuMemAddressFree runs.
+TEST_F(DevrFinalizeTest, DrainsLeftoverMemory) {
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
 
-  // Simulate a resource window whose owning devcomm was never destroyed: obtain
-  // symmetric memory and leave it linked on memHead.
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   void* userAddr = reinterpret_cast<void*>(0x100000);
   struct ncclDevrMemory* mem = nullptr;
@@ -335,7 +382,6 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
             ncclSuccess);
   ASSERT_EQ(comm->devrState.memHead, mem);
 
-  // Finalize must drain the leftover before freeing the flat VA reservation.
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
