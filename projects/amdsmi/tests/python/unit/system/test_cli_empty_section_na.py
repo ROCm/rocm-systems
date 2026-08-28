@@ -19,32 +19,21 @@ under development rather than a possibly-stale installed copy.
 
 import importlib.util
 import os
-import sys
-import types
 import unittest
 
+from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-LOGGER_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "amdsmi_logger.py")
-
-
-def _install_fake_helpers():
-    """Register a stub ``amdsmi_helpers`` so ``amdsmi_logger`` imports cleanly."""
-    module = types.ModuleType("amdsmi_helpers")
-    module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = module
-
-
-def _restore_helpers(saved):
-    """Undo ``_install_fake_helpers`` so the stub does not leak into sibling suites."""
-    if saved is None:
-        sys.modules.pop("amdsmi_helpers", None)
-    else:
-        sys.modules["amdsmi_helpers"] = saved
+# This directory first so a source checkout wins: the point is to exercise the
+# logger under development, not a possibly-stale installed copy.
+_CLI_DIR = find_cli_dir(_THIS_DIR, amdsmi_path)
+LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
 
 def _load_logger_module():
     spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", LOGGER_PATH)
+    if spec is None or spec.loader is None:
+        raise unittest.SkipTest(f"could not load amdsmi_logger from {LOGGER_PATH}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -53,13 +42,14 @@ def _load_logger_module():
 class TestCliEmptySectionNA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(LOGGER_PATH):
-            raise unittest.SkipTest(f"amdsmi_logger not found at {LOGGER_PATH}")
+        if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI amdsmi_logger.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         # Registered before the stub is installed, so the restore still runs if
         # loading the logger raises: unittest skips tearDownClass on that path.
-        saved = sys.modules.get("amdsmi_helpers")
-        cls.addClassCleanup(_restore_helpers, saved)
-        _install_fake_helpers()
+        helpers = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
+        stub_modules(cls, {"amdsmi_helpers": helpers})
         module = _load_logger_module()
         cls.logger = module.AMDSMILogger.__new__(module.AMDSMILogger)
 
@@ -102,7 +92,3 @@ class TestCliEmptySectionNA(unittest.TestCase):
 
     def test_empty_payload_renders_nothing(self):
         self.assertEqual(self._render({}), "")
-
-
-if __name__ == "__main__":
-    unittest.main()
