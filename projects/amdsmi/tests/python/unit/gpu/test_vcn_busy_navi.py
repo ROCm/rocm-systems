@@ -25,10 +25,12 @@ import os
 import types
 import unittest
 
-from common.common import amdsmi_path, stub_modules
+from common.common import amdsmi_path, find_cli_dir, stub_modules
 
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
 class _FakeClkType:
@@ -237,8 +239,10 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
