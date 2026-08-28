@@ -26,6 +26,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -115,6 +116,53 @@ TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
   EXPECT_FALSE(summary->touches_m0);
   EXPECT_FALSE(summary->touches_flat_scratch);
   EXPECT_FALSE(summary->uses_private_segment);
+}
+
+TEST(ProbeFixture, CallableSgprUseExceedsKernelDescriptor) {
+  Executable exec(kernel_hsaco_path("callable_sgpr_probe_gfx950"));
+  ASSERT_TRUE(exec.is_valid()) << "failed to load callable_sgpr_probe_gfx950.hsaco";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  EXPECT_EQ(co->target_id(), ROCJITSU_CODE_TARGET_GFX950);
+
+  const auto descriptor_sgprs = co->min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(descriptor_sgprs.has_value());
+  EXPECT_EQ(*descriptor_sgprs, 40u);
+
+  std::string err;
+  const auto resolved = resolve_probe_symbol(*co, "callable_sgpr_probe", &err);
+  ASSERT_TRUE(resolved.has_value()) << err;
+  EXPECT_GT(resolved->body_size, 0u);
+  EXPECT_EQ(resolved->body_size % sizeof(uint32_t), 0u);
+
+  const auto *image = reinterpret_cast<const uint8_t *>(co->image_data());
+  const size_t num_words = resolved->body_size / sizeof(uint32_t);
+  std::vector<uint32_t> body(num_words + 1, 0);
+  std::memcpy(body.data(), image + resolved->body_file_offset, resolved->body_size);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kMovS40One = 0xBEA80081u;
+  bool saw_s40_write = false;
+  size_t word = 0;
+  while (word < num_words) {
+    auto decoded = decoder->decode(&body[word]);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+    const int size = inst->size();
+    ASSERT_TRUE(size == 4 || size == 8) << "unexpected instruction size in callable body";
+    if (body[word] == kMovS40One) {
+      EXPECT_EQ(std::string_view(inst->mnemonic()), "s_mov_b32");
+      saw_s40_write = true;
+    }
+    word += static_cast<size_t>(size) / sizeof(uint32_t);
+  }
+
+  EXPECT_TRUE(saw_s40_write);
+  EXPECT_LT(*descriptor_sgprs, 41u) << "the entry descriptor unexpectedly includes callable s40";
 }
 
 } // namespace

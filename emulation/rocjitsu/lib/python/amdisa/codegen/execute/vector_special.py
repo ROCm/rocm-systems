@@ -2025,11 +2025,37 @@ def gen_vector_cvt_scale(
 
     direction, pack_width, out_fmt, in_fmt = parts
     count = int(pack_width[2:])
+    if direction == 'unpack':
+        bits = _scale_lowp_bits(in_fmt)
+        src_word_count = (count * bits + 31) // 32
+        if out_fmt == 'f32':
+            dst_word_count = count
+        elif out_fmt in ('f16', 'bf16'):
+            dst_word_count = count // 2
+        else:
+            raise ValueError(f'unsupported scaled unpack output format: {out_fmt}')
+    elif direction == 'pack':
+        bits = _scale_lowp_bits(out_fmt)
+        src_word_count = count if in_fmt == 'f32' else count // 2
+        dst_word_count = (count * bits + 31) // 32
+    else:
+        raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
+
     L: list[str] = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
+    _scale_read_vgpr_base(L, 'src_base', src[0])
+    L.append('    amdgpu::RegisterAccess regs(wf);')
+    # TODO(newling): Apply this check-before-observe pattern to other
+    # multi-region instruction helpers, then make region acquisition require
+    # successful preflight instead of returning validity-bearing views.
+    L.append(
+        f'    if (!regs.owns_vgpr_range(src_base, {src_word_count}u) || '
+        f'!regs.owns_vgpr_range(dst_base, {dst_word_count}u))'
+    )
+    L.append('      continue;')
     scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
         L.extend(_scale_e8m0_unpack_scale(scale_src))
@@ -2043,31 +2069,31 @@ def gen_vector_cvt_scale(
         )
 
     if direction == 'unpack':
-        bits = _scale_lowp_bits(in_fmt)
+        L.append(
+            f'    auto src_region = regs.read_vgpr_region('
+            f'src_base, {src_word_count}u, 1ULL << lane);'
+        )
         if count == 8 and bits == 4:
-            L.append(
-                f'    uint32_t src_payload = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-            )
+            L.append('    uint32_t src_payload = src_region.lane(0, lane);')
         elif count == 8 and bits == 8:
-            L.append(
-                f'    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);'
-            )
+            L.append('    uint64_t src_payload = src_region.lane64(0, lane);')
         elif count == 16 and bits == 6:
-            _scale_read_vgpr_base(L, 'src_base', src[0])
             L.append('    uint32_t src_words[4] = {};')
             L.append('    for (uint32_t word = 0; word < 3u; ++word)')
-            L.append(
-                '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
-            )
+            L.append('      src_words[word] = src_region.lane(word, lane);')
         else:
             raise ValueError(f'unsupported scaled unpack operation: {op}')
 
         L.extend(_scale_unpack_element_raw(in_fmt, arch_name))
         if out_fmt == 'f32':
+            L.append(
+                f'    auto dst_region = regs.write_vgpr_region('
+                f'dst_base, {dst_word_count}u, 1ULL << lane);'
+            )
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append('      float value = read_scaled_src(index) * scale;')
             L.append(
-                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane, std::bit_cast<uint32_t>(value));'
+                '      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));'
             )
             L.append('    }')
         elif out_fmt in ('f16', 'bf16'):
@@ -2076,32 +2102,33 @@ def gen_vector_cvt_scale(
                 if out_fmt == 'f16'
                 else 'util::f32_to_bf16_rne_mode'
             )
-            words = count // 2
-            L.append(f'    uint32_t dst_words[{words}] = {{}};')
+            L.append(
+                f'    auto dst_region = regs.write_vgpr_region('
+                f'dst_base, {dst_word_count}u, 1ULL << lane);'
+            )
+            L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append(
                 f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, wf.fp16_ovfl());'
             )
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
             L.append('    }')
-            L.append(f'    for (uint32_t word = 0; word < {words}u; ++word)')
-            L.append(
-                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
-            )
-        else:
-            raise ValueError(f'unsupported scaled unpack output format: {out_fmt}')
+            L.append(f'    for (uint32_t word = 0; word < {dst_word_count}u; ++word)')
+            L.append('      dst_region.set_lane(word, lane, dst_words[word]);')
     elif direction == 'pack':
-        bits = _scale_lowp_bits(out_fmt)
-        src_words = count if in_fmt == 'f32' else count // 2
-        out_words = (count * bits + 31) // 32
-        _scale_read_vgpr_base(L, 'src_base', src[0])
-        L.append(f'    uint32_t src_words[{src_words}] = {{}};')
-        L.append(f'    for (uint32_t word = 0; word < {src_words}u; ++word)')
         L.append(
-            '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
+            f'    auto src_region = regs.read_vgpr_region('
+            f'src_base, {src_word_count}u, 1ULL << lane);'
         )
+        L.append(
+            f'    auto dst_region = regs.write_vgpr_region('
+            f'dst_base, {dst_word_count}u, 1ULL << lane);'
+        )
+        L.append(f'    uint32_t src_words[{src_word_count}] = {{}};')
+        L.append(f'    for (uint32_t word = 0; word < {src_word_count}u; ++word)')
+        L.append('      src_words[word] = src_region.lane(word, lane);')
         L.extend(_scale_source_reader(in_fmt))
-        L.append(f'    uint32_t dst_words[{out_words}] = {{}};')
+        L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
         L.append('    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {')
         L.append(f'      code &= 0x{((1 << bits) - 1):x}u;')
         L.append(f'      uint32_t bit = index * {bits}u;')
@@ -2123,12 +2150,8 @@ def gen_vector_cvt_scale(
                 f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value', arch_name)});"
             )
         L.append('    }')
-        L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
-        L.append(
-            '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
-        )
-    else:
-        raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
+        L.append(f'    for (uint32_t word = 0; word < {dst_word_count}u; ++word)')
+        L.append('      dst_region.set_lane(word, lane, dst_words[word]);')
 
     L.append('  }')
     return '\n'.join(L)

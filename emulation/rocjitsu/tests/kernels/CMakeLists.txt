@@ -183,6 +183,11 @@ set(HAS_GFX1250_DBT_FIXTURE FALSE)
 set(RJ_GFX1250_DBT_FIXTURE_TARGET)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
+    rj_add_probe_object(
+        callable_sgpr_probe
+        gfx950
+        OUTPUT_NAME callable_sgpr_probe_gfx950
+    )
     set(HAS_PROBE_FIXTURES TRUE)
 
     # The narrow gfx1250 DBT library accepts a raw AMDGPU code object rather
@@ -205,7 +210,9 @@ if(CLANG_OFFLOAD_BUNDLER)
     # only when the offload bundler is available.
     if(RJ_INSTALL_TESTS)
         install(
-            FILES ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+            FILES
+                ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+                ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
         if(HAS_GFX1250_DBT_FIXTURE)

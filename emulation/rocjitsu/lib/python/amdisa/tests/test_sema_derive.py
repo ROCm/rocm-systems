@@ -1281,7 +1281,8 @@ class TestDeriveVectorUnary:
         )
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
+        assert 'write_vgpr_region' in cpp
+        assert 'dst_region.set_lane' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1336,6 +1337,8 @@ class TestDeriveVectorUnary:
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
+        assert 'read_vgpr_region' in cpp
+        assert 'write_vgpr_region' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),

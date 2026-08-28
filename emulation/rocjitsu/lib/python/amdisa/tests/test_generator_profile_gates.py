@@ -4552,6 +4552,19 @@ def test_cdna3_generated_disassembly_preserves_ds_and_flat_offsets(
     assert 'void Flat::build_modifiers' not in encodings_cpp
 
 
+def test_generated_sdwa_scalar_destination_uses_explicit_lane_mask_write(
+    cdna4_generated_root: Path,
+) -> None:
+    vopc = (cdna4_generated_root / 'vopc_exec.cpp').read_text()
+
+    lane_mask_write = (
+        'amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);'
+    )
+    assert lane_mask_write in vopc
+    assert 'write_sgpr(sb + sdwa_sdst_' not in vopc
+    assert 'write_sgpr(sb + sdwa_sdst_ + 1' not in vopc
+
+
 def test_generated_sdwa_uses_source_specific_modifier_formats(
     cdna4_generated_root: Path,
 ) -> None:
@@ -5931,6 +5944,7 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in execute_shared
 
     gfx1250_vop3_cvt = (gfx1250_generated_root / 'vop3_exec_cvt.cpp').read_text()
+    assert 'RegisterAccess(wf.cu())' not in gfx1250_vop3_cvt
 
     body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF32Fp8Vop3', 'VCvtF32Bf8Vop3')
 
@@ -6976,7 +6990,12 @@ def test_ev124_125_arch_gating_in_generated_operand(
     # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
     # matching the arch's M0 encoding reads M0.
     shared_resolve = (amdgpu_root / 'shared' / 'scalar_operand_resolve.h').read_text()
-    assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
+    assert re.search(
+        r'if \(m0_ev == static_cast<int>\(kModernM0Selector\) &&\s*'
+        r'ev == static_cast<int>\(kModernNullSelector\)\)\s*'
+        r'return 0u; // NULL',
+        shared_resolve,
+    )
     assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 
 
@@ -7328,6 +7347,43 @@ def test_only_gfx1250_generates_implicit_use_operands_overrides(
             f'{arch} has no VGPR-MSB banking, so implicit_use_operands() overrides '
             f'are dead weight: {offenders}'
         )
+
+
+def test_generated_smem_rejects_invalid_complete_scalar_selector_ranges(
+    amdgpu_generated_root: Path,
+):
+    """SMEM must issue only after complete address and data ranges validate."""
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'gfx1250',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        smem_exec = (
+            _execution_source_path(
+                amdgpu_generated_root / _generated_dir_name(arch) / 'smem.cpp',
+                _profile_for_arch(arch),
+            )
+        ).read_text()
+        assert (
+            'auto dst_register = amdgpu::resolve_scalar_register_range(wf,' in smem_exec
+        )
+        assert 'd->dst_register = *dst_register;' in smem_exec
+        assert 'auto address = smem_calculate_address(' in smem_exec
+        assert 'if (!address)' in smem_exec
+        if 'd->is_load = false;' in smem_exec:
+            assert 'const uint32_t sdata_sel = inst_.sdata;' in smem_exec
+            assert (
+                'auto src_register = amdgpu::resolve_scalar_register_range(wf,'
+                in smem_exec
+            )
+            assert 'read_scalar_register(wf, *src_register, i)' in smem_exec
 
 
 @pytest.mark.parametrize(

@@ -30,10 +30,11 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 
 EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                                       std::vector<uint32_t> registers, uint64_t execMask,
-                                      uint8_t byteMask, IntervalSet ldsIntervals) {
+                                      uint8_t byteMask, IntervalSet ldsIntervals,
+                                      amdgpu::WaitCounterType waitCounterType) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals));
+                            std::move(ldsIntervals), waitCounterType);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
@@ -198,6 +199,17 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
   if (e.space == RaceViolation::Space::SGPR) {
     std::ostringstream oss;
     oss << "\nSGPR race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
+        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
+        << "). Conflicting events:\n\n";
+
+    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
+    printCodeBlocks(oss, std::move(eventPcs));
+    return oss.str();
+  }
+
+  if (e.space == RaceViolation::Space::TTMP) {
+    std::ostringstream oss;
+    oss << "\nTTMP race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
         << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 

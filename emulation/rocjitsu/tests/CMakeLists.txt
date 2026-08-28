@@ -845,7 +845,11 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         probe_fixture_test
         PRIVATE KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
     )
-    add_dependencies(probe_fixture_test probe_rj_nop_probe_gfx90a)
+    add_dependencies(
+        probe_fixture_test
+        probe_rj_nop_probe_gfx90a
+        probe_callable_sgpr_probe_gfx950
+    )
     rj_configure_target(probe_fixture_test TEST)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(probe_fixture_test)
@@ -855,6 +859,16 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND "bin/probe_fixture_test"
+    )
+    rj_add_test(
+        NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
+        COMMAND
+            probe_fixture_test
+            --gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "bin/probe_fixture_test"
+            "--gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
     )
 endif()
 
