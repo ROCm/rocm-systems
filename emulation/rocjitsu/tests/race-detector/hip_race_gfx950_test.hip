@@ -1093,7 +1093,7 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_mfma) {
 
 static constexpr RaceExpectation kF64VgprRaceExpectation{
     .findings = FindingCount::OneOrMore,
-    .type_substring = "VGPR",
+    .type = "VGPR",
 };
 
 __global__ void f64_vgpr_race_kernel(const double *src, double *dst) {

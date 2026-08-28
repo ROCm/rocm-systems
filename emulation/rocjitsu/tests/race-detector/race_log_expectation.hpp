@@ -30,19 +30,17 @@ enum class FindingCount {
 /// Describes the observable race report expected from a test kernel.
 ///
 /// Tests set only the fields relevant to the behavior they protect. The
-/// matcher compares those fields with the first race record after validating
-/// the requested finding count. Instruction fields refer to the two marked
+/// matcher compares those fields with a race record after validating the
+/// requested finding count. Instruction fields refer to the two marked
 /// instructions and, optionally, an instruction between those markers in the
 /// human-readable race trace.
 struct RaceExpectation {
   FindingCount findings = FindingCount::One;
 
   // Normalized report fields. Type and access use exact matches. Kernel is a
-  // substring expected in both the resolved display name and ELF symbol;
-  // type_substring is a substring match for reports with a composite type.
+  // substring expected in both the resolved display name and ELF symbol.
   const char *kernel = nullptr;
   const char *type = nullptr;
-  const char *type_substring = nullptr;
   const char *access = nullptr;
 
   // Negative context values mean that the field is not checked.
@@ -325,19 +323,9 @@ inline bool anyContains(const std::vector<std::string> &lines, const std::string
                      [&](const std::string &line) { return detail::contains(line, substring); });
 }
 
-inline RaceExpectationMatchResult matchRaceExpectation(const std::vector<RaceRecord> &records,
-                                                       const RaceExpectation &expected) {
+inline RaceExpectationMatchResult matchRaceRecord(const RaceRecord &record,
+                                                  const RaceExpectation &expected) {
   RaceExpectationMatchResult result;
-  if (expected.findings == FindingCount::One && records.size() != 1) {
-    result.errors.push_back("expected exactly one race, got " + std::to_string(records.size()));
-    return result;
-  }
-  if (expected.findings == FindingCount::OneOrMore && records.empty()) {
-    result.errors.push_back("expected at least one race, got none");
-    return result;
-  }
-
-  const RaceRecord &record = records.front();
   if (expected.kernel != nullptr) {
     if (record.kernel.empty())
       detail::appendMissing(result.errors, "kernel name");
@@ -360,11 +348,6 @@ inline RaceExpectationMatchResult matchRaceExpectation(const std::vector<RaceRec
   }
   if (expected.type != nullptr && record.type != expected.type)
     detail::appendMismatch(result.errors, "race type", record.type, expected.type);
-  if (expected.type_substring != nullptr &&
-      !detail::contains(record.type, expected.type_substring)) {
-    result.errors.push_back("race type '" + record.type + "' does not contain '" +
-                            expected.type_substring + "'");
-  }
   if (expected.access != nullptr && record.access != expected.access)
     detail::appendMismatch(result.errors, "race access", record.access, expected.access);
   if (expected.wave >= 0 && record.wave != expected.wave) {
@@ -380,11 +363,6 @@ inline RaceExpectationMatchResult matchRaceExpectation(const std::vector<RaceRec
   if (expected.type != nullptr && !detail::contains(trace.header, expected.type)) {
     result.errors.push_back("trace header does not contain race type '" +
                             std::string(expected.type) + "'");
-  }
-  if (expected.type_substring != nullptr &&
-      !detail::contains(trace.header, expected.type_substring)) {
-    result.errors.push_back("trace header does not contain race type fragment '" +
-                            std::string(expected.type_substring) + "'");
   }
   if (expected.wave >= 0 &&
       !detail::contains(trace.header, "wave " + std::to_string(expected.wave))) {
@@ -407,6 +385,36 @@ inline RaceExpectationMatchResult matchRaceExpectation(const std::vector<RaceRec
                             expected.consumer + "'");
   }
   return result;
+}
+
+inline RaceExpectationMatchResult matchRaceExpectation(const std::vector<RaceRecord> &records,
+                                                       const RaceExpectation &expected) {
+  if (expected.findings == FindingCount::One) {
+    if (records.size() != 1) {
+      return RaceExpectationMatchResult{
+          .errors = {"expected exactly one race, got " + std::to_string(records.size())}};
+    }
+    return matchRaceRecord(records.front(), expected);
+  }
+
+  if (records.empty())
+    return RaceExpectationMatchResult{.errors = {"expected at least one race, got none"}};
+
+  RaceExpectationMatchResult closest = matchRaceRecord(records.front(), expected);
+  if (closest.ok())
+    return closest;
+  for (std::size_t index = 1; index < records.size(); ++index) {
+    RaceExpectationMatchResult candidate = matchRaceRecord(records[index], expected);
+    if (candidate.ok())
+      return candidate;
+    if (candidate.errors.size() < closest.errors.size())
+      closest = std::move(candidate);
+  }
+
+  closest.errors.insert(closest.errors.begin(),
+                        "none of " + std::to_string(records.size()) +
+                            " races matched the expectation; closest record:");
+  return closest;
 }
 
 } // namespace rocjitsu::test

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race_log_expectation.hpp"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
@@ -88,6 +89,14 @@ TEST(RaceLogExpectationTest, ParsesValidEmptyLog) {
       parse("[rocjitsu] Kernel dispatch: \"clean_kernel\" symbol=\"clean_kernel\"\n"
             " ROCJITSU RACE DETECTION SUMMARY\n"
             " No races detected.\n");
+
+  ASSERT_TRUE(parsed.ok()) << parsed.error;
+  EXPECT_TRUE(parsed.records.empty());
+}
+
+TEST(RaceLogExpectationTest, ParsesDispatchOnlyEmptyLog) {
+  const RaceLogParseResult parsed =
+      parse("[rocjitsu] Kernel dispatch: \"clean_kernel\" symbol=\"clean_kernel\"\n");
 
   ASSERT_TRUE(parsed.ok()) << parsed.error;
   EXPECT_TRUE(parsed.records.empty());
@@ -191,8 +200,9 @@ TEST(RaceLogExpectationTest, MissingEnvironmentFails) {
 }
 
 TEST(RaceLogExpectationTest, MissingFileFails) {
+  const ScopedTempDirectory directory("rocjitsu-race-log-expectation-");
   const std::filesystem::path missing =
-      std::filesystem::temp_directory_path() / "rocjitsu-race-log-expectation-missing" / "race.log";
+      std::filesystem::path(directory.path()) / "missing" / "race.log";
   const RaceLogParseResult parsed = parseRaceLogFile(missing);
 
   EXPECT_FALSE(parsed.ok());
@@ -234,6 +244,27 @@ TEST(RaceLogExpectationTest, RejectsFindingCountMismatches) {
   expectMatchError(matchRaceExpectation({}, one_or_more), "expected at least one race, got none");
 }
 
+TEST(RaceLogExpectationTest, OneOrMoreFindsMatchingRecordAfterMismatch) {
+  std::vector<RaceRecord> records = validRaceRecords();
+  ASSERT_EQ(records.size(), 1u);
+  RaceRecord mismatch = records.front();
+  mismatch.type = "SGPR";
+  records.insert(records.begin(), std::move(mismatch));
+
+  const RaceExpectation one_or_more{
+      .findings = FindingCount::OneOrMore,
+      .type = "VGPR",
+  };
+  const RaceExpectation exactly_one{
+      .type = "VGPR",
+  };
+
+  const RaceExpectationMatchResult matched = matchRaceExpectation(records, one_or_more);
+
+  EXPECT_TRUE(matched.ok()) << matched.message();
+  expectMatchError(matchRaceExpectation(records, exactly_one), "expected exactly one race, got 2");
+}
+
 TEST(RaceLogExpectationTest, RejectsInvalidDispatchIdentity) {
   std::vector<RaceRecord> records = validRaceRecords();
   ASSERT_EQ(records.size(), 1u);
@@ -256,7 +287,6 @@ TEST(RaceLogExpectationTest, ReportsAllNormalizedFieldMismatches) {
   ASSERT_EQ(records.size(), 1u);
   const RaceExpectation expected{
       .type = "SGPR",
-      .type_substring = "LDS",
       .access = "write",
       .wave = 2,
       .lane = 3,
@@ -265,7 +295,6 @@ TEST(RaceLogExpectationTest, ReportsAllNormalizedFieldMismatches) {
   const RaceExpectationMatchResult matched = matchRaceExpectation(records, expected);
 
   expectMatchError(matched, "race type mismatch");
-  expectMatchError(matched, "race type 'VGPR' does not contain 'LDS'");
   expectMatchError(matched, "race access mismatch");
   expectMatchError(matched, "wave mismatch");
   expectMatchError(matched, "lane mismatch");
