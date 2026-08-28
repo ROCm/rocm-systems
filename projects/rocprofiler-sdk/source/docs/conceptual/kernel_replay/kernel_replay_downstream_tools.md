@@ -61,9 +61,16 @@ executions of the same kernel. Re-deriving identity from the timestamp would giv
 synthetic id and the counter groups would never merge back onto one row.
 
 The fix is to stop re-deriving under replay and use the SDK's `dispatch_id`, which is stable across
-passes by construction. Everything downstream of that is closer to working than it looks:
-`process_rocpd_csv()` already pivots multiple counter names onto a single dispatch row, which is the
-shape replay produces.
+passes by construction. `process_rocpd_csv()` then already pivots multiple counter names onto a
+single dispatch row, which is the shape replay produces.
+
+That is necessary but not sufficient, because the timestamps are not the only thing rocpd loses. It
+does not record the pass index at all, so the counters of every pass arrive against one dispatch with
+nothing to separate them, and any counter appearing in more than one group arrives several times over
+as identical rows. A pivot onto a dispatch row meets duplicate entries for precisely those counters.
+Compute would either have to require that no counter is repeated across groups, which is a real
+constraint on how groups are formed, or wait for the pass index to reach rocpd. See
+[Benchmarking](kernel_replay_benchmarking.md) for what that involves.
 
 ### The other work
 

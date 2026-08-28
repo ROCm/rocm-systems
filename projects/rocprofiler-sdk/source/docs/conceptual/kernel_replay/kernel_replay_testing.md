@@ -107,6 +107,12 @@ These are known gaps, listed so they are not rediscovered:
   macros for dispatch tables, and now the replay record — but nothing compares built artifacts
   across versions the way `abidiff` would.
 - **No multi-GPU coverage at any level.**
+- **Nothing is validated on the default output format.** The pass index that distinguishes one
+  replay pass from another reaches JSON and no other writer, so the correctness tests read JSON,
+  which `rocprofv3` produces only when asked. A run left to its default writes rocpd, where the
+  passes of a dispatch are merged onto one event with no way to separate them. Nothing asserts what
+  that output contains, and there is currently nothing it could usefully assert. See
+  [Benchmarking](kernel_replay_benchmarking.md).
 - **No test that a HIP graph launch declines replay visibly.** The behaviour is documented and
   warns once, but nothing asserts it, so a workload that captures graphs — which is the default for
   much of PyTorch and vLLM — would silently get no replay.

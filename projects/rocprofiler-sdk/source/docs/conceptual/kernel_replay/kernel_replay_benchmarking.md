@@ -75,6 +75,59 @@ Either way the measurement is a median over repeated runs taken after untimed wa
 timed run on shared CI hardware only detects catastrophic regressions, because the first run of an
 application pays for page cache misses and code object loading.
 
+## Where the results go, and what that costs
+
+Writing the results is inside the measurement. A replay run producing G groups has G times as many
+counter records to write as a single-group run, so some of what looks like replay overhead in a
+pass-count sweep is the output path scaling with the record count. Since `rocprofv3` writes rocpd
+unless told otherwise, that is the format the benchmark jobs and `replay_perf.py` use: measuring a
+format nobody runs with would answer a question nobody asked.
+
+The choice matters for a second reason. `tool_counter_record_t` carries a `replay_pass` index, and
+its own comment is explicit about why:
+
+```cpp
+// Kernel-replay pass index (0-based). All passes of a replayed dispatch share the same
+// dispatch_id, so this is the only field that distinguishes them. 0 for non-replay runs.
+uint64_t replay_pass = 0;
+```
+
+That field is serialized by the JSON writer and by nothing else. `generateRocpd.cpp` keys counter
+rows on the dispatch id alone:
+
+```cpp
+auto evt_id = dispatch_evt_ids.at(dispatch_id);
+for(const auto& count : record.read())
+    get_insert_statement(db, "rocpd_pmc_event{{uuid}}", { ..., insert_value("value", count.value) });
+```
+
+Since every pass of a replayed dispatch shares that dispatch id, every pass's counters attach to one
+event, and `rocpd_pmc_event` has no column that could tell them apart. The kernel dispatch row is
+deduplicated by the same id, so the dispatch appears once with the timestamps of the first pass.
+
+For counters unique to one group that is survivable: each lands once and a pivot by counter name
+reconstructs the row. For a counter that appears in more than one group -- which is the normal
+arrangement, since a sanity counter repeated across groups is how the passes are checked against
+each other -- it lands once per group, as indistinguishable rows against the same dispatch:
+
+```text
+dispatch_id=7  SQ_WAVES=512  duration=1000
+dispatch_id=7  SQ_WAVES=512  duration=1000
+dispatch_id=7  SQ_WAVES=512  duration=1000
+
+SQ_WAVES         SUM=1536   rows=3
+GRBM_COUNT       SUM=90000  rows=1
+```
+
+Nothing in the database says the 1536 is three readings of one dispatch rather than one reading of
+three, and nothing says how many passes to expect. A consumer that pivots counter names onto a
+dispatch row hits duplicate entries for exactly the counters it would use to check the passes agree.
+
+This is why the replay correctness tests validate JSON: it is the only output that carries the pass
+index, and it is not the default. Closing the gap is a column on `rocpd_pmc_event`, a schema version
+bump, and passing `record.replay_pass` through the insert above; it belongs with the tool
+integration rather than here.
+
 ## What it still cannot express
 
 **The snapshot itself is not measured.** `benchmark_metrics` records host process statistics: wall

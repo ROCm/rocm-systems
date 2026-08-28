@@ -44,6 +44,12 @@ runs, which is the same convention the CI performance tests use: the first run
 of an application pays for page cache misses and code object loading, and
 folding that into the measurement makes a fast configuration look slow.
 
+Writing the results is inside the measurement, and there are G times as many
+counter records to write with G groups, so the output format is part of what is
+being compared rather than a detail. It defaults to rocpd, which is what an
+unqualified rocprofv3 invocation uses. Note that rocpd does not record which
+replay pass a counter value came from; --output-format json does.
+
 Writes one CSV row per measurement to --output. Every row records the full
 command so a number can be traced back to what produced it.
 
@@ -108,7 +114,15 @@ def _profile_cmd(args, groups, outdir, replay=False, extra=None):
         + _pmc_args(groups)
         + ([REPLAY_FLAG] if replay else [])
         + (extra or [])
-        + ["--output-format", "json", "-d", f"{args.workdir}/{outdir}", "-o", "out", "--"]
+        + [
+            "--output-format",
+            args.output_format,
+            "-d",
+            f"{args.workdir}/{outdir}",
+            "-o",
+            "out",
+            "--",
+        ]
         + args.app_cmd
     )
 
@@ -384,6 +398,15 @@ def parse_args(argv=None):
         "Arguments beginning with a dash are not supported here.",
     )
     parser.add_argument("--output", default="replay_perf.csv")
+    parser.add_argument(
+        "--output-format",
+        default="rocpd",
+        choices=("rocpd", "json", "csv"),
+        help="format rocprofv3 writes its results in (default: rocpd). Writing the results is "
+        "part of what is being timed and the volume of them grows with the group count, so this "
+        "defaults to what an unqualified rocprofv3 invocation uses. Pass json to inspect the "
+        "replay_pass field afterwards; it is the only format that carries it.",
+    )
     parser.add_argument("--workdir", default="replay_perf_out")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument(
@@ -419,6 +442,7 @@ def main(argv=None):
     if args.dry_run:
         print(f"rocprofv3: {args.rocprofv3}")
         print(f"app:       {' '.join(args.app_cmd)}")
+        print(f"format:    {args.output_format}")
         print(f"repeats:   {args.repeats}   warmup: {args.warmup}")
         print(f"groups:    {args.groups}")
         print(f"experiments: {', '.join(args.only)}")

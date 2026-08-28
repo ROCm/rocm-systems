@@ -66,6 +66,7 @@ class TestCommandConstruction(unittest.TestCase):
             rocprofv3="rocprofv3",
             app_cmd=["./kernel-replay", "1048576"],
             workdir="/tmp/work",
+            output_format="rocpd",
         )
 
     def test_one_pmc_flag_per_group(self):
@@ -92,6 +93,11 @@ class TestCommandConstruction(unittest.TestCase):
         )
         self.assertIn("--kernel-include-regex", cmd)
         self.assertLess(cmd.index("^x$"), cmd.index("--"))
+
+    def test_output_format_is_passed_through(self):
+        self.args.output_format = "json"
+        cmd = harness._profile_cmd(self.args, ["GRBM_COUNT"], "out")
+        self.assertEqual(cmd[cmd.index("--output-format") + 1], "json")
 
     def test_output_directory_is_per_measurement(self):
         first = harness._profile_cmd(self.args, ["GRBM_COUNT"], "p1-replay")
@@ -245,6 +251,13 @@ class TestArguments(unittest.TestCase):
 
     def test_defaults_include_a_warmup(self):
         self.assertEqual(harness.parse_args(self.base()).warmup, 1)
+
+    def test_default_output_format_is_the_one_users_get(self):
+        self.assertEqual(harness.parse_args(self.base()).output_format, "rocpd")
+
+    def test_unknown_output_format_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            harness.parse_args(self.base("--output-format", "parquet"))
 
     def test_repeats_must_be_positive(self):
         with self.assertRaises(SystemExit):
