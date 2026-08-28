@@ -2459,6 +2459,145 @@ TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// symWindowDestroy undoes symWindowCreate: release the underlying memory, clear
+// the window's slot in the table (searching the chain for it), free the shadow
+// allocations, drop it from the sorted list and the global window map.
+//
+// The fixture drives the real lifecycle -- obtain memory, create a window --
+// rather than hand-building state, because symMemoryDestroy walks memHead to
+// unlink and faults if its argument is not on the list.
+
+class SymWindowDestroyTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+  std::vector<hipMemGenericAllocationHandle_t> memHandles;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 1;
+    devr->nLsaTeams = 1;
+    devr->bigSize = size_t(1) << 32;
+    devr->granularity = 4096;
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x40000000);
+    lsaRankList.assign({0});
+    devr->lsaRankList = lsaRankList.data();
+
+    memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+  }
+
+  void TearDown() override {
+    ncclDevrState* devr = &comm->devrState;
+    free(devr->winSorted);
+    devr->winSorted = nullptr;
+    ncclDevCommWindowTable* t = devr->windowTable;
+    while (t != nullptr) {
+      ncclDevCommWindowTable* next = t->next;
+      free(t);
+      t = next;
+    }
+    devr->windowTable = nullptr;
+    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    g_callocCallIndex = 0;
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+
+  // A window over freshly obtained memory, so the whole teardown chain is valid.
+  ncclWindow_vidmem* MakeWindow(void* userPtr) {
+    ncclDevrMemory* mem = nullptr;
+    EXPECT_EQ(symMemoryObtain(comm, memHandles.data(), 1, userPtr, 4096, 0, &mem, false), ncclSuccess);
+    ncclWindow_vidmem* winDev = nullptr;
+    EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, nullptr, &winDev, nullptr, nullptr), ncclSuccess);
+    return winDev;
+  }
+};
+
+// The happy path: the table slot is cleared and the sorted list shrinks.
+TEST_F(SymWindowDestroyTest, Succeeds_ClearsTableSlotAndSortedEntry) {
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  ASSERT_EQ(comm->devrState.windowTable->entries[0].window, winDev);
+
+  EXPECT_EQ(symWindowDestroy(comm, winDev, nullptr), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(comm->devrState.windowTable->entries[0].window, nullptr);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);  // the memory went with it
+}
+
+// Branch: the multi-segment window array is released only when one exists.
+TEST_F(SymWindowDestroyTest, MultiSegmentWins_AreFreed) {
+  ncclSegmentWindow segWins{};
+  ScopedHook segAlloc(g_devrAllocAndPopulateSegmentWindows,
+                      [&](ncclDevrState*, ncclDevrMemory*, hipStream_t, ncclSegmentWindow** out) {
+                        *out = &segWins;
+                        return ncclSuccess;
+                      });
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_shadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
+  EXPECT_EQ(symWindowDestroy(comm, winDev, nullptr), ncclSuccess);
+  EXPECT_NE(std::find(freed.begin(), freed.end(), static_cast<void*>(&segWins)), freed.end());
+  EXPECT_NE(std::find(freed.begin(), freed.end(), static_cast<void*>(winDev)), freed.end());
+}
+
+// Branch: no segment array, so only the descriptor is released.
+TEST_F(SymWindowDestroyTest, NoMultiSegmentWins_FreesOnlyDescriptor) {
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+
+  ScopedHook poolFree(g_shadowPoolFree,
+                      [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+  EXPECT_EQ(symWindowDestroy(comm, winDev, nullptr), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 1);
+}
+
+// Branch: the table search walks the chain. The 33rd window lives in the second
+// table, so finding it means following next rather than giving up at 32.
+TEST_F(SymWindowDestroyTest, WindowInChainedTable_IsFound) {
+  ncclWindow_vidmem* last = nullptr;
+  for (int i = 0; i < 33; i++) {
+    last = MakeWindow(reinterpret_cast<void*>(0x100000 + i * 0x1000));
+  }
+  ncclDevCommWindowTable* second = comm->devrState.windowTable->next;
+  ASSERT_NE(second, nullptr);
+  ASSERT_EQ(second->entries[0].window, last);
+
+  EXPECT_EQ(symWindowDestroy(comm, last, nullptr), ncclSuccess);
+  EXPECT_EQ(second->entries[0].window, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 32);
+}
+
+// Branch: the cleanup label reached from a failure. However teardown went, the
+// window must still leave the sorted list -- leaving it there would dangle.
+//
+// The return code is deliberately not asserted. remove_winSorted ends with
+// NCCLCHECKGOTO on the map removal, and that macro assigns unconditionally, so
+// a successful removal overwrites the earlier error with ncclSuccess. Asserting
+// either value would lock that in; see ~/rccl-dev-runtime-findings.md.
+TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  ScopedHook poolFree(g_shadowPoolFree,
+                      [](ncclShadowPool*, void*, hipStream_t) { return ncclSystemError; });
+
+  symWindowDestroy(comm, winDev, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(poolFree.calls, 1);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

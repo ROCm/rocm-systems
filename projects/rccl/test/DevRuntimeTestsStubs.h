@@ -46,6 +46,7 @@ extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long lon
 extern std::function<hipError_t(void*, size_t)> g_hipMemAddressFree;
 extern std::function<hipError_t(void*, size_t)> g_hipMemUnmap;
 extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_hipMemcpyAsync;
+extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync;
 
 extern std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier;

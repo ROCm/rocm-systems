@@ -473,6 +473,18 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)
 HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind kind, hipStream_t stream) {
   return g_hipMemcpyAsync(dst, src, n, kind, stream);
 }
+
+// Same reasoning as hipMemcpyAsync above: unfaked, this reaches the real driver
+// rather than failing to link.
+static hipError_t DefaultMemsetAsync(void* dst, int value, size_t n, hipStream_t) {
+  if (dst != nullptr) memset(dst, value, n);
+  return hipSuccess;
+}
+std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultMemsetAsync;
+
+HIP_FAKE hipError_t hipMemsetAsync(void* dst, int value, size_t n, hipStream_t stream) {
+  return g_hipMemsetAsync(dst, value, n, stream);
+}
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -561,6 +573,7 @@ void ResetDevRuntimeFakes() {
   g_shadowPoolAlloc                         = DefaultShadowPoolAlloc;
   g_shadowPoolFree                          = DefaultShadowPoolFree;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
+  g_hipMemsetAsync                          = DefaultMemsetAsync;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }
