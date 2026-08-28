@@ -108,7 +108,6 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, stream, playback, roundtrip]
-    disabled: [amd_windows]
   Unit_HRR_MemsetVariantsRoundtrip:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
@@ -217,12 +216,10 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, memcpy, playback, roundtrip]
-    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy2DUnalignedRoundtrip:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, memcpy, playback, roundtrip]
-    disabled: [amd_windows]
   Unit_HRR_TextureRoundtrip:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
@@ -275,17 +272,15 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, replacekernel]
-    disabled: [amd_windows]
   Unit_HRR_ReplaceKernelMissingCO:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, replacekernel]
-    disabled: [amd_windows]
   Unit_HRR_ReplaceKernelBadSpec:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, replacekernel]
-    disabled: [amd_windows]
+    
   Unit_HRR_AllApis_Direct:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
@@ -310,12 +305,10 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, memcpy]
-    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy2DUnaligned_Direct:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, memcpy]
-    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy_Direct:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
@@ -404,7 +397,7 @@ hrr:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, stream]
-    disabled: [amd_windows]
+    
   Unit_HRR_MemsetD2D_Direct:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
