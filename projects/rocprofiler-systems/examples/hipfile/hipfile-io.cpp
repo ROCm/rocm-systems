@@ -7,9 +7,12 @@
 // handle, then loops read/write for a fixed duration so that the profiler's
 // periodic process sampler observes the cumulative hipFile stats.
 //
-// The file is opened WITHOUT O_DIRECT so the workload runs on any filesystem
-// (it exercises hipFile's fallback backend); the goal is to validate the
-// telemetry pipeline, not the GPU-direct fast path.
+// The file is opened without O_DIRECT so open(2) itself does not depend on an
+// O_DIRECT-capable filesystem. That does not pin the POSIX fallback: hipFile
+// reopens the file through /proc/self/fd with O_DIRECT at HandleRegister and
+// still takes the GPU-direct fast path when the filesystem allows it. Fallback
+// is used only when that reopen fails. The goal is to validate the telemetry
+// pipeline, not a particular I/O path.
 //
 // Usage: hipfile-io [FILE] [GPUID] [SECONDS]
 
