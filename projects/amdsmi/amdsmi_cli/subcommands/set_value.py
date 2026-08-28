@@ -1676,7 +1676,7 @@ class SetValueCommands:
                     self.logger.store_output(args.gpu, "clk_limit", bound_error)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
-                    return
+                    raise ValueError(bound_error)
 
                 if lim_type == "min":
                     if val == clk_tuple["min_clk"]:
