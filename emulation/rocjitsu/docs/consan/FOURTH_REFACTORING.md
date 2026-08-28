@@ -1,10 +1,22 @@
-# ConSan fourth refactoring: enforce the component architecture
+# ConSan fourth refactoring: enforce components and factor variability
 
-This document is the working charter for ConSan's fourth refactoring. It begins
-with the de-facto component structure found in the current implementation, then
-identifies where the code does not respect that structure, and finally proposes
-an ordered route for turning the effective architecture into enforced
-boundaries.
+This document is the working charter for ConSan's fourth refactoring. It starts
+from two independent investigations of the current implementation:
+
+1. what the de-facto components are and whether dependencies respect them; and
+2. how implementation size varies across engines and targets, especially
+   whether the source is scaling as `O(N * M)` rather than `O(N + M)`.
+
+The two views are related but not interchangeable. A well-layered program can
+still duplicate every engine/target combination, while a compact shared helper
+can still violate every intended dependency boundary. The refactoring must
+improve both properties.
+
+The destination design in this document is deliberately a set of hypotheses
+and invariants, not a frozen class diagram. Each extraction must be tested as a
+vertical slice, measured, and either generalized, revised, or removed before
+the next slice. The freedom to discover a better interface during the work is
+part of the plan; parallel authorities and unmeasured rewrites are not.
 
 The measurements below use commit
 `01e6a6f1a23997866ff7a318966f6d809f9de6b8`. They cover production code under:
@@ -13,9 +25,11 @@ The measurements below use commit
 - `emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/`
 
 Tests, documentation, build files, blank lines, and comments are excluded. The
-result is **84,041 implementation lines in 83 files**. The categories are exact
-whole-file sums by dominant responsibility; they do not imply that every line
-in a file belongs exclusively to that responsibility.
+result is **84,041 implementation lines in 83 files**. The component table in
+Section 1 uses exact whole-file sums by dominant responsibility; it does not
+imply that every line in a file belongs exclusively to that responsibility.
+The variability survey in Section 2 instead uses reviewed source regions so
+that mixed files do not inherit one label wholesale.
 
 ## 1. De-facto components
 
@@ -157,7 +171,252 @@ This matters because the source tree visually suggests more isolation than the
 compiler enforces. The `.inc` files are useful clues to the intended
 components, but they are not yet component boundaries.
 
-## 2. Where the implementation violates the component model
+## 2. Variability across modes and targets
+
+ConSan currently supports four engines and five target products:
+
+| Dimension | Members used in this survey |
+| --- | --- |
+| Modes | Record/Replay, Sampled, InlineShadow, SuperCollider |
+| Targets | `gfx942`/CDNA3, `gfx950`/CDNA4, `gfx1100`/RDNA3, `gfx1201`/RDNA4, `gfx1250`/CDNA5 |
+
+The desired source-growth model is approximately `O(1) + O(N) + O(M)`, with a
+small, justified interaction term. This does not mean erasing real ISA
+differences. It means expressing an engine policy once, expressing a target
+mechanism once, and composing the two through a narrow contract.
+
+### 2.1 Measurement method
+
+This survey does **not** classify a line by whether the spelling of a mode or
+architecture occurs on that line. That approach is badly wrong here. Most of
+an engine implementation has no engine name on each line, and most target
+variation is reached through a capability field or a target-aware builder.
+Conversely, identifiers such as `kRdna4ExecLo`, `kRdna4VccLo`, and
+`kRdna4ScopeDevice` occur as normalized operands in algorithms used on all five
+targets. Those uses are not RDNA4-only code.
+
+The survey instead used the following semantic procedure:
+
+1. Assign every complete file, function, generated fragment, and coherent
+   branch region to the set of modes that can use the implementation. Callers
+   and engine selection, not names, determine the set. Mixed HSA and report
+   coordinators remain shared only for their common orchestration; separable
+   Record/Replay, Sampled, InlineShadow, and SuperCollider analysis or
+   allocation bodies receive their actual engine ownership.
+2. Within those regions, identify exact decoders/classifiers, target-selection
+   branches, capability-guarded bodies, target profile data, and emission paths
+   whose implementation shape changes with the target matrix.
+3. Do not mark an unchanged engine algorithm as target-sensitive merely because
+   it calls `build_*(_, arch)`; the target-aware builder is the target seam.
+4. Count nonblank, comment-excluded code lines in the reviewed regions and
+   check that the mode partition covers all 84,041 lines exactly once.
+5. Keep subset ownership. Code shared by all three MOI engines, by
+   Record/Replay and InlineShadow, or by a target family must not be replicated
+   into several exclusive buckets merely to make a rectangular table.
+
+The result is a source-change-sensitivity measurement. A target classifier that
+handles all five products is target-specific because it is an authority that
+must be extended or deliberately reject a sixth target. An ordinary algorithm
+which merely passes `arch` through a stable target interface is target-neutral.
+
+Semantic attribution is not an intrinsic lexical property. Moving a wrapper
+line across a reviewed region boundary can change a few lines without changing
+the design. The numbers below are therefore appropriate as a refactoring
+baseline and trend metric, not as a claim that every brace has metaphysical
+ownership. The large regions and conclusions are stable under reasonable
+boundary choices. Future measurements must preserve the reviewed-region
+method, record boundary changes, and never substitute filename or token
+classification.
+
+### 2.2 The four requested top-level buckets
+
+| Source sensitivity | Implementation lines | Share |
+| --- | ---: | ---: |
+| Neither mode- nor target-specific | 27,336 | 32.5% |
+| Mode-specific, target-neutral | 49,623 | 59.0% |
+| Target-specific, mode-neutral | 3,512 | 4.2% |
+| Both mode- and target-specific | 3,570 | 4.2% |
+| **Total** | **84,041** | **100%** |
+
+This is not a codebase dominated by five copies of four engines. The strict
+interaction term is 4.2%, not the majority of the implementation. The largest
+category is engine policy and machinery that is already shared across all five
+targets. That is reassuring about asymptotic scaling, but it does not make the
+3,570-line interaction term harmless: those lines contain several of the
+largest and most fragile lowering paths, and their current placement makes both
+new-engine and new-target work harder.
+
+### 2.3 Mode ownership before and after target sensitivity
+
+The exclusive partition under this attribution is clearer when subset sharing
+is retained:
+
+| Mode ownership set | Target-neutral | Target-sensitive | Total |
+| --- | ---: | ---: | ---: |
+| All four modes | 27,336 | 3,512 | 30,848 |
+| Record/Replay + Sampled + InlineShadow (shared MOI) | 16,729 | 1,708 | 18,437 |
+| Record/Replay + InlineShadow | 2,170 | 52 | 2,222 |
+| Record/Replay only | 8,073 | 65 | 8,138 |
+| Sampled only | 7,116 | 520 | 7,636 |
+| InlineShadow only | 9,080 | 664 | 9,744 |
+| SuperCollider only | 6,455 | 561 | 7,016 |
+| **Total** | **76,959** | **7,082** | **84,041** |
+
+The 16,729 target-neutral lines shared by the three MOI engines are important.
+They show that substantial `O(N * M)` duplication has already been avoided,
+but they also expose a hidden component: “shared MOI” is larger than any one
+exclusive engine implementation and is mostly textually composed rather than
+enforced as a component.
+
+For the requested per-mode view, shared-subset lines are incidence counts: a
+line used by the three MOI engines appears in all three rows, but exists only
+once in the exclusive table above.
+
+| Mode | Target-neutral mode-sensitive incidence | Target-sensitive mode incidence |
+| --- | ---: | ---: |
+| Record/Replay | 26,972 | 1,825 |
+| Sampled | 23,845 | 2,228 |
+| InlineShadow | 27,979 | 2,424 |
+| SuperCollider | 6,455 | 561 |
+
+The incidence columns must not be summed. They answer “how much specialized
+source can affect this mode?”, not “how many physical lines exist?”.
+
+### 2.4 Architecture and mode-by-architecture incidence
+
+Target-sensitive but mode-neutral code is highly shared. The following table
+counts, for each product, the reviewed target-authority source that applies to
+that product. Most exact classifiers and validators cover several or all
+targets, so these are deliberately overlapping incidence counts over 3,512
+physical lines.
+
+| Target | Mode-neutral target-sensitive incidence |
+| --- | ---: |
+| `gfx942` / CDNA3 | 3,259 |
+| `gfx950` / CDNA4 | 3,258 |
+| `gfx1100` / RDNA3 | 3,256 |
+| `gfx1201` / RDNA4 | 3,255 |
+| `gfx1250` / CDNA5 | 3,293 |
+
+The near-equality is a good result: target normalization, target profile
+validation, inventory construction, exact sequence recognition, and independent
+validation are mostly common target components rather than five product
+copies. The small `gfx1250` increase reflects genuinely unique selectable-bank,
+split-LDS, `S_CALL_I64`, and transport behavior.
+
+The requested mode/target-pair breakdown is likewise an incidence matrix over
+the 3,570 physical lines in the interaction bucket:
+
+| Mode \ target | `gfx942` | `gfx950` | `gfx1100` | `gfx1201` | `gfx1250` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Record/Replay | 1,587 | 1,587 | 1,399 | 1,531 | 1,731 |
+| Sampled | 2,009 | 2,009 | 1,398 | 1,530 | 1,711 |
+| InlineShadow | 2,022 | 2,022 | 1,460 | 1,740 | 1,956 |
+| SuperCollider | 193 | 193 | 155 | 499 | 484 |
+
+These cells also must not be summed. For example, 1,708 physical lines of
+target-sensitive shared-MOI code contribute to three mode rows, and a single
+gfx9-family far-route body contributes to both `gfx942` and `gfx950`. Counting
+it as four copies would manufacture the very `N * M` duplication being
+measured.
+
+### 2.5 Where the actual interaction term lives
+
+The important both-sensitive regions are concentrated rather than diffuse:
+
+- InlineShadow's far dense atomic route in
+  `consan_moi_inline_atomic.inc` is a roughly 374-code-line coherent region for
+  the `gfx942`/`gfx950` capability set.
+- Sampled's corresponding far dense atomic route in
+  `consan_moi_sampled_sync.inc` is roughly 423 code lines for the same pair.
+- SuperCollider's branch-only dense route in
+  `consan_supercollider_lds.inc` is roughly 275 code lines used by
+  `gfx1201`/`gfx1250`.
+- The SuperCollider inline flat rewrite is roughly 63 code lines and is
+  currently a `gfx1201`-only capability.
+- InlineShadow's lazy workgroup-local shadow initialization is roughly 148 code
+  lines shared by `gfx1201` and `gfx1250`.
+- `gfx1250` contributes smaller but repeated per-engine branches for
+  `S_CALL_I64`, per-kernel owner translation, selectable VGPR banks,
+  split-two-address LDS relocation, and return-PC route identity.
+- Workgroup identity, dense routing, address materialization, VCC preservation,
+  wave width, and register-bank transitions recur in both shared-MOI and
+  engine-specific code.
+
+The first two bullets are especially revealing. They implement analogous
+target routing capabilities separately inside two modes. This is genuine local
+`N * M` growth and a good extraction candidate. In contrast, the five rows of
+`kConSanTargetProfiles` are desirable `O(M)` data, and common target-aware
+builders are desirable shared target mechanisms.
+
+### 2.6 Scaling diagnosis
+
+The codebase is not fundamentally `O(N * M)`. Its present shape is closer to:
+
+```text
+large common core
++ large O(N) engine and shared-engine-subset implementations
++ modest O(M) target authorities
++ small but costly engine/target interaction regions
+```
+
+Three qualifications matter:
+
+1. The interaction term is disproportionately complex. Dense routing and
+   register-state preservation account for more engineering risk than their
+   line share suggests.
+2. Subset sharing is often physical rather than architectural. The shared-MOI
+   implementation exists once, but textual inclusion and broad buses let every
+   engine reach too much of it.
+3. Similar target capabilities are sometimes re-expressed per engine rather
+   than lowered through one target operation. A sixth target with a new call or
+   transport model could therefore grow several separate branches even though
+   the current aggregate is only 4.2%.
+
+The fourth refactoring should reduce the interaction term and make its
+remaining members explicit. It should not chase zero: some engine policies
+legitimately select a target capability, and independent validation must retain
+target- and mode-aware proof.
+
+### 2.7 How the variability and layering work coexist
+
+The layering investigation asks **who owns a fact and who may depend on it**.
+The variability investigation asks **which dimension owns a difference and how
+often that difference is expressed**. Every proposed cut must answer both.
+
+The leading design hypothesis is a composition of three kinds of product:
+
+```text
+semantic site + evidence requirement
+                 |
+                 v
+          engine operation plan
+                 |
+                 v
+       target operation lowering
+                 |
+                 v
+ placement transaction + validated static mapping
+```
+
+This is intentionally not yet a commitment to one universal operation IR,
+virtual interface, variant, or table-driven backend. The refactoring should
+discover the smallest useful seam through repeated vertical slices:
+
+1. choose one repeated interaction, such as far routing, report atomics,
+   workgroup identity, or address materialization;
+2. describe the engine's required operation without exposing exact encoding;
+3. lower it for at least two materially different target families;
+4. consume it from a second engine and delete the duplicate path;
+5. measure the four source-sensitivity buckets and adapter size;
+6. keep, revise, or discard the abstraction based on the result.
+
+An extraction that merely moves 400 lines behind a broader options object has
+not improved either axis. An extraction that makes the target operation reusable
+but gives it authority over semantic coverage has improved scaling while
+breaking layering. Both tests are required at every checkpoint.
+
+## 3. Where the implementation violates the component model
 
 The present code is not spaghetti and it does not contain a catastrophic
 circular semantic dependency. Its responsibility decomposition is good, its
@@ -168,7 +427,7 @@ build graph do not enforce.
 The violations below are ordered by architectural and correctness risk, not by
 how easy they are to edit.
 
-### 2.1 Coverage is reconstructed from patch geometry
+### 3.1 Coverage is reconstructed from patch geometry
 
 This is the highest-priority violation.
 
@@ -195,7 +454,7 @@ to the wrong intent.
 Coverage must instead be published from the same transaction that commits or
 rejects an intent-bound lowering operation.
 
-### 2.2 Exact instruction admission is duplicated across policy and lowering
+### 3.2 Exact instruction admission is duplicated across policy and lowering
 
 `consan_access_policy.cpp` includes generated CDNA5 and RDNA4 machine headers
 and knows exact constants and operand representations such as `SREG_NULL`, raw
@@ -221,7 +480,7 @@ than an explicit classifier inconsistency. Exact target normalization belongs
 in one target-classifier authority. Semantic policy should consume the
 normalized fact, and the lowerer should consume the resulting recipe.
 
-### 2.3 Broad structures act as cross-component buses
+### 3.3 Broad structures act as cross-component buses
 
 #### `MoiOptions`
 
@@ -256,7 +515,7 @@ Some detailed patch telemetry is legitimately needed by final validation. The
 problem is that the same representation is also used as the semantic and
 runtime communication channel.
 
-### 2.4 Runtime analysis consumes lowerer patch geometry
+### 3.4 Runtime analysis consumes lowerer patch geometry
 
 `AutoMoiReportBufferRegistry::summarize` in
 `rj_hsa_dbi_hook_moi_report.cpp` combines HSA snapshotting, ABI validation,
@@ -273,7 +532,7 @@ The pure trust evaluator inside this path demonstrates that decomposition is
 practical. Lifecycle, decoding, analysis, trust, and rendering now need their
 own contracts.
 
-### 2.5 One source file crosses the host/target boundary
+### 3.5 One source file crosses the host/target boundary
 
 The first roughly 2,500 lines of `consan_moi_model.cpp` implement host-side
 report and replay models. Its final roughly 500 lines implement exact
@@ -281,7 +540,7 @@ target-atomic address planning and emission. The interfaces in that tail are
 reasonably narrow, but its physical placement is a clear component error and
 makes dependencies harder to state and enforce.
 
-### 2.6 Diagnostics are not yet an edge-only concern
+### 3.6 Diagnostics are not yet an edge-only concern
 
 There are 1,858 `warnings`/`errors` `emplace_back` or `push_back` sites across
 36 production files. Current design permits string diagnostics from lowerers
@@ -294,7 +553,7 @@ component contract. Diagnostic wording should remain stable and should be
 rendered at the appropriate edge. This is a later cleanup, not a reason to
 destabilize the early cuts.
 
-### 2.7 Raw architecture branches are not uniformly violations
+### 3.7 Raw architecture branches are not uniformly violations
 
 The implementation contains 105 `ROCJITSU_CODE_ARCH_*` references across 20
 files and 120 `consan_uses_gfx*` references across 19 files. Most references in
@@ -305,7 +564,7 @@ policy or duplicated target classifiers, not every architecture branch.
 The fourth refactoring must avoid replacing explicit and reviewable target
 code with an abstraction that merely hides necessary ISA differences.
 
-### 2.8 Detailed patch access in final validation is appropriate
+### 3.8 Detailed patch access in final validation is appropriate
 
 Final validation contains 631 `patch.*` accesses and uses much of
 `ConSanPatchInfo`. This is largely correct: an independent validator must inspect
@@ -316,7 +575,7 @@ The desired boundary is that detailed patch proof remains private to lowering
 and validation, while semantic coverage and runtime analysis use smaller typed
 products.
 
-### 2.9 Severity summary
+### 3.9 Severity summary
 
 | Violation | Layering severity | Correctness risk |
 | --- | --- | --- |
@@ -330,12 +589,14 @@ products.
 | Raw architecture branching in target lowerers | Mostly legitimate | Low |
 | Detailed patch telemetry in independent validation | Appropriate | Low |
 
-## 3. Governing rules for the fourth refactoring
+## 4. Governing rules for the fourth refactoring
 
-The refactoring should optimize for enforceable ownership and dependency
-direction. A smaller implementation is desirable, especially where duplicate
-classifiers and reverse mappings can be deleted, but line count is not the
-primary stage gate.
+The refactoring should optimize for enforceable ownership, dependency
+direction, and additive growth across the mode and target dimensions. A
+smaller implementation is desirable, especially where duplicate classifiers,
+target routes, and reverse mappings can be deleted. Line count alone is not a
+stage gate, but a boundary that makes the interaction term larger without a
+clear semantic gain is suspect.
 
 1. **Preserve semantic authorities already established by the completed
    reimplementation stages.** Inventory, semantic policy, observation intent,
@@ -366,13 +627,37 @@ primary stage gate.
     completed fourth-refactoring stage is then checked on all five emulated
     targets with `-j16`, followed by the serialized physical `gfx1201` gate with
     `-j1`. Physical GPU jobs must never run concurrently.
+11. **Assign variation to one dimension.** Engine policy may select a semantic
+    operation; target lowering may realize it. Do not let each engine recreate
+    the same target call, routing, identity, or register-state mechanism.
+12. **Retain subset sharing explicitly.** Shared MOI, exact-shadow, gfx9,
+    gfx12, CDNA, and other real subsets are preferable to duplication. They must
+    have named contracts rather than being inferred from textual inclusion.
+13. **Measure both exclusive lines and incidence.** The four exclusive buckets
+    detect physical growth. Per-mode and per-target incidence detects blast
+    radius. Neither should be replaced by lexical token counts.
 
-## 4. Ordered implementation route
+## 5. Provisional convergence route
 
-The order is intentional. The first cuts repair information flow; the later
-cuts use those typed products to reduce visibility and split physical
-translation units. These stages are labeled `F0` through `F9` to distinguish
-them from the completed reimplementation stages.
+The dependency order is intentional, but the concrete destination interfaces
+are provisional. The first cuts repair information flow. Target-operation
+seams are then discovered through vertical slices, not designed all at once.
+Later cuts use the proven typed products to reduce visibility and split
+physical translation units. These stages are labeled `F0` through `F9` to
+distinguish them from the completed reimplementation stages.
+
+There are two workstreams inside this order:
+
+- the **boundary workstream** moves coverage, static mapping, options, runtime
+  analysis, and proof to their rightful owners; and
+- the **variability workstream** extracts repeated engine/target interactions
+  into reusable target operations and verifies that a second engine can consume
+  them without importing target internals.
+
+The workstreams converge at the classifier, stage-contract, and compiled-
+component cuts. A stage may revise an earlier interface when a second vertical
+slice disproves it, provided the revision is committed separately, tested, and
+does not leave two authorities.
 
 ### F0. Freeze the baseline and dependency checks
 
@@ -384,6 +669,10 @@ dependencies as soon as the corresponding boundary exists.
 At minimum, retain the following baseline metrics for comparison:
 
 - 84,041 nonblank, comment-excluded production implementation lines;
+- 27,336 mode- and target-neutral lines, 49,623 mode-only lines, 3,512
+  target-only lines, and 3,570 lines in the interaction bucket;
+- 16,729 target-neutral shared-MOI lines and 1,708 target-sensitive shared-MOI
+  lines;
 - 57,129 lines, or 68.0%, textually compiled through the two main `.inc`
   closures;
 - 146 `const MoiOptions &` parameters;
@@ -394,8 +683,10 @@ At minimum, retain the following baseline metrics for comparison:
 - 5,302 registered ConSan tests at the Stage 10 exit: 4,667 nonphysical tests
   and 635 serialized physical `gfx1201` tests.
 
-The purpose of these numbers is to detect whether dependencies actually move,
-not to encourage mechanical changes that game a metric.
+The purpose of these numbers is to detect whether dependencies and variation
+actually move, not to encourage mechanical changes that game a metric. Update
+the semantic region ledger when a source boundary moves; do not silently switch
+to filename or token attribution.
 
 ### F1. Bind semantic intent to the lowering transaction
 
@@ -505,12 +796,28 @@ The lowerer may still reject resource allocation, placement, or emission. It
 must not report a generic placement failure for an instruction form that the
 classifier should have rejected.
 
+Use this stage for the first variability vertical slice. Select one operation
+that is currently expressed in more than one engine—far routing is the leading
+candidate—and separate:
+
+- the engine's semantic request and required preserved state;
+- the target's call, branch, and identity recipe;
+- placement feasibility and the committed result.
+
+Implement at least two materially different target capability sets, then use
+the operation from a second engine. Do not generalize the interface beyond the
+evidence from those consumers. If far routing proves to combine too many
+invariants, split the experiment into a smaller operation such as call/return
+state, route-key construction, or SCC preservation.
+
 Required tests include target-specific classifier goldens and common semantic
 policy fixtures fed by normalized forms on all supported architectures.
 
 **F4 completion criterion:** there is one exact lowerability classifier per
 operation class, semantic policy contains no generated ISA headers or raw
-architecture encoding constants, and emitters do not reclassify candidates.
+architecture encoding constants, emitters do not reclassify candidates, and
+one target-operation slice has replaced duplicated mode/target lowering in at
+least two engines without broadening semantic authority.
 
 ### F5. Replace broad option buses with stage contracts
 
@@ -527,6 +834,14 @@ actually required:
 
 Do not replace one broad object with arbitrary anonymous subsets. Each value
 type should name an invariant and have a single construction authority.
+
+Continue the variability work one operation at a time. Candidate slices after
+far routing are workgroup identity, atomic address materialization, report
+atomics/cache completion, VCC/SCC preservation, and selectable-bank
+transitions. After each slice, recompute the four buckets, per-mode/target
+incidence, adapter lines, and number of target branches remaining in engines.
+Retain the seam only when a second consumer makes it narrower or deletes more
+code than its adapters introduce.
 
 **F5 completion criterion:** native emission and placement components have zero
 `const MoiOptions &` parameters. Any surviving aggregate is confined to
@@ -552,6 +867,12 @@ include graph enforces the intended dependency direction.
 
 Move the target-address planning/emission tail out of
 `consan_moi_model.cpp` as part of this stage.
+
+The physical split should enforce both axes: an engine component must not see
+generated target encodings, and a target-operation component must not decide
+coverage, evidence policy, or engine semantics. Shared-MOI and exact-shadow
+subsets should become named internal components rather than accidental include
+closures.
 
 **F6 completion criterion:** the build no longer relies on 20,000-35,000-line
 textual translation units or on include-order visibility between conceptual
@@ -609,6 +930,13 @@ checks for the architectural rules that can be stated mechanically:
 - conceptual components compile through declared interfaces rather than a
   textual include closure.
 
+Also recompute the semantic variability ledger. Any remaining interaction
+region must be reviewed as one of:
+
+- a legitimate mode selection of a target capability;
+- independent mode-and-target-aware validation proof; or
+- debt with a named next extraction.
+
 Recompute implementation lines and all dependency metrics. A reduction is
 expected from deleting reverse coverage reconstruction, duplicate exact
 classifiers, broad adapter fields, and redundant runtime mappings. Falling
@@ -616,7 +944,7 @@ below 80,000 lines would be welcome, but it is not sufficient evidence of a
 successful refactoring and is not worth preserving a second authority or
 weakening validation.
 
-## 5. Test and commit discipline
+## 6. Test and commit discipline
 
 Each stage should be a sequence of small local commits. A useful commit changes
 one authority or one consumer set, adds or updates its focused tests, and leaves
@@ -639,7 +967,7 @@ GPU tests are serialized and less frequent during iteration, but mandatory at
 each completed stage. Existing paired device tests must not be weakened to make
 a boundary change pass.
 
-## 6. Definition of success
+## 7. Definition of success
 
 The fourth refactoring is complete when all of the following are true:
 
@@ -661,7 +989,14 @@ The fourth refactoring is complete when all of the following are true:
   declared interfaces and enforced dependency direction;
 - all five emulated architectures and serialized physical `gfx1201` tests pass,
   with no loss of test inventory;
-- implementation size and coupling metrics are recomputed and documented.
+- implementation size and coupling metrics are recomputed and documented;
+- the mode/target interaction bucket is smaller, or every surviving region has
+  an explicit justification and owner;
+- adding an engine does not require copying target routing, identity,
+  addressing, or register-state mechanisms, and adding a target does not
+  require editing each engine for an already-normalized operation;
+- shared-MOI and other subset-shared implementations have declared contracts
+  and enforced visibility rather than relying on textual inclusion.
 
 The key outcome is not merely a rearranged source tree. It is that a future
 change to a patch kind cannot alter semantic coverage, a new target encoding
@@ -669,4 +1004,6 @@ cannot be admitted differently by policy and lowering, and the host analyzer
 cannot learn semantic meaning by peering into target-patching internals. Once
 those properties are enforced by types and compilation boundaries, the
 component architecture described in the design will also be the architecture
-the code is capable of expressing.
+the code is capable of expressing. Once repeated target operations are owned by
+target components, the fifth engine or sixth target should extend one dimension
+rather than reopening a matrix of engine-specific target lowerers.
