@@ -615,9 +615,8 @@ def pytest_collection_modifyitems(config, items) -> None:
             if not rocprof_config.capabilities.cap_perfmon:
                 item.add_marker(
                     pytest.mark.skip(
-                        reason="GPU hardware performance counter access requires "
-                        "CAP_PERFMON (add runner to the render group or grant "
-                        "CAP_PERFMON / CAP_SYS_PERFMON to the process)"
+                        reason="Test requires CAP_PERFMON capability; "
+                        "either enable it or use CAP_SYS_ADMIN as a general override"
                     )
                 )
         if "disable_archs" in item.keywords:
@@ -1293,6 +1292,8 @@ def _ctest_generate_tests(
         "depends_on",
         "serialize",
         "class_name",
+        "cap_perfmon",
+        "disable_archs",
     }
     no_report_args_markers = {"rocpd"}
     only_report_args_markers = {"mpi_implementation"}
