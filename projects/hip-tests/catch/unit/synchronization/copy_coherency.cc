@@ -52,7 +52,6 @@ void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
                                   reinterpret_cast<void**>(&config)));
 }
 
-bool g_warnOnFail = true;
 int g_elementSizes[] = {128 * 1000, 256 * 1000, 16 * 1000 * 1000};
 
 // Set value of array to specified 32-bit integer:
@@ -75,13 +74,10 @@ __global__ void memcpyIntKernel(int* dst, const int* src, size_t numElements) {
 // Check arrays in reverse order, to more easily detect cases where
 // the copy is "partially" done.
 void checkReverse(const int* ptr, int numElements, int expected) {
-  int mismatchCnt = 0;
   for (int i = numElements - 1; i >= 0; i--) {
-    if (!g_warnOnFail) {
+    if (ptr[i] != expected) {
+      INFO("Mismatch at index " << i << ": got " << ptr[i] << ", expected " << expected);
       REQUIRE(ptr[i] == expected);
-    }
-    if (++mismatchCnt >= 10) {
-      break;
     }
   }
 }
@@ -103,7 +99,6 @@ const char* CmdTypeStr(CmdType c) {
 }
 
 enum SyncType {
-  NONE,
   EVENT_QUERY,
   EVENT_SYNC,
   STREAM_WAIT_EVENT,
@@ -115,7 +110,6 @@ enum SyncType {
 
 const char* SyncTypeStr(SyncType s) {
   switch (s) {
-    ENUM_CASE_STR(NONE);
     ENUM_CASE_STR(EVENT_QUERY);
     ENUM_CASE_STR(EVENT_SYNC);
     ENUM_CASE_STR(STREAM_WAIT_EVENT);
@@ -191,8 +185,6 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStrea
 
   // Sync in-between?
   switch (syncType) {
-    case NONE:
-      break;
     case EVENT_QUERY: {
       hipError_t st = hipErrorNotReady;
       HIP_CHECK(hipEventRecord(e, stream1));
@@ -254,17 +246,14 @@ void testWrapper(size_t numElements) {
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipDeviceSynchronize());
 
-  runTestImpl(COPY, EVENT_SYNC, KERNEL, stream1, stream2, numElements, Ad, Bd, Cd, Ch, expected);
-
   for (int cmdA = 0; cmdA < MAX_CmdType; cmdA++) {
     for (int cmdB = 0; cmdB < MAX_CmdType; cmdB++) {
       for (int syncMode = 0; syncMode < MAX_SyncType; syncMode++) {
         switch (syncMode) {
-          // case NONE::
           case EVENT_QUERY:
           case EVENT_SYNC:
           case STREAM_WAIT_EVENT:
-          // case STREAM_QUERY:
+          case STREAM_QUERY:
           case STREAM_SYNC:
           case DEVICE_SYNC:
             runTestImpl(CmdType(cmdA), SyncType(syncMode), CmdType(cmdB), stream1, stream2,
@@ -276,17 +265,6 @@ void testWrapper(size_t numElements) {
       }
     }
   }
-
-#if 0
-  runTestImpl(COPY, STREAM_SYNC, MODULE_KERNEL, stream1, stream2,
-              numElements, Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_SYNC, KERNEL, stream1, stream2, numElements,
-              Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_WAIT_EVENT, MODULE_KERNEL, stream1, stream2,
-               numElements, Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_WAIT_EVENT, KERNEL, stream1, stream2, numElements,
-              Ad, Bd, Cd, Ch, expected);
-#endif
 
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));

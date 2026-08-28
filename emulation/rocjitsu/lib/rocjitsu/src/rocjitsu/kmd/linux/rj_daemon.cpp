@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -85,14 +86,41 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
     break;
   }
   case AMDKFD_IOC_DBG_TRAP: {
+    // Every op the client reserves an inline tail for has to appear here, or
+    // the exact-length test below rejects a well-formed request and the
+    // connection is dropped. Keep this in step with the tail sizes
+    // RemoteDriver::send_ioctl() computes and the pointers
+    // reconstruct_embedded_pointers() repoints (rj_vm.cpp) -- all three must
+    // agree on the same set of ops.
     const auto *args = static_cast<const kfd_ioctl_dbg_trap_args *>(buffer);
-    if (args->op == KFD_IOC_DBG_TRAP_ENABLE) {
+    switch (args->op) {
+    case KFD_IOC_DBG_TRAP_ENABLE:
       inline_size =
           std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(kfd_runtime_info));
-    } else if (args->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT &&
-               !checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
-                                &inline_size)) {
-      return false;
+      break;
+    case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+      if (!checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
+                           &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+      if (!checked_product(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size,
+                           &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+      inline_size = args->query_exception_info.info_size;
+      break;
+    case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+      if (!checked_product(args->suspend_queues.num_queues, sizeof(uint32_t), &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+      if (!checked_product(args->resume_queues.num_queues, sizeof(uint32_t), &inline_size))
+        return false;
+      break;
+    default:
+      break;
     }
     break;
   }
@@ -115,15 +143,33 @@ bool send_with_fd_exact(int socket, const void *data, size_t size, int fd) {
          rpc_send_exact(socket, static_cast<const uint8_t *>(data) + bytes_sent, size - bytes_sent);
 }
 
-bool receive_header_with_fd(int socket, RpcHeader *header, util::UniqueHandle *fd) {
-  int received_fds[1] = {-1};
-  size_t received_fd_count = 1;
+/// @brief The SCM_RIGHTS descriptors a client may attach to one request.
+///
+/// @details DBG_TRAP ENABLE sends three: the debugger's notifier, and the
+/// authorization the daemon needs to reach the debuggee's address space --
+/// /proc/<pid>/mem, plus the /proc/<pid> directory that pins the identity that
+/// fd belongs to. Every other request sends at most the notifier. Ownership is
+/// RAII, so descriptors the VM declines to adopt are released with the request
+/// rather than leaked for the life of the connection.
+struct ReceivedFds {
+  util::UniqueHandle notifier;
+  util::UniqueHandle target_mem;
+  util::UniqueHandle target_proc;
+};
+
+bool receive_header_with_fds(int socket, RpcHeader *header, ReceivedFds *fds) {
+  int received_fds[3] = {-1, -1, -1};
+  size_t received_fd_count = std::size(received_fds);
   ssize_t header_bytes = 0;
   do {
     header_bytes = rpc_recv_msg(socket, header, sizeof(*header), received_fds, &received_fd_count);
   } while (header_bytes < 0 && errno == EINTR);
   if (received_fd_count > 0)
-    fd->reset(received_fds[0]);
+    fds->notifier.reset(received_fds[0]);
+  if (received_fd_count > 1)
+    fds->target_mem.reset(received_fds[1]);
+  if (received_fd_count > 2)
+    fds->target_proc.reset(received_fds[2]);
   if (header_bytes <= 0)
     return false;
   const size_t bytes_received = static_cast<size_t>(header_bytes);
@@ -194,12 +240,12 @@ public:
     try {
       while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
         RpcHeader header{};
-        util::UniqueHandle input_fd;
-        if (!receive_header_with_fd(client_fd_, &header, &input_fd))
+        ReceivedFds input_fds;
+        if (!receive_header_with_fds(client_fd_, &header, &input_fds))
           break;
 
         if (header.reserved != 0 ||
-            handle_request(header, input_fd) == RequestDisposition::Disconnect) {
+            handle_request(header, input_fds) == RequestDisposition::Disconnect) {
           break;
         }
       }
@@ -209,25 +255,25 @@ public:
   }
 
 private:
-  RequestDisposition handle_request(const RpcHeader &header, util::UniqueHandle &input_fd) {
+  RequestDisposition handle_request(const RpcHeader &header, ReceivedFds &input_fds) {
     switch (header.opcode) {
     case RPC_HANDSHAKE:
-      return handle_handshake(header, input_fd);
+      return handle_handshake(header, input_fds);
     case RPC_CLOSE:
-      return handle_close(header, input_fd);
+      return handle_close(header, input_fds);
     case RPC_MMAP:
-      return handle_mmap(header, input_fd);
+      return handle_mmap(header, input_fds);
     case RPC_MUNMAP:
-      return handle_munmap(header, input_fd);
+      return handle_munmap(header, input_fds);
     case RPC_IOCTL:
-      return handle_ioctl(header, input_fd);
+      return handle_ioctl(header, input_fds);
     default:
       return RequestDisposition::Disconnect;
     }
   }
 
-  RequestDisposition handle_handshake(const RpcHeader &header, const util::UniqueHandle &input_fd) {
-    if (process_id_ != 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
+  RequestDisposition handle_handshake(const RpcHeader &header, const ReceivedFds &input_fds) {
+    if (process_id_ != 0 || header.payload_bytes != 0 || input_fds.notifier)
       return RequestDisposition::Disconnect;
 
     if (rj_vm_device_open(daemon_->vm, client_pid_, &process_id_) != ROCJITSU_STATUS_SUCCESS) {
@@ -275,8 +321,8 @@ private:
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_close(const RpcHeader &header, const util::UniqueHandle &input_fd) {
-    if (process_id_ == 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
+  RequestDisposition handle_close(const RpcHeader &header, const ReceivedFds &input_fds) {
+    if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.notifier)
       return RequestDisposition::Disconnect;
 
     close_device();
@@ -287,8 +333,8 @@ private:
     return RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_mmap(const RpcHeader &header, const util::UniqueHandle &input_fd) {
-    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) || input_fd.get() >= 0) {
+  RequestDisposition handle_mmap(const RpcHeader &header, const ReceivedFds &input_fds) {
+    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) || input_fds.notifier) {
       return RequestDisposition::Disconnect;
     }
     RpcMmapRequest request{};
@@ -326,9 +372,9 @@ private:
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_munmap(const RpcHeader &header, const util::UniqueHandle &input_fd) {
+  RequestDisposition handle_munmap(const RpcHeader &header, const ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMunmapRequest) ||
-        input_fd.get() >= 0) {
+        input_fds.notifier) {
       return RequestDisposition::Disconnect;
     }
     RpcMunmapRequest request{};
@@ -344,7 +390,7 @@ private:
                                                                    : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_ioctl(const RpcHeader &header, util::UniqueHandle &input_fd) {
+  RequestDisposition handle_ioctl(const RpcHeader &header, ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes > kMaxPayloadBytes ||
         header.payload_bytes < sizeof(RpcIoctlRequest)) {
       return RequestDisposition::Disconnect;
@@ -365,11 +411,19 @@ private:
     command.buf = arguments;
     command.buf_size = request->args_bytes;
     command.shared_handle = -1;
-    command.in_handle = input_fd.get();
+    command.in_handle = input_fds.notifier.get();
+    command.in_mem_handle = input_fds.target_mem.get();
+    // Borrowed, not adopted: the driver dups it if the session needs to keep it
+    // (rj_vm.cpp passes it by value), so this side always closes its own copy.
+    command.in_proc_handle = input_fds.target_proc.get();
     if (rj_vm_execute_as(daemon_->vm, process_id_, &command) != ROCJITSU_STATUS_SUCCESS)
       return RequestDisposition::Disconnect;
+    // The VM clears each handle it took ownership of; drop ours to match, so
+    // RAII does not close a descriptor the debug session now owns.
     if (command.in_handle < 0)
-      static_cast<void>(input_fd.release());
+      static_cast<void>(input_fds.notifier.release());
+    if (command.in_mem_handle < 0)
+      static_cast<void>(input_fds.target_mem.release());
     if (command.buf_size > available_arguments)
       return RequestDisposition::Disconnect;
 

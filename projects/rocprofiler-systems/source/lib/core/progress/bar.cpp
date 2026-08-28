@@ -180,8 +180,8 @@ bar::on_finish() noexcept
         return;
     if(!m_visible) return;
 
-    std::lock_guard<std::mutex> lock{ m_render_mtx };
-    const auto                  total = m_total.load(std::memory_order_relaxed);
+    const std::lock_guard<std::mutex> lock{ m_render_mtx };
+    const auto                        total = m_total.load(std::memory_order_relaxed);
     if(total > 0) m_current.store(total, std::memory_order_relaxed);
     render_locked();
     std::fputc('\n', m_opts.stream);
@@ -197,7 +197,7 @@ bar::try_render() noexcept
     // Acquire the render lock first so the throttle timestamp is only read
     // and updated by the single thread that will actually render. This avoids
     // burning the throttle slot when contention causes try_lock() to fail.
-    std::unique_lock<std::mutex> lock{ m_render_mtx, std::try_to_lock };
+    const std::unique_lock<std::mutex> lock{ m_render_mtx, std::try_to_lock };
     if(!lock.owns_lock()) return;
 
     // Re-check under the lock: on_finish() may have completed between the

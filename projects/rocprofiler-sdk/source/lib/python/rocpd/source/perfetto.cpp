@@ -43,6 +43,10 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -71,6 +75,7 @@ get_hash_id(Tp&& _val)
     else
         return get_hash_id(*_val);
 }
+
 }  // namespace
 
 PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3* conn)
@@ -131,6 +136,15 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     tracing_session->StartBlocking();
 }
 
+::perfetto::StaticString
+PerfettoSession::get_static_event_name(const std::string& value) const
+{
+    // emplace() is a no-op when the name is already cached; the returned iterator
+    // points to storage that stays valid for the whole PerfettoSession lifetime,
+    // which is what perfetto::StaticString interning requires.
+    return ::perfetto::StaticString{static_event_names.emplace(value).first->c_str()};
+}
+
 PerfettoSession::~PerfettoSession()
 {
     tracing_session->StopBlocking();
@@ -180,6 +194,7 @@ write_perfetto(
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
                                                      agent_data,
+    rocpd_version_triplet_t                          schema_version,
     const tool::generator<types::thread>&            thread_gen,
     const tool::generator<types::region>&            region_gen,
     const tool::generator<types::sample>&            sample_gen,
@@ -206,6 +221,8 @@ write_perfetto(
 
     auto uuid_pid       = common::fnv1a_hasher::combine(this_nid, this_pid_init_ns, this_pid);
     auto this_pid_track = ::perfetto::Track{uuid_pid, ::perfetto::Track{}};
+
+    common::consume_args(schema_version);
 
     {
         auto desc = orig_process_desc;
@@ -246,9 +263,13 @@ write_perfetto(
 
     auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
         if(!ocfg.annotate_pmc) return std::vector<types::pmc_event>{};
+        // Filter out SPM pmc_events (sample_id IS NOT NULL) - they carry hardware
+        // timestamps in a different clock domain and should not be associated with
+        // regions or kernel dispatches in the Perfetto timeline.
         return rocpd::read_sql_query<types::pmc_event>(
             conn,
-            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
+            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={} AND "
+                        "sample_id IS NULL",
                         process.guid,
                         event_id));
     };
@@ -358,6 +379,8 @@ write_perfetto(
                 _namess << "(CPU)";
             else if(_agent.type == "GPU")
                 _namess << "(GPU)";
+            else if(_agent.type == "NIC")
+                _namess << "(NIC)";
             else
                 _namess << "(UNK)";
 
@@ -457,7 +480,7 @@ write_perfetto(
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
                     _category,
-                    ::perfetto::DynamicString{_name},
+                    perfetto_session.get_static_event_name(_name),
                     track,
                     itr.start,
                     ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -545,7 +568,7 @@ write_perfetto(
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_INSTANT(_category,
-                                    ::perfetto::DynamicString{_name},
+                                    perfetto_session.get_static_event_name(_name),
                                     track,
                                     itr.timestamp,
                                     ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -589,7 +612,7 @@ write_perfetto(
                 auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
                 auto dst_agent_index = agent_data.at(itr.dst_agent_abs_index).second;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                                  ::perfetto::DynamicString{itr.name},
+                                  perfetto_session.get_static_event_name(itr.name),
                                   *_track,
                                   itr.start,
                                   ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -616,13 +639,10 @@ write_perfetto(
                                   "stream_id",
                                   itr.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(itr.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", itr.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", itr.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", itr.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", itr.graph_node_id);
                                   });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
@@ -825,7 +845,7 @@ write_perfetto(
                 auto _name =
                     (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                                  ::perfetto::DynamicString{_name},
+                                  perfetto_session.get_static_event_name(_name),
                                   *_track,
                                   current.start,
                                   ::perfetto::Flow::Global(current.stack_id ^ uuid_pid),
@@ -858,13 +878,10 @@ write_perfetto(
                                   "stream_id",
                                   current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(current.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", current.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", current.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", current.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", current.graph_node_id);
 
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {

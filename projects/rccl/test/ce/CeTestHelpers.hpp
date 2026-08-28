@@ -15,6 +15,8 @@
 #include "MPIHelpers.hpp"
 
 #include <hip/hip_runtime.h>
+#include <cstdlib>
+#include <string>
 
 // Returns true when compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
 // Gated at build time via check_symbol_exists(hipMemcpyBatchAsync); no runtime query needed.
@@ -66,6 +68,15 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
+inline bool isCeAllReduceDispatchConfigured()
+{
+    constexpr int kCeAllReduceDefault = 0;
+    constexpr int kCeAllReduceEnabled = 1;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
+}
+
 // Batch path prediction helpers
 
 // Mirrors the thresholds from ce_coll.cc (CE_COLL_INTRA_BATCH_SYNC_FREQ /
@@ -91,6 +102,41 @@ inline hipError_t ceFillRankScalarFloat(void* buf, size_t nElem, int rank)
 {
     return RCCLTestHelpers::initializeBufferWithPattern<float>(
         buf, nElem, [rank](size_t) { return static_cast<float>(rank + 1); });
+}
+
+// True when NCCL logs indicate the CE AllReduce pipeline ran.
+inline bool ceLogShowsAllReducePath(const std::string& log)
+{
+    return log.find("CE AllReduce:") != std::string::npos ||
+           log.find("CE 2-shot AllReduce") != std::string::npos;
+}
+
+// Largest chunksPerShard reported by the "CE AllReduce: rank ..." INFO line that
+// ncclCeAllReduce() emits once per call, or 0 when no such line was logged.
+// 1 means the single-shot path ran; >= 2 means the multi-chunk pipeline ran.
+inline size_t ceLogChunksPerShard(const std::string& log)
+{
+    const std::string key  = "chunksPerShard=";
+    size_t            best = 0;
+    for(size_t p = log.find(key); p != std::string::npos; p = log.find(key, p + key.size()))
+    {
+        const size_t value =
+            static_cast<size_t>(std::strtoull(log.c_str() + p + key.size(), nullptr, 10));
+        if(value > best)
+            best = value;
+    }
+    return best;
+}
+
+// Round count up to the next multiple of nRanks (CE AR requires count % nRanks == 0).
+inline size_t ceAllReduceAlignedCount(size_t count, int nRanks)
+{
+    if(nRanks <= 0)
+        return count;
+    const size_t nr = static_cast<size_t>(nRanks);
+    if(count % nr == 0)
+        return count;
+    return count + (nr - (count % nr));
 }
 
 // Verify AllGather / AlltoAll output: element at index i must equal

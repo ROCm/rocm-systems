@@ -7,8 +7,7 @@
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
-#include "rocprofiler-systems/categories.h"
-#include "rocprofiler-systems/user.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
 #include <spdlog/fmt/fmt.h>
@@ -75,11 +74,6 @@ namespace pycoverage
 py::module
 generate(py::module& _pymod);
 }
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod);
-}
 }  // namespace pyrocprofsys
 
 template <typename... Tp>
@@ -106,8 +100,13 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
-    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
-                                                 &pyrocprofsys_resume_callback);
+    // Deferred out of module init: this is the first call into the dl layer and it
+    // dlopens librocprof-sys.so, so registering here would load the whole runtime on
+    // `import rocprofsys`.
+    static auto _register_pause_callbacks = []() {
+        rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                     &pyrocprofsys_resume_callback);
+    };
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -119,6 +118,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
@@ -130,6 +130,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
             rocprofsys_set_mpi(_get_use_mpi());
@@ -161,7 +162,6 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
 
     pyprofile::generate(omni);
     pycoverage::generate(omni);
-    pyuser::generate(omni);
 
     auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
@@ -312,7 +312,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable = false; } };
+    const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;
@@ -321,11 +321,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
-    int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
-               : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
-               : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
-               : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
-                                                  : -1;
+    const int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
+                     : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
+                     : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
+                     : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
+                                                        : -1;
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {
@@ -518,15 +518,13 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         }
 
         _config.records.emplace_back([&_label_ref, _annotate]() {
-            rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                           (_annotate) ? _config.annotations.data()
-                                                       : nullptr,
-                                           _config.annotations.size());
+            rocprofsys_pop_category_region_python(
+                _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+                _config.annotations.size());
         });
-        rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                        (_annotate) ? _config.annotations.data()
-                                                    : nullptr,
-                                        _config.annotations.size());
+        rocprofsys_push_category_region_python(
+            _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+            _config.annotations.size());
     };
 
     // stop function
@@ -929,32 +927,6 @@ generate(py::module& _pymod)
 }
 }  // namespace pycoverage
 
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod)
-{
-    py::module _pyuser = _pymod.def_submodule("user", "User instrumentation");
-
-    _pyuser.def("start_trace", &rocprofsys_user_start_trace,
-                "Enable tracing on this thread and all subsequently created threads");
-    _pyuser.def("stop_trace", &rocprofsys_user_stop_trace,
-                "Disable tracing on this thread and all subsequently created threads");
-    _pyuser.def(
-        "start_thread_trace", &rocprofsys_user_start_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def(
-        "stop_thread_trace", &rocprofsys_user_stop_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def("push_region", &rocprofsys_user_push_region,
-                "Start a user-defined region");
-    _pyuser.def("pop_region", &rocprofsys_user_pop_region, "Start a user-defined region");
-    _pyuser.def("error_string", &rocprofsys_user_error_string,
-                "Return a descriptor for the provided error code");
-
-    return _pyuser;
-}
-}  // namespace pyuser
 }  // namespace pyrocprofsys
 //
 //======================================================================================//

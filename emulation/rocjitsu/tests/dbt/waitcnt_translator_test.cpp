@@ -5,7 +5,7 @@
 /// @brief Focused GFX9-to-GFX12 wait-counter translation tests.
 
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 
 #include <gtest/gtest.h>
 

@@ -1,23 +1,6 @@
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ABI compatibility.
 #
 # When a user pins amdsmi_interface.py from one ROCm version against a
@@ -243,6 +226,15 @@ class AbiCompatTest(unittest.TestCase):
         # cannot catch the case where someone adds a new unguarded binding
         # for a symbol that only exists in newer .so revisions.
         unguarded = _scan_unguarded_bindings()
+        # Guard against the scan itself silently matching nothing (e.g. the
+        # generator renames the "_libraries" binding): an empty result would
+        # trivially satisfy the assertion below and turn this gate into a no-op.
+        self.assertTrue(
+            unguarded,
+            "scan found no unguarded amdsmi_* bindings -- the wrapper layout "
+            "changed and _scan_unguarded_bindings() needs updating, otherwise "
+            "this ABI gate no longer checks anything.",
+        )
         unstable = unguarded - STABLE_SYMBOLS
         self.assertFalse(
             unstable,
