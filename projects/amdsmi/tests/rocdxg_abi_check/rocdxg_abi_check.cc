@@ -27,6 +27,12 @@
 
 #include <cstddef>
 
+// Pulled in at global scope on purpose: the upstream headers below are included
+// inside a namespace, and anything they include for the first time would have
+// its libc declarations namespaced along with them.
+#include <stdbool.h>
+#include <stdint.h>
+
 // Vendored copy under test.
 #include "amd_smi/impl/wsl/rocdxg_abi.h"
 

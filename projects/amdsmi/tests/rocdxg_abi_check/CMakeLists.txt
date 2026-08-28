@@ -4,7 +4,14 @@
 #   cmake -DENABLE_WSL_BACKEND=ON -DVERIFY_ROCDXG_ABI=ON \
 #         -DROCDXG_UPSTREAM_INCLUDE_DIR=<path-to>/libhsakmt/include
 
-find_path(ROCDXG_UPSTREAM_INCLUDE_DIR hsakmt/rocdxg_smi.h HINTS ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+# PATHS + NO_DEFAULT_PATH: an installed /opt/rocm header may lag the source tree,
+# and verifying against a stale copy reports a pass the sources do not deserve.
+find_path(
+    ROCDXG_UPSTREAM_INCLUDE_DIR
+    hsakmt/rocdxg_smi.h
+    PATHS ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include
+    NO_DEFAULT_PATH
+)
 
 if(NOT ROCDXG_UPSTREAM_INCLUDE_DIR)
     message(
@@ -13,6 +20,8 @@ if(NOT ROCDXG_UPSTREAM_INCLUDE_DIR)
         "Set ROCDXG_UPSTREAM_INCLUDE_DIR to a libhsakmt include tree."
     )
 endif()
+
+message(STATUS "rocdxg ABI check verifies against ${ROCDXG_UPSTREAM_INCLUDE_DIR}/hsakmt/rocdxg_smi.h")
 
 add_executable(rocdxg_abi_check rocdxg_abi_check.cc)
 target_include_directories(rocdxg_abi_check PRIVATE ${PROJECT_SOURCE_DIR}/include ${ROCDXG_UPSTREAM_INCLUDE_DIR})
