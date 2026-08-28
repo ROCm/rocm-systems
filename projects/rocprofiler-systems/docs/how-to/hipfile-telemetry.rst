@@ -153,13 +153,31 @@ indicator of compile-time support:
 
 To enable collection:
 
-.. code-block:: shell
+1. Set ``ROCPROFSYS_USE_HIPFILE=ON``. Collection runs on the process-sampling
+   thread, which is on by default.
 
-   ROCPROFSYS_USE_HIPFILE=ON
-   ROCPROFSYS_USE_PROCESS_SAMPLING=ON
-   ROCPROFSYS_PROCESS_SAMPLING_FREQ=100
-   # Optional; the default is "fastpath, fallback, bandwidth, bytes, errors"
-   ROCPROFSYS_HIPFILE_METRICS=all
+   .. code-block:: shell
+
+      export ROCPROFSYS_USE_HIPFILE=ON
+
+2. Optionally set ``ROCPROFSYS_HIPFILE_METRICS``. The default is:
+
+   .. code-block:: shell
+
+      ROCPROFSYS_HIPFILE_METRICS=fastpath,fallback,bandwidth,bytes,errors
+
+   To include the groups that are off by default (``ops`` and ``unaligned``),
+   list them with the rest, or collect every group:
+
+   .. code-block:: shell
+
+      ROCPROFSYS_HIPFILE_METRICS=fastpath,fallback,bandwidth,bytes,errors,ops,unaligned
+      ROCPROFSYS_HIPFILE_METRICS=all
+
+   The setting accepts ``all`` or ``on``, ``none`` or ``off``, or a comma or
+   semicolon separated list of the group names in `Metrics collected`_. Each
+   name selects both the read and the write track. An unrecognized name is
+   ignored with a warning.
 
 Details of the settings:
 
