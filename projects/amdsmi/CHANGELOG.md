@@ -20,6 +20,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - GPU enumeration goes through `rocdxg_smi_get_device_count()` and `rocdxg_smi_get_device_info()` instead of `hsaKmtGetNodeProperties()`, dropping the large `HsaNodeProperties` structure from the ABI surface.
   - `amdsmitst` no longer links `librocdxg`; the WSL functional tests resolve it with `dlopen`, matching the library. The tests package no longer carries an undeclared runtime dependency.
   - Added an opt-in `-DVERIFY_ROCDXG_ABI=ON` target that `static_assert`s the vendored copy against upstream headers.
+  - WSL GPU UUIDs change. `amdsmi_get_gpu_device_uuid()` now derives the UUID from the ASIC serial reported by `rocdxg_smi_get_device_info()` rather than `HsaNodeProperties.UniqueID`, because `HsaNodeProperties` is no longer read. Tooling that pinned a WSL GPU by UUID must be re-registered against the new value.
+  - A device whose info `rocdxg_smi_get_device_info()` cannot return is skipped rather than aborting enumeration, so an amd-smi paired with a `librocdxg` built from a different `rocdxg_smi.h` still reports the devices it can describe.
 
 - **Bumped the library major version to 27.0.0** (breaking).  
   - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
@@ -75,6 +77,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Fixed
+
+- **Fixed WSL GPU queries reading the wrong device on systems with more than one node**.
+  - Enumeration passed an HSA node id to the `rocdxg_smi_*` functions, which index the WDDM device list instead. The two index spaces coincide only when every HSA node is a GPU, so on a multi-node system every per-device query — clocks, power, temperature, VRAM usage — could be answered from a different GPU. Enumeration now walks `rocdxg_smi_get_device_count()`, which is the index space those functions expect.
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
   - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
