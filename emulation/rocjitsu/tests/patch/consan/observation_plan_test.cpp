@@ -318,6 +318,36 @@ TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPl
   EXPECT_EQ(copied.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
 }
 
+ConSanRuntimeStaticMapping
+record_replay_runtime_mapping_for(const ConSanObservationPlan &plan,
+                                  std::span<const ConSanProbeIntentId> intent_ids) {
+  assert(!intent_ids.empty());
+  const ConSanProbeIntent *first = plan.intent(intent_ids.front());
+  assert(first != nullptr);
+  ConSanStaticAccessAttribution access{
+      .intent_ids = std::vector(intent_ids.begin(), intent_ids.end()),
+      .original_site = first->physical_site,
+      .original_semantic_sites = {},
+      .execution_owner_descriptor_file_offsets = {},
+      .owner_provenance_complete = false,
+  };
+  for (ConSanProbeIntentId id : intent_ids) {
+    const ConSanProbeIntent *intent = plan.intent(id);
+    assert(intent != nullptr);
+    assert(intent->kind == ConSanProbeIntentKind::AccessRecord);
+    assert(intent->physical_site == access.original_site);
+    for (const SemanticSiteId &site : intent->covered_semantic_sites) {
+      if (std::ranges::find(access.original_semantic_sites, site) ==
+          access.original_semantic_sites.end()) {
+        access.original_semantic_sites.push_back(site);
+      }
+    }
+  }
+  ConSanRuntimeStaticMapping mapping;
+  mapping.record_replay_accesses.push_back({.access = std::move(access)});
+  return mapping;
+}
+
 TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
@@ -345,8 +375,9 @@ TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
       .emitted_size = 16,
       .relocated_guest_text_offset = 0x208,
   }};
-  auto commit = make_consan_committed_lowering(
-      plan, intent_ids, locations, ConSanLoweringOutcomeKind::Instrumented, "coalesced");
+  auto commit = make_consan_committed_lowering(plan, intent_ids, locations,
+                                               ConSanLoweringOutcomeKind::Instrumented, "coalesced",
+                                               record_replay_runtime_mapping_for(plan, intent_ids));
   ASSERT_TRUE(commit);
   ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
   ASSERT_EQ(result.committed_lowerings.size(), 1u);
@@ -379,8 +410,9 @@ TEST(ConSanObservationPlan, CommittedLoweringRetainsEveryLocationInASequence) {
           .relocated_guest_text_offset = 0x308,
       },
   };
-  const auto commit = make_consan_committed_lowering(policy.plan, intent_ids, locations,
-                                                     ConSanLoweringOutcomeKind::Instrumented);
+  const auto commit = make_consan_committed_lowering(
+      policy.plan, intent_ids, locations, ConSanLoweringOutcomeKind::Instrumented, {},
+      record_replay_runtime_mapping_for(policy.plan, intent_ids));
   ASSERT_TRUE(commit);
   EXPECT_EQ(commit->locations, (std::vector(locations.begin(), locations.end())));
 }
@@ -409,6 +441,8 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
           },
   });
   const ConSanRuntimeStaticMapping expected_mapping = mapping;
+  EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
+                                              ConSanLoweringOutcomeKind::Instrumented));
   auto commit = make_consan_committed_lowering(policy.plan, intent_ids, locations,
                                                ConSanLoweringOutcomeKind::Instrumented, "mapped",
                                                std::move(mapping));
@@ -419,8 +453,13 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   result.coverage_ledger = ConSanCoverageLedger(policy.plan);
   ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
   EXPECT_EQ(result.runtime_static_mapping, expected_mapping);
+  EXPECT_TRUE(result.runtime_static_mapping_matches_commits());
   ASSERT_EQ(result.committed_lowerings.size(), 1u);
   EXPECT_EQ(result.committed_lowerings.front().runtime_mapping, expected_mapping);
+
+  result.runtime_static_mapping = {};
+  EXPECT_FALSE(result.runtime_static_mapping_matches_commits());
+  result.runtime_static_mapping = expected_mapping;
 
   ConSanRuntimeStaticMapping malformed = expected_mapping;
   malformed.record_replay_accesses.front().access.original_site.original_text_offset += 4u;
@@ -513,8 +552,9 @@ TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommit
       .emitted_size = 16,
       .relocated_guest_text_offset = 0x208,
   }};
-  auto instrumentation = make_consan_committed_lowering(plan, instrumented_id, location,
-                                                        ConSanLoweringOutcomeKind::Instrumented);
+  auto instrumentation = make_consan_committed_lowering(
+      plan, instrumented_id, location, ConSanLoweringOutcomeKind::Instrumented, {},
+      record_replay_runtime_mapping_for(plan, instrumented_id));
   ASSERT_TRUE(rejection);
   ASSERT_TRUE(instrumentation);
   std::vector commits = {std::move(*rejection), std::move(*instrumentation)};

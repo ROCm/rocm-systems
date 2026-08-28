@@ -254,7 +254,7 @@ public:
   using Summary = AutoMoiReportSummary;
 
   void register_metadata(uint64_t reader, uint64_t generation, std::string_view input_fingerprint,
-                         std::span<const rocjitsu::ConSanPatchInfo> patches) {
+                         const rocjitsu::ConSanRuntimeStaticMapping &static_mapping) {
     std::lock_guard lock(mutex_);
     auto entry = std::find_if(entries_.begin(), entries_.begin() + entry_count_,
                               [reader, generation](const Entry &item) {
@@ -264,70 +264,87 @@ public:
       return;
 
     entry->input_fingerprint = input_fingerprint;
-    entry->record_replay_patch_mappings.clear();
-    entry->record_replay_patch_mapping_malformed = false;
-    entry->sampled_patch_mappings.clear();
-    entry->sampled_patch_mapping_malformed = false;
+    entry->record_replay_static_mappings.clear();
+    entry->record_replay_static_mapping_malformed = false;
+    entry->sampled_static_mappings.clear();
+    entry->sampled_static_mapping_malformed = false;
+    entry->compact_token_mapping_count = 0;
+    entry->compact_token_mapping_malformed = false;
     auto *mappings = reinterpret_cast<rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
         static_cast<uint8_t *>(entry->ptr) + entry->layout.inline_compact_token_mappings_offset);
-    size_t compact_patch_count = 0;
-    size_t record_replay_patch_count = 0;
-    size_t sampled_patch_count = 0;
-    for (const rocjitsu::ConSanPatchInfo &patch : patches) {
-      if (patch.kind == rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore ||
-          patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore) {
-        ++record_replay_patch_count;
-        if (patch.anchor_offset > std::numeric_limits<uint32_t>::max()) {
-          entry->record_replay_patch_mapping_malformed = true;
-        } else {
-          const uint32_t instruction_offset = static_cast<uint32_t>(patch.anchor_offset);
-          auto mapping = std::ranges::find_if(
-              entry->record_replay_patch_mappings,
-              [instruction_offset](const Entry::RecordReplayPatchMapping &candidate) {
-                return candidate.instruction_offset == instruction_offset;
-              });
-          if (mapping == entry->record_replay_patch_mappings.end()) {
-            entry->record_replay_patch_mappings.push_back({
-                .instruction_offset = instruction_offset,
-                .owner_descriptor_file_offsets = patch.owner_descriptor_file_offsets,
-                .owner_provenance_complete = !patch.owner_descriptor_file_offsets.empty(),
-            });
-          } else {
-            mapping->owner_provenance_complete &= !patch.owner_descriptor_file_offsets.empty();
-            for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-              if (std::ranges::find(mapping->owner_descriptor_file_offsets, owner) ==
-                  mapping->owner_descriptor_file_offsets.end()) {
-                mapping->owner_descriptor_file_offsets.push_back(owner);
-              }
-            }
+    for (const rocjitsu::ConSanRecordReplayStaticAccessMapping &static_access :
+         static_mapping.record_replay_accesses) {
+      if (static_access.access.owner_provenance_complete &&
+          static_access.access.execution_owner_descriptor_file_offsets.empty()) {
+        entry->record_replay_static_mapping_malformed = true;
+      }
+      if (static_access.access.original_site.original_text_offset >
+          std::numeric_limits<uint32_t>::max()) {
+        entry->record_replay_static_mapping_malformed = true;
+        continue;
+      }
+      const uint32_t instruction_offset =
+          static_cast<uint32_t>(static_access.access.original_site.original_text_offset);
+      auto mapping = std::ranges::find_if(
+          entry->record_replay_static_mappings,
+          [instruction_offset](const Entry::RecordReplayStaticMapping &candidate) {
+            return candidate.instruction_offset == instruction_offset;
+          });
+      if (mapping == entry->record_replay_static_mappings.end()) {
+        entry->record_replay_static_mappings.push_back({
+            .instruction_offset = instruction_offset,
+            .owner_descriptor_file_offsets =
+                static_access.access.execution_owner_descriptor_file_offsets,
+            .owner_provenance_complete =
+                static_access.access.owner_provenance_complete &&
+                !static_access.access.execution_owner_descriptor_file_offsets.empty(),
+        });
+      } else {
+        mapping->owner_provenance_complete &= static_access.access.owner_provenance_complete;
+        for (uint64_t owner : static_access.access.execution_owner_descriptor_file_offsets) {
+          if (std::ranges::find(mapping->owner_descriptor_file_offsets, owner) ==
+              mapping->owner_descriptor_file_offsets.end()) {
+            mapping->owner_descriptor_file_offsets.push_back(owner);
           }
         }
       }
-      if (patch.sampled_access_range_count != 0u && patch.sampled_window_bank_count != 0u) {
-        ++sampled_patch_count;
-        const uint64_t slot_count = static_cast<uint64_t>(patch.sampled_access_range_count) *
-                                    patch.sampled_window_bank_count;
-        if (patch.sampled_first_slot <= entry->layout.sampled_watchpoint_capacity &&
-            slot_count <= entry->layout.sampled_watchpoint_capacity - patch.sampled_first_slot) {
-          entry->sampled_patch_mappings.push_back({
-              .first_slot = patch.sampled_first_slot,
-              .range_count = patch.sampled_access_range_count,
-              .bank_count = patch.sampled_window_bank_count,
-              .instruction_offset = patch.anchor_offset,
-              .trampoline_offset = patch.trampoline_offset,
-              .relocated_guest_offset = patch.relocated_guest_instruction_offset.value_or(0u),
-              .scratch_vgpr = patch.scratch_vgpr,
-              .owner_descriptor_file_offsets = patch.owner_descriptor_file_offsets,
-          });
-        } else {
-          entry->sampled_patch_mapping_malformed = true;
-        }
+    }
+    for (const rocjitsu::ConSanSampledStaticAccessMapping &static_access :
+         static_mapping.sampled_accesses) {
+      if (static_access.access.owner_provenance_complete &&
+          static_access.access.execution_owner_descriptor_file_offsets.empty()) {
+        entry->sampled_static_mapping_malformed = true;
       }
-      if (!patch.workgroup_shadow_compact || patch.workgroup_shadow_compact_token == 0u)
-        continue;
-      ++compact_patch_count;
-      if (patch.anchor_offset > rocjitsu::consan_moi_exact_shadow::max_instruction_offset ||
-          patch.owner_descriptor_file_offsets.size() != 1u ||
+      const uint64_t slot_count =
+          static_cast<uint64_t>(static_access.range_count) * static_access.bank_count;
+      if (static_access.range_count != 0u && static_access.bank_count != 0u &&
+          static_access.first_slot <= entry->layout.sampled_watchpoint_capacity &&
+          slot_count <= entry->layout.sampled_watchpoint_capacity - static_access.first_slot) {
+        entry->sampled_static_mappings.push_back({
+            .first_slot = static_access.first_slot,
+            .range_count = static_access.range_count,
+            .bank_count = static_access.bank_count,
+            .instruction_offset = static_access.access.original_site.original_text_offset,
+            .emitted_probe_offset = static_access.emitted_probe_text_offset,
+            .relocated_guest_offset = static_access.relocated_guest_text_offset.value_or(0u),
+            .scratch_vgpr = static_access.scratch_vgpr,
+            .owner_descriptor_file_offsets =
+                static_access.access.execution_owner_descriptor_file_offsets,
+            .owner_provenance_complete =
+                static_access.access.owner_provenance_complete &&
+                !static_access.access.execution_owner_descriptor_file_offsets.empty(),
+        });
+      } else {
+        entry->sampled_static_mapping_malformed = true;
+      }
+    }
+    for (const rocjitsu::ConSanInlineCompactStaticAccessMapping &static_access :
+         static_mapping.inline_compact_accesses) {
+      if (static_access.token == 0u ||
+          static_access.access.original_site.original_text_offset >
+              rocjitsu::consan_moi_exact_shadow::max_instruction_offset ||
+          !static_access.access.owner_provenance_complete ||
+          static_access.access.execution_owner_descriptor_file_offsets.size() != 1u ||
           entry->compact_token_mapping_count >=
               entry->layout.inline_compact_token_mapping_capacity) {
         entry->compact_token_mapping_malformed = true;
@@ -335,33 +352,36 @@ public:
       }
       mappings[entry->compact_token_mapping_count++] =
           rocjitsu::ConSanMoiCompactDiagnosticTokenMapping{
-              .owner_descriptor_file_offset = patch.owner_descriptor_file_offsets.front(),
-              .instruction_offset = static_cast<uint32_t>(patch.anchor_offset),
-              .token = patch.workgroup_shadow_compact_token,
+              .owner_descriptor_file_offset =
+                  static_access.access.execution_owner_descriptor_file_offsets.front(),
+              .instruction_offset =
+                  static_cast<uint32_t>(static_access.access.original_site.original_text_offset),
+              .token = static_access.token,
           };
     }
-    if (record_replay_patch_count != 0u) {
+    if (!static_mapping.record_replay_accesses.empty()) {
       log_message(kLogInfo,
-                  "ConSan MOI record-replay diagnostic map reader=%llu patches=%zu mappings=%zu "
+                  "ConSan MOI record-replay diagnostic map reader=%llu entries=%zu mappings=%zu "
                   "malformed=%s",
-                  static_cast<unsigned long long>(reader), record_replay_patch_count,
-                  entry->record_replay_patch_mappings.size(),
-                  entry->record_replay_patch_mapping_malformed ? "true" : "false");
+                  static_cast<unsigned long long>(reader),
+                  static_mapping.record_replay_accesses.size(),
+                  entry->record_replay_static_mappings.size(),
+                  entry->record_replay_static_mapping_malformed ? "true" : "false");
     }
-    if (sampled_patch_count != 0u) {
+    if (!static_mapping.sampled_accesses.empty()) {
       log_message(kLogInfo,
-                  "ConSan MOI sampled diagnostic map reader=%llu patches=%zu mappings=%zu "
+                  "ConSan MOI sampled diagnostic map reader=%llu entries=%zu mappings=%zu "
                   "capacity=%u malformed=%s",
-                  static_cast<unsigned long long>(reader), sampled_patch_count,
-                  entry->sampled_patch_mappings.size(), entry->layout.sampled_watchpoint_capacity,
-                  entry->sampled_patch_mapping_malformed ? "true" : "false");
+                  static_cast<unsigned long long>(reader), static_mapping.sampled_accesses.size(),
+                  entry->sampled_static_mappings.size(), entry->layout.sampled_watchpoint_capacity,
+                  entry->sampled_static_mapping_malformed ? "true" : "false");
     }
-    if (compact_patch_count != 0u) {
+    if (!static_mapping.inline_compact_accesses.empty()) {
       log_message(kLogInfo,
-                  "ConSan MOI compact diagnostic map reader=%llu patches=%zu mappings=%u "
+                  "ConSan MOI compact diagnostic map reader=%llu entries=%zu mappings=%u "
                   "capacity=%u malformed=%s",
-                  static_cast<unsigned long long>(reader), compact_patch_count,
-                  entry->compact_token_mapping_count,
+                  static_cast<unsigned long long>(reader),
+                  static_mapping.inline_compact_accesses.size(), entry->compact_token_mapping_count,
                   entry->layout.inline_compact_token_mapping_capacity,
                   entry->compact_token_mapping_malformed ? "true" : "false");
     }
@@ -452,21 +472,22 @@ private:
   };
 
   struct Entry {
-    struct RecordReplayPatchMapping {
+    struct RecordReplayStaticMapping {
       uint32_t instruction_offset = 0;
       std::vector<uint64_t> owner_descriptor_file_offsets;
       bool owner_provenance_complete = false;
     };
 
-    struct SampledPatchMapping {
+    struct SampledStaticMapping {
       uint32_t first_slot = 0;
       uint32_t range_count = 0;
       uint32_t bank_count = 0;
       uint64_t instruction_offset = 0;
-      uint64_t trampoline_offset = 0;
+      uint64_t emitted_probe_offset = 0;
       uint64_t relocated_guest_offset = 0;
       std::optional<uint16_t> scratch_vgpr;
       std::vector<uint64_t> owner_descriptor_file_offsets;
+      bool owner_provenance_complete = false;
     };
 
     uint64_t reader = 0;
@@ -489,12 +510,12 @@ private:
     bool inline_shadow = false;
     bool fine_grained = false;
     std::string input_fingerprint;
-    std::vector<RecordReplayPatchMapping> record_replay_patch_mappings;
-    std::vector<SampledPatchMapping> sampled_patch_mappings;
+    std::vector<RecordReplayStaticMapping> record_replay_static_mappings;
+    std::vector<SampledStaticMapping> sampled_static_mappings;
     uint32_t compact_token_mapping_count = 0;
     bool compact_token_mapping_malformed = false;
-    bool record_replay_patch_mapping_malformed = false;
-    bool sampled_patch_mapping_malformed = false;
+    bool record_replay_static_mapping_malformed = false;
+    bool sampled_static_mapping_malformed = false;
     uint64_t executable = 0;
     bool executable_bound = false;
   };
@@ -602,7 +623,7 @@ private:
     total.sampled_incomplete_snapshot_count += entry.sampled_incomplete_snapshot_count;
     total.sampled_changed_snapshot_count += entry.sampled_changed_snapshot_count;
     total.sampled_malformed_snapshot_count += entry.sampled_malformed_snapshot_count;
-    total.sampled_patch_mapping_malformed_count += entry.sampled_patch_mapping_malformed_count;
+    total.sampled_static_mapping_malformed_count += entry.sampled_static_mapping_malformed_count;
     total.sampled_unsupported_sync_count += entry.sampled_unsupported_sync_count;
     total.sampled_malformed_sync_count += entry.sampled_malformed_sync_count;
   }
@@ -699,8 +720,8 @@ private:
     summary.buffer_count = 1;
     if (entry.compact_token_mapping_malformed)
       ++summary.inline_malformed_count;
-    if (entry.sampled_patch_mapping_malformed)
-      ++summary.sampled_patch_mapping_malformed_count;
+    if (entry.sampled_static_mapping_malformed)
+      ++summary.sampled_static_mapping_malformed_count;
     // Summarization performs several passes over report data. Reading a
     // fine-grained HSA allocation field by field can be orders of magnitude
     // slower than sequential copies into ordinary host memory. Snapshot after
@@ -1048,19 +1069,19 @@ private:
       uint32_t workgroup_z = 0;
       uint32_t epoch = 0;
       uint32_t cluster_workgroup_id = 0;
-      const Entry::SampledPatchMapping *patch_mapping = nullptr;
+      const Entry::SampledStaticMapping *static_mapping = nullptr;
       bool sync_snapshot_usable = true;
     };
     std::vector<SampledEntry> visible_sampled;
-    const auto sampled_patch_mapping_for_slot = [&](uint32_t slot) {
+    const auto sampled_static_mapping_for_slot = [&](uint32_t slot) {
       const auto mapping = std::ranges::find_if(
-          entry.sampled_patch_mappings, [&](const Entry::SampledPatchMapping &candidate) {
+          entry.sampled_static_mappings, [&](const Entry::SampledStaticMapping &candidate) {
             if (slot < candidate.first_slot)
               return false;
             const uint64_t relative = slot - candidate.first_slot;
             return relative < static_cast<uint64_t>(candidate.range_count) * candidate.bank_count;
           });
-      return mapping == entry.sampled_patch_mappings.end() ? nullptr : &*mapping;
+      return mapping == entry.sampled_static_mappings.end() ? nullptr : &*mapping;
     };
     uint32_t visible_sampled_sync_metadata = 0;
     uint64_t sampled_watchpoint_slots_examined = 0;
@@ -1187,7 +1208,8 @@ private:
             {i, snapshot.entry, sync,
              static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u),
              window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
-             window_cluster_workgroup_id, sampled_patch_mapping_for_slot(i), sync_snapshot_usable});
+             window_cluster_workgroup_id, sampled_static_mapping_for_slot(i),
+             sync_snapshot_usable});
         break;
       case rocjitsu::ConSanMoiSampledSnapshotState::StaleGeneration:
         ++summary.sampled_stale_snapshot_count;
@@ -1365,14 +1387,14 @@ private:
         // executed in the same dispatch, even on targets whose instrumentation
         // ABI uses the code-object reader literal in place of a hardware
         // dispatch ID. Keep missing or empty provenance conservative.
-        if (current.patch_mapping != nullptr && prior.patch_mapping != nullptr &&
-            !current.patch_mapping->owner_descriptor_file_offsets.empty() &&
-            !prior.patch_mapping->owner_descriptor_file_offsets.empty() &&
+        if (current.static_mapping != nullptr && prior.static_mapping != nullptr &&
+            current.static_mapping->owner_provenance_complete &&
+            prior.static_mapping->owner_provenance_complete &&
             std::ranges::none_of(
-                current.patch_mapping->owner_descriptor_file_offsets, [&](uint64_t owner) {
-                  return std::ranges::find(prior.patch_mapping->owner_descriptor_file_offsets,
+                current.static_mapping->owner_descriptor_file_offsets, [&](uint64_t owner) {
+                  return std::ranges::find(prior.static_mapping->owner_descriptor_file_offsets,
                                            owner) !=
-                         prior.patch_mapping->owner_descriptor_file_offsets.end();
+                         prior.static_mapping->owner_descriptor_file_offsets.end();
                 }))
           continue;
         if (!rocjitsu::consan_moi_sampled_watchpoints_conflict(current.entry, prior.entry))
@@ -1500,7 +1522,7 @@ private:
         "sampled_dropped_windows=%u sampled_saturated_windows=%u "
         "sampled_stale_snapshots=%llu sampled_incomplete_snapshots=%llu "
         "sampled_changed_snapshots=%llu sampled_malformed_snapshots=%llu "
-        "sampled_patch_mapping_malformed=%llu "
+        "sampled_static_mapping_malformed=%llu "
         "fine_grained=%s",
         static_cast<unsigned long long>(entry.reader),
         static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
@@ -1565,7 +1587,7 @@ private:
         static_cast<unsigned long long>(summary.sampled_incomplete_snapshot_count),
         static_cast<unsigned long long>(summary.sampled_changed_snapshot_count),
         static_cast<unsigned long long>(summary.sampled_malformed_snapshot_count),
-        static_cast<unsigned long long>(summary.sampled_patch_mapping_malformed_count),
+        static_cast<unsigned long long>(summary.sampled_static_mapping_malformed_count),
         entry.fine_grained ? "true" : "false");
 
     for (size_t i = 0; i < visible_inline_atomic_releases.size(); ++i) {
@@ -1754,25 +1776,25 @@ private:
             rocjitsu::repair_consan_moi_record_replay_provenance(
                 replay_access_records, std::span<rocjitsu::ConSanMoiDiagnosticRecord>(
                                            diagnostics.data(), raw_replay_visible_diagnostics));
-        const auto patch_mapping_for_instruction = [&](uint32_t instruction_offset) {
+        const auto static_mapping_for_instruction = [&](uint32_t instruction_offset) {
           const auto mapping = std::ranges::find_if(
-              entry.record_replay_patch_mappings,
-              [instruction_offset](const Entry::RecordReplayPatchMapping &candidate) {
+              entry.record_replay_static_mappings,
+              [instruction_offset](const Entry::RecordReplayStaticMapping &candidate) {
                 return candidate.instruction_offset == instruction_offset;
               });
-          return mapping == entry.record_replay_patch_mappings.end() ? nullptr : &*mapping;
+          return mapping == entry.record_replay_static_mappings.end() ? nullptr : &*mapping;
         };
         const auto has_disjoint_kernel_owners = [&](const auto &diagnostic) {
           if (diagnostic.kind !=
               static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict)) {
             return false;
           }
-          const Entry::RecordReplayPatchMapping *first =
-              patch_mapping_for_instruction(diagnostic.first_instruction_offset);
-          const Entry::RecordReplayPatchMapping *second =
-              patch_mapping_for_instruction(diagnostic.second_instruction_offset);
+          const Entry::RecordReplayStaticMapping *first =
+              static_mapping_for_instruction(diagnostic.first_instruction_offset);
+          const Entry::RecordReplayStaticMapping *second =
+              static_mapping_for_instruction(diagnostic.second_instruction_offset);
           if (first == nullptr || second == nullptr || !first->owner_provenance_complete ||
-              !second->owner_provenance_complete || entry.record_replay_patch_mapping_malformed) {
+              !second->owner_provenance_complete || entry.record_replay_static_mapping_malformed) {
             return false;
           }
           // A dispatch enters exactly one kernel descriptor. Queue-local AQL
@@ -1963,13 +1985,13 @@ private:
     constexpr size_t kSampledLogLimit = 64u;
     for (uint32_t i = 0; i < std::min(visible_sampled.size(), kSampledLogLimit); ++i) {
       const SampledEntry &sampled_entry = visible_sampled[i];
-      const Entry::SampledPatchMapping *mapping = sampled_entry.patch_mapping;
+      const Entry::SampledStaticMapping *mapping = sampled_entry.static_mapping;
       const uint64_t instruction_offset = mapping != nullptr ? mapping->instruction_offset : 0u;
       const uint32_t relative_slot =
           mapping != nullptr ? sampled_entry.index - mapping->first_slot : 0u;
       const uint32_t range = mapping != nullptr ? relative_slot / mapping->bank_count : 0u;
       const uint32_t bank = mapping != nullptr ? relative_slot % mapping->bank_count : 0u;
-      const uint64_t trampoline_offset = mapping != nullptr ? mapping->trampoline_offset : 0u;
+      const uint64_t emitted_probe_offset = mapping != nullptr ? mapping->emitted_probe_offset : 0u;
       const uint64_t relocated_guest_offset =
           mapping != nullptr ? mapping->relocated_guest_offset : 0u;
       const uint16_t scratch_vgpr =
@@ -1991,7 +2013,7 @@ private:
                   static_cast<unsigned long long>(sampled_entry.dispatch_id),
                   sampled_entry.workgroup_x, sampled_entry.workgroup_y, sampled_entry.workgroup_z,
                   static_cast<unsigned long long>(instruction_offset),
-                  static_cast<unsigned long long>(trampoline_offset),
+                  static_cast<unsigned long long>(emitted_probe_offset),
                   static_cast<unsigned long long>(relocated_guest_offset), scratch_vgpr, range,
                   bank, mapping != nullptr ? "true" : "false",
                   static_cast<uint32_t>(sampled_entry.sync.classification),
@@ -2059,9 +2081,9 @@ bool allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint
 
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        std::string_view input_fingerprint,
-                                       std::span<const ConSanPatchInfo> patches) {
+                                       const ConSanRuntimeStaticMapping &static_mapping) {
   AutoMoiReportBufferRegistry::instance().register_metadata(reader, generation, input_fingerprint,
-                                                            patches);
+                                                            static_mapping);
 }
 
 void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,

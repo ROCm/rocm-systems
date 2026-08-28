@@ -610,7 +610,7 @@ struct AutoMoiReportSummary {
   uint64_t sampled_incomplete_snapshot_count = 0;
   uint64_t sampled_changed_snapshot_count = 0;
   uint64_t sampled_malformed_snapshot_count = 0;
-  uint64_t sampled_patch_mapping_malformed_count = 0;
+  uint64_t sampled_static_mapping_malformed_count = 0;
   uint64_t sampled_unsupported_sync_count = 0;
   uint64_t sampled_malformed_sync_count = 0;
 
@@ -915,7 +915,7 @@ void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64
     uint64_t *registered_size, uint64_t *registered_generation);
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        std::string_view input_fingerprint,
-                                       std::span<const ConSanPatchInfo> patches);
+                                       const ConSanRuntimeStaticMapping &static_mapping);
 void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
                                                hsa_executable_t executable);
 void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);

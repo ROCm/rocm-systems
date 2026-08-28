@@ -239,6 +239,17 @@ struct ConSanTransformArtifacts {
                                std::make_move_iterator(commits.end()));
     return true;
   }
+  /// Verify that the runtime projection is exactly the ordered projection of
+  /// authoritative committed lowering transactions.
+  [[nodiscard]] bool runtime_static_mapping_matches_commits() const {
+    ConSanRuntimeStaticMapping expected;
+    for (const ConSanCommittedLowering &commit : committed_lowerings) {
+      if (!consan_runtime_static_mapping_matches_commit(observation_plan, commit))
+        return false;
+      expected.append(commit.runtime_mapping);
+    }
+    return expected == runtime_static_mapping;
+  }
   /// Stage and transitively merge MOI synchronization commits that share an
   /// intent. Publication is deferred until every synchronization emitter has
   /// contributed, allowing one address-capture intent to name both an atomic

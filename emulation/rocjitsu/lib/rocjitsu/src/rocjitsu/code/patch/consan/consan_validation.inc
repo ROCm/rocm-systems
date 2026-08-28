@@ -4515,6 +4515,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   }
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
+  if (!result.runtime_static_mapping_matches_commits()) {
+    errors.emplace_back(
+        "ConSan final validation found runtime static mapping outside committed lowering");
+  }
   std::vector<std::string> accounting_errors =
       validate_patch_byte_accounting(original, replacement, result);
   errors.insert(errors.end(), std::make_move_iterator(accounting_errors.begin()),

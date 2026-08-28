@@ -568,6 +568,17 @@ bool consan_runtime_static_mapping_matches_commit(const ConSanObservationPlan &p
       return false;
     }
   }
+  for (ConSanProbeIntentId id : commit.intent_ids) {
+    const ConSanProbeIntent *intent = plan.intent(id);
+    if (intent == nullptr)
+      return false;
+    const size_t mapping_count = std::ranges::count(mapped_intents, id);
+    if ((intent->kind == ConSanProbeIntentKind::AccessRecord ||
+         intent->kind == ConSanProbeIntentKind::SampledAccess) &&
+        mapping_count != 1u) {
+      return false;
+    }
+  }
   return true;
 }
 

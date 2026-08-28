@@ -5206,36 +5206,91 @@ enum class AutoReplayOwnerScope {
   UnknownOwnerPair,
 };
 
+void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &result,
+                                         rocjitsu::ConSanCapabilityEngine engine,
+                                         rocjitsu::ConSanProbeIntentKind intent_kind,
+                                         std::span<const uint64_t> instruction_offsets) {
+  rocjitsu::ConSanObservationPlan plan;
+  plan.engine = engine;
+  for (uint64_t instruction_offset : instruction_offsets) {
+    const rocjitsu::PhysicalSiteId physical{
+        .code_object = result.program_inventory.code_object_id(),
+        .original_text_offset = instruction_offset,
+    };
+    const rocjitsu::SemanticSiteId semantic{
+        .physical = physical,
+        .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+    };
+    const rocjitsu::ConSanProbeIntentId intent_id{static_cast<uint32_t>(plan.probe_intents.size())};
+    plan.site_decisions.push_back({
+        .engine = engine,
+        .semantic_site = semantic,
+        .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
+        .reason = rocjitsu::ConSanAccessPolicyReason::None,
+        .intent_ids = {intent_id},
+        .source_containers = {"auto_report_access"},
+    });
+    plan.probe_intents.push_back({
+        .id = intent_id,
+        .engine = engine,
+        .physical_site = physical,
+        .covered_semantic_sites = {semantic},
+        .kind = intent_kind,
+        .position = rocjitsu::ConSanProbePosition::Before,
+        .synchronization_association = std::nullopt,
+        .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+    });
+  }
+  ASSERT_TRUE(plan.valid());
+  result.observation_plan = std::move(plan);
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
+  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    ASSERT_TRUE(result.coverage_ledger.set_lowering_outcome(
+        intent.id, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  }
+}
+
+rocjitsu::ConSanStaticAccessAttribution
+auto_report_static_access_attribution(const rocjitsu::ConSanTransformArtifacts &result,
+                                      size_t intent_index, std::vector<uint64_t> owners,
+                                      bool owner_provenance_complete) {
+  const rocjitsu::ConSanProbeIntent &intent = result.observation_plan.probe_intents[intent_index];
+  return {
+      .intent_ids = {intent.id},
+      .original_site = intent.physical_site,
+      .original_semantic_sites = intent.covered_semantic_sites,
+      .execution_owner_descriptor_file_offsets = std::move(owners),
+      .owner_provenance_complete = owner_provenance_complete,
+  };
+}
+
 rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
     AutoReplayOwnerScope owner_scope = AutoReplayOwnerScope::NoProvenance) {
   rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
-  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-                               rocjitsu::ConSanCapabilityEngine::RecordReplay,
-                               rocjitsu::ConSanProbeIntentKind::AccessRecord);
-  const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
-    rocjitsu::ConSanPatchInfo patch;
-    patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
-    patch.anchor_offset = instruction_offset;
-    if (owner_scope != AutoReplayOwnerScope::NoProvenance &&
-        owner_scope != AutoReplayOwnerScope::UnknownOwnerPair) {
-      patch.owner_descriptor_file_offsets = {owner};
+  std::vector<uint64_t> instruction_offsets = {0xfe96cu};
+  if (owner_scope != AutoReplayOwnerScope::NoProvenance)
+    instruction_offsets.push_back(0xfe974u);
+  install_auto_report_access_coverage(result, rocjitsu::ConSanCapabilityEngine::RecordReplay,
+                                      rocjitsu::ConSanProbeIntentKind::AccessRecord,
+                                      instruction_offsets);
+  for (size_t index = 0; index < instruction_offsets.size(); ++index) {
+    const bool owner_provenance_complete = owner_scope != AutoReplayOwnerScope::NoProvenance &&
+                                           owner_scope != AutoReplayOwnerScope::UnknownOwnerPair;
+    std::vector<uint64_t> owners;
+    if (owner_provenance_complete) {
+      owners.push_back(
+          index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
     }
-    result.patches.push_back(std::move(patch));
-  };
-  if (owner_scope == AutoReplayOwnerScope::NoProvenance) {
-    append_patch(0xfe96cu, 0u);
-  } else {
-    append_patch(0xfe96cu, 0x100u);
-    append_patch(0xfe974u,
-                 owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+    result.runtime_static_mapping.record_replay_accesses.push_back({
+        .access = auto_report_static_access_attribution(result, index, std::move(owners),
+                                                        owner_provenance_complete),
+    });
   }
   return result;
 }
 
 enum class AutoSampledOwnerScope {
-  SinglePatch,
+  SingleMapping,
   SharedOwnerPair,
   DisjointOwnerPair,
   UnknownOwnerPair,
@@ -5243,36 +5298,39 @@ enum class AutoSampledOwnerScope {
 
 rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
     bool malformed_mapping = false,
-    AutoSampledOwnerScope owner_scope = AutoSampledOwnerScope::SinglePatch) {
-  rocjitsu::ConSanTransformArtifacts result = auto_report_replay_transform_result();
-  const auto append_patch = [&](uint32_t slot, uint64_t owner) {
-    rocjitsu::ConSanPatchInfo patch;
-    patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-    patch.anchor_offset = 0x120u + slot * 0x20u;
-    patch.trampoline_offset = 0x440u + slot * 0x20u;
-    patch.sampled_first_slot = malformed_mapping ? std::numeric_limits<uint32_t>::max() : slot;
-    patch.sampled_window_bank_count = 1u;
-    patch.sampled_access_range_count = 1u;
-    patch.relocated_guest_instruction_offset = 0x448u + slot * 0x20u;
-    patch.scratch_vgpr = 12u;
-    patch.owner_descriptor_file_offsets = {owner};
-    result.patches.push_back(std::move(patch));
-  };
-  append_patch(0u, 0x100u);
-  if (owner_scope != AutoSampledOwnerScope::SinglePatch) {
-    append_patch(1u, owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
-    if (owner_scope == AutoSampledOwnerScope::UnknownOwnerPair)
-      result.patches.back().owner_descriptor_file_offsets.clear();
+    AutoSampledOwnerScope owner_scope = AutoSampledOwnerScope::SingleMapping) {
+  rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
+  std::vector<uint64_t> instruction_offsets = {0x120u};
+  if (owner_scope != AutoSampledOwnerScope::SingleMapping)
+    instruction_offsets.push_back(0x140u);
+  install_auto_report_access_coverage(result, rocjitsu::ConSanCapabilityEngine::Sampled,
+                                      rocjitsu::ConSanProbeIntentKind::SampledAccess,
+                                      instruction_offsets);
+  for (size_t index = 0; index < instruction_offsets.size(); ++index) {
+    const bool owner_provenance_complete =
+        !(index == 1u && owner_scope == AutoSampledOwnerScope::UnknownOwnerPair);
+    std::vector<uint64_t> owners;
+    if (owner_provenance_complete) {
+      owners.push_back(
+          index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+    }
+    result.runtime_static_mapping.sampled_accesses.push_back({
+        .access = auto_report_static_access_attribution(result, index, std::move(owners),
+                                                        owner_provenance_complete),
+        .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
+                                                       : static_cast<uint32_t>(index),
+        .range_count = 1u,
+        .bank_count = 1u,
+        .emitted_probe_text_offset = 0x440u + index * 0x20u,
+        .relocated_guest_text_offset = 0x448u + index * 0x20u,
+        .scratch_vgpr = 12u,
+    });
   }
-  install_test_access_coverage(
-      result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-      rocjitsu::ConSanCapabilityEngine::Sampled, rocjitsu::ConSanProbeIntentKind::SampledAccess);
   return result;
 }
 
 rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result = auto_report_replay_transform_result();
+  rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
   constexpr std::array<uint8_t, 8> instruction_bytes{};
   constexpr uint64_t owner_descriptor_offset = 0x100u;
   rocjitsu::ProgramInventoryBuilder inventory(instruction_bytes);
@@ -6668,7 +6726,7 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 2);
 }
 
-TEST(HsaHooksUnitTest, AutoSampledReportLogsPatchProvenance) {
+TEST(HsaHooksUnitTest, AutoSampledReportLogsStaticMappingProvenance) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -6830,7 +6888,7 @@ TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOw
   }
 }
 
-TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalformedPatchMapping) {
+TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalformedStaticMapping) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -6861,10 +6919,10 @@ TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalform
   const std::string log = testing::internal::GetCapturedStderr();
 
   const size_t mapping =
-      log.find("ConSan MOI sampled diagnostic map reader=101 patches=1 mappings=0 ");
+      log.find("ConSan MOI sampled diagnostic map reader=101 entries=1 mappings=0 ");
   ASSERT_NE(mapping, std::string::npos) << log;
   EXPECT_NE(log.find("malformed=true", mapping), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_patch_mapping_malformed=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("sampled_static_mapping_malformed=1"), std::string::npos) << log;
   EXPECT_NE(log.find("sampled_watchpoint_slots_examined=0"), std::string::npos) << log;
 }
 
