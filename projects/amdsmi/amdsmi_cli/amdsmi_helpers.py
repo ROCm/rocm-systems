@@ -2437,18 +2437,8 @@ class AMDSMIHelpers:
 
         return True
 
-    def _severity_as_string(self, error_severity, notify_type, for_filename):
-        # Check if this is an IFoE CPER (all-zeros GUID placeholder)
-        is_ifoe = False
-        if isinstance(notify_type, str):
-            # notify_type is formatted as hex string, check if all zeros
-            try:
-                notify_hex = notify_type.replace(":", "").replace(" ", "")
-                is_ifoe = all(c == "0" for c in notify_hex)
-            except Exception:
-                pass
-
-        if is_ifoe:
+    def _severity_as_string(self, error_severity, notify_type, for_filename, source=None):
+        if source == "fabric":
             # IFoE fabric event naming
             if error_severity == "non_fatal_uncorrected":
                 if for_filename:
@@ -2514,6 +2504,7 @@ class AMDSMIHelpers:
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
+                    entry.get("source"),
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
@@ -2575,7 +2566,8 @@ class AMDSMIHelpers:
             # Determine prefix/severity
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            prefix = self._severity_as_string(error_severity, notify_type, True)
+            source = entry.get("source")
+            prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
             count = cper_counter[0] + 1
@@ -2614,7 +2606,7 @@ class AMDSMIHelpers:
             gpu_id = "-"
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            severity = self._severity_as_string(error_severity, notify_type, False)
+            severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
                 gpu_id,
@@ -2763,6 +2755,7 @@ class AMDSMIHelpers:
                             entry.get("error_severity", "Unknown"),
                             entry.get("notify_type", "Unknown"),
                             False,
+                            entry.get("source"),
                         )
                         json_rows.append(
                             {
@@ -2996,10 +2989,14 @@ class AMDSMIHelpers:
                 cper_counter,
             )
 
-        # Fetch fabric CPER entries (IFoE RAS events)
-        fabric_cursor_idx = gpu_idx  # Reuse same cursor index
-        if len(args.cursor) <= fabric_cursor_idx:
-            args.cursor.append(0)
+        # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
+        # separate list so --follow does not interleave them with the GPU cursors.
+        fabric_cursors = getattr(args, "fabric_cursor", None)
+        if fabric_cursors is None:
+            fabric_cursors = []
+            args.fabric_cursor = fabric_cursors
+        while len(fabric_cursors) <= gpu_idx:
+            fabric_cursors.append(0)
 
         fabric_entries = {}
         fabric_cper_data = []
@@ -3007,7 +3004,7 @@ class AMDSMIHelpers:
             try:
                 fabric_entries, new_fabric_cursor, fabric_cper_data, _fabric_status_code = (
                     amdsmi_interface.amdsmi_get_fabric_cper_entries(
-                        device_handle, severity_mask, buffer_size, args.cursor[fabric_cursor_idx]
+                        device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
                     )
                 )
                 logging.debug(f"fabric_cper_entries | entries: {fabric_entries}")
@@ -3026,7 +3023,7 @@ class AMDSMIHelpers:
                     logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
                     break
 
-            args.cursor[fabric_cursor_idx] = new_fabric_cursor
+            fabric_cursors[gpu_idx] = new_fabric_cursor
             if len(fabric_entries) == 0:
                 break
 
