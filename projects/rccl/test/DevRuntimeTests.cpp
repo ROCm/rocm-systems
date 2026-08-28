@@ -887,6 +887,171 @@ TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryMapLsaTeam publishes this rank's segment handles to its LSA team and
+// maps every peer's in return: size the message array from the widest rank,
+// export our own segments into it, all-gather, reserve the flat VA on first
+// use, map each rank's segments, then barrier so nobody unmaps early.
+
+class SymMemoryMapLsaTeamTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrMemory mem{};
+  std::vector<int> lsaRankList;
+  std::vector<int> lsaNumSegments;
+  std::vector<size_t> segmentSizes;
+  std::vector<hipMemGenericAllocationHandle_t> memHandles;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are seams
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 2;
+    devr->bigSize = 1u << 20;
+    devr->lsaFlatBase = nullptr;  // force the reservation on first use
+    lsaRankList.assign({0, 1});
+    devr->lsaRankList = lsaRankList.data();
+
+    lsaNumSegments.assign({1, 1});
+    segmentSizes.assign({4096});
+    memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+    mem.lsaNumSegments = lsaNumSegments.data();
+    mem.segmentSizes = segmentSizes.data();
+    mem.memHandles = memHandles.data();
+    mem.numSegments = 1;
+    mem.bigOffset = 0;
+  }
+
+  void TearDown() override {
+    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    g_callocCallIndex = 0;                  // TU-local, not covered by the reset below
+    g_callocFailAt = -1;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: lsaFlatBase is null, so the flat VA range is reserved for the whole
+// team -- lsaSize * bigSize, not one rank's worth.
+TEST_F(SymMemoryMapLsaTeamTest, FirstUse_ReservesFlatVaForWholeTeam) {
+  size_t reserved = 0;
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [&](void** ptr, size_t size, size_t, void*, unsigned long long) {
+                       reserved = size;
+                       *ptr = reinterpret_cast<void*>(0x200000);
+                       return hipSuccess;
+                     });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reserve.calls, 1);
+  EXPECT_EQ(reserved, comm->devrState.lsaSize * comm->devrState.bigSize);
+  EXPECT_EQ(comm->devrState.lsaFlatBase, reinterpret_cast<void*>(0x200000));
+}
+
+// Branch: a base is already reserved, so the reservation is skipped and the
+// existing one is left alone.
+TEST_F(SymMemoryMapLsaTeamTest, AlreadyReserved_SkipsReservation) {
+  void* existing = reinterpret_cast<void*>(0x300000);
+  comm->devrState.lsaFlatBase = existing;
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reserve.calls, 0);
+  EXPECT_EQ(comm->devrState.lsaFlatBase, existing);
+}
+
+// The message array is sized from the widest rank, so a peer with more segments
+// than us still has room. Two ranks x 2 segments each = 4 messages.
+TEST_F(SymMemoryMapLsaTeamTest, SizesMessagesFromWidestRank) {
+  lsaNumSegments.assign({1, 2});  // the peer has more segments than we do
+  size_t gatherBytes = 0;
+  ScopedHook gather(g_bootstrapIntraNodeAllGather,
+                    [&](void*, int*, int, int, void*, int bytes) {
+                      gatherBytes = static_cast<size_t>(bytes);
+                      return ncclSuccess;
+                    });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(gatherBytes, sizeof(symLsaMessage) * 2);  // per-rank stride = maxSegments
+}
+
+// Branch: the message allocation fails before anything is exported.
+TEST_F(SymMemoryMapLsaTeamTest, MessageAllocFails_ReturnsError) {
+  g_callocFailAt = g_callocCallIndex;  // fail the next ncclCalloc
+  ScopedHook gather(g_bootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+}
+
+// Branch: exporting our own segment fails, so nothing is gathered.
+TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ReturnsErrorWithoutGathering) {
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+  ScopedHook gather(g_bootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(gather.calls, 0);
+}
+
+// Branch: the all-gather fails, so no VA is reserved.
+TEST_F(SymMemoryMapLsaTeamTest, AllGatherFails_ReturnsErrorWithoutReserving) {
+  ScopedHook gather(g_bootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void*, int) { return ncclSystemError; });
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reserve.calls, 0);
+}
+
+// Branch: the VA reservation fails.
+TEST_F(SymMemoryMapLsaTeamTest, ReserveFails_ReturnsError) {
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [](void**, size_t, size_t, void*, unsigned long long) { return hipErrorOutOfMemory; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(comm->devrState.lsaFlatBase, nullptr);
+}
+
+// Branch: mapping a rank's segments fails, so the closing barrier is skipped --
+// a rank that failed to map must not signal that it is ready.
+TEST_F(SymMemoryMapLsaTeamTest, MapFails_ReturnsErrorWithoutBarrier) {
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [](void** ptr, size_t, size_t, void*, unsigned long long) {
+                       *ptr = reinterpret_cast<void*>(0x200000);
+                       return hipSuccess;
+                     });
+  ScopedHook map(g_hipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 0);
+}
+
+// Branch: the closing barrier fails.
+TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
+  ScopedHook reserve(g_hipMemAddressReserve,
+                     [](void** ptr, size_t, size_t, void*, unsigned long long) {
+                       *ptr = reinterpret_cast<void*>(0x200000);
+                       return hipSuccess;
+                     });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSystemError; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+}
+
+
+// ---------------------------------------------------------------------------
 // symBindTeamMemory binds memory into a team's multicast handle, guarded by
 // `comm->nvlsSupport && tm->mcBasePtr != nullptr`. The body is behind
 // `#if CUDART_VERSION >= 12010`, which no HIP build defines, so on this target
