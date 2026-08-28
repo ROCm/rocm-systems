@@ -66,6 +66,7 @@ target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_h
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
+add_subdirectory(control)
 add_subdirectory(perfetto)
 add_subdirectory(progress)
 add_subdirectory(trace_cache)

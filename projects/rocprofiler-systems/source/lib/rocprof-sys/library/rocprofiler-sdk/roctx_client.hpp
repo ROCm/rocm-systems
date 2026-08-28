@@ -3,8 +3,9 @@
 
 #pragma once
 
+#include "core/control/session.hpp"
+#include "core/control/triggers/roctx.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -34,7 +36,8 @@ template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
-    explicit roctx_client(const roctx_client_config& roctx_cfg);
+    roctx_client(std::shared_ptr<control::session> session,
+                 const roctx_client_config&        roctx_cfg);
 
     ~roctx_client()                              = default;
     roctx_client(const roctx_client&)            = delete;
@@ -44,10 +47,11 @@ public:
 
     void configure_services(rocprofiler_context_id_t ctx);
 
-    std::shared_ptr<control::trace_control> get_controller() const
+    [[nodiscard]] const std::shared_ptr<control::session>& get_session() const
     {
-        return m_controller;
+        return m_session;
     }
+    [[nodiscard]] control::triggers::roctx& get_trigger() const { return *m_trigger; }
 
 private:
     struct marker_range_entry
@@ -60,10 +64,11 @@ private:
 
     using marker_range_stack_t = std::vector<marker_range_entry>;
 
-    rocprofiler_context_id_t                m_ctx{ 0 };
-    roctx_client_config                     m_config;
-    marker_writer<MarkerWriterPolicy>       m_writer;
-    std::shared_ptr<control::trace_control> m_controller{};
+    rocprofiler_context_id_t                  m_ctx{ 0 };
+    roctx_client_config                       m_config;
+    marker_writer<MarkerWriterPolicy>         m_writer;
+    std::shared_ptr<control::session>         m_session;
+    std::unique_ptr<control::triggers::roctx> m_trigger;
 
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
@@ -84,11 +89,6 @@ private:
                                         void* callback_data);
 };
 
-// ---------------------------------------------------------------------------
-// Template definitions that must be visible to all translation units
-// so that roctx_client can be instantiated with any MarkerWriterPolicy.
-// ---------------------------------------------------------------------------
-
 template <typename MarkerWriterPolicy>
 thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
@@ -98,12 +98,14 @@ thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_started_ranges{};
 
 template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
+roctx_client<MarkerWriterPolicy>::roctx_client(std::shared_ptr<control::session> session,
+                                               const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
-, m_controller{ std::make_shared<control::trace_control>(
-      roctx_cfg.selected_trace_regions) }
+, m_session{ std::move(session) }
+, m_trigger{ std::make_unique<control::triggers::roctx>(
+      m_session, roctx_cfg.selected_trace_regions) }
 {}
 
 }  // namespace rocprofiler_sdk
