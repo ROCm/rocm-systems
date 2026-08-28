@@ -32,6 +32,7 @@
 
 #include <cstdlib>
 #include <fcntl.h>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -708,6 +709,162 @@ TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
   EXPECT_EQ(release.calls, 1);
+}
+
+
+// ---------------------------------------------------------------------------
+// symMemoryImportAndMapSegmentsForRank walks one rank's segments, mapping each
+// at a running address. Per segment it decides whether to reuse the caller's
+// handle: always for the local rank, and for a remote rank only when
+// SYM_REUSE_SYSMEM_HANDLES is on and that segment is CPU-backed.
+
+class SymImportAndMapForRankTest : public ::testing::Test {
+protected:
+  static const int kMaxSegments = 2;
+
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+  std::vector<symLsaMessage> messages;
+  std::vector<hipMemGenericAllocationHandle_t> memHandles;
+
+  const uintptr_t kBase = 0x100000;
+  const size_t kBigSize = 1u << 20;
+  const hipMemGenericAllocationHandle_t kCallerHandle =
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->bigSize = kBigSize;
+    devr->lsaFlatBase = reinterpret_cast<void*>(kBase);
+    lsaRankList.assign({0, 1});
+    devr->lsaRankList = lsaRankList.data();
+
+    // messages is laid out [rank][segment], stride kMaxSegments.
+    messages.assign(2 * kMaxSegments, symLsaMessage{});
+    for (auto& m : messages) {
+      m.segmentSize = 4096;
+      m.type = hipMemLocationTypeDevice;
+    }
+    memHandles.assign(kMaxSegments, kCallerHandle);
+  }
+
+  void TearDown() override {
+    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    ResetDevRuntimeFakes();
+  }
+
+  // Turn SYM_REUSE_SYSMEM_HANDLES on; other params keep their defaults.
+  static std::function<int64_t(const char*, int64_t)> ReuseSysmemHandlesOn() {
+    return [](const char* env, int64_t deftVal) -> int64_t {
+      return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+    };
+  }
+};
+
+// Branch: r == lsaSelf, so every segment reuses the caller's handle and nothing
+// is imported.
+TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
+  std::vector<hipMemGenericAllocationHandle_t> mapped;
+  ScopedHook map(g_hipMemMap, [&](void*, size_t, size_t, hipMemGenericAllocationHandle_t h, unsigned long long) {
+    mapped.push_back(h);
+    return hipSuccess;
+  });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(import.calls, 0);
+  ASSERT_EQ(mapped.size(), 2u);
+  EXPECT_EQ(mapped[0], kCallerHandle);
+  EXPECT_EQ(mapped[1], kCallerHandle);
+}
+
+// Branch: remote rank with the reuse param off, so the segment is imported.
+TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+                      return hipSuccess;
+                    });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(import.calls, 1);
+}
+
+// Branch: the second clause of reuseLocal -- remote rank, param on, CPU-backed
+// segment -- so the caller's handle is reused without an import.
+TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
+  messages[1 * kMaxSegments].type = hipMemLocationTypeHostNuma;
+  ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(import.calls, 0);
+}
+
+// Branch: param on but the segment is device-backed, so reuse does not apply.
+TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImports) {
+  ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+                      return hipSuccess;
+                    });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(import.calls, 1);
+}
+
+// The running address: each segment maps directly after the previous one,
+// starting at lsaFlatBase + r * bigSize + bigOffset.
+TEST_F(SymImportAndMapForRankTest, MultipleSegments_AdvanceAddressBySegmentSize) {
+  messages[0].segmentSize = 4096;
+  messages[1].segmentSize = 8192;
+  std::vector<uintptr_t> addrs;
+  ScopedHook map(g_hipMemMap, [&](void* p, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+    addrs.push_back(reinterpret_cast<uintptr_t>(p));
+    return hipSuccess;
+  });
+
+  const size_t bigOffset = 512;
+  EXPECT_EQ(
+      symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), bigOffset),
+      ncclSuccess);
+  ASSERT_EQ(addrs.size(), 2u);
+  EXPECT_EQ(addrs[0], kBase + bigOffset);
+  EXPECT_EQ(addrs[1], kBase + bigOffset + 4096);
+}
+
+// Boundary: no segments means the loop body never runs.
+TEST_F(SymImportAndMapForRankTest, ZeroSegments_MapsNothing) {
+  ScopedHook map(g_hipMemMap,
+                 [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(map.calls, 0);
+}
+
+// Branch: a segment fails, so the loop stops there rather than mapping the rest.
+TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
+  ScopedHook map(g_hipMemMap,
+                 [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+                   return hipErrorInvalidValue;
+                 });
+
+  EXPECT_NE(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), 0),
+            ncclSuccess);
+  EXPECT_EQ(map.calls, 1);  // stopped after the first, did not attempt the second
 }
 
 
