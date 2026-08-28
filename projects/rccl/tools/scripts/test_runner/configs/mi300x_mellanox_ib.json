@@ -5022,6 +5022,18 @@
           }
         }
       ]
+    },
+    "multisegment_cast_rma_multinode": {
+      "extends": "multisegment_transport_multinode",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_CAST_RMA_All_MultiNode",
+          "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -5065,6 +5077,12 @@
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
       "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
       "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CAST RMA (Multi-Node)",
+      "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
+      "config": "multisegment_cast_rma_multinode",
       "enabled": true
     },
     {

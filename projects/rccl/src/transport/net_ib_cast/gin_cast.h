@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "nccl.h"
+#include "net_ib/rma_multiseg.h"
 
 struct CastIbGinCollComm {
   void* ctx;
