@@ -1,0 +1,40 @@
+{
+    "evaluations": [
+      {
+        "id": "explicit-ask-for-pc-sampling",
+        "skill_should_trigger": true,
+        "prompt": "use pc sampling to profile my HIP application.",
+        "expected_behavior": ["calls rocprofv3 with pc sampling flags"],
+        "unexpected_behavior": ["uses a tool other than rocprofv3"],
+        "files_exist": ["agent_info.csv"],
+        "note": "checking for the metadata file instead of the samples file since the agent may need to use either host trap or stochastic sampling, which changes the file name"
+      },
+      {
+        "id": "ask-to-find-slow-gpu-code",
+        "skill_should_trigger": true,
+        "prompt": "figure out slowest parts of my gpu code and suggest solutions",
+        "expected_behavior": ["uses rocprofv3 with pc sampling flags, analyzes the output files to determine bottlenecks, and suggests solutions"]
+      },
+      {
+        "id": "ask-to-characterize-performance",
+        "skill_should_trigger": true,
+        "prompt": "analyze the performance characteristics of my HIP program",
+        "expected_behavior": ["uses rocprofv3 with pc sampling flags, analyzes the output files to determine performance characteristics, and reports results to user"]
+      },
+      {
+        "id": "vague-performance-question",
+        "skill_should_trigger": false,
+        "prompt": "how can i make my application faster?"
+      },
+      {
+        "id": "vague-gpu-improvement-question",
+        "skill_should_trigger": false,
+        "prompt": "how could i improve this gpu program?"
+      },
+      {
+        "id": "cuda-profiling-request",
+        "skill_should_trigger": false,
+        "prompt": "please perform pc sampling on my cuda application"
+      }
+    ]
+}
