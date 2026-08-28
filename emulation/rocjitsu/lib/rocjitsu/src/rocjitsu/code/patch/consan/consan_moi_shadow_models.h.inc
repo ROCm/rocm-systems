@@ -1276,12 +1276,11 @@ consan_moi_sampled_begin_causal_claim(std::span<ConSanMoiSampledCausalWindow> wi
 /// Return whether every MOI engine can lower this decoded FLAT LDS access.
 [[nodiscard]] bool consan_moi_supports_flat_access_mnemonic(std::string_view mnemonic);
 
-struct ConSanLoweringExecution;
-
 [[nodiscard]] ConSanTransformArtifacts
 try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
                      std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
-                     ConSanLoweringExecution *execution = nullptr);
+                     ConSanLoweringExecution *execution = nullptr,
+                     ConSanLoweringExtent extent = ConSanLoweringExtent::Complete);
 
 /// Re-run only MOI planning, lowering, and validation from a semantic
 /// inventory produced for the same bytes and engine. This is used after a

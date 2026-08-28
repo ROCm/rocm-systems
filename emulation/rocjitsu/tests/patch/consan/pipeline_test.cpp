@@ -940,6 +940,23 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   ASSERT_TRUE(deferred.evidence_requirements());
   EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::RuntimeBinding)].status,
             ConSanPipelineStageStatus::Deferred);
+  EXPECT_EQ(
+      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ProgramInventory)].execution_count,
+      1u);
+  EXPECT_EQ(
+      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ObservationPlan)].execution_count,
+      1u);
+  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ResourceSolvingAndLowering)]
+                .status,
+            ConSanPipelineStageStatus::Blocked);
+  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ResourceSolvingAndLowering)]
+                .execution_count,
+            0u);
+  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::FinalValidation)].status,
+            ConSanPipelineStageStatus::Blocked);
+  EXPECT_EQ(
+      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::FinalValidation)].execution_count,
+      0u);
 
   const auto &requirements =
       std::get<ConSanRecordReplayEvidenceRequirements>(*deferred.evidence_requirements());
@@ -953,6 +970,10 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
                                                   debug, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 2u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
@@ -999,6 +1020,10 @@ TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 2u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);

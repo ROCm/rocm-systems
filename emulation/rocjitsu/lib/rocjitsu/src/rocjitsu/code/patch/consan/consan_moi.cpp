@@ -686,11 +686,10 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
          two_address_native_lds_offset_scale(mnemonic).has_value();
 }
 
-ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
-                                              const MoiOptions &options,
-                                              std::span<const uint8_t> code_object_bytes,
-                                              rj_code_arch_t arch,
-                                              ConSanLoweringExecution *execution) {
+ConSanTransformArtifacts
+try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
+                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
+                     ConSanLoweringExecution *execution, ConSanLoweringExtent extent) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   MoiOptions effective_options = options;
@@ -729,6 +728,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (!observation_valid) {
     return result;
   }
+  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
+    return result;
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();
   std::vector<ConSanMoiCandidate> moi_candidates =

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_lowering_types.h"
 #include "rocjitsu/code/patch/consan/consan_moi_abi.h"
 #include "rocjitsu/code/rj_code.h"
 

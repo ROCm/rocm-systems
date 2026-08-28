@@ -505,7 +505,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {},
-    bool require_applicable_fault_plan = false, ConSanLoweringExecution *execution = nullptr) {
+    bool require_applicable_fault_plan = false, ConSanLoweringExecution *execution = nullptr,
+    ConSanLoweringExtent extent = ConSanLoweringExtent::Complete) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -1011,7 +1012,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // section objects and names, and derived state cannot overlap every
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
-    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution);
+    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution,
+                                extent);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
@@ -1023,6 +1025,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (execution != nullptr)
     execution->note_observation_plan();
   if (!sc_observation_valid)
+    return result;
+  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
     return result;
 
   if (execution != nullptr)
