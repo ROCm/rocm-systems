@@ -116,8 +116,9 @@ TEST_F(GpuIntegration, DestroyCounter_InvalidHandle) {
 
 // ---------------- amdsmi_gpu_control_counter (invalid) ----------------
 TEST_F(GpuIntegration, ControlCounter_InvalidHandle) {
-  GTEST_SKIP() << "amdsmi_gpu_control_counter crashes on an invalid handle; proper return "
-                  "should be AMDSMI_STATUS_INVAL";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_gpu_control_counter crashes on an invalid handle; proper return "
+         "should be AMDSMI_STATUS_INVAL";
   // Proper contract once fixed:
   //   amdsmi_status_t err = amdsmi_gpu_control_counter(kInvalidHandle, AMDSMI_CNTR_CMD_START,
   //   nullptr); AMDSMI_EXPECT_NULL_ARG(err);
@@ -145,8 +146,9 @@ TEST_F(GpuIntegration, ReadCounter_InvalidHandle) {
 
 // ---------------- valid create/control/read/destroy flow ----------------
 TEST_F(GpuIntegration, CounterLifecycle_AllGpus) {
-  GTEST_SKIP() << "amdsmi_gpu_create_event/control_counter returns AMDSMI_STATUS_UNEXPECTED_DATA; "
-                  "root cause unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_gpu_create_event/control_counter returns AMDSMI_STATUS_UNEXPECTED_DATA; "
+         "root cause unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_gpu_create_counter");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

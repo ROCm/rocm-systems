@@ -108,8 +108,9 @@ TEST_F(GpuIntegration, GetUtilizationCount_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetUtilizationCount_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_utilization_count returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_utilization_count returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_utilization_count");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -305,8 +306,9 @@ TEST_F(GpuIntegration, GetActivity_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetActivity_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_gpu_activity returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_gpu_activity returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_activity");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

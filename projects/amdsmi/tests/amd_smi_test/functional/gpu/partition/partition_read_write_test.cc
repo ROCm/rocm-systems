@@ -54,6 +54,8 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_memory_partition");
+  size_t attempted = 0;
+  size_t busy = 0;
   for (size_t i = 0; i < gpus().size(); ++i) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
@@ -68,17 +70,22 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
                                                      : AMDSMI_MEMORY_PARTITION_NPS1;
     std::string target = (target_enum == AMDSMI_MEMORY_PARTITION_NPS1) ? "NPS1" : "NPS2";
 
-    // Driver returns BUSY unless the device is idle with no open clients.
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition",
                        "gpu=" + std::to_string(i) + " set=" + target, kVerbose);
     amdsmi_status_t err = amdsmi_set_gpu_memory_partition(gpus()[i], target_enum);
+    ++attempted;
+    // The driver rejects a partition change while any client holds the device open.
+    if (err == AMDSMI_STATUS_BUSY) {
+      ++busy;
+      continue;
+    }
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
-                          AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_BUSY);
+                          AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
                ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
-                   AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_BUSY));
+                   AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 
     if (err == AMDSMI_STATUS_SUCCESS) {
       char readback[64];
@@ -105,6 +112,8 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
       }
     }
   }
+  if (attempted > 0 && busy == attempted)
+    GTEST_SKIP() << "every GPU was busy; a partition set needs an idle device";
   col.ExpectNoFailures();
 }
 
@@ -113,6 +122,8 @@ TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   amdsmi::test::StatusCollector col("amdsmi_set_gpu_compute_partition");
+  size_t attempted = 0;
+  size_t busy = 0;
   for (size_t i = 0; i < gpus().size(); ++i) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
@@ -127,17 +138,22 @@ TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
                                                       : AMDSMI_COMPUTE_PARTITION_SPX;
     std::string target = (target_enum == AMDSMI_COMPUTE_PARTITION_SPX) ? "SPX" : "CPX";
 
-    // Driver returns BUSY unless the device is idle with no open clients.
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition",
                        "gpu=" + std::to_string(i) + " set=" + target, kVerbose);
     amdsmi_status_t err = amdsmi_set_gpu_compute_partition(gpus()[i], target_enum);
+    ++attempted;
+    // The driver rejects a partition change while any client holds the device open.
+    if (err == AMDSMI_STATUS_BUSY) {
+      ++busy;
+      continue;
+    }
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
-                          AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_BUSY);
+                          AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
                ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
-                   AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_BUSY));
+                   AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 
     if (err == AMDSMI_STATUS_SUCCESS) {
       char readback[64];
@@ -159,5 +175,7 @@ TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
       }
     }
   }
+  if (attempted > 0 && busy == attempted)
+    GTEST_SKIP() << "every GPU was busy; a partition set needs an idle device";
   col.ExpectNoFailures();
 }

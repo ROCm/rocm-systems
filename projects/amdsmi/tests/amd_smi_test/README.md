@@ -154,10 +154,24 @@ restore took, so a run leaves the device as it found it.
 The one setter the API cannot read back, `amdsmi_set_cpu_msr_floor_freq_limit`,
 writes 0 to clear the floor, which is the default state, so it needs no restore.
 
+The partition setters carry two caveats. The driver returns
+`AMDSMI_STATUS_BUSY` unless the device is idle with no open clients, so those
+tests skip rather than report a pass; and a memory-partition change only becomes
+current after an amdgpu restart, so the readback may still show the old mode.
+
 ## Known test skips
 
-Unconditional skips due to driver or library issues are tracked in
-[`known_failures.md`](known_failures.md).
+Skips due to driver or library issues are tracked in
+[`known_failures.md`](known_failures.md), which also names the file holding
+each skip. Set `AMDSMI_RUN_KNOWN_FAILURES` to run those tests anyway and see
+what they currently do:
+
+```shell
+AMDSMI_RUN_KNOWN_FAILURES=1 ./amdsmitst
+```
+
+The variable does not override `amdsmitst.exclude`; a test filtered there
+stays filtered.
 
 ## Verbosity and logging
 

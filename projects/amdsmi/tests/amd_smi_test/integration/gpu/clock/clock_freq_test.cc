@@ -53,8 +53,9 @@ TEST_F(GpuIntegration, GetClkFreq_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetClkFreq_AllGpusAllTypes) {
-  GTEST_SKIP() << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
-                  "under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
+         "under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_clk_freq");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -89,8 +90,9 @@ TEST_F(GpuIntegration, GetClockInfo_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetClockInfo_AllGpusAllTypes) {
-  GTEST_SKIP() << "amdsmi_get_clk_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
-                  "under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_clk_info returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause unknown, "
+         "under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_clock_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

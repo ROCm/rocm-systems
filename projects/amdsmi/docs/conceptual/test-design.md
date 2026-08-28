@@ -58,8 +58,16 @@ reading as covered.
 The **functional** tier owns **setters** and any API needing setup from another
 API. Every read-write test stores the original value, sets a different one,
 verifies the readback against what it set, restores the original and confirms the
-restore took, so a run leaves the device as it found it. Writes require root
-via `AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
+restore took, so a run leaves the device as it found it. A setter the API
+cannot read back, or whose effect the driver defers to a restart, relaxes that
+check and says why at the test. Writes require root via
+`AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
+
+A test blocked by a driver or library bug skips via
+`AMDSMI_SKIP_KNOWN_FAILURE()` and is listed in
+[`known_failures.md`](../../tests/amd_smi_test/known_failures.md). Setting
+`AMDSMI_RUN_KNOWN_FAILURES` runs those tests instead, so a fixed API shows up
+as a pass rather than staying silently skipped.
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
 meaningful timing data.

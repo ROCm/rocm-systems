@@ -256,8 +256,9 @@ TEST_F(GpuIntegration, ValidateRasEeprom_AllGpus) {
 
 // ---------------- amdsmi_get_gpu_cper_entries ----------------
 TEST_F(GpuIntegration, GetCperEntries_NullOutput) {
-  GTEST_SKIP() << "amdsmi_get_gpu_cper_entries returns OUT_OF_RESOURCES instead of INVAL for null "
-                  "pointer; library input-validation bug";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_gpu_cper_entries returns OUT_OF_RESOURCES instead of INVAL for null "
+         "pointer; library input-validation bug";
   // Proper contract once fixed:
   //   char cper_data[4096]; memset(cper_data, 0, sizeof(cper_data));
   //   amdsmi_status_t err = amdsmi_get_gpu_cper_entries(gpus()[0], 0xFFFFFFFF,
@@ -310,8 +311,9 @@ TEST_F(GpuIntegration, GetAfidsFromCper_NullOutput) {
   EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 TEST_F(GpuIntegration, GetAfidsFromCper_DummyBuffer) {
-  GTEST_SKIP() << "amdsmi_get_afids_from_cper returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_afids_from_cper returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   char cper_buffer[256];
   memset(cper_buffer, 0, sizeof(cper_buffer));

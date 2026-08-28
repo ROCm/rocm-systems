@@ -48,7 +48,7 @@ TEST_F(GpuIntegration, XgmiErrorStatus_InvalidHandle) {
 TEST_F(GpuIntegration, XgmiErrorStatus_AllGpus) {
   // amdsmi.h reserves AMDSMI_STATUS_INVAL for a null status pointer, but the call
   // returns it for valid arguments on every GPU. See known_failures.md.
-  GTEST_SKIP() << "amdsmi_gpu_xgmi_error_status returns INVAL for valid arguments";
+  AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_gpu_xgmi_error_status returns INVAL for valid arguments";
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_gpu_xgmi_error_status");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {

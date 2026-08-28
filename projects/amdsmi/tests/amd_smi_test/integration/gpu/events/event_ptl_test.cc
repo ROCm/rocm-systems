@@ -45,8 +45,9 @@ TEST_F(GpuIntegration, GetViolationStatus_InvalidHandle) {
   AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetViolationStatus_AllGpus) {
-  GTEST_SKIP() << "amdsmi_get_violation_status returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
-                  "unknown, under investigation";
+  AMDSMI_SKIP_KNOWN_FAILURE()
+      << "amdsmi_get_violation_status returns AMDSMI_STATUS_UNEXPECTED_DATA; root cause "
+         "unknown, under investigation";
 
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_violation_status");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
