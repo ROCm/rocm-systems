@@ -196,7 +196,10 @@ if(HIP_PLATFORM MATCHES "amd")
   # plus a single offload arch; without --cuda-device-only clang emits a host/IR
   # bundle, and -S rejects -o when more than one arch is given. The metadata is
   # arch-independent, so the first offload arch is sufficient.
-  list(GET OFFLOAD_ARCH_LIST 0 COPYKERNEL_S_OFFLOAD_ARCH)
+  set(COPYKERNEL_S_OFFLOAD_ARCH)
+  if(OFFLOAD_ARCH_LIST)
+    list(GET OFFLOAD_ARCH_LIST 0 COPYKERNEL_S_OFFLOAD_ARCH)
+  endif()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${COPYKERNEL_S_OFFLOAD_ARCH} -mcode-object-version=5 --cuda-device-only -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
@@ -416,6 +419,12 @@ add_dependencies(ModuleTest empty_file)
 add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
+  # SPIR-V builds compile copyKernel.s for --offload-arch=amdgcnspirv, which emits
+  # SPIR-V rather than GCN assembly, so it has no AMDGPU .uniform_work_group_size
+  # metadata. Signal the CheckCodeObjAttr test to skip itself in that case.
+  if(ENABLE_SPIRV)
+    target_compile_definitions(ModuleTest PRIVATE HIP_TESTS_SPIRV_BUILD)
+  endif()
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
