@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
 
 #include <array>
@@ -215,8 +216,8 @@ public:
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
-  /// @brief The instruction's human-readable mnemonic.
-  /// @returns Reference to the mnemonic string.
+  /// @brief The instruction's canonical semantic mnemonic.
+  /// @returns Reference to the mnemonic used by analysis and execution consumers.
   std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
@@ -339,21 +340,29 @@ public:
   /// @returns Reference to the disassembly string.
   const std::string &disassemble() const {
     if (disassembly_.empty()) {
-      disassembly_ = mnemonic_;
+      append_mnemonic(disassembly_);
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
-      for (uint8_t i = 0; i < num_dst_; ++i) {
-        if (dst_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
+        if (dst_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[i]->name();
+        append_dst_operand(disassembly_, operand_index);
         first = false;
       }
-      for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
+        if (src_operands_[operand_index]->size_bits() == 0 ||
+            src_operands_[operand_index]->is_fieldless())
           continue;
+        if (omit_repeated_destination_sources_) {
+          bool repeats_dst = false;
+          for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+          if (repeats_dst)
+            continue;
+        }
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += src_operands_[i]->name();
+        append_src_operand(disassembly_, operand_index);
         first = false;
       }
       build_modifiers(disassembly_);
@@ -375,10 +384,23 @@ protected:
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
-  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
-  /// Overridden by memory encoding bases that have flag bits to display.
+  /// @brief Whether read/write operands are rendered only in destination position.
+  bool omit_repeated_destination_sources_ = false;
+  /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
+  /// The default matches mnemonic(); encoding decorations may override it.
+  virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }
+  /// @brief Append encoding attributes to the disassembly string (e.g. cache flags or DPP state).
+  /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Append one destination operand to textual disassembly.
+  virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
+    out += dst_operands_[operand_index]->name();
+  }
+  /// @brief Append one source operand to textual disassembly.
+  virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
+    out += src_operands_[operand_index]->name();
+  }
   /// @brief Cached disassembly string.
   mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.
@@ -413,6 +435,12 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic string.
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
       : Instruction(mnemonic, exec_fn, src_loc) {}
+
+  /// @brief Accept encodings for formats without additional validation.
+  template <typename... Args>
+  static constexpr Result validate_encoding([[maybe_unused]] Args &&...args) noexcept {
+    return Result::success();
+  }
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///

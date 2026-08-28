@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -15,7 +16,8 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk-tracing-config-deps.hpp"
+#include "sdk-tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -53,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
@@ -983,7 +986,9 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
+    rocprofiler_sdk::sdk_tracing_config<
+        rocprofiler_sdk::wrapper,
+        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
@@ -1327,19 +1332,26 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    auto  _cap_status        = timemory::linux::capability::cap_read(process::get_id());
-    auto* _cap_data          = &_cap_status.effective;
-    bool  _has_cap_sys_admin = false;
-    for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
-        if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
+    // Capability numbers are stable kernel ABI, but CAP_* macros come from the host
+    // Name the PERFMON bit here to keep it visible even where those headers predate it
+    constexpr unsigned _cap_sys_admin_bit = CAP_SYS_ADMIN;
+    constexpr unsigned _cap_perfmon_bit   = 38;  // linux 5.8+
 
-    if(_paranoid > 2 && !_has_cap_sys_admin)
+    // CAP_PERFMON is the narrower grant; either one permits perf_event_open
+    const auto _cap_effective =
+        timemory::linux::capability::cap_read(process::get_id()).effective;
+    const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
+                               ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
+
+    if(_paranoid > 2 && !_has_perf_cap)
     {
         LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2)",
+                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                    "CAP_SYS_ADMIN)",
                     _paranoid);
         LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
+                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
         trait::runtime_enabled<comp::papi_config>::set(false);
         trait::runtime_enabled<comp::papi_common<void>>::set(false);
         trait::runtime_enabled<comp::papi_array_t>::set(false);
@@ -1400,8 +1412,6 @@ configure_settings(bool _init)
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
-        if(_config->get_suppress_config()) continue;
-
         const auto expanded_filename = settings::format(filename, _config->get_tag());
 
         // Prevent Timemory's read() silently dropping JSON config files without proper
@@ -1417,6 +1427,14 @@ configure_settings(bool _init)
                             "configuration, pass it via --preset instead.",
                             expanded_filename, TIMEMORY_PROJECT_NAME));
         }
+
+        // Timemory parses config files during static init before main() (see
+        // timemory_library_constructor()->init_config()). Bad .json files fail to parse
+        // but Timemory error message is uninformative. Meanwhile, the suppress_config
+        // flag is always true in the launcher. So, to produce a proper diagnostic message
+        // for bad .json files, the above .json root check MUST stay above this 'continue'
+        // gate to run regardless of suppress_config flag.
+        if(_config->get_suppress_config()) continue;
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
@@ -3032,10 +3050,17 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !path::is_directory(path))
+    auto try_create_directory = [](std::string path) {
+        if(!path.empty())
         {
-            tim::filepath::makedir(path);
+            try
+            {
+                std::filesystem::create_directories(path);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                LOG_WARNING("Failed to create unified memory output directory '{}': {}",
+                            path, e.code().message());
+            }
         }
         return path;
     };
@@ -3070,14 +3095,14 @@ get_ump_absolute_path()
         auto explicit_path = get_setting_value<std::string>(
             std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
         if(explicit_path && !explicit_path->empty())
-            return ensure_dir(make_absolute(*explicit_path));
+            return try_create_directory(make_absolute(*explicit_path));
     }
 
     if(!settings_are_configured())
     {
         auto env_path =
             rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
-        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        if(!env_path.empty()) return try_create_directory(make_absolute(env_path));
         return settings::output_path();
     }
 
@@ -3374,20 +3399,6 @@ tmp_file::open(std::ios::openmode _mode)
 }
 
 bool
-tmp_file::fopen(const char* _mode)
-{
-    LOG_DEBUG("Opening temporary file '{}'...", filename);
-
-    touch();
-
-    m_pid = getpid();
-    file  = filepath::fopen(filename, _mode);
-    if(file) fd = ::fileno(file);
-
-    return (file != nullptr && fd > 0);
-}
-
-bool
 tmp_file::flush()
 {
     if(m_pid != getpid()) return false;
@@ -3395,18 +3406,6 @@ tmp_file::flush()
     if(stream.is_open())
     {
         stream.flush();
-    }
-    else if(file != nullptr)
-    {
-        int _ret = fflush(file);
-        int _cnt = 0;
-        while(_ret == EAGAIN || _ret == EINTR)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-            _ret = fflush(file);
-            if(++_cnt > 10) break;
-        }
-        return (_ret == 0);
     }
     else if(fd > 0)
     {
@@ -3435,16 +3434,6 @@ tmp_file::close()
     {
         stream.close();
         return !stream.is_open();
-    }
-    else if(file != nullptr)
-    {
-        auto _ret = fclose(file);
-        if(_ret == 0)
-        {
-            file = nullptr;
-            fd   = -1;
-        }
-        return (_ret == 0);
     }
     else if(fd > 0)
     {
@@ -3477,9 +3466,7 @@ tmp_file::remove()
 
 tmp_file::operator bool() const
 {
-    return (m_pid == getpid()) &&
-           ((stream.is_open() && stream.good()) || (file != nullptr && fd > 0) ||
-            (file == nullptr && fd > 0));
+    return (m_pid == getpid()) && ((stream.is_open() && stream.good()) || fd > 0);
 }
 
 std::shared_ptr<tmp_file>

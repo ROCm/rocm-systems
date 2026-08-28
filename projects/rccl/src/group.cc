@@ -318,20 +318,6 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
     free(task);
   }
 
-  while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
-    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->suspendTaskQueue);
-    struct ncclComm* taskComm = task->comm;
-    free(task);
-    NCCLCHECKGOTO(ncclCommMemSuspend(taskComm), ret, fail);
-  }
-
-  while (!ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
-    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
-    struct ncclComm* taskComm = task->comm;
-    free(task);
-    NCCLCHECKGOTO(ncclCommMemResume(taskComm), ret, fail);
-  }
-
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
     NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
@@ -496,6 +482,29 @@ static void reclaimPlannerState(struct ncclComm* comm) {
     if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
     comm->planner.bcast_info.minBcastPeer = INT_MAX;
     comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+  }
+}
+
+// Undo the comm->groupJob links published by the non-blocking branch of
+// ncclGroupEndInternal before that groupJob is destroyed on the fail path.
+// Without this a later ncclCommAbort -> ncclCommEnsureReady -> ncclGroupJobAbort
+// would dereference freed memory. An init/split comm is only reachable via
+// asyncJobs (it is never placed on the groupCommHead chains), so both lists
+// must be walked. Only clears comms that adopted this exact groupJob.
+static void groupJobUnlinkComms(struct ncclGroupJob* groupJob) {
+  if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
+    struct ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
+    do {
+      if (job->comm && job->comm->groupJob == groupJob) job->comm->groupJob = NULL;
+      job = job->next;
+    } while (job);
+  }
+  for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+    struct ncclComm* comm = groupJob->groupCommHead[type];
+    while (comm != nullptr) {
+      if (comm->groupJob == groupJob) comm->groupJob = NULL;
+      comm = comm->groupNext[type];
+    }
   }
 }
 
@@ -909,7 +918,7 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
 
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
-    if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {
+    if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&groupJob->asyncJobs))) {
       /* nonblocking group */
       if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
         ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
@@ -964,6 +973,7 @@ exit:
   return ret;
 fail:
   if (groupJob) {
+    groupJobUnlinkComms(groupJob);
     groupCleanup(groupJob->groupCommHead, &groupJob->asyncJobs, ret);
     delete groupJob;
   } else {

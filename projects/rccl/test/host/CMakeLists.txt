@@ -24,8 +24,13 @@ if(BUILD_TESTS)
   # libamdhip64.so (HIP compile requirements are applied below without linking).
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
+    rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+    group-test.cc
     fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
     fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+    fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
+    fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
+    fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
     fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
     ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
     ../common/ProcessIsolatedTestRunner.cpp
@@ -60,6 +65,8 @@ if(BUILD_TESTS)
   # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+    RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
+    GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -117,6 +124,106 @@ if(BUILD_TESTS)
       message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
     endif()
   endif()
+
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc
+  # (AICOMRCCL-1685). Dedicated executables (NOT shared with rccl-UnitTestsMicro)
+  # so init.cc's symbols and std::once_flag state stay isolated. They also compile
+  # the real host-only oracle TUs (argcheck/archinfo/utils) from the hipified
+  # snapshot; --gc-sections drops their unreferenced deep deps. Two
+  # HIP_*_UNCACHED_MEMORY variants exercise both arms of the cache-setting paths;
+  # tests self-select via #ifdef and coverage is merged across the two binaries.
+  # ---------------------------------------------------------------------------
+  set(TEST_MICRO_INIT_SOURCE_FILES
+    init-test.cc
+    fakes/init_fakes.cc                  # init-only seams (micro_getenv, ResetInitFakes)
+    fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc                  # core/lifecycle stubs + data symbols
+    fakes/nccl_fakes.cc                  # reusable nccl* stubs
+    fakes/hip_fakes.cc                   # HIP runtime seams
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
+    ../common/main_altrsmi.cpp
+    ../common/ProcessIsolatedTestRunner.cpp
+  )
+  # The oracle TUs are produced by the hipify step (add_dependencies below), so
+  # they don't exist at configure time -- mark GENERATED so a fresh configure
+  # doesn't error on missing sources.
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+    PROPERTIES GENERATED TRUE)
+
+  # Two binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
+  # HIP_UNCACHED_MEMORY at the *preprocessor* (#if defined / #ifndef, e.g. the
+  # gfx950 corruption guard and the uncached-vs-finegrained malloc). Each arm's
+  # code is absent from the object unless its macro is set, so a single compile
+  # of init.cc can only ever reach one side -- covering both requires compiling
+  # it twice with different -D. The base and -uncached binaries together exercise
+  # both arms; coverage merges across their two .profraw files.
+  foreach(_variant "" "-uncached")
+    set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
+    add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
+    target_include_directories(${_init_tgt} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${RCCL_COMMON_INCLUDE_DIRS})
+    # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
+    # init.cc), so hipify keeps its name -- no _tmp suffix.
+    target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
+      INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
+    if(_variant STREQUAL "-uncached")
+      target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
+    endif()
+    # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
+    foreach(_hip_tgt hip::host hip::device)
+      if(TARGET ${_hip_tgt})
+        target_include_directories(${_init_tgt} PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+        target_compile_definitions(${_init_tgt} PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+        target_compile_options(${_init_tgt} PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+      endif()
+    endforeach()
+    target_link_libraries(${_init_tgt} PRIVATE ${MICRO_TEST_LINK_LIBS})
+    add_dependencies(${_init_tgt} hipify_all copy_nccl_device_headers)
+    # Host-only (no amdgcn pass, so llvm coverage never reaches the device link) +
+    # -ffunction-sections/--gc-sections so the oracle TUs' unreferenced deep deps
+    # are dropped rather than pulling in the world.
+    target_compile_options(${_init_tgt} PRIVATE
+      --offload-host-only -ffunction-sections
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_init_tgt} PRIVATE
+      -no-hip-rt
+      -fprofile-instr-generate -fcoverage-mapping
+      -Wl,--gc-sections)
+    if(BUILD_ADDRESS_SANITIZER)
+      target_compile_options(${_init_tgt} PRIVATE -fsanitize=address)
+      target_link_options(${_init_tgt} PRIVATE -fsanitize=address -shared-libasan)
+      if(DEFINED ASAN_RUNTIME_DIR)
+        target_link_options(${_init_tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+      endif()
+    endif()
+    rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
+    if(COMMAND apply_test_category_labels)
+      set(_init_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
+      if(EXISTS "${_init_categories_yaml}")
+        message(STATUS "Applying test categories for ${_init_tgt}")
+        apply_test_category_labels(
+          ${_init_tgt}
+          "${_init_categories_yaml}"
+          "${PROJECT_BINARY_DIR}"
+          "${INSTALL_TEST_FILE}"
+        )
+      else()
+        message(WARNING "Skipping test categories for ${_init_tgt}: missing ${_init_categories_yaml}")
+      endif()
+    endif()
+  endforeach()
 
   return()
 endif()
@@ -184,6 +291,20 @@ if(NOT GTest_FOUND)
   endif()
 endif()
 
+# Both find_package(GTest) code paths above (system and RCCL-vendored) export
+# only the modern GTest::gtest target; GTest::GTest is a legacy alias CMake's
+# own FindGTest module stopped providing. Add it once here instead of after
+# every branch so target_link_libraries(... GTest::GTest) below works
+# regardless of which resolution path was taken.
+if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
+  # Promote before aliasing: GTest's package config creates GTest::gtest as a
+  # non-GLOBAL imported target, and ALIAS of one of those needs CMake 3.18,
+  # above this project's declared 3.16 minimum. Promotion works from 3.11 and
+  # only from the directory that created the target, which is this file.
+  set_target_properties(GTest::gtest PROPERTIES IMPORTED_GLOBAL TRUE)
+  add_library(GTest::GTest ALIAS GTest::gtest)
+endif()
+
 # --- Resolve fmt: system -> FetchContent fallback ---
 find_package(fmt QUIET)
 if(NOT fmt_FOUND)
@@ -239,6 +360,33 @@ else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
 endif()
 
+# --- Detect HIP fabric API support (mirrors top-level CMakeLists.txt) ---
+# mem_manager.h only defines its own hipMemFabricHandle_st fallback when
+# HIP_FABRIC_API is undefined; on HIP runtimes that already provide the type
+# (e.g. ROCm 7.14+), omitting this define causes a redefinition conflict
+# with hip_runtime_api.h.
+# Compile-only (STATIC_LIBRARY), like the amdsmi probe above: with the default
+# EXECUTABLE target type these checks link, which drags in the HIP runtime at
+# configure time even though the binary itself is linked with -no-hip-rt.
+include(CheckSymbolExists)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemFabricHandle_t handle;
+    (void)handle;
+    return 0;
+  }
+" HIP_FABRIC_HANDLE_TYPE)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+endif()
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -265,6 +413,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
@@ -279,6 +428,7 @@ add_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/VersionInfoTests.cpp
   ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+  RomeTopoConsensusLogTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
   ${RCCL_TEST_DIR}/VersionGateTests.cpp
   ${RCCL_TEST_DIR}/TimeoutTests.cpp
@@ -300,14 +450,41 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt)
+# llvm source-based coverage (host-only build: no -Xarch_device split needed
+# because --offload-host-only never runs the amdgcn device pass; see the
+# CMAKE_CXX_FLAGS_INIT above). On by default so the binary always produces a
+# profile; disable with -DHOST_UT_COVERAGE=OFF.
+#
+# RCCL_TEST_CODE_COVERAGE is what makes process-isolated tests flush their
+# counters in the forked child (test/common/ProcessIsolatedTestRunner.cpp).
+# Without it those tests run but contribute nothing to the profile, so it is
+# tied to the same switch rather than exposed separately.
+# rccl-source-wrappers must be instrumented too: mem_manager.cc reaches the
+# binary through that static library, so instrumenting only the executable
+# silently drops it from the report -- the profile still looks healthy, it just
+# has no record of that file at all.
+option(HOST_UT_COVERAGE "Build rccl-HostUnitTests with llvm source-based coverage" ON)
+if(HOST_UT_COVERAGE)
+  target_compile_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_definitions(rccl-HostUnitTests PRIVATE RCCL_TEST_CODE_COVERAGE=1)
+  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 
 target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
   Threads::Threads
   fmt::fmt-header-only
+  # RCCL_TEST_CODE_COVERAGE compiles a dlsym() call in
+  # ProcessIsolatedTestRunner.cpp; the in-tree test build links dl for the same
+  # runner. Empty on platforms where libdl is folded into libc (glibc >= 2.34),
+  # required on older ones.
+  ${CMAKE_DL_LIBS}
   -Wl,--whole-archive
   rccl-source-wrappers
   -Wl,--no-whole-archive
@@ -321,8 +498,13 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # HIP runtime.
 add_executable(rccl-UnitTestsMicro
   p2p-test.cc
+  rma-proxy-progress-test.cc
+  group-test.cc
   fakes/nccl_fakes.cc
   fakes/p2p_fakes.cc
+  fakes/rma_fakes.cc
+  fakes/comm_fakes.cc
+  fakes/collective_stubs.cc
   fakes/hip_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
@@ -341,9 +523,19 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
+  GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
+  # Same fallback-vs-runtime conflicts the host target guards against: without
+  # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
+  # enumerators on ROCm 7.14+, and the standalone build fails.
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
+# libgtest.a used by this standalone path is built without -fPIC, so a PIE
+# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
@@ -359,7 +551,75 @@ if(MICRO_COVERAGE)
   target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
+# --- Standalone init micro-test binaries --------------------------------
+# rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc,
+# same model as rccl-UnitTestsMicro. Compiles the real host-only oracle TUs
+# (argcheck/archinfo/utils) from the hipified snapshot; --gc-sections drops
+# their unreferenced deps. Two HIP_*_UNCACHED_MEMORY variants.
+set(TEST_MICRO_INIT_SOURCE_FILES
+  init-test.cc
+  fakes/init_fakes.cc
+  fakes/bootstrap_stubs.cc
+  fakes/topo_stubs.cc
+  fakes/transport_stubs.cc
+  fakes/nccl_stubs.cc
+  fakes/nccl_fakes.cc
+  fakes/hip_fakes.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
+)
+
+# Two binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
+# HIP_UNCACHED_MEMORY at the preprocessor, so each arm's code is absent from the
+# object unless its macro is set. Covering both requires compiling init.cc twice
+# with different -D (see the in-build block above for the full rationale).
+foreach(_variant "" "-uncached")
+  set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
+  add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
+
+  target_compile_options(${_init_tgt} PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+
+  target_include_directories(${_init_tgt} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_INCLUDE_DIRS}
+  )
+
+  target_compile_definitions(${_init_tgt} PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
+    # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
+    # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
+    # this from RCCL_COMMON_COMPILE_DEFS instead.
+    USE_AMDSMI
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+    INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
+  )
+  if(_variant STREQUAL "-uncached")
+    target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
+  endif()
+
+  target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
+  target_link_libraries(${_init_tgt} PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
+
+  if(MICRO_COVERAGE)
+    target_compile_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  endif()
+endforeach()
+
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly, e.g.
 #   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
-# The in-RCCL-build path registers rccl-UnitTestsMicro via CTest categories.
+#   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
+# The in-RCCL-build path registers the micro/init binaries via CTest categories.

@@ -171,9 +171,15 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
-  /// Called when all waves in a workgroup have reached s_barrier.
+  /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+
+  /// Whether this plugin needs SGPR read callbacks. The group samples this
+  /// policy once when the plugin is added. The conservative default preserves
+  /// existing plugin behavior: callbacks continue unless a plugin explicitly
+  /// opts out.
+  virtual bool observes_sgpr_reads() const { return true; }
 
 private:
   friend class ExecutionPluginGroup;

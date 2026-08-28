@@ -12,7 +12,7 @@
 #    endif
 #endif
 
-#include "rocprofiler-systems/user.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include <atomic>
 #include <cstdint>
@@ -56,12 +56,10 @@ extern "C"
     void rocprofsys_pop_trace(const char* name) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_push_region(const char*) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_pop_region(const char*) ROCPROFSYS_PUBLIC_API;
-    int  rocprofsys_push_category_region(rocprofsys_category_t, const char*,
-                                         rocprofsys_annotation_t*,
-                                         size_t) ROCPROFSYS_PUBLIC_API;
-    int  rocprofsys_pop_category_region(rocprofsys_category_t, const char*,
-                                        rocprofsys_annotation_t*,
-                                        size_t) ROCPROFSYS_PUBLIC_API;
+    int  rocprofsys_push_category_region_python(const char*, rocprofsys_annotation_t*,
+                                                size_t) ROCPROFSYS_PUBLIC_API;
+    int  rocprofsys_pop_category_region_python(const char*, rocprofsys_annotation_t*,
+                                               size_t) ROCPROFSYS_PUBLIC_API;
 
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
                                     size_t      address,
@@ -78,23 +76,12 @@ extern "C"
     void rocprofsys_preinit_library(void) ROCPROFSYS_HIDDEN_API;
     int  rocprofsys_preload_library(void) ROCPROFSYS_HIDDEN_API;
 
-    int rocprofsys_user_start_trace_dl(void) ROCPROFSYS_HIDDEN_API;
-    int rocprofsys_user_stop_trace_dl(void) ROCPROFSYS_HIDDEN_API;
+    int rocprofsys_causal_begin_dl(const char*) ROCPROFSYS_HIDDEN_API;
+    int rocprofsys_causal_end_dl(const char*) ROCPROFSYS_HIDDEN_API;
 
-    int rocprofsys_user_start_thread_trace_dl(void) ROCPROFSYS_HIDDEN_API;
-    int rocprofsys_user_stop_thread_trace_dl(void) ROCPROFSYS_HIDDEN_API;
-
-    int rocprofsys_user_push_region_dl(const char*) ROCPROFSYS_HIDDEN_API;
-    int rocprofsys_user_pop_region_dl(const char*) ROCPROFSYS_HIDDEN_API;
-
-    int rocprofsys_user_push_annotated_region_dl(const char*, rocprofsys_annotation_t*,
-                                                 size_t) ROCPROFSYS_HIDDEN_API;
-    int rocprofsys_user_pop_annotated_region_dl(const char*, rocprofsys_annotation_t*,
+    int rocprofsys_causal_progress_dl(const char* name) ROCPROFSYS_HIDDEN_API;
+    int rocprofsys_causal_annotated_progress_dl(const char*, rocprofsys_annotation_t*,
                                                 size_t) ROCPROFSYS_HIDDEN_API;
-
-    int rocprofsys_user_progress_dl(const char* name) ROCPROFSYS_HIDDEN_API;
-    int rocprofsys_user_annotated_progress_dl(const char*, rocprofsys_annotation_t*,
-                                              size_t) ROCPROFSYS_HIDDEN_API;
     // KokkosP
     struct ROCPROFSYS_HIDDEN_API SpaceHandle
     {
@@ -174,7 +161,7 @@ enum class InstrumentMode : int
     PythonProfile = 2,  // python setprofile
     Last,
 };
-}
+}  // namespace dl
 }  // namespace rocprofsys
 
 #endif  // ROCPROFSYS_DL_HPP_ 1
