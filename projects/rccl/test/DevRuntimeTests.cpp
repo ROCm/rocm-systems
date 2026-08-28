@@ -3040,6 +3040,111 @@ TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevrWindowRegisterInGroup is the entry point for window registration. It
+// takes a local registration, then either hands off to the non-symmetric helper
+// or walks the symmetric path itself.
+//
+// This suite covers the dispatch and the failures reachable before the
+// symmetric walk begins.
+
+class DevrWindowRegisterInGroupTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> lsaRankList;
+  std::vector<ncclPeerInfo> peers;
+  void* const kUserPtr = reinterpret_cast<void*>(0x100000);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 0;
+    comm->nRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    comm->symmetricSupport = 0;  // dispatch to the non-symmetric helper
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 1;
+    lsaRankList.assign({0});
+    devr->lsaRankList = lsaRankList.data();
+
+    peers.assign(1, ncclPeerInfo{});
+    comm->peerInfo = peers.data();
+  }
+
+  void TearDown() override {
+    ncclDevrState* devr = &comm->devrState;
+    for (int i = 0; i < devr->winSortedCount; i++) {
+      ncclDevrWindow* w = devr->winSorted[i].win;
+      free(w->ipcPeerPtrs);
+      free(w->ipcPeerPtrsAllocBase);
+      free(w);
+    }
+    free(devr->winSorted);
+    devr->winSorted = nullptr;
+    devr->winSortedCount = devr->winSortedCapacity = 0;
+    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: without symmetric support the whole symmetric path is bypassed and
+// the non-symmetric helper owns the result -- recognisable because the window
+// it builds has no backing ncclDevrMemory.
+TEST_F(DevrWindowRegisterInGroupTest, NoSymmetricSupport_RoutesToNonSymHelper) {
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  ASSERT_NE(out, nullptr);
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+  EXPECT_EQ(comm->devrState.winSorted[0].win->memory, nullptr);
+}
+
+// The local registration handle is threaded through to the helper, which stores
+// it on the window for its own teardown to release.
+TEST_F(DevrWindowRegisterInGroupTest, PassesLocalRegHandleToHelper) {
+  void* const kHandle = reinterpret_cast<void*>(0xABCD);
+  ScopedHook reg(g_ncclCommRegister, [&](const ncclComm_t, void*, size_t, void** h) {
+    *h = kHandle;
+    return ncclSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSorted[0].win->localRegHandle, kHandle);
+}
+
+// Branch: the local registration fails, so nothing downstream runs and there is
+// no handle to release.
+TEST_F(DevrWindowRegisterInGroupTest, CommRegisterFails_ReturnsErrorWithoutDeregistering) {
+  ScopedHook reg(g_ncclCommRegister,
+                 [](const ncclComm_t, void*, size_t, void**) { return ncclSystemError; });
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 0);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: the helper fails after the local registration succeeded, so that
+// registration must be released -- the fail_locReg label exists for exactly
+// this, and nothing else reports it.
+TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistration) {
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

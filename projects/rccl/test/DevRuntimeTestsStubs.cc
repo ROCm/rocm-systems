@@ -99,8 +99,24 @@ ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
 // ---------------------------------------------------------------------------
 // Public registration API.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclCommRegister(const ncclComm_t, void*, size_t, void**) { return ncclSuccess; }
-ncclResult_t ncclCommDeregister(const ncclComm_t, void*) { return ncclSuccess; }
+// Seams: ncclDevrWindowRegisterInGroup takes a local registration up front and
+// releases it on every failure path, which is only observable by counting.
+static ncclResult_t DefaultCommRegister(const ncclComm_t, void*, size_t, void** handle) {
+  if (handle) *handle = reinterpret_cast<void*>(0x1234);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(const ncclComm_t, void*, size_t, void**)> g_ncclCommRegister = DefaultCommRegister;
+
+ncclResult_t ncclCommRegister(const ncclComm_t comm, void* ptr, size_t size, void** handle) {
+  return g_ncclCommRegister(comm, ptr, size, handle);
+}
+
+static ncclResult_t DefaultCommDeregister(const ncclComm_t, void*) { return ncclSuccess; }
+std::function<ncclResult_t(const ncclComm_t, void*)> g_ncclCommDeregister = DefaultCommDeregister;
+
+ncclResult_t ncclCommDeregister(const ncclComm_t comm, void* handle) {
+  return g_ncclCommDeregister(comm, handle);
+}
 ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
@@ -517,9 +533,15 @@ static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hi
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) { return g_hipMemRelease(handle); }
-HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
+static hipError_t DefaultMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
+}
+std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)> g_hipMemRetainAllocationHandle =
+    DefaultMemRetainAllocationHandle;
+
+HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void* ptr) {
+  return g_hipMemRetainAllocationHandle(handle, ptr);
 }
 static hipError_t DefaultMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
@@ -612,6 +634,9 @@ void ResetDevRuntimeFakes() {
   g_hipIpcOpenMemHandle                     = DefaultIpcOpenMemHandle;
   g_hipIpcCloseMemHandle                    = DefaultIpcCloseMemHandle;
   g_hipMemGetAddressRange                   = DefaultMemGetAddressRange;
+  g_hipMemRetainAllocationHandle            = DefaultMemRetainAllocationHandle;
+  g_ncclCommRegister                        = DefaultCommRegister;
+  g_ncclCommDeregister                      = DefaultCommDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }
