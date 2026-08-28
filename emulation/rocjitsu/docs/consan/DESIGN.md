@@ -749,11 +749,13 @@ plan through one local projection and accumulate private descriptor extents
 through one maximum rule. Placement alternatives therefore cannot acquire
 different resource telemetry without changing the plan itself.
 
-The native event emitters still accept the mutable compatibility options.
-`bind_moi_record_event_options` is the one explicit boundary that projects a
-typed event plan into that old interface. It is not a second resource plan:
-its eventual deletion is coupled to replacing the emitter parameters with a
-narrow lowering contract.
+Record/Replay's native atomic, fence, and barrier emitters consume
+`MoiRecordEventEmissionPlan`, an immutable lowering input resolved alongside
+the common resource plan. It carries only the selected scratch and scalar
+state, exact workgroup and dispatch sources, report address, runtime-gate
+plan, and indirect-routing ABI needed by those emitters. Dense barrier
+fallback records the same plan during placement. No emitter reconstructs an
+owner assignment or receives the mutable compatibility options.
 
 Dynamic record field stores have one layout-parameterized implementation.
 `DynamicRecordLayout` supplies the record stride and the VGPR-value field

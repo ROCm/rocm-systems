@@ -3749,10 +3749,10 @@ template <typename RelocationAllowed>
 /// that bank's base unconditionally would corrupt a live guest operand. A
 /// single dead register is a materially weaker requirement than the probe's
 /// contiguous scratch tuple and is proven against every owning kernel scope.
-[[nodiscard]] std::optional<uint16_t>
-find_moi_borrowed_entry_backup_vgpr(MoiResourcePlanningState &state,
-                                    std::span<const uint64_t> owners, uint64_t text_offset,
-                                    uint16_t allocated_vgpr_count, const MoiOptions &options) {
+template <typename PersistentVgprState>
+[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
+    uint16_t allocated_vgpr_count, const PersistentVgprState &options) {
   if (owners.empty() || allocated_vgpr_count == 0u)
     return std::nullopt;
 

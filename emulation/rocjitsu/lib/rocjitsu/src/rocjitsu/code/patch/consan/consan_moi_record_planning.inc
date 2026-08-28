@@ -1,38 +1,104 @@
-/// Common placement-to-emission handoff for one Record/Replay synchronization
-/// event.
+/// Resolved lowering input shared by Record/Replay atomic, fence, and barrier
+/// emitters.
 ///
-/// An atomic, barrier, or fence has different semantic evidence and native
-/// emission, but all three use the same resolved scratch window, private epoch
-/// and owner representation, and register-preservation plan. Keeping that
-/// transaction in one type prevents the event-specific planners from
-/// acquiring subtly different rules for the same Record/Replay resources.
-struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
-  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
+/// This deliberately contains only values read by those emitters and their
+/// routing boundary. It is immutable after owner-local placement resolves the
+/// event and replaces the former pattern of copying and mutating all of
+/// `MoiOptions` again at each consumer.
+struct MoiRecordEventEmissionPlan {
+  std::optional<uint16_t> scratch_vgpr;
+  std::optional<uint16_t> moi_exec_save_sgpr;
+  std::optional<uint16_t> moi_owner_vgpr;
+  std::optional<uint16_t> moi_epoch_vgpr;
+  std::optional<uint16_t> moi_workgroup_key_vgpr;
+  std::optional<uint16_t> moi_dispatch_id_vgpr;
+  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  ConSanMoiPersistentSgprState moi_persistent_sgprs;
+  std::optional<uint64_t> moi_report_buffer_address;
+  bool automatic_moi_record_replay_sgpr_spill = false;
+  std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;
+  std::optional<uint16_t> moi_record_replay_call_return_sgpr;
+  ConSanMoiWorkgroupSources workgroup_sources;
+  MoiSpecialStateSgprs special_state;
+  std::array<ConSanMoiReportDispatchIdWordSource, 2> dispatch_id_sources;
+  std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
+  std::optional<MoiIndirectJumpSgprs> indirect_jump;
+  uint16_t required_sgpr_count = 0;
 };
 
-/// Bind one planned Record/Replay event to the still-mutable options accepted
-/// by the native emitters.
-///
-/// This is the single remaining compatibility boundary between the typed
-/// event plan and emitters that have not yet replaced `MoiOptions` with a
-/// narrow lowering input. It selects the event's scratch window, private
-/// workgroup representation, transient scalar assignment, and entry-captured
-/// workgroup tuple. A false result means a previously proved owner-local
-/// assignment disappeared and callers must abort rather than emit with a
-/// different register interpretation.
-[[nodiscard]] bool bind_moi_record_event_options(MoiOptions &event_options,
-                                                 const ConSanMoiOperatingPoint &allocation,
-                                                 const MoiPlannedRecordEvent &event) {
-  event_options.scratch_vgpr = event.resources.base;
-  if (event.private_layout) {
-    event_options.moi_record_replay_workgroup_private_offsets =
-        event.private_layout->record_replay_workgroup_offsets;
-  }
-  return apply_moi_transient_sgpr_assignment(event_options, allocation,
-                                             event.resources.owner_descriptor_file_offsets) &&
-         apply_record_replay_entry_workgroup_assignment(
-             event_options, allocation, event.resources.owner_descriptor_file_offsets);
+[[nodiscard]] std::optional<MoiSpecialStateSgprs>
+moi_special_state_sgprs(const MoiRecordEventEmissionPlan &plan) {
+  return plan.special_state;
 }
+
+[[nodiscard]] std::optional<MoiIndirectJumpSgprs>
+moi_indirect_jump_sgprs(const MoiRecordEventEmissionPlan &plan) {
+  return plan.indirect_jump;
+}
+
+[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
+    const MoiRecordEventEmissionPlan &plan, uint16_t slot_vgpr, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+  return append_dynamic_record_store_moi_report_dispatch_id_pair(
+      words, layout, low_field_address, plan.dispatch_id_sources, slot_vgpr, scratch_vgpr, arch,
+      policy);
+}
+
+void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
+                                const ResolvedMoiScratchPlan &resources,
+                                const MoiRecordEventEmissionPlan &plan, rj_code_arch_t /*arch*/) {
+  note_maximum_descriptor_extents(requirements, resources.owner_descriptor_file_offsets,
+                                  plan.required_sgpr_count);
+}
+
+/// Snapshot the already-resolved Record/Replay lowering state needed by a
+/// native event emitter. Owner-local assignment remains a planning concern;
+/// this function performs no mutation and cannot choose a different binding.
+[[nodiscard]] std::optional<MoiRecordEventEmissionPlan>
+resolve_moi_record_event_emission_plan(const MoiOptions &event_options, uint16_t scratch_vgpr,
+                                       rj_code_arch_t arch) {
+  const auto workgroup_sources = record_replay_persistent_workgroup_sources(event_options, arch);
+  const auto special_state = moi_special_state_sgprs(event_options);
+  if (!event_options.moi_exec_save_sgpr || !event_options.moi_report_buffer_address ||
+      !workgroup_sources || !special_state) {
+    return std::nullopt;
+  }
+  std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
+  if (event_options.moi_runtime_sample_stride > 1u &&
+      !event_options.automatic_moi_record_replay_sgpr_spill) {
+    runtime_workgroup_gate =
+        plan_moi_runtime_workgroup_gate(event_options, *workgroup_sources, arch);
+  }
+  return MoiRecordEventEmissionPlan{
+      .scratch_vgpr = scratch_vgpr,
+      .moi_exec_save_sgpr = event_options.moi_exec_save_sgpr,
+      .moi_owner_vgpr = event_options.moi_owner_vgpr,
+      .moi_epoch_vgpr = event_options.moi_epoch_vgpr,
+      .moi_workgroup_key_vgpr = event_options.moi_workgroup_key_vgpr,
+      .moi_dispatch_id_vgpr = event_options.moi_dispatch_id_vgpr,
+      .moi_record_replay_workgroup_vgprs = event_options.moi_record_replay_workgroup_vgprs,
+      .moi_persistent_sgprs = event_options.moi_persistent_sgprs,
+      .moi_report_buffer_address = event_options.moi_report_buffer_address,
+      .automatic_moi_record_replay_sgpr_spill =
+          event_options.automatic_moi_record_replay_sgpr_spill,
+      .moi_record_replay_dispatch_key_sgpr = event_options.moi_record_replay_dispatch_key_sgpr,
+      .moi_record_replay_call_return_sgpr = event_options.moi_record_replay_call_return_sgpr,
+      .workgroup_sources = *workgroup_sources,
+      .special_state = *special_state,
+      .dispatch_id_sources = {moi_report_dispatch_id_word_source(event_options,
+                                                                 /*high_word=*/false),
+                              moi_report_dispatch_id_word_source(event_options,
+                                                                 /*high_word=*/true)},
+      .runtime_workgroup_gate = runtime_workgroup_gate,
+      .indirect_jump = moi_indirect_jump_sgprs(event_options),
+  };
+}
+
+struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
+  MoiRecordEventEmissionPlan emission;
+  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
+};
 
 /// Resolve the resource state shared by Record/Replay synchronization events.
 ///
@@ -83,6 +149,13 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     return std::nullopt;
   }
 
+  auto emission = resolve_moi_record_event_emission_plan(event_options, resources.base, arch);
+  if (!emission) {
+    result.warnings.emplace_back(std::string(warning_context) +
+                                 " has an incomplete Record/Replay emission plan");
+    return std::nullopt;
+  }
+
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   if (!event_options.moi_owner_vgpr && !event_options.moi_persistent_sgprs.owner) {
     if (moi_record_uses_private_owner(event_options)) {
@@ -108,5 +181,14 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
       event_options.automatic_moi_record_replay_sgpr_spill, active_private_segment_size);
   if (!probe)
     return std::nullopt;
-  return MoiPlannedRecordEvent{std::move(*probe), derived_owner};
+
+  MoiDescriptorSgprRequirements scalar_requirements;
+  note_moi_sgpr_requirements(scalar_requirements, resources, event_options, arch);
+  uint16_t required_sgpr_count = 0u;
+  for (const auto &[descriptor, count] : scalar_requirements) {
+    (void)descriptor;
+    required_sgpr_count = std::max(required_sgpr_count, count);
+  }
+  emission->required_sgpr_count = required_sgpr_count;
+  return MoiPlannedRecordEvent{std::move(*probe), std::move(*emission), derived_owner};
 }

@@ -163,7 +163,7 @@ private:
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const MoiBarrierEvidenceSitePlan &candidate,
-    const MoiOptions &options, const VgprSpillSequence *spill,
+    const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
     size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
     uint64_t return_text_offset, const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
@@ -204,14 +204,7 @@ private:
     derived_owner_vgpr = owner->vgpr;
     derived_owner_words = owner->words;
   }
-  const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(options, arch);
-  if (!persistent_workgroup_sources) {
-    errors.emplace_back(
-        "ConSan MOI Record/Replay barrier requires one exact entry-captured workgroup tuple");
-    return std::nullopt;
-  }
-  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
+  const ConSanMoiWorkgroupSources &workgroup_sources = options.workgroup_sources;
 
   std::vector<uint32_t> words;
   const uint64_t base = *options.moi_report_buffer_address;
@@ -230,18 +223,11 @@ private:
   words.reserve(
       186 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
-  const bool runtime_workgroup_gate =
-      options.moi_runtime_sample_stride > 1u && !options.automatic_moi_record_replay_sgpr_spill &&
-      moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
+  const bool runtime_workgroup_gate = options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
-    const auto gate_plan = plan_moi_runtime_workgroup_gate(options, workgroup_sources, arch);
-    if (!gate_plan) {
-      errors.emplace_back("ConSan MOI barrier record patch lost its runtime workgroup gate plan");
-      return std::nullopt;
-    }
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes.subspan(candidate.site.file_offset, candidate.site.size), *gate_plan,
-        workgroup_sources, cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.site.file_offset, candidate.site.size),
+        *options.runtime_workgroup_gate, workgroup_sources, cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
             candidate.site.size, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);
@@ -1034,6 +1020,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::optional<uint16_t> scratch_vgpr;
     std::optional<uint32_t> private_epoch_offset;
     std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
+    std::optional<MoiRecordEventEmissionPlan> record_emission;
     ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     std::optional<VgprSpillSequence> spill;
     std::optional<SgprSpillSequence> scalar_spill;
@@ -1122,6 +1109,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
+        const auto record_emission =
+            resolve_moi_record_event_emission_plan(candidate_options, resources->base, arch);
+        if (!record_emission) {
+          result.warnings.emplace_back(
+              "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
+          continue;
+        }
         std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
         if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner) {
           const auto owner_shift =
@@ -1165,6 +1159,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             .scratch_vgpr = resources->base,
             .private_epoch_offset = access_patch->persistent_epoch_private_offset,
             .derived_owner = derived_owner,
+            .record_emission = record_emission,
             .private_record_replay_workgroup_offsets =
                 access_patch->persistent_record_replay_workgroup_private_offsets,
             .spill = std::move(spill),
@@ -1199,6 +1194,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           .scratch_vgpr = access_patch->scratch_vgpr,
           .private_epoch_offset = access_patch->persistent_epoch_private_offset,
           .derived_owner = std::nullopt,
+          .record_emission = std::nullopt,
           .private_record_replay_workgroup_offsets = {},
           .spill = std::move(spill),
           .scalar_spill = std::nullopt,
@@ -1258,6 +1254,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::optional<uint16_t> scratch_vgpr;
     std::optional<VgprSpillSequence> spill;
     std::optional<SgprSpillSequence> scalar_spill;
+    std::optional<MoiRecordEventEmissionPlan> record_emission;
     uint32_t required_private_bytes = 0u;
     const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
     const bool needs_record_replay_scalar_spill =
@@ -1313,12 +1310,36 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
                                  arch);
     }
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
+      if (!scratch_vgpr) {
+        result.warnings.emplace_back(
+            "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
+        continue;
+      }
+      candidate_options.scratch_vgpr = scratch_vgpr;
+      if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
+                                               owners) ||
+          !apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                          result.moi_operating_point, owners)) {
+        result.warnings.emplace_back(
+            "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
+        continue;
+      }
+      record_emission =
+          resolve_moi_record_event_emission_plan(candidate_options, *scratch_vgpr, arch);
+      if (!record_emission) {
+        result.warnings.emplace_back(
+            "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
+        continue;
+      }
+    }
     planned_candidates.push_back(PlannedInlineEpochBarrier{
         .candidate = candidate,
         .owner_descriptor_file_offsets = std::move(owners),
         .scratch_vgpr = scratch_vgpr,
         .private_epoch_offset = std::nullopt,
         .derived_owner = std::nullopt,
+        .record_emission = std::move(record_emission),
         .private_record_replay_workgroup_offsets = {},
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -1363,27 +1384,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           std::optional<uint16_t> call_return_sgpr,
           std::optional<uint16_t> gfx1250_vgpr_msb_mode) -> std::optional<std::vector<uint32_t>> {
     if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
-      if (!planned.scratch_vgpr) {
+      if (!planned.record_emission) {
         result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback requires scratch VGPR state");
-        return std::nullopt;
-      }
-      candidate_options.scratch_vgpr = planned.scratch_vgpr;
-      if (planned.private_epoch_offset) {
-        candidate_options.moi_record_replay_workgroup_private_offsets =
-            planned.private_record_replay_workgroup_offsets;
-      }
-      if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
-                                               planned.owner_descriptor_file_offsets) ||
-          !apply_record_replay_entry_workgroup_assignment(candidate_options,
-                                                          result.moi_operating_point,
-                                                          planned.owner_descriptor_file_offsets)) {
-        result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback lost its owner-local assignment");
+            "ConSan MOI Record/Replay dense barrier fallback lost its planned emission state");
         return std::nullopt;
       }
       return build_barrier_record_cave_words(
-          active_bytes, planned.candidate, candidate_options,
+          active_bytes, planned.candidate, *planned.record_emission,
           planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
@@ -2574,7 +2581,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
   struct StagedBarrierRecord {
     const PlannedBarrierRecord *planned = nullptr;
-    MoiOptions candidate_options;
+    const MoiRecordEventEmissionPlan *emission = nullptr;
     uint32_t original_barrier_word = 0u;
     uint64_t cave_text_offset = 0u;
     uint64_t return_text_offset = 0u;
@@ -2599,11 +2606,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
     uint64_t return_text_offset = site.text_offset + site.size;
-    MoiOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
-      result.errors.emplace_back("ConSan MOI barrier record patch lost a planned assignment");
-      return;
-    }
+    const MoiRecordEventEmissionPlan &emission = planned.emission;
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_operating_point, planned.resources.owner_descriptor_file_offsets);
     // A routed branch-only body replaces this harmless placeholder after all
@@ -2611,7 +2614,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const uint64_t cave_return_target =
         branch_only_scalar_spill ? cave_text_offset : return_text_offset;
     auto cave_words = build_barrier_record_cave_words(
-        active_bytes, candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
+        active_bytes, candidate, emission, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, original_barrier_word,
         cave_text_offset, cave_return_target, planned.derived_owner, result.errors);
@@ -2654,10 +2657,10 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           break;
         }
       }
-      const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(emission);
       const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
           standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
-          site.text_offset, planned.resources.required_vgpr_count, candidate_options);
+          site.text_offset, planned.resources.required_vgpr_count, emission);
       if (!displaced_words.empty() && !overlaps_existing_patch && !crosses_control_flow_entry &&
           !overlaps_other_sync && jump_sgprs && backup_vgpr) {
         borrowed_entry = build_moi_borrowed_record_replay_entry(
@@ -2685,7 +2688,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const size_t staged_index = staged_barriers.size();
     staged_barriers.push_back({
         .planned = &planned,
-        .candidate_options = std::move(candidate_options),
+        .emission = &planned.emission,
         .original_barrier_word = original_barrier_word,
         .cave_text_offset = cave_text_offset,
         .return_text_offset = return_text_offset,
@@ -2750,7 +2753,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const PlannedBarrierRecord &planned = *staged.planned;
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
-    MoiOptions &candidate_options = staged.candidate_options;
+    const MoiRecordEventEmissionPlan &emission = *staged.emission;
     const uint64_t cave_text_offset = staged.cave_text_offset;
     const uint64_t return_text_offset = staged.return_text_offset;
     const bool branch_only_scalar_spill = staged.branch_only_scalar_spill;
@@ -2814,7 +2817,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     if (has_entry_island) {
       const bool emitted = emit_moi_local_indirect_entry_island(
-          new_text, entry_island, staged.placement.body_offset, site.text_offset, candidate_options,
+          new_text, entry_island, staged.placement.body_offset, site.text_offset, emission,
           planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
           "ConSan MOI barrier record patch");
       if (!emitted)
@@ -2849,7 +2852,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       info.branch_only_return_relay_offsets = branch_only_route->return_relay_offsets;
     }
     if (staged.borrowed_entry) {
-      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(candidate_options);
+      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
       info.branch_only_borrowed_indirect_entry = true;
       info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
       info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
@@ -2859,7 +2862,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     // resource-admitted candidates.  Accumulating them here keeps a later
     // reachability rejection from changing an uninstrumented owner.
     note_descriptor_requirements(descriptor_requirements, planned.resources);
-    note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
+    note_moi_sgpr_requirements(scalar_requirements, planned.resources, emission, arch);
     note_moi_probe_private_requirements(private_requirements, planned);
     patches.push_back(info);
   }

@@ -6053,10 +6053,11 @@ for nominal line-count reductions.
   `note_moi_record_event_private_requirements` derives the kernel private
   segment requirement from the shared event plan. Atomics, barriers, and
   fences no longer maintain independent maximum-offset loops.
-- **Explicit remaining seam:** Native event emitters still consume
-  `ConSanOptions`. `bind_moi_record_event_options` is the sole typed-plan to
-  compatibility-options projection for these events and is the deletion point
-  for the later narrow-emitter-input cutover.
+- **Emitter cutover:** Native event emitters now consume the immutable
+  `MoiRecordEventEmissionPlan`. Owner-local register selection, exact
+  workgroup and dispatch sources, runtime-gate state, and indirect-routing ABI
+  are resolved once during placement; atomic, fence, barrier, and dense
+  barrier fallback emission cannot rebind them through `ConSanOptions`.
 - **Sharing and target boundary:** The common plan and algorithms contain no
   target discriminator or instruction encoding. Event-specific address
   qualification, barrier routing, fence sequence identity, and native builders

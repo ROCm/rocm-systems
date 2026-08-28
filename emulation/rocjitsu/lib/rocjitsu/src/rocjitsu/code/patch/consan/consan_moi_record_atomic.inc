@@ -150,10 +150,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
-    MoiOptions candidate_options = options;
-    if (bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
-      note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
-    }
+    note_moi_sgpr_requirements(scalar_requirements, planned.resources, planned.emission, arch);
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
@@ -188,14 +185,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
             : *composed_access_patch->relocated_guest_instruction_offset;
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = physical_anchor_offset + site.size;
-    MoiOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
-      result.errors.emplace_back("ConSan MOI atomic record patch lost a planned assignment");
-      return;
-    }
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
-        active_bytes, candidate, planned.address_plan, candidate_options,
+        active_bytes, candidate, planned.address_plan, planned.emission,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
@@ -254,8 +246,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
             new_text, indirect_entry_island, placement->body_offset, physical_anchor_offset,
-            options, planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI atomic record patch")) {
+            planned.emission, planned.resources.owner_descriptor_file_offsets, arch, patches,
+            result.errors, "ConSan MOI atomic record patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);

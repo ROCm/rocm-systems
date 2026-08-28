@@ -523,21 +523,18 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
   return words;
 }
 
-[[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
-                                                        uint64_t cave_text_offset,
-                                                        uint64_t return_text_offset,
-                                                        const MoiOptions &options,
-                                                        rj_code_arch_t arch) {
+[[nodiscard]] bool append_moi_direct_or_indirect_return(
+    std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
+    const std::optional<MoiIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch) {
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
   if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
     words.push_back(build_s_branch(*direct, arch));
     return true;
   }
-  const auto jump_sgprs = moi_indirect_jump_sgprs(options);
-  if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
-                         words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
-                         jump_sgprs->scc_save_sgpr, /*capture_scc=*/false, arch)) {
+  if (!indirect_jump || !append_moi_scc_preserving_indirect_jump(
+                            words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
+                            indirect_jump->scc_save_sgpr, /*capture_scc=*/false, arch)) {
     return false;
   }
   const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
@@ -547,18 +544,35 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
   return true;
 }
 
+[[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
+                                                        uint64_t cave_text_offset,
+                                                        uint64_t return_text_offset,
+                                                        const MoiOptions &options,
+                                                        rj_code_arch_t arch) {
+  return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+                                              moi_indirect_jump_sgprs(options), arch);
+}
+
+[[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
+                                                        uint64_t cave_text_offset,
+                                                        uint64_t return_text_offset,
+                                                        const MoiRecordEventEmissionPlan &plan,
+                                                        rj_code_arch_t arch) {
+  return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+                                              plan.indirect_jump, arch);
+}
+
 [[nodiscard]] bool
 emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
                                      uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const MoiOptions &options,
+                                     const MoiIndirectJumpSgprs &jump_sgprs,
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context) {
-  const auto jump_sgprs = moi_indirect_jump_sgprs(options);
   std::vector<uint32_t> words;
-  if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
-                         words, island_text_offset, cave_text_offset, jump_sgprs->pc_sgpr,
-                         jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
+  if (!append_moi_scc_preserving_indirect_jump(words, island_text_offset, cave_text_offset,
+                                               jump_sgprs.pc_sgpr, jump_sgprs.scc_save_sgpr,
+                                               /*capture_scc=*/true, arch)) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }
@@ -584,6 +598,33 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return true;
 }
 
+[[nodiscard]] bool
+emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
+                                     uint64_t cave_text_offset, uint64_t anchor_text_offset,
+                                     const MoiOptions &options,
+                                     std::span<const uint64_t> owner_descriptor_file_offsets,
+                                     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
+                                     std::vector<std::string> &errors, std::string_view context) {
+  const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+  return jump_sgprs &&
+         emit_moi_local_indirect_entry_island(
+             text, island_text_offset, cave_text_offset, anchor_text_offset, *jump_sgprs,
+             owner_descriptor_file_offsets, arch, patches, errors, context);
+}
+
+[[nodiscard]] bool
+emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
+                                     uint64_t cave_text_offset, uint64_t anchor_text_offset,
+                                     const MoiRecordEventEmissionPlan &plan,
+                                     std::span<const uint64_t> owner_descriptor_file_offsets,
+                                     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
+                                     std::vector<std::string> &errors, std::string_view context) {
+  return plan.indirect_jump &&
+         emit_moi_local_indirect_entry_island(
+             text, island_text_offset, cave_text_offset, anchor_text_offset, *plan.indirect_jump,
+             owner_descriptor_file_offsets, arch, patches, errors, context);
+}
+
 [[nodiscard]] bool emit_moi_local_indirect_kernel_entry_island(
     std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
     uint64_t anchor_text_offset, std::span<const uint64_t> owner_descriptor_file_offsets,
@@ -593,6 +634,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   // liveness selects them as transient instrumentation state. VCC and SCC
   // have no incoming kernel-argument value, so use VCC as the PC pair and
   // leave every ordinary input untouched.
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    errors.emplace_back(std::string(context) + " has no target profile");
+    return false;
+  }
   std::vector<uint32_t> words;
   const uint64_t getpc_text_offset = island_text_offset;
   words.push_back(build_s_getpc_b64(kRdna4VccLo, arch));
@@ -603,7 +649,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                static_cast<int64_t>(cave_text_offset) -
                                    static_cast<int64_t>(pc_after_getpc),
                                /*minimum_words=*/3u,
-                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch))) {
+                               /*prefer_literal64=*/
+                               target->direct_call_form == ConSanDirectCallForm::SCallI64)) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }

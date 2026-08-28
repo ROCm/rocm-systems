@@ -893,11 +893,10 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
 
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const MoiOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    ConSanMoiLiteralDispatchIdPolicy policy) {
+    const std::array<ConSanMoiReportDispatchIdWordSource, 2> &sources, uint16_t slot_vgpr,
+    uint16_t scratch_vgpr, rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
-    const ConSanMoiReportDispatchIdWordSource source =
-        moi_report_dispatch_id_word_source(options, high_word);
+    const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
       return false;
     const uint64_t field_address = low_field_address + (high_word ? sizeof(uint32_t) : 0u);
@@ -913,6 +912,16 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
       return false;
   }
   return true;
+}
+
+[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
+    const MoiOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    ConSanMoiLiteralDispatchIdPolicy policy) {
+  const std::array sources{moi_report_dispatch_id_word_source(options, /*high_word=*/false),
+                           moi_report_dispatch_id_word_source(options, /*high_word=*/true)};
+  return append_dynamic_record_store_moi_report_dispatch_id_pair(
+      words, layout, low_field_address, sources, slot_vgpr, scratch_vgpr, arch, policy);
 }
 
 [[nodiscard]] bool append_dynamic_record_store_workgroup_source(

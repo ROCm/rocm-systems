@@ -2919,7 +2919,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
     std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -2973,14 +2973,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     derived_owner_words = owner->words;
   }
 
-  const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(options, arch);
-  if (!persistent_workgroup_sources) {
-    errors.emplace_back(
-        "ConSan MOI Record/Replay fence requires one exact entry-captured workgroup tuple");
-    return std::nullopt;
-  }
-  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
+  const ConSanMoiWorkgroupSources &workgroup_sources = options.workgroup_sources;
 
   std::vector<uint32_t> words;
   const uint64_t displaced_tail_bytes =
@@ -2992,9 +2985,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     return std::nullopt;
   }
   const bool runtime_workgroup_gate =
-      !candidate.capture_address_before_guest && options.moi_runtime_sample_stride > 1u &&
-      !options.automatic_moi_record_replay_sgpr_spill &&
-      moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
+      !candidate.capture_address_before_guest && options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
     if (candidate.capture_address_before_guest) {
       errors.emplace_back(
@@ -3003,14 +2994,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
     const uint32_t guest_byte_count =
         static_cast<uint32_t>(candidate.patch_size + displaced_tail_bytes);
-    const auto gate_plan = plan_moi_runtime_workgroup_gate(options, workgroup_sources, arch);
-    if (!gate_plan) {
-      errors.emplace_back("ConSan MOI fence record patch lost its runtime workgroup gate plan");
-      return std::nullopt;
-    }
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes.subspan(candidate.patch_file_offset, guest_byte_count), *gate_plan, workgroup_sources,
-        cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.patch_file_offset, guest_byte_count),
+        *options.runtime_workgroup_gate, workgroup_sources, cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
             guest_byte_count, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);

@@ -141,15 +141,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
                               "ConSan MOI fence record patch", active_private_size);
     if (!record_event)
       continue;
-    MoiOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
-                                       *record_event)) {
-      result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
-      return;
-    }
     note_moi_probe_private_requirements(private_requirements, *record_event);
     note_descriptor_requirements(descriptor_requirements, record_event->resources);
-    note_moi_sgpr_requirements(scalar_requirements, record_event->resources, candidate_options,
+    note_moi_sgpr_requirements(scalar_requirements, record_event->resources, record_event->emission,
                                arch);
     selected.push_back({std::move(*record_event), std::move(candidate), address_plan});
   }
@@ -220,11 +214,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   };
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
-    MoiOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
-      result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
-      return;
-    }
+    const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
     const std::optional<uint16_t> dense_call_return_sgpr =
         candidate_options.automatic_moi_record_replay_sgpr_spill
             ? candidate_options.moi_record_replay_call_return_sgpr

@@ -828,7 +828,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiRecordEventEmissionPlan &options,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
@@ -876,14 +876,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     derived_owner_words = owner->words;
   }
 
-  const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(options, arch);
-  if (!persistent_workgroup_sources) {
-    errors.emplace_back(
-        "ConSan MOI Record/Replay atomic requires one exact entry-captured workgroup tuple");
-    return std::nullopt;
-  }
-  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
+  const ConSanMoiWorkgroupSources &workgroup_sources = options.workgroup_sources;
 
   if (candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset) {
@@ -893,18 +886,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   std::vector<uint32_t> words;
   const bool runtime_workgroup_gate =
-      options.moi_runtime_sample_stride > 1u && !already_runtime_workgroup_gated &&
-      !options.automatic_moi_record_replay_sgpr_spill &&
-      moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
+      !already_runtime_workgroup_gated && options.runtime_workgroup_gate.has_value();
   if (runtime_workgroup_gate) {
-    const auto gate_plan = plan_moi_runtime_workgroup_gate(options, workgroup_sources, arch);
-    if (!gate_plan) {
-      errors.emplace_back("ConSan MOI atomic record patch lost its runtime workgroup gate plan");
-      return std::nullopt;
-    }
     auto gate = build_moi_runtime_workgroup_gate_call_words(
-        bytes.subspan(candidate.site.file_offset, candidate.site.size), *gate_plan,
-        workgroup_sources, cave_text_offset, return_text_offset,
+        bytes.subspan(candidate.site.file_offset, candidate.site.size),
+        *options.runtime_workgroup_gate, workgroup_sources, cave_text_offset, return_text_offset,
         moi_runtime_workgroup_gate_reserved_words(
             candidate.site.size, workgroup_sources.cluster_workgroup_id.has_value()),
         arch);
