@@ -342,10 +342,10 @@ amdsmi_status_t WSLGPUBackend::get_memory_usage(amdsmi_memory_type_t mem_type, u
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM)
     return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (used == nullptr) return AMDSMI_STATUS_INVAL;
   rocdxg_smi_vram_usage_t usage = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_vram_usage(node_id_, &usage);
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
-  if (used == nullptr) return AMDSMI_STATUS_INVAL;
   *used = usage.vram_used_mb * 1024 * 1024;
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -366,10 +366,10 @@ amdsmi_status_t WSLGPUBackend::get_volt_metric(amdsmi_voltage_type_t sensor_type
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
   rocdxg_smi_power_info_t power = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
-  if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
   *voltage = power.gfx_voltage;
   return AMDSMI_STATUS_SUCCESS;
 }
