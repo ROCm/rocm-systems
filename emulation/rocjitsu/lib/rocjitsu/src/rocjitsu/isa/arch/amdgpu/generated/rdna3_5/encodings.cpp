@@ -1457,6 +1457,8 @@ void Vop3p::append_mnemonic(std::string &out) const {
     out += "_e64_dpp";
 }
 
+bool Vop3p::uses_vop3p_absolute_source_syntax() const { return (inst_.op >= 32 && inst_.op <= 34); }
+
 uint32_t Vop3p::vop3p_encoded_source_count() const {
   uint32_t count = 0;
   for (uint8_t src = 0; src < num_src_; ++src) {
@@ -1600,8 +1602,9 @@ Ldsdir::Ldsdir(std::string_view mnemonic, const LdsdirMachineInst *inst, Execute
 bool Ldsdir::default_encoding() { return 1; }
 
 bool Ds::uses_split_ds_offsets() const {
-  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 55 && inst_.op <= 56) ||
-         (inst_.op >= 78 && inst_.op <= 79) || (inst_.op >= 119 && inst_.op <= 120);
+  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 46 && inst_.op <= 47) ||
+         (inst_.op >= 55 && inst_.op <= 56) || (inst_.op >= 78 && inst_.op <= 79) ||
+         (inst_.op >= 110 && inst_.op <= 111) || (inst_.op >= 119 && inst_.op <= 120);
 }
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
@@ -1628,12 +1631,50 @@ Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn 
   opcode_ = inst_.op;
 }
 
+bool Mimg::omits_gfx11_mimg_dim_dmask() const { return (inst_.op >= 25 && inst_.op <= 26); }
+
+uint32_t Mimg::gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const {
+  switch (inst_.op) {
+  case 25:
+    if (inst_.a16) {
+      static constexpr uint8_t widths[] = {1, 1, 3, 3};
+      return index < 4 ? widths[index] : 0;
+    }
+    {
+      static constexpr uint8_t widths[] = {1, 1, 3, 3, 3};
+      return index < 5 ? widths[index] : 0;
+    }
+  case 26:
+    if (inst_.a16) {
+      static constexpr uint8_t widths[] = {2, 1, 3, 3};
+      return index < 4 ? widths[index] : 0;
+    }
+    {
+      static constexpr uint8_t widths[] = {2, 1, 3, 3, 3};
+      return index < 5 ? widths[index] : 0;
+    }
+  default:
+    if (index < 4)
+      return 1;
+    return index == 4 && vaddr_words > 4 ? vaddr_words - 4 : 0;
+  }
+}
+
 Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+}
+
+void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  if (!inst_.nsa)
+    return;
+  nsa_vaddr_operand_ = vaddr;
+  size_ = sizeof(OpEncoding) + sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Mimg::has_nsa() { return (inst_.nsa == 1); }

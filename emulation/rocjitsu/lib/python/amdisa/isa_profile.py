@@ -509,6 +509,48 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        """Whether GFX11 image operands and modifiers use canonical syntax."""
+        return False
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        """Whether DS 2ADDR instructions render two independent offsets."""
+        return False
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        """VOP3P instructions whose NEG fields encode source abs and negate."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        """GFX11 MIMG instructions with gather-style VDATA sizing."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        """GFX11 MIMG instructions with a fixed VDATA width in DWORDs."""
+        return {}
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        """GFX11 MIMG VADDR widths as ``(default, a16)`` DWORD counts."""
+        return {}
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        """GFX11 partial-NSA group widths as ``(default, a16)`` tuples."""
+        return {}
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        """Whether return-message selectors use symbolic assembly syntax."""
+        return False
+
+    @property
     def split_execution_sources(self) -> bool:
         """True when execution bodies are emitted to separate source files."""
         return False
@@ -2140,6 +2182,49 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        return True
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        return True
 
 
 class Rdna4Profile(_AmdgpuProfileBase):

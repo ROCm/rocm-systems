@@ -637,8 +637,9 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3p_disassembly(
-        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), inst->neg, inst->neg_hi,
-        inst->clamp, vop3p_encoded_source_count(), inst_.op <= 18);
+        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
+        inst_.op <= 19 || inst_.op == 26);
     if (has_encoded_dpp())
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
