@@ -898,13 +898,9 @@ class AMDSMIHelpers:
             else:
                 self.error_collector.record(e.value)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            # NO_PERM is the one command-wide fatal: a permission problem affects
-            # every device, so abort the whole command instead of recording it as
-            # a per-device error and continuing. Backstops any handler that failed
-            # to convert NO_PERM before it escapes here.
-            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                raise PermissionError("Command requires elevation") from e
-            self.error_collector.record_library_error(e.get_error_code())
+            # Backstops any handler that let a library error escape; record_or_raise
+            # owns the NO_PERM-is-command-wide rule the handlers apply themselves.
+            self.record_or_raise(e)
 
     def record_or_raise(self, exception, context=None):
         """Record a per-device library failure, or raise when it is command-wide.
