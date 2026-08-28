@@ -785,6 +785,8 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
   if ((base | nThreads) & (WARP_SIZE - 1)) {
     return false;
   }
+  // WARP_SIZE is a compile-time power of two,
+  // so these exact divisions compile to shifts.
   uint32_t w0 = base / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
   for (int dst = 0; dst < nDsts; dst++) {
     tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[dst], src, bytes, ncclTdmStageForWarp(w0),
