@@ -357,9 +357,6 @@ struct ncclKernelPlan {
   bool isRma;
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
-#ifdef ENABLE_TDM_SIMPLE
-  bool hasTdmSimpleWork;
-#endif
   int kernelDynSmem; // only for symmetric kernels
   void* kernelFn;
   union {

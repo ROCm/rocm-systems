@@ -52,15 +52,10 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 // Global-address alignment for TDM's direct L2->LDS path.
 #define RCCL_TDM_ALIGN 256
 
-// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best.
-#ifdef ENABLE_TDM_SIMPLE
-#define RCCL_TDM_STAGE_BYTES_PER_WARP_MAX 16384
-#else
-#define RCCL_TDM_STAGE_BYTES_PER_WARP_MAX 0
-#endif
-
+// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
+// every kernel pays the LDS: 167KB of 320KB at 16KB/warp.
 #if defined(__gfx1250__) && defined(ENABLE_TDM_SIMPLE)
-#define RCCL_TDM_STAGE_BYTES_PER_WARP RCCL_TDM_STAGE_BYTES_PER_WARP_MAX
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
 #else
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
 #endif
