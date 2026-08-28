@@ -2434,6 +2434,15 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
 }
 #endif
 
+// True when tool_init must skip starting the main (primary/counter) contexts,
+// leaving them for the "rocm" subscriber's on_resume to start once the session
+// goes active.
+bool
+should_defer_main_contexts()
+{
+    return !g_session->is_active(control::scope::global);
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
@@ -2766,23 +2775,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     assert(g_session);
     create_roctx_client();
 
-    if(g_roctx_client)
-    {
-        g_roctx_client->configure_services(_data->get_control_context());
+    if(g_roctx_client) g_roctx_client->configure_services(_data->get_control_context());
 
-        const auto filtering_active = g_roctx_client->get_trigger().filter_active();
-        if(!filtering_active)
-        {
-            start();
-        }
-        else
-        {
-            if(_data != nullptr)
-            {
-                start_context(_data->get_code_obj_context());
-                start_context(_data->get_control_context());
-            }
-        }
+    if(should_defer_main_contexts())
+    {
+        start_context(_data->get_code_obj_context());
+        start_context(_data->get_control_context());
     }
     else
     {

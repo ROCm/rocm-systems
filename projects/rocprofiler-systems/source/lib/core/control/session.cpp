@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -16,6 +15,14 @@
 
 namespace rocprofsys::control
 {
+session::session() noexcept
+{
+    for(auto& tracing_flag : m_scope_tracing)
+    {
+        tracing_flag.store(true, std::memory_order_relaxed);
+    }
+}
+
 void
 session::shutdown()
 {
@@ -26,8 +33,14 @@ session::shutdown()
     }
     {
         const std::scoped_lock action_lock{ m_actions_mutex };
-        m_actions.clear();
-        m_active.store(true, std::memory_order_relaxed);
+        for(auto& scoped : m_actions)
+        {
+            scoped.clear();
+        }
+        for(auto& tracing_flag : m_scope_tracing)
+        {
+            tracing_flag.store(true, std::memory_order_relaxed);
+        }
     }
 }
 
@@ -40,39 +53,58 @@ session::subscribe(subscriber sub)
 }
 
 void
-session::register_trigger(std::string_view name, action initial)
+session::register_trigger(std::string_view name, action initial, scope event_scope)
 {
-    apply_locked_transition([&] { m_actions[std::string{ name }] = initial; }, name);
+    apply_locked_transition(
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)][std::string{ name }] =
+                initial;
+        },
+        name, event_scope);
 }
 
 void
-session::unregister_trigger(std::string_view name)
+session::unregister_trigger(std::string_view name, scope event_scope)
 {
-    apply_locked_transition([&] { m_actions.erase(std::string{ name }); }, name);
+    apply_locked_transition(
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)].erase(std::string{ name });
+        },
+        name, event_scope);
 }
 
 void
-session::set_action(std::string_view name, action act)
+session::set_action(std::string_view name, action act, scope event_scope)
 {
-    apply_locked_transition([&] { m_actions[std::string{ name }] = act; }, name);
+    apply_locked_transition(
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)][std::string{ name }] = act;
+        },
+        name, event_scope);
 }
 
 void
 session::apply_locked_transition(const std::function<void()>& mutate,
-                                 std::string_view             name)
+                                 std::string_view name, scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    // Serializes compute-then-notify across concurrent callers so subscribers
+    // observe transitions in the same order they were computed. Deliberately
+    // a separate mutex from m_actions_mutex (released below, before
+    // notify_pause()/notify_resume() run) so a subscriber callback that
+    // re-enters is_active()/is_active_without() cannot deadlock.
     const std::scoped_lock notify_lk{ m_notify_mutex };
 
-    bool was_active = false;
-    bool now_active = false;
+    const auto scope_idx  = static_cast<std::size_t>(event_scope);
+    bool       was_active = false;
+    bool       now_active = false;
     {
         const std::scoped_lock action_lk{ m_actions_mutex };
 
-        was_active = m_active.load(std::memory_order_relaxed);
+        was_active = m_scope_tracing[scope_idx].load(std::memory_order_relaxed);
         mutate();
-        now_active = resolve_locked();
-        m_active.store(now_active, std::memory_order_relaxed);
+        now_active = resolve_locked(event_scope);
+        m_scope_tracing[scope_idx].store(now_active, std::memory_order_relaxed);
     }
 
     if(was_active == now_active)
@@ -80,35 +112,59 @@ session::apply_locked_transition(const std::function<void()>& mutate,
         return;
     }
 
-    LOG_DEBUG("session: trigger '{}' {} the session", name,
+    LOG_DEBUG("session: trigger '{}' {} its scope", name,
               now_active ? "resumed" : "paused");
 
     if(now_active)
     {
-        notify_resume();
+        notify_resume(event_scope);
     }
     else
     {
-        notify_pause();
+        notify_pause(event_scope);
     }
 }
 
-// Any pause action pauses the session. Skip is ignored.
-// With no actions the session is active by default.
+// Any pause action within the given scope pauses that scope. Skip is
+// ignored. With no actions for the scope, the scope is active by default.
 bool
-session::resolve_locked() const noexcept
+session::resolve_locked(scope event_scope) const noexcept
 {
+    const auto& scoped = m_actions[static_cast<std::size_t>(event_scope)];
     return std::ranges::none_of(
-        m_actions, [](const auto& entry) { return entry.second == action::pause; });
+        scoped, [](const auto& entry) { return entry.second == action::pause; });
 }
 
+bool
+session::is_active_without(std::string_view name, scope event_scope) const noexcept
+{
+    const std::scoped_lock actions_lk{ m_actions_mutex };
+    const auto&            scoped = m_actions[static_cast<std::size_t>(event_scope)];
+    return std::ranges::none_of(scoped, [name](const auto& entry) {
+        return entry.first != name && entry.second == action::pause;
+    });
+}
+
+namespace
+{
+bool
+listens_to(const subscriber& sub, scope event_scope)
+{
+    return sub.scopes.contains(event_scope);
+}
+}  // namespace
+
 void
-session::notify_pause()
+session::notify_pause(scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     const std::scoped_lock notify_lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
+        if(!listens_to(sub, event_scope))
+        {
+            continue;
+        }
         LOG_DEBUG("session: pausing subscriber '{}'", sub.name);
         if(sub.on_pause)
         {
@@ -118,12 +174,22 @@ session::notify_pause()
 }
 
 void
-session::notify_resume()
+session::notify_resume(scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     const std::scoped_lock notify_lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
+        if(!listens_to(sub, event_scope))
+        {
+            continue;
+        }
+        const bool all_active =
+            sub.scopes.all_of([this](scope listened) { return is_active(listened); });
+        if(!all_active)
+        {
+            continue;
+        }
         LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
         if(sub.on_resume)
         {

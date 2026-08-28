@@ -15,24 +15,32 @@
 
 namespace rocprofsys::control::triggers
 {
+/// A time_window's delay/duration schedule. Clock-agnostic - the same specs
+/// can be handed to a time_window<Clock> for any Clock.
+struct time_window_specs
+{
+    clock_duration delay{};
+    clock_duration duration{};
+};
+
 template <typename Clock>
 class time_window
 {
 public:
-    time_window(std::shared_ptr<session> sess, Clock& clk, clock_duration delay,
-                clock_duration duration)
+    time_window(std::shared_ptr<session> sess, Clock& clk, time_window_specs specs,
+                scope event_scope = scope::global)
     : m_session{ std::move(sess) }
     , m_clock{ clk }
-    , m_delay{ delay }
-    , m_duration{ duration }
+    , m_specs{ specs }
+    , m_scope{ event_scope }
     {
-        m_session->register_trigger(trigger_name, initial_action(delay, duration));
+        m_session->register_trigger(trigger_name, initial_action(m_specs), m_scope);
     }
 
     ~time_window()
     {
         stop();
-        m_session->unregister_trigger(trigger_name);
+        m_session->unregister_trigger(trigger_name, m_scope);
     }
 
     time_window(const time_window&)            = delete;
@@ -59,11 +67,6 @@ public:
         m_thread = std::thread{ [this]() { worker(); } };
     }
 
-    /// Interrupt the clock and join the worker thread. Idempotent.
-    /// m_thread.join() can only throw if joinable() is false (guarded above)
-    /// or if called from the worker thread itself, which never happens -
-    /// stop() is only ever invoked from the owning thread (including via
-    /// the destructor), never from worker().
     void stop() noexcept
     {
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
@@ -81,19 +84,18 @@ private:
 
     std::shared_ptr<session> m_session;
     Clock&                   m_clock;
-    const clock_duration     m_delay;
-    const clock_duration     m_duration;
+    const time_window_specs  m_specs;
+    const scope              m_scope;
     std::thread              m_thread;
     std::mutex               m_lifecycle_mutex;
 
-    [[nodiscard]] static action initial_action(clock_duration delay,
-                                               clock_duration duration) noexcept
+    [[nodiscard]] static action initial_action(const time_window_specs& specs) noexcept
     {
-        if(delay > clock_duration::zero())
+        if(specs.delay > clock_duration::zero())
         {
             return action::pause;
         }
-        if(duration > clock_duration::zero())
+        if(specs.duration > clock_duration::zero())
         {
             return action::trace;
         }
@@ -102,7 +104,8 @@ private:
 
     [[nodiscard]] bool has_window() const noexcept
     {
-        return m_delay > clock_duration::zero() || m_duration > clock_duration::zero();
+        return m_specs.delay > clock_duration::zero() ||
+               m_specs.duration > clock_duration::zero();
     }
 
     void worker()
@@ -110,26 +113,26 @@ private:
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         const auto current_ts   = m_clock.now();
-        const bool has_delay    = m_delay > clock_duration::zero();
-        const bool has_duration = m_duration > clock_duration::zero();
+        const bool has_delay    = m_specs.delay > clock_duration::zero();
+        const bool has_duration = m_specs.duration > clock_duration::zero();
 
         if(has_delay)
         {
-            if(!m_clock.sleep_until(current_ts + m_delay))
+            if(!m_clock.sleep_until(current_ts + m_specs.delay))
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::trace);
+            m_session->set_action(trigger_name, action::trace, m_scope);
         }
 
         if(has_duration)
         {
-            const auto end = current_ts + m_delay + m_duration;
+            const auto end = current_ts + m_specs.delay + m_specs.duration;
             if(!m_clock.sleep_until(end))
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::pause);  // terminal
+            m_session->set_action(trigger_name, action::pause, m_scope);  // terminal
         }
     }
 };
