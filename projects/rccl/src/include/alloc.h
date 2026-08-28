@@ -641,8 +641,9 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
     cudaStream_t sidestream = nullptr, zeroStream = nullptr;
     NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
     zeroStream = sidestream;
-    if (sidestream == nullptr)
+    if (sidestream == nullptr) {
       CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    }
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
     CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
   destroyStream:
