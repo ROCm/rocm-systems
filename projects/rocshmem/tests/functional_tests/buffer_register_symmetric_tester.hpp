@@ -45,8 +45,10 @@ class BufferRegisterSymmetricTester : public Tester {
   bool skip_{false};
   bool pass_{true};
   void *original_{nullptr};
-  int *alias_{nullptr};
+  unsigned char *alias_{nullptr};
+  unsigned char *source_{nullptr};
   size_t allocation_size_{0};
+  size_t worker_count_{0};
 #if HIP_VERSION >= 70200000
   hipMemGenericAllocationHandle_t handle_{};
 #endif
