@@ -1995,7 +1995,7 @@ void VFmaMixloBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     float result = std::fma(a, b, c);
     if (inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
 }
@@ -2041,7 +2041,7 @@ RJ_NOINLINE void VFmaMixloBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
     float result = std::fma(a, b, c);
     if (inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
   dpp_write_mask_scope_.restore();
@@ -2077,7 +2077,7 @@ void VFmaMixhiBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     float result = std::fma(a, b, c);
     if (inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
 }
@@ -2123,7 +2123,7 @@ RJ_NOINLINE void VFmaMixhiBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
     float result = std::fma(a, b, c);
     if (inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
   dpp_write_mask_scope_.restore();
