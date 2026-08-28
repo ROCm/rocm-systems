@@ -62,6 +62,9 @@ extern std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSe
 
 extern std::function<ncclResult_t(struct ncclShadowPool*, size_t, void**, void**, hipStream_t)> g_shadowPoolAlloc;
 extern std::function<ncclResult_t(struct ncclShadowPool*, void*, hipStream_t)> g_shadowPoolFree;
+extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
+                                  struct ncclSegmentWindow**)>
+    g_devrAllocAndPopulateSegmentWindows;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_rmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>

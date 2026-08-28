@@ -303,10 +303,17 @@ std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSi
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments) {
   return g_devrPopulateSegmentSizes(mem, numSegments);
 }
-ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
-                                                    struct ncclSegmentWindow** out) {
+static ncclResult_t DefaultDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*,
+                                                              hipStream_t, struct ncclSegmentWindow** out) {
   if (out) *out = nullptr;
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t, struct ncclSegmentWindow**)>
+    g_devrAllocAndPopulateSegmentWindows = DefaultDevrAllocAndPopulateSegmentWindows;
+
+ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
+                                                    hipStream_t stream, struct ncclSegmentWindow** out) {
+  return g_devrAllocAndPopulateSegmentWindows(devr, mem, stream, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,5 +561,6 @@ void ResetDevRuntimeFakes() {
   g_shadowPoolAlloc                         = DefaultShadowPoolAlloc;
   g_shadowPoolFree                          = DefaultShadowPoolFree;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
+  g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
 }

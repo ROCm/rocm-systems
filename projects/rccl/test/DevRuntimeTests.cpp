@@ -2300,6 +2300,165 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs
 
 
 // ---------------------------------------------------------------------------
+// symWindowCreate builds a window over a slice of an existing memory: fill the
+// device-side descriptor, publish it into the 32-entry window table (chaining a
+// new table when the current one is full), and insert into the address-sorted
+// window list.
+//
+// The shadow-pool fake returns one buffer for both device and host and makes
+// ToHost the identity, so the table walk operates on real memory here.
+
+class SymWindowCreateTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrMemory mem{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 7;
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 1;
+    devr->lsaSize = 2;
+    devr->bigSize = size_t(1) << 33;  // 8GB, so stride4G is a non-trivial 2
+    devr->lsaFlatBase = reinterpret_cast<void*>(0x40000000);
+
+    mem.bigOffset = 4096;
+    mem.numGinSegments = 3;
+  }
+
+  void TearDown() override {
+    ncclDevrState* devr = &comm->devrState;
+    for (int i = 0; i < devr->winSortedCount; i++) free(devr->winSorted[i].win);
+    free(devr->winSorted);
+    devr->winSorted = nullptr;
+    devr->winSortedCount = devr->winSortedCapacity = 0;
+    // The table is a chain of shadow-pool buffers, which the fake calloc'd.
+    ncclDevCommWindowTable* t = devr->windowTable;
+    while (t != nullptr) {
+      ncclDevCommWindowTable* next = t->next;
+      free(t);
+      t = next;
+    }
+    devr->windowTable = nullptr;
+    ResetDevRuntimeFakes();
+  }
+
+  ncclResult_t Create(void* userPtr, size_t userSize, size_t memOffset = 0,
+                      ncclWindow_vidmem** outWinDev = nullptr, ncclDevrWindow** outWin = nullptr) {
+    return symWindowCreate(comm, &mem, memOffset, userPtr, userSize, /*winFlags=*/0, /*localReg=*/nullptr,
+                           outWinDev, outWin, nullptr);
+  }
+};
+
+// The device-side descriptor is the function's real output. Each field is
+// derived from a different input, so a swapped assignment would show here and
+// nowhere else.
+TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
+  ncclWindow_vidmem* winDev = nullptr;
+  ncclDevrWindow* win = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 8192, /*memOffset=*/8192, &winDev, &win), ncclSuccess);
+  ASSERT_NE(winDev, nullptr);
+  ASSERT_NE(win, nullptr);
+
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(win->bigOffset, mem.bigOffset + 8192);  // memory's offset plus ours
+  EXPECT_EQ(win->size, 8192u);
+  EXPECT_EQ(win->memory, &mem);
+  // dev == host under the shadow-pool fake, so winDev is readable directly.
+  EXPECT_EQ(winDev->lsaFlatBase, static_cast<char*>(devr->lsaFlatBase) + win->bigOffset);
+  EXPECT_EQ(winDev->mcOffset4K, win->bigOffset >> 12);
+  EXPECT_EQ(winDev->stride4G, devr->bigSize >> 32);
+  EXPECT_EQ(winDev->lsaRank, devr->lsaSelf);
+  EXPECT_EQ(winDev->worldRank, comm->rank);
+  EXPECT_EQ(winDev->winHost, static_cast<void*>(win));
+  EXPECT_EQ(winDev->ginOffset4K, 8192u >> 12);
+  EXPECT_EQ(winDev->numSegments, mem.numGinSegments);
+}
+
+// Branch: a caller with no VA of its own gets the LSA flat mapping.
+TEST_F(SymWindowCreateTest, NullUserPtr_DerivesFromLsaMapping) {
+  ncclDevrWindow* win = nullptr;
+  ASSERT_EQ(Create(nullptr, 4096, 0, nullptr, &win), ncclSuccess);
+
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(win->userPtr,
+            static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset);
+}
+
+// Branch: a caller-supplied VA is kept as is.
+TEST_F(SymWindowCreateTest, CallerUserPtr_IsKept) {
+  ncclDevrWindow* win = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &win), ncclSuccess);
+  EXPECT_EQ(win->userPtr, reinterpret_cast<void*>(0x100000));
+}
+
+// The window is published into the first free table slot, keyed by user address.
+TEST_F(SymWindowCreateTest, PublishesIntoWindowTable) {
+  ncclWindow_vidmem* winDev = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 8192, 0, &winDev), ncclSuccess);
+
+  ncclDevCommWindowTable* table = comm->devrState.windowTable;
+  ASSERT_NE(table, nullptr);
+  EXPECT_EQ(table->entries[0].base, 0x100000u);
+  EXPECT_EQ(table->entries[0].size, 8192u);
+  EXPECT_EQ(table->entries[0].window, winDev);
+}
+
+// Branch: the table holds 32 entries, so the 33rd window chains a new one.
+TEST_F(SymWindowCreateTest, FullTable_ChainsAnotherTable) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+  ASSERT_EQ(first->next, nullptr);  // still one table
+
+  ncclWindow_vidmem* winDev = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096, 0, &winDev), ncclSuccess);
+  ASSERT_NE(first->next, nullptr);
+  EXPECT_EQ(first->next->entries[0].window, winDev);
+}
+
+// The sorted list is keyed on user address, so windows created out of order are
+// still stored in address order.
+TEST_F(SymWindowCreateTest, InsertsIntoSortedListByAddress) {
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x300000), 4096), ncclSuccess);
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_EQ(devr->winSortedCount, 3);
+  EXPECT_EQ(devr->winSorted[0].userAddr, 0x100000u);
+  EXPECT_EQ(devr->winSorted[1].userAddr, 0x200000u);
+  EXPECT_EQ(devr->winSorted[2].userAddr, 0x300000u);
+}
+
+// Branch: the segment-window allocation fails, so nothing is published.
+TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
+  ScopedHook segWins(g_devrAllocAndPopulateSegmentWindows,
+                     [](ncclDevrState*, ncclDevrMemory*, hipStream_t, ncclSegmentWindow**) {
+                       return ncclSystemError;
+                     });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(comm->devrState.windowTable, nullptr);
+}
+
+// Branch: the descriptor allocation fails before any of it is filled in.
+TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
+  ScopedHook alloc(g_shadowPoolAlloc,
+                   [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
