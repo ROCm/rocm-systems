@@ -76,7 +76,8 @@ class AmdSmiErrorSeverity(enum.Enum):
              syntax / missing required target / permission). Continuing makes no
              sense because nothing device-specific succeeded.
     DEVICE - record the failure and keep iterating the remaining devices; the
-             process exit code is decided once at the end by ``finalize()``.
+             process exit code is decided once at the end by
+             ``AmdSmiErrorCollector.resolve_exit_code()``.
     """
 
     FATAL = "fatal"
