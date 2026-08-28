@@ -757,7 +757,7 @@ configure_settings(bool _init)
         "hipFile metrics to collect: bytes, ops, fastpath, fallback, unaligned, errors, "
         "bandwidth. Each name selects both the read and the write track. An empty value "
         "implies 'all' and 'none' suppresses all.",
-        "fastpath, fallback, bandwidth, bytes, errors", "backend", "hipfile", "rocm",
+        env_vars::HIPFILE_METRICS_DEFAULT, "backend", "hipfile", "rocm",
         "process_sampling");
 #endif
 
@@ -3753,14 +3753,9 @@ get_causal_mode()
         {
             auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-<<<<<<< HEAD
+                // NOLINTNEXTLINE(misc-include-cleaner)
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
                             mode, fmt::join(value->second->get_choices(), ", ")));
-=======
-                // NOLINTNEXTLINE(misc-include-cleaner)
-                fmt::format("[get_causal_mode] invalid causal mode {}. Choices: {}",
-                            _mode, fmt::join(_v->second->get_choices(), ", ")));
->>>>>>> b8bec21474 (Fix clang-tidy Part 3)
         }
         return state::process::CausalMode::function;
     }();

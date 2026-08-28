@@ -52,6 +52,8 @@ namespace rocprofsys::trace_cache
 // metrics::query_failed is deliberately not carried: cache_policy::store_sample drops a
 // failed query before it reaches the buffer, so every stored sample has it false and the
 // default-constructed value round-trips correctly.
+// Field order after timestamp is metrics member order, excluding query_failed (dropped
+// before store). serialize, deserialize, and get_size must list the same fields.
 template <>
 inline void
 serialize(std::uint8_t* buffer, const pmc::collectors::hipfile::sample& item)

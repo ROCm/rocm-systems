@@ -172,18 +172,23 @@ def require_hipfile_collector(rocprof_config: RocprofsysConfig) -> None:
         )
 
 
-@pytest.mark.usefixtures("require_hipfile_io")
+@pytest.mark.usefixtures("require_hipfile_io", "require_hipfile_collector")
 @pytest.mark.class_name("hipfile-io")
 class TestHipFileTelemetry(RocprofsysTest):
-    """Tests for hipFile I/O telemetry (Perfetto and ROCPD)."""
+    """Tests for hipFile I/O telemetry (Perfetto and ROCPD).
+
+    ``hipfile-io`` can exist without the in-tree collector (older/basic hipFile
+    at configure time). Both fixtures are required so that configuration skips
+    rather than failing on missing ``ROCPROFSYS_*HIPFILE*`` settings.
+    """
 
     @pytest.mark.timeout(30)
     def test_settings_present(self, rocprof_config: RocprofsysConfig):
         """hipFile settings must be listed by ``rocprof-sys-avail --settings``.
 
-        These settings are only registered when hipFile support is compiled in,
-        so their presence proves the collector is in the binaries. No GPU-direct
-        storage hardware is required.
+        These settings are only registered when hipFile support is compiled in.
+        No GPU-direct storage hardware is required. The class-level collector
+        fixture skips when they are absent; this asserts both names appear.
         """
         result = subprocess.run(
             [str(rocprof_config.rocprofsys_avail), "--settings"],
@@ -202,7 +207,6 @@ class TestHipFileTelemetry(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
-    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.rocpd("hipfile_telemetry_env")
     def test_telemetry(self, hipfile_telemetry_env, hipfile_telemetry_rules):
         """Run hipfile-io and validate hipFile counters in ROCPD + Perfetto."""
@@ -230,16 +234,15 @@ class TestHipFileTelemetry(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
-    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.rocpd("hipfile_default_metrics_env")
     def test_default_metric_selection(self, hipfile_default_metrics_env):
         """
         Leave ROCPROFSYS_HIPFILE_METRICS unset and check what a user gets for free.
 
         The default registered for the setting is ``fastpath, fallback, bandwidth, bytes,
-        errors``, so those ten tracks must be present without any opt-in. That the
-        remaining groups stay off is pinned by the collector unit tests, which can inspect the
-        emitted set directly.
+        errors``, so those ten tracks must be present without any opt-in. Ops and
+        unaligned are not part of that default; this test does not assert their
+        absence.
 
         The fastpath, fallback, and error counters are asserted on presence rather than value:
         which path pair is non-zero is a property of the storage under the test, not of the
@@ -275,7 +278,6 @@ class TestHipFileTelemetry(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
-    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.rocpd("hipfile_fallback_env")
     def test_telemetry_fallback_path(self, hipfile_fallback_env, hipfile_telemetry_rules):
         """
