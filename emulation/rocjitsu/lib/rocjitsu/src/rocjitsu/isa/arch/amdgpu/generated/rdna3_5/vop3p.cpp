@@ -1023,6 +1023,7 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
@@ -1085,6 +1086,7 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   src_operands_[3] = &vdst;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
@@ -1153,6 +1155,7 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   src_operands_[3] = &vdst;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)

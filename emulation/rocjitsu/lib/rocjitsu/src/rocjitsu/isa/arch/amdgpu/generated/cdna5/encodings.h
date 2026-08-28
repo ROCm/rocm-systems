@@ -815,8 +815,8 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3p_disassembly(
-        out, inst->opsel, inst->opsel_hi | (inst->opsel_hi_2 << 2), inst->neg, inst->neg_hi,
-        inst->clamp, vop3p_encoded_source_count(),
+        out, inst->opsel, inst->opsel_hi | (inst->opsel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
         inst_.op <= 17 || (inst_.op >= 20 && inst_.op <= 21) ||
             (inst_.op >= 27 && inst_.op <= 31) || inst_.op == 35 ||
             (inst_.op >= 40 && inst_.op <= 50) || (inst_.op >= 54 && inst_.op <= 57));

@@ -4167,6 +4167,107 @@ def test_generated_sendmsg_return_selectors_are_not_literals(
             assert 'LiteralSupport::None, 0' in sendmsg_decode
 
 
+def test_generated_rdna3_5_sendmsg_return_uses_symbolic_disassembly(
+    amdgpu_generated_root: Path,
+):
+    operand = (
+        amdgpu_generated_root / _generated_dir_name('rdna3_5') / 'operand.cpp'
+    ).read_text()
+    start = operand.index('case OperandType::OPR_SENDMSG_RTN:')
+    end = operand.index('case OperandType::OPR_SIMM16:', start)
+    sendmsg_return = operand[start:end]
+
+    assert 'return "sendmsg(MSG_RTN_GET_DOORBELL)";' in sendmsg_return
+    assert 'return std::format("sendmsg({}, 0, 0)", value);' in sendmsg_return
+
+
+def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
+    rdna3 = Rdna3Profile()
+    rdna3_5 = Rdna3_5Profile()
+
+    assert not rdna3.renders_gfx11_image_syntax
+    assert not rdna3.split_ds_2addr_offsets
+    assert not rdna3.vop3p_absolute_source_instructions
+    assert not rdna3.sendmsg_return_symbolic
+    assert rdna3_5.renders_gfx11_image_syntax
+    assert rdna3_5.split_ds_2addr_offsets
+    assert rdna3_5.vop3p_absolute_source_instructions == frozenset(
+        {'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'}
+    )
+    assert rdna3_5.gfx11_mimg_gather_style_instructions == frozenset(
+        {'IMAGE_MSAA_LOAD'}
+    )
+    assert rdna3_5.gfx11_mimg_fixed_vdata_words == {
+        'IMAGE_BVH_INTERSECT_RAY': 4,
+        'IMAGE_BVH64_INTERSECT_RAY': 4,
+    }
+    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == {
+        'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+        'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+    }
+    assert rdna3_5.gfx11_mimg_nsa_group_words == {
+        'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+        'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+    }
+    assert rdna3_5.sendmsg_return_symbolic
+
+
+def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
+    generated_root = amdgpu_generated_root / _generated_dir_name('rdna3_5')
+    encodings = (generated_root / 'encodings.cpp').read_text()
+    encodings_h = (generated_root / 'encodings.h').read_text()
+    encoding_model = encodings_h + '\n' + encodings
+    mimg = (generated_root / 'mimg.cpp').read_text()
+    vop1 = (generated_root / 'vop1.cpp').read_text()
+
+    assert 'if (!omits_gfx11_mimg_dim_dmask())' in encoding_model
+    assert 'out += "0123456789abcdef"[inst->dmask & 0xfu];' in encoding_model
+    assert 'nsa_vaddr_operand_ = vaddr;' in encoding_model
+    assert 'operand != nsa_vaddr_operand_' in encoding_model
+    assert 'gfx11_mimg_nsa_group_width' in encoding_model
+    assert 'const Operand *nsa_vaddr_operand_ = nullptr;' in encodings_h
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in mimg
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in mimg
+    assert 'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst)' in mimg
+    assert 'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in mimg
+    assert 'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true)' in mimg
+    assert 'vdata(128, OperandType::OPR_VGPR' in _generated_constructor_body(
+        mimg, 'ImageBvhIntersectRayMimg'
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+        _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+        _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
+    )
+    assert 'capture_nsa_words(inst, &vaddr);' in mimg
+    assert 'omit_repeated_destination_sources_ = true;' in _generated_constructor_body(
+        mimg, 'ImageAtomicSubMimg'
+    )
+    assert 'inst_.op >= 46 && inst_.op <= 47' in _generated_bool_method_body(
+        encodings, 'Ds', 'uses_split_ds_offsets'
+    )
+    assert 'out += \'-\';' in _generated_inline_method_body(
+        encodings_h, 'Vop3p', 'void append_src_operand'
+    )
+    assert 'out += "lit(";' in _generated_inline_method_body(
+        encodings_h, 'Vop3p', 'void append_src_operand'
+    )
+    assert 'inst_.op == 26' in _generated_inline_method_body(
+        encodings_h, 'Vop3p', 'void build_modifiers'
+    )
+    v_swap_ctor = _generated_constructor_body(vop1, 'VSwapB16Vop1')
+    assert (
+        '"v_swap_b16_dpp"' in v_swap_ctor
+        and ': "v_swap_b16"' in v_swap_ctor
+        and 'omit_repeated_destination_sources_ = true;' in v_swap_ctor
+        and 'OperandType::OPR_VGPR' in v_swap_ctor
+        and 'reinterpret_cast<const OpEncoding *>(inst)->src0 & 0xffu)' in v_swap_ctor
+        and 'true, true);' in v_swap_ctor
+        and '& 0x7fu' not in v_swap_ctor
+    )
+
+
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):
