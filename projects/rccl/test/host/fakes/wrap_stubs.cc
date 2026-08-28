@@ -8,11 +8,10 @@
 // into rccl-UnitTestsMicro alongside p2p.cc/rma_proxy_progress.cc's own
 // tests. #include-ing the whole 1771-line rccl_wrap.cc (via WRAP_CC_PATH)
 // pulls in the DDA / CE / symmetric-kernel / hierarchical backend-selection
-// machinery even though the current test batch only exercises a handful of
-// low-dependency helpers at the top of the file (see wrap-test.cc).
-// Everything below satisfies the link closure; entries the current tests
-// never reach default to abort()-on-call so an accidentally exercised path
-// fails fast instead of silently returning a wrong answer.
+// machinery even though the covered functions (see wrap-test.cc) don't reach
+// all of it yet. Everything below satisfies the link closure; entries the
+// current tests never reach default to abort()-on-call so an accidentally
+// exercised path fails fast instead of silently returning a wrong answer.
 //
 // Deliberately NOT reusing nccl_stubs.cc / bootstrap_stubs.cc / topo_stubs.cc
 // / transport_stubs.cc here: those are curated for init.cc and each already
@@ -25,11 +24,10 @@
 // rather than duplicated.
 //
 // RCCL_PARAM / NCCL_PARAM: every RCCL_PARAM(...) invocation textually inside
-// rccl_wrap.cc is redirected by wrap-test.cc to return its compile-time
-// default directly (no test in the current batch needs a specific param
-// value, so there is nothing yet to make per-test-controllable -- see
-// wrap-test.cc's redirector comment for the upgrade path) and needs no stub
-// here. The few ncclParamXxx / rcclParamXxx symbols rccl_wrap.cc declares
+// rccl_wrap.cc is redirected by wrap-test.cc to route through a g_loadParam
+// std::function hook (same mechanism as init-test.cc's redirect), so a test
+// can flip one param's value between cases -- see wrap-test.cc's redirector
+// comment. The few ncclParamXxx / rcclParamXxx symbols rccl_wrap.cc declares
 // `extern` and calls without a local RCCL_PARAM/NCCL_PARAM invocation (their
 // generator lives in another .cc) are stubbed below instead.
 

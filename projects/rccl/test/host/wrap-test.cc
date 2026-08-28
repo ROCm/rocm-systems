@@ -11,15 +11,25 @@
 // callable, links NO librccl/HIP, and satisfies every external symbol via
 // fakes/wrap_stubs.cc.
 //
-// Covers 17 low-dependency helpers: nine that take no ncclComm* at all, or
-// touch only a handful of plain fields, plus eight more that need a real
-// one-GPU comm+topology (MakeCommWithArch below) but still avoid RCCL_PARAM/
-// getenv/DDA/CE/symmetric-kernel machinery beyond a cached fast-return path.
-// rcclOverrideChannels, rcclSetPipelining, the WarpSpeed helpers, and
-// rcclSelectAllReduce/AllGather/ReduceScatter are unreached by design; each
-// depends on seams this file doesn't build. Mutation-tested directly against
-// this file; residuals are documented at their own test below rather than
-// here.
+// Covers most of rccl_wrap.cc's low- and medium-dependency functions,
+// reached through plain comm/topology setup (MakeCommWithArch below) plus a
+// handful of controllable seams (RCCL_PARAM via g_loadParam below, a
+// settable getenv/ncclGetEnv fake, and a few settable hooks -- all in
+// fakes/wrap_stubs.cc).
+//
+// Not yet covered, each documented further at its own would-be test site or
+// in fakes/wrap_stubs.cc: rcclSetPipelining; the WarpSpeed helpers (not even
+// compiled into this binary -- ENABLE_WARP_SPEED is off); and the High-tier
+// group that shares the DDA/CE/symmetric-kernel abort-floor surface --
+// rcclSelectAllReduce/AllGather/ReduceScatter, rcclHierarchicalAlgoInfo,
+// rcclGetAlgoInfo, rcclGetCollImplInfo, and the deep (post-guard) path of
+// rcclSymkQuery/rcclSymKGetInfo. All of these need several abort floors in
+// fakes/wrap_stubs.cc upgraded to controllable hooks first, which is a
+// larger, separate piece of work.
+//
+// Mutation-tested directly against this file; residuals and equivalent
+// mutants found along the way are documented at their own test below
+// rather than here.
 
 #include <gtest/gtest.h>
 
