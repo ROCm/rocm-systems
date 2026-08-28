@@ -1714,8 +1714,9 @@ class TestGpuBenchmark(unittest.TestCase):
 
     def test_performance_get_gpu_reg_table_info(self):
         self.common.print_func_name("")
-        if self.common.TODO_SKIP_FAIL:
-            self.skipTest("Skipping test_performance_get_gpu_reg_table_info as it fails on MI300.")
+        self.skipTest(
+            "Skipping test_performance_get_gpu_reg_table_info as it causes resets on some MI3x systems."
+        )
 
         for i, processor in enumerate(self.processors):
             for reg_type_name, reg_type, reg_type_cond in common.REG_TYPES:
