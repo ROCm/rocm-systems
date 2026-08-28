@@ -40,13 +40,22 @@ _ADDITIONS_ATTRIBUTES = {
 }
 _ID_PATTERN = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
 _INSTRUCTION_NAME_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_]*\Z')
-# These operands name extension words that the generator patches explicitly;
-# they are intentionally absent from the implied-literal form's parent bitmap.
-_IMPLIED_LITERAL_OPERAND_FIELDS = frozenset({'literal', 'literal64', 'simm32'})
 
 
 class IsaAdditionError(ValueError):
     """An ISA additions document is malformed or conflicts with its base XML."""
+
+
+@dataclass(frozen=True)
+class _ImpliedLiteralOperandContract:
+    """Identity and role of an implied-literal operand established by the base."""
+
+    field_name: str
+    operand_type: str
+    is_input: bool
+    is_output: bool
+    is_implicit: bool
+    is_binary_microcode_required: bool
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,7 @@ class _EncodingDefinition:
     decoded_opcodes: frozenset[int]
     condition_ids: dict[str, frozenset[str]]
     operand_field_names: frozenset[str]
+    implied_literal_operand_contracts: set[_ImpliedLiteralOperandContract]
     parent_name: str | None
     is_implied_literal: bool
 
@@ -141,6 +151,29 @@ def _required_decimal(text: str, context: str) -> int:
     except ValueError as error:
         raise IsaAdditionError(f'{context}: invalid decimal value {text!r}') from error
     return value
+
+
+def _implied_literal_operand_contract(
+    operand: elem_tree.Element,
+    enc_name: str,
+    profile: IsaProfile,
+    context: str,
+) -> _ImpliedLiteralOperandContract:
+    raw_field_name = _required_text(operand, xs.FIELD_NAME, context).lower()
+    operand_type = _required_text(operand, xs.OPERAND_TYPE, context)
+    return _ImpliedLiteralOperandContract(
+        field_name=profile.normalize_operand_field_name(enc_name, raw_field_name),
+        operand_type=profile.normalize_operand_type(
+            enc_name, raw_field_name, operand_type
+        ),
+        is_input=operand.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true',
+        is_output=operand.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true',
+        is_implicit=operand.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true',
+        is_binary_microcode_required=(
+            operand.attrib[xs.OPERAND_ATTR_IS_BINARY_MICROCODE_REQUIRED].lower()
+            == 'true'
+        ),
+    )
 
 
 def _validate_node_shape(
@@ -638,6 +671,7 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
             decoded_opcodes=frozenset(decoded_opcodes),
             condition_ids=condition_ids,
             operand_field_names=operand_field_names,
+            implied_literal_operand_contracts=set(),
             parent_name=parent_name,
             is_implied_literal=is_implied_literal,
         )
@@ -688,6 +722,25 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
                 if condition_id is not None:
                     ids.add(condition_id)
                 encoding_definition.condition_ids[condition] = frozenset(ids)
+                if encoding_definition.is_implied_literal:
+                    operands = encoding.find(xs.OPERANDS)
+                    if operands is not None:
+                        for operand in operands:
+                            if operand.find(xs.FIELD_NAME) is None:
+                                continue
+                            contract = _implied_literal_operand_contract(
+                                operand,
+                                enc_name,
+                                profile,
+                                f'base instruction {name}/{enc_name} operand',
+                            )
+                            if (
+                                contract.field_name
+                                not in encoding_definition.operand_field_names
+                            ):
+                                encoding_definition.implied_literal_operand_contracts.add(
+                                    contract
+                                )
             if encoding_definition is None or profile.skip_inst_encoding(
                 enc_name, condition
             ):
@@ -1019,21 +1072,27 @@ def _validate_instruction_addition(
             if field_node is None or encoding_definition is None:
                 continue
             field_name = _required_text(operand, xs.FIELD_NAME, operand_context)
-            normalized_field_name = profile.normalize_operand_field_name(
-                enc_name, field_name.lower()
+            contract = _implied_literal_operand_contract(
+                operand, enc_name, profile, operand_context
             )
-            is_implied_literal_field = (
-                encoding_definition.is_implied_literal
-                and normalized_field_name in _IMPLIED_LITERAL_OPERAND_FIELDS
-            )
-            if (
-                normalized_field_name not in encoding_definition.operand_field_names
-                and not is_implied_literal_field
-            ):
+            if contract.field_name in encoding_definition.operand_field_names:
+                continue
+            if contract in encoding_definition.implied_literal_operand_contracts:
+                continue
+            established_implied_literal_fields = {
+                item.field_name
+                for item in encoding_definition.implied_literal_operand_contracts
+            }
+            if contract.field_name in established_implied_literal_fields:
                 raise IsaAdditionError(
                     f'{context}: instruction {name!r}/{enc_name} references '
-                    f'unknown operand field {field_name!r}'
+                    f'implied-literal operand field {field_name!r} with a type or '
+                    'role not established by the base XML'
                 )
+            raise IsaAdditionError(
+                f'{context}: instruction {name!r}/{enc_name} references '
+                f'unknown operand field {field_name!r}'
+            )
 
     addition = deepcopy(instruction)
     addition.attrib[ADDITION_SOURCE_ATTR] = addition_id
@@ -1321,11 +1380,19 @@ def apply_isa_additions(
 
     reachable = _reachable_opcodes(encodings, pending_identifiers)
     for addition in pending_instructions:
-        for enc_name, opcode, condition in addition.forms:
-            if enc_name in profile.skip_encodings or profile.skip_inst_encoding(
-                enc_name, condition
-            ):
-                continue
+        active_forms = [
+            form
+            for form in addition.forms
+            if form[0] not in profile.skip_encodings
+            and not profile.skip_inst_encoding(form[0], form[2])
+        ]
+        if not active_forms:
+            raise IsaAdditionError(
+                f'{addition.path}: additions document {addition.addition_id!r} '
+                f'instruction {addition.name!r} has no encoding form active in '
+                'the selected ISA profile'
+            )
+        for enc_name, opcode, _condition in active_forms:
             if opcode not in reachable[enc_name]:
                 raise IsaAdditionError(
                     f'{addition.path}: additions document '

@@ -462,6 +462,24 @@ class Parser:
         self._inject_s_waitcnt_compat()
         self._inject_cdna5_permlane64_compat()
 
+    def _compatibility_instruction_slot(
+        self, expected_instruction_name: str
+    ) -> tuple[str, int, str]:
+        """Return the profile-owned instruction triple for its injector."""
+        slots = self.profile.compatibility_instruction_slots
+        matches = [
+            (enc_name, opcode, instruction_name)
+            for (enc_name, opcode), instruction_name in slots.items()
+            if instruction_name == expected_instruction_name
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f'{self.isa_spec.arch_name} profile must declare exactly one '
+                f'compatibility instruction named {expected_instruction_name}, '
+                f'found {matches}'
+            )
+        return matches[0]
+
     def _inject_s_waitcnt_compat(self) -> None:
         """Add the legacy monolithic S_WAITCNT accepted by LLVM on GFX12."""
         if self.isa_spec.arch_name != 'rdna4':
@@ -470,29 +488,35 @@ class Parser:
         # The RDNA4/GFX12 XML only lists split S_WAIT_* instructions, but LLVM
         # still accepts and emits the monolithic SOPP opcode-9 S_WAITCNT
         # compatibility form for sources such as "s_waitcnt lgkmcnt(0)".
-        enc = self.isa_spec.encoding_map.get('ENC_SOPP')
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'S_WAITCNT'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
         if enc is None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility injection requires ENC_SOPP'
+                f'RDNA4 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
             )
         if enc.primary_dt_ptrs is None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility injection requires an ENC_SOPP '
-                'primary decode route table'
+                f'RDNA4 {instruction_name} compatibility injection requires an '
+                f'{enc_name} primary decode route table'
             )
-        opcode = 9
-        if any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in enc.insts):
+        if any(
+            inst.name == instruction_name and inst.opcode == opcode
+            for inst in enc.insts
+        ):
             return
         occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
         if occupied is not None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility opcode 9 is already occupied by '
-                f'{occupied.name}'
+                f'RDNA4 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
             )
         if len(enc.primary_dt_ptrs) <= opcode:
             raise ValueError(
-                'RDNA4 ENC_SOPP primary decode route table does not contain '
-                'S_WAITCNT opcode 9'
+                f'RDNA4 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
@@ -509,31 +533,33 @@ class Parser:
             }
             if not matching_dt_ptrs:
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 has no ENC_SOPP primary decode route'
+                    f'RDNA4 {instruction_name} opcode {opcode} has no {enc_name} '
+                    'primary decode route'
                 )
             if len(matching_dt_ptrs) != 1:
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 requires exactly one unique '
-                    'ENC_SOPP primary decode route, found '
+                    f'RDNA4 {instruction_name} opcode {opcode} requires exactly '
+                    f'one unique {enc_name} primary decode route, found '
                     f'{sorted(matching_dt_ptrs)}'
                 )
             dt_ptr = matching_dt_ptrs.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
-                'RDNA4 S_WAITCNT opcode 9 resolves to invalid primary '
+                f'RDNA4 {instruction_name} opcode {opcode} resolves to invalid primary '
                 f'decode-table index {dt_ptr}'
             )
 
         dte = self.isa_spec.primary_decode_table[dt_ptr]
-        decode_func = 'decodeSWaitcntSopp'
         if dte.sub_decode_funcs is not None:
             if opcode >= len(dte.sub_decode_funcs):
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 is outside the selected subdecode table'
+                    f'RDNA4 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
                 )
             if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 subdecode slot is already occupied by '
+                    f'RDNA4 {instruction_name} opcode {opcode} subdecode slot is '
+                    'already occupied by '
                     f'{dte.sub_decode_funcs[opcode]}'
                 )
         elif (
@@ -541,13 +567,13 @@ class Parser:
             or getattr(dte, 'inst_name', None) is not None
         ):
             raise ValueError(
-                'RDNA4 S_WAITCNT terminal decode entry is already occupied'
+                f'RDNA4 {instruction_name} terminal decode entry is already occupied'
             )
 
         inst = Instruction(
-            'S_WAITCNT',
-            'ENC_SOPP',
-            9,
+            instruction_name,
+            enc_name,
+            opcode,
             [
                 Operand(
                     'simm16',
@@ -560,7 +586,7 @@ class Parser:
                     1,
                 )
             ],
-            available_encodings=frozenset({'ENC_SOPP'}),
+            available_encodings=frozenset({enc_name}),
         )
         insert_idx = next(
             (
@@ -594,32 +620,35 @@ class Parser:
         if self.isa_spec.arch_name != 'cdna5':
             return
 
-        enc = self.isa_spec.encoding_map.get('ENC_VOP1')
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'V_PERMLANE64_B32'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
         if enc is None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility injection requires ENC_VOP1'
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
             )
         if enc.primary_dt_ptrs is None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility injection requires '
-                'an ENC_VOP1 primary decode route table'
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'an {enc_name} primary decode route table'
             )
-        opcode = 103
         if any(
-            inst.name == 'V_PERMLANE64_B32' and inst.opcode == opcode
+            inst.name == instruction_name and inst.opcode == opcode
             for inst in enc.insts
         ):
             return
         occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
         if occupied is not None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility opcode 103 is already '
-                f'occupied by {occupied.name}'
+                f'CDNA5 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
             )
         if len(enc.primary_dt_ptrs) <= opcode:
             raise ValueError(
-                'CDNA5 ENC_VOP1 primary decode route table does not contain '
-                'V_PERMLANE64_B32 opcode 103'
+                f'CDNA5 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
@@ -633,40 +662,39 @@ class Parser:
             }
             if len(adjacent_routes) != 1:
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 requires exactly one '
-                    'adjacent ENC_VOP1 decode route'
+                    f'CDNA5 {instruction_name} opcode {opcode} requires exactly '
+                    f'one adjacent {enc_name} decode route'
                 )
             dt_ptr = adjacent_routes.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 opcode 103 resolves to invalid primary '
+                f'CDNA5 {instruction_name} opcode {opcode} resolves to invalid primary '
                 f'decode-table index {dt_ptr}'
             )
 
         dte = self.isa_spec.primary_decode_table[dt_ptr]
-        decode_func = 'decodeVPermlane64B32Vop1'
         if dte.sub_decode_funcs is not None:
             if opcode >= len(dte.sub_decode_funcs):
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 is outside the selected '
-                    'subdecode table'
+                    f'CDNA5 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
                 )
             if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 subdecode slot is already '
-                    f'occupied by {dte.sub_decode_funcs[opcode]}'
+                    f'CDNA5 {instruction_name} opcode {opcode} subdecode slot is '
+                    f'already occupied by {dte.sub_decode_funcs[opcode]}'
                 )
         elif (
             getattr(dte, 'decode_func', None) is not None
             or getattr(dte, 'inst_name', None) is not None
         ):
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 terminal decode entry is already occupied'
+                f'CDNA5 {instruction_name} terminal decode entry is already occupied'
             )
 
         inst = Instruction(
-            'V_PERMLANE64_B32',
-            'ENC_VOP1',
+            instruction_name,
+            enc_name,
             opcode,
             [
                 Operand(
@@ -692,7 +720,7 @@ class Parser:
                     'FMT_NUM_B32',
                 ),
             ],
-            available_encodings=frozenset({'ENC_VOP1'}),
+            available_encodings=frozenset({enc_name}),
         )
         insert_idx = next(
             (idx for idx, existing in enumerate(enc.insts) if existing.opcode > opcode),
@@ -702,6 +730,7 @@ class Parser:
         if patch_route:
             enc.primary_dt_ptrs[opcode] = dt_ptr
 
+        decode_func = f'decode{inst.fmt_name}'
         if dte.sub_decode_funcs is not None:
             dte.sub_decode_funcs[opcode] = decode_func
         else:

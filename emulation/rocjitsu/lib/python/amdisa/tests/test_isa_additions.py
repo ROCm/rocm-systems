@@ -494,6 +494,21 @@ def test_same_instruction_may_repeat_slot_when_only_one_condition_is_active(tmp_
     assert len(added.findall('./InstructionEncodings/InstructionEncoding')) == 2
 
 
+def test_instruction_requires_an_active_encoding_condition(tmp_path):
+    root = _base_root()
+    before = elem_tree.tostring(root)
+    instruction = _instruction().replace(
+        '<EncodingCondition>default</EncodingCondition>',
+        '<EncodingCondition>alternate</EncodingCondition>',
+    )
+    addition = _write_additions(tmp_path, instruction)
+
+    with pytest.raises(IsaAdditionError, match=r'no encoding form active'):
+        apply_isa_additions(root, [str(addition)], _PROFILE)
+
+    assert elem_tree.tostring(root) == before
+
+
 def test_unknown_encoding_condition_is_rejected_before_merge(tmp_path):
     root = _base_root()
     before = elem_tree.tostring(root)
@@ -863,6 +878,30 @@ def test_compatibility_instruction_slots_are_reserved_before_merge(
     assert elem_tree.tostring(root) == before
 
 
+def test_instruction_in_fully_skipped_encoding_is_rejected_before_merge(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_encoding_clone_additions(
+        tmp_path,
+        base_xml,
+        encoding_name='ENC_VOP3PX2',
+        instruction_name='SKIPPED_ADDITION',
+        opcode=52,
+    )
+    root = elem_tree.parse(base_xml).getroot()
+    before = elem_tree.tostring(root)
+
+    with pytest.raises(IsaAdditionError, match=r'no encoding form active'):
+        apply_isa_additions(root, [str(addition)], Cdna5Profile())
+
+    assert elem_tree.tostring(root) == before
+
+
 def _cdna1_mimg_identifier(opcode: int) -> str:
     value = list('00000000000000000000000000000000' '11110000000000000000000000000000')
     value[39:46] = f'{opcode:07b}'
@@ -1105,6 +1144,95 @@ def test_cdna5_unknown_operand_field_is_rejected_before_merge(tmp_path):
         apply_isa_additions(root, [str(addition)], Cdna5Profile())
 
     assert elem_tree.tostring(root) == before
+
+
+@pytest.mark.parametrize(
+    ('field_name', 'message'),
+    [
+        ('literal64', r"unknown operand field 'literal64'"),
+        (
+            'LITERAL',
+            r"implied-literal operand field 'LITERAL'.*type or role not established",
+        ),
+    ],
+)
+def test_cdna5_implied_literal_field_requires_an_established_contract(
+    tmp_path, field_name, message
+):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_cdna5_clone_additions(
+        tmp_path, base_xml, include_implied_literal=True
+    )
+    tree = elem_tree.parse(addition)
+    implied_literal = next(
+        encoding
+        for encoding in tree.findall(
+            './InstructionAdditions/Instruction/InstructionEncodings/'
+            'InstructionEncoding'
+        )
+        if encoding.findtext('EncodingName') == 'SOP1_INST_LITERAL'
+    )
+    destination = next(
+        operand
+        for operand in implied_literal.findall('./Operands/Operand')
+        if operand.findtext('FieldName') == 'SDST'
+    )
+    destination.find('FieldName').text = field_name
+    tree.write(addition, encoding='unicode')
+    root = elem_tree.parse(base_xml).getroot()
+    before = elem_tree.tostring(root)
+
+    with pytest.raises(IsaAdditionError, match=message):
+        apply_isa_additions(root, [str(addition)], Cdna5Profile())
+
+    assert elem_tree.tostring(root) == before
+
+
+def test_cdna5_implied_literal_contract_allows_a_new_value_shape(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_cdna5_clone_additions(
+        tmp_path,
+        base_xml,
+        add_identifiers=True,
+        include_implied_literal=True,
+    )
+    tree = elem_tree.parse(addition)
+    literal_operands = [
+        operand
+        for encoding in tree.findall(
+            './InstructionAdditions/Instruction/InstructionEncodings/'
+            'InstructionEncoding'
+        )
+        if encoding.findtext('EncodingName') == 'SOP1_INST_LITERAL'
+        for operand in encoding.findall('./Operands/Operand')
+        if operand.findtext('FieldName') == 'LITERAL'
+    ]
+    assert literal_operands
+    for operand in literal_operands:
+        operand.find('OperandSize').text = '128'
+        operand.find('DataFormatName').text = 'FMT_NUM_PK2_F64'
+    tree.write(addition, encoding='unicode')
+
+    spec = Parser(str(base_xml), Cdna5Profile(), [str(addition)]).parse()
+
+    added = next(
+        instruction
+        for instruction in spec.encoding_map['ENC_SOP1'].insts
+        if instruction.name == 'S_ADDITION_TEST_B32'
+    )
+    assert added.source_addition == spec.applied_additions[0]
 
 
 def test_cdna5_normalized_instruction_name_collision_is_rejected(tmp_path):

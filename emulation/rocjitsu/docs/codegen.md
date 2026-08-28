@@ -85,8 +85,9 @@ than a general XML patch:
   formats, encoding conditions, operand types, or data formats.
 - Added instructions must reference encodings, encoding conditions, operand
   types, and operand fields already defined by the applicable base encoding
-  layout. Established implied-literal operands are validated against their
-  parent layout and literal-extension contract.
+  layout. Implied-literal operands outside that layout are accepted only when
+  their normalized field, type, direction, and parser-role flags match an
+  implied-literal contract established by the base XML.
 - An identifier addition names its encoding and expected opcode. Its radix and
   width must match the base encoding; its fixed bits must match an existing
   identifier layout; and its decoded opcode must equal the declared opcode.
@@ -100,7 +101,7 @@ than a general XML patch:
   data, and base architecture/schema mismatches are errors. Repetition of one
   instruction's slot under distinct base-established MR-ISA encoding conditions
   is allowed only when profile filtering leaves at most one generated form
-  active.
+  active. Every added instruction must retain at least one active form.
 - Every input document and contained addition validates before the parser-owned
   tree is changed. Validated identifiers are merged before normal
   encoding/decode-table parsing, then instructions are appended in deterministic
