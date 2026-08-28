@@ -101,11 +101,8 @@ class SetValueCommands:
                 else:
                     static_dict["set_core_boost_limit"]["Response"] = f"{boost_limit} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_core_boost_limit"]["Response"] = (
-                    f"Error occurred for Core {core_id} - {e.get_error_info()}"
+                static_dict["set_core_boost_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"Core {core_id}"
                 )
                 logging.debug(
                     "Failed to set core boost limit for core %s | %s", core_id, e.get_error_info()
@@ -145,11 +142,8 @@ class SetValueCommands:
                 else:
                     static_dict["floor_limit"]["Response"] = f"Set, VALUE: {flimit} MHz, successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["floor_limit"]["Response"] = (
-                    f"Error occurred for Core {core_id} - {e.get_error_info()}"
+                static_dict["floor_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"Core {core_id}"
                 )
                 logging.debug(
                     "Failed to set core floor limit for core %s | %s", core_id, e.get_error_info()
@@ -194,11 +188,8 @@ class SetValueCommands:
                         f"Set, VALUE: {effflimit} MHz, successful"
                     )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["msr_floor_limit"]["Response"] = (
-                    f"Error occurred for Core {core_id} - {e.get_error_info()}"
+                static_dict["msr_floor_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"Core {core_id}"
                 )
                 logging.debug(
                     "Failed to set core MSR floor limit for core %s | %s",
@@ -375,11 +366,8 @@ class SetValueCommands:
                     f"{args.cpu_pwr_limit[0][0] / 1000:.3f} W"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_pwr_limit"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_pwr_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set power limit for cpu %s | %s", cpu_id, e.get_error_info()
@@ -395,11 +383,8 @@ class SetValueCommands:
                     f"{args.cpu_xgmi_link_width[0][0]} - {args.cpu_xgmi_link_width[0][1]}"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_xgmi_link_width"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_xgmi_link_width"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set xgmi link width for cpu %s | %s", cpu_id, e.get_error_info()
@@ -418,11 +403,8 @@ class SetValueCommands:
                     f"NBIO[{args.cpu_lclk_dpm_level[0][0]}]"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_lclk_dpm_level"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_lclk_dpm_level"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set lclk dpm level for cpu %s | %s", cpu_id, e.get_error_info()
@@ -463,11 +445,8 @@ class SetValueCommands:
                     "Set power efficiency mode operation successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["pwr_eff_mode"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["pwr_eff_mode"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set power efficiency mode for cpu %s | %s",
@@ -485,11 +464,8 @@ class SetValueCommands:
                     f"{args.cpu_gmi3_link_width[0][0]} - {args.cpu_gmi3_link_width[0][1]}"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_gmi3_link_width"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_gmi3_link_width"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set gmi3 link width for cpu %s | %s", cpu_id, e.get_error_info()
@@ -503,11 +479,8 @@ class SetValueCommands:
                 )
                 static_dict["set_pcie_link_rate"]["prev_mode"] = resp
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_pcie_link_rate"]["prev_mode"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_pcie_link_rate"]["prev_mode"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set pcie link rate for cpu %s | %s", cpu_id, e.get_error_info()
@@ -521,11 +494,8 @@ class SetValueCommands:
                 )
                 static_dict["set_df_pstate_range"]["response"] = "Set Operation successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_df_pstate_range"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_df_pstate_range"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set df pstate range for cpu %s | %s", cpu_id, e.get_error_info()
@@ -539,12 +509,7 @@ class SetValueCommands:
                     "Enabled DF - Pstate performance boost algorithm"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["apbenable"]["state"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
-                )
+                static_dict["apbenable"]["state"] = self.helpers.record_or_raise(e, f"CPU {cpu_id}")
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_disable_apb:
@@ -555,11 +520,8 @@ class SetValueCommands:
                     "Disabled DF - Pstate performance boost algorithm"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["apbdisable"]["state"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["apbdisable"]["state"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
@@ -571,11 +533,8 @@ class SetValueCommands:
                 )
                 static_dict["set_soc_boost_limit"]["Response"] = "Set Operation successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["set_soc_boost_limit"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_soc_boost_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set socket boost limit for cpu %s | %s", cpu_id, e.get_error_info()
@@ -591,11 +550,8 @@ class SetValueCommands:
                     f"Set, MIN_PSTATE: {args.cpu_xgmi_pstate_range[0][0]}, MAX_PSTATE: {args.cpu_xgmi_pstate_range[0][1]}, successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["xgmi_pstate_range"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["xgmi_pstate_range"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set xgmi pstate range for cpu %s | %s", cpu_id, e.get_error_info()
@@ -609,11 +565,8 @@ class SetValueCommands:
                 )
                 static_dict["railisofreq_policy"]["response"] = f"Set, VALUE: {resp}, successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["railisofreq_policy"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["railisofreq_policy"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set ISO frequency policy for cpu %s | %s", cpu_id, e.get_error_info()
@@ -627,11 +580,8 @@ class SetValueCommands:
                 )
                 static_dict["dfcstate_ctrl"]["response"] = f"Set, VALUE: {resp}, successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["dfcstate_ctrl"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["dfcstate_ctrl"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set dfcstate control for cpu %s | %s", cpu_id, e.get_error_info()
@@ -645,11 +595,8 @@ class SetValueCommands:
                     f"Set, VALUE: {args.cpu_pc6_enable[0][0]}, successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["pc6_enable"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["pc6_enable"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set PC6 enable for cpu %s | %s", cpu_id, e.get_error_info()
@@ -663,11 +610,8 @@ class SetValueCommands:
                     f"Set, VALUE: {args.cpu_cc6_enable[0][0]}, successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["cc6_enable"]["response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["cc6_enable"]["response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set CC6 enable for cpu %s | %s", cpu_id, e.get_error_info()
@@ -706,11 +650,8 @@ class SetValueCommands:
                 else:
                     static_dict["floor_limit"]["Response"] = f"Set, VALUE: {flimit} MHz, successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["floor_limit"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["floor_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set socket floor limit for cpu %s | %s", cpu_id, e.get_error_info()
@@ -753,11 +694,8 @@ class SetValueCommands:
                         f"Set, VALUE: {effflimit} MHz, successful"
                     )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["msr_floor_limit"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["msr_floor_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set CPU MSR floor limit for cpu %s | %s", cpu_id, e.get_error_info()
@@ -783,11 +721,8 @@ class SetValueCommands:
                     "Set DIMM sideband register write operation successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["dimm_sb_reg"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["dimm_sb_reg"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to write DIMM sideband register for cpu %s | %s",
@@ -804,11 +739,8 @@ class SetValueCommands:
                     f"Set, VALUE: {sdps_limit_watts:.3f} W, successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                self.helpers.error_collector.record_library_error(e.get_error_code())
-                static_dict["sdps_limit"]["Response"] = (
-                    f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["sdps_limit"]["Response"] = self.helpers.record_or_raise(
+                    e, f"CPU {cpu_id}"
                 )
                 logging.debug(
                     "Failed to set socket SDPS limit for cpu %s | %s", cpu_id, e.get_error_info()

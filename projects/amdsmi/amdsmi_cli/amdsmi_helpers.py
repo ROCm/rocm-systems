@@ -906,6 +906,23 @@ class AMDSMIHelpers:
                 raise PermissionError("Command requires elevation") from e
             self.error_collector.record_library_error(e.get_error_code())
 
+    def record_or_raise(self, exception, context=None):
+        """Record a per-device library failure, or raise when it is command-wide.
+
+        NO_PERM means the user needs elevation, which affects every device, so it
+        aborts instead of being recorded per device and retried. Every other status
+        is device-scoped: record it and let the caller continue.
+
+        Returns the per-device message when *context* names the device (e.g.
+        ``"CPU 3"``), so a caller can store it wherever it collects output.
+        """
+        if exception.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+            raise PermissionError("Command requires elevation") from exception
+        self.error_collector.record_library_error(exception.get_error_code())
+        if context is None:
+            return None
+        return f"Error occurred for {context} - {exception.get_error_info()}"
+
     def store_device_error(self, logger, device, key, message, exception=None, code=None):
         """Show a per-device error AND record it for the final exit code.
 
