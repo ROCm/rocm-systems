@@ -164,7 +164,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto restore_label = sequence.make_label();
   const auto fast_return_label = sequence.make_label();
   const auto matched_window_label = sequence.make_label();
-  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return std::nullopt;
+  const bool control_gfx1250_vgpr_bank = target->has_selectable_vgpr_bank;
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   // A patched s_call_i64 can be immediately followed by the guest's next

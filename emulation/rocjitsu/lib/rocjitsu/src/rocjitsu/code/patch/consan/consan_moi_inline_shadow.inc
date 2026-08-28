@@ -558,11 +558,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                                                                       : 0u)) *
                   sizeof(uint32_t)
             : 0u;
-    const uint64_t vgpr_msb_bytes = (consan_arch_has_selectable_vgpr_bank(arch) &&
-                                             candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u
-                                         ? (spill ? 4u : 2u) * sizeof(uint32_t)
-                                         : 0u) +
-                                    high_bank_capture_bytes;
+    const uint64_t vgpr_msb_bytes =
+        (target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u
+             ? (spill ? 4u : 2u) * sizeof(uint32_t)
+             : 0u) +
+        high_bank_capture_bytes;
     const uint32_t required_private_bytes =
         std::max({private_layout ? private_layout->ephemeral_base : 0u,
                   spill ? spill->total_private_bytes : 0u,
@@ -1916,7 +1916,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   if (relocate_instruction) {
     const bool capture_high_bank_address =
         moi_access_requires_high_bank_address_capture(candidate, arch);
-    const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
+    const bool select_guest_vgpr_bank = target->has_selectable_vgpr_bank &&
                                         candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u &&
                                         !capture_high_bank_address;
     if (select_guest_vgpr_bank)
@@ -2494,8 +2494,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   }
 
   std::vector<uint32_t> words;
-  const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
-                                      candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
+  const bool select_guest_vgpr_bank =
+      target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
   if (spill_backed_operand_recovery &&
@@ -2773,7 +2773,8 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
       moi_runtime_workgroup_selection_source(options, arch);
   const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
-  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||
       (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
        !moi_permits_literal_dispatch_identity(options, arch)))
     return std::nullopt;
@@ -2898,7 +2899,8 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
       moi_runtime_workgroup_selection_source(options, arch);
   const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
-  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||
       (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
        !moi_permits_literal_dispatch_identity(options, arch)))
     return std::nullopt;
@@ -2911,10 +2913,10 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // word for that engine without destroying the live call return. Sampled
   // returns with its ordinary indirect-PC pair and retains the established
   // residue slot.
-  const uint16_t residue =
-      options.moi_engine == ConSanMoiEngine::RecordReplay && consan_arch_has_s_call_i64(arch)
-          ? *options.moi_exec_save_sgpr
-          : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
+  const uint16_t residue = options.moi_engine == ConSanMoiEngine::RecordReplay &&
+                                   target->direct_call_form == ConSanDirectCallForm::SCallI64
+                               ? *options.moi_exec_save_sgpr
+                               : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t shift =
       scalar_positive_inline_u32(std::countr_zero(options.moi_runtime_sample_stride));
   const uint32_t mask = options.moi_runtime_sample_stride - 1u;

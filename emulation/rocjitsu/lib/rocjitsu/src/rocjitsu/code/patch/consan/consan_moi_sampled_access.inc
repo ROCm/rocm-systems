@@ -211,8 +211,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result, options, arch, resource_state, original_text, candidates,
-      consan_arch_has_selectable_vgpr_bank(arch) ? 0u : 64u, access_island_begin,
-      access_relay_words, use_indirect_appended, MoiDenseAccessRouteAbi::Sampled,
+      target->has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_relay_words,
+      use_indirect_appended, MoiDenseAccessRouteAbi::Sampled,
       local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
