@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -59,21 +60,21 @@ enum class InstCategory
 inline bool operator==(const InstCategory& cat, uint64_t value) { return static_cast<uint64_t>(cat) == value; }
 inline bool operator==(uint64_t value, const InstCategory& cat) { return static_cast<uint64_t>(cat) == value; }
 
+class Trie;
+Trie& get_instruction_trie();
+
 class Trie
 {
 public:
-    Trie() = default;
-    ~Trie();
+    Trie();
 
-    InstCategory type_from_trie(const std::string_view inst);
-
-    static Trie root_trie;
+    InstCategory type_from_trie(const std::string_view inst) const;
 
     static InstCategory inst_type(const std::string_view line, int gfxip)
     {
         if (line.find("branch") != std::string::npos) return InstCategory::BRANCH;
 
-        InstCategory type = root_trie.type_from_trie(line);
+        InstCategory type = get_instruction_trie().type_from_trie(line);
 
         if (type == InstCategory::VALU)
         {
@@ -96,9 +97,13 @@ public:
     }
 
 private:
-    void add_type(const std::string& inst_header, InstCategory type);
+    struct Node
+    {
+        InstCategory type = InstCategory::LAST;
+        std::unordered_map<char, std::unique_ptr<Node>> paths;
+    };
 
-    bool bInit = false;
-    InstCategory type = InstCategory::LAST;
-    std::unordered_map<char, Trie*> paths; //  Change to smart pointer
+    void add_type(std::string_view inst_header, InstCategory type);
+
+    Node root;
 };

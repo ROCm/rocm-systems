@@ -76,7 +76,7 @@ struct cbdata_t
 common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
-// start requests are deferred and replayed by initialize().
+// start requests are deferred and replayed by start_active_contexts().
 std::atomic<bool>&
 hsa_inited()
 {
@@ -411,6 +411,18 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
+    enabled.store(false, std::memory_order_release);
+
+    if(auto* controller = hsa::get_queue_controller())
+    {
+        client.wlock([&](auto& client_id) {
+            if(!client_id) return;
+            controller->remove_callback(*client_id);
+            client_id = std::nullopt;
+        });
+        controller->disable_serialization();
+    }
+
     ROCP_TRACE << "Clearing agents";
     auto lk = std::unique_lock{agents_map_mut};
     agents.clear();
@@ -435,6 +447,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         rocprof_corr_id.internal = corr_id->internal;
     }
     // TODO: Get external
+
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
 
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
@@ -494,6 +508,7 @@ DispatchThreadTracer::start_context()
     // Only installs queue-controller callbacks (cached and applied to queues as
     // they are created), so this is safe to call before hsa_init.
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    enabled.store(true, std::memory_order_release);
 
     // Only one thread should be attempting to enable/disable this context
     client.wlock([&](auto& client_id) {
@@ -529,18 +544,11 @@ DispatchThreadTracer::start_context()
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    auto* controller = hsa::get_queue_controller();
-    if(!controller) return;
+    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
+    // registered so packets already in the queues can drain through the serializer transition.
+    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
-    client.wlock([&](auto& client_id) {
-        if(!client_id) return;
-
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(*client_id);
-        client_id = std::nullopt;
-    });
-
-    controller->disable_serialization();
+    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
 }
 
 DeviceThreadTracer::DeviceThreadTracer()
@@ -583,7 +591,7 @@ void
 DeviceThreadTracer::start_context()
 {
     // Per-agent resources don't exist until HSA is registered; the request is
-    // cached in the active-context array and replayed by initialize().
+    // cached in the active-context array and replayed by start_active_contexts().
     if(!hsa_inited().load())
     {
         ROCP_INFO << "Device thread trace start requested before hsa_init; deferring";
@@ -650,12 +658,17 @@ initialize(HsaApiTable* table)
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
     }
+}
 
+void
+start_active_contexts()
+{
     // HSA resources now exist; allow start_context() to program the hardware.
     hsa_inited().store(true);
 
     // Replay device contexts started before hsa_init() (their start_context()
-    // returned early above). Dispatch mode needs no replay.
+    // returned early). Must run after the queue infrastructure is initialized
+    // (see registration.cpp); starting the SQTT hardware earlier hangs the GPU.
     for(auto& ctx : context::get_active_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->start_context();

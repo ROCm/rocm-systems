@@ -14,7 +14,7 @@
         "unique_id": 0,
         "marketing_name": "AMD Instinct MI300X",
         "drm_render_minor": 128,
-        "simd_count": 1280,
+        "simd_count": 1216,
         "max_waves_per_simd": 8,
         "num_shader_engines": 4,
         "num_shader_arrays_per_engine": 1,
@@ -34,6 +34,7 @@
         "l2_assoc": 16,
         "num_sdma_engines": 4,
         "num_sdma_xgmi_engines": 6,
+        "num_sdma_queues_per_engine": 8,
         "num_cp_queues": 128,
         "max_engine_clk_fcompute": 2100
       }

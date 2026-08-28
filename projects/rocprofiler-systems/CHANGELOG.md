@@ -4,9 +4,54 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
+### Changed
+
+- `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
+  via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
+- The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
+  default. Pass `--profile` to get a call-stack-based profile instead.
+- `rocprof-sys-python` no longer accepts abbreviated long options (for example,
+  `--conf` for `--config`). Spell out the full option name.
+
+### Resolved issues
+
+- Fixed `rocprof-sys-python` ignoring the `-c`/`--config` flag. The configuration
+  file is now applied to `ROCPROFSYS_CONFIG_FILE` before the profiler bindings are
+  loaded, so its settings take effect. A configuration file already named by
+  `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
+  appended to it.
+
+### Removed
+
+- Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
+  storage backend. This is now handled by profiler-hub.
+
+- Removed the deprecated `rocprof-sys-user` library and its C API
+  (`rocprofsys_user_*`, `<rocprofiler-systems/user.h>`), including the `user`
+  find_package component, the `examples/user-api` example, the Python
+  `rocprofsys.user` submodule, and the associated pytest coverage. Use
+  ROCTx (`rocprofiler-sdk-roctx`) for general-purpose manual instrumentation
+  (starting/stopping tracing, named regions) instead; see `examples/roctx`
+  for usage.
+
+  - Causal profiling's `ROCPROFSYS_CAUSAL_PROGRESS`/`ROCPROFSYS_CAUSAL_BEGIN`/
+    `ROCPROFSYS_CAUSAL_END` macros are unaffected at the source level: they now
+    run on a new, minimal `rocprof-sys-causal-api` library instead of the removed
+    general-purpose user API. Existing causal profiling code does not need to be
+    edited, but it must be rebuilt against the new headers and library, and
+    projects that requested the old component via
+    `find_package(rocprofiler-systems COMPONENTS user)` must change that to
+    `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
+    it now fails at configure time.
+
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
 
 ### Added
+
+- hipFILE (GPU-direct storage) API tracing. Add `hipfile_api` to
+  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.5 or later.
 
 - `--exe-only` flag for `rocprof-sys-instrument`: shorthand for excluding every shared
   library from instrumentation, leaving only the main executable.
@@ -22,9 +67,23 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   function include/restrict (`--function-include`/`-I`, `--function-restrict`/`-R`)
   regexes.
 
+- rocSHMEM host-stream API tracing via `ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`.
+  ROCm Systems Profiler now captures the nine host-stream rocSHMEM API calls
+  (`putmem_on_stream`, `getmem_on_stream`, `putmem_signal_on_stream`,
+  `signal_wait_until_on_stream`, `broadcastmem_on_stream`, `alltoallmem_on_stream`,
+  `barrier_all_on_stream`, `sync_all_on_stream`, `quiet_on_stream`) as
+  `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
+  rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 10.0).
+  As of rocSHMEM 3.6.0, `USE_ROCPROFILER_REGISTER` defaults to `ON`, so
+  package installations automatically include this support. A `rocshmem` example
+  demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
+
 ### Changed
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
+- Introduced the new `profiler-hub` writer backend for trace persistence, as a
+  replacement for the existing SQLite3/rocpd backend.
 
 ### Removed
 
@@ -208,7 +267,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 - SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
 - `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via ROCprofiler-SDK rocattach API (experimental).
-- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
+- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_OPENSHMEM=ON` configuration setting.
 
 ### Changed
 

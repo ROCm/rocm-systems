@@ -19,6 +19,7 @@ set(TEST_SRC
     hipGetSetDeviceFlags.cc
     hipSetGetDevice.cc
     hipDeviceGetUuid.cc
+    hipDeviceGetLuid.cc
     hipDeviceAPUCheck.cc
     hipDeviceGetDefaultMemPool.cc
     hipDeviceCanAccessPeer.cc
@@ -29,6 +30,7 @@ set(TEST_SRC
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
     hipInit.cc
+    hipInitDevice.cc
     hipDriverGetVersion.cc
     hipSetValidDevices.cc
     hipIpcOpenMemHandle.cc

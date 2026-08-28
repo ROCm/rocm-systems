@@ -19,15 +19,12 @@ RCCL_INSTALL_DIR = os.environ.get("RCCL_INSTALL_DIR", "path/to/rccl")
 OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
-# Tuner plugin paths (renamed from ext-tuner/ in NCCL 2.29 sync)
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
 PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
 
-# Profiler plugin paths (renamed from ext-profiler/ in NCCL 2.29 sync)
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 
-# Inspector plugin paths (renamed from ext-profiler/inspector/ in NCCL 2.29 sync)
 INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
 INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
 

@@ -81,9 +81,11 @@
  * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
  * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
+ * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
+ * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 29
+#define HSA_AMD_INTERFACE_VERSION_MINOR 31
 
 #ifdef __cplusplus
 extern "C" {
@@ -983,6 +985,9 @@ typedef enum hsa_amd_agent_info_s {
    * For CPU agents: indicates host memory can be allocated and exported.
    * For GPU agents: indicates the GPU can access such host-allocated memory.
    * The type of this attribute is bool.
+   *
+   * @note This query will be deprecated in the future.
+   * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
@@ -1595,6 +1600,13 @@ typedef struct hsa_amd_image_descriptor_s {
   */
   uint32_t data[1];
 } hsa_amd_image_descriptor_t;
+
+// Value stamped into hsa_amd_image_descriptor_t::version to mark a descriptor whose data[] holds an
+// opaque surface-metadata blob (not a full SRD) that the gfx image manager must interpret to
+// reconstruct the SRD (Windows Vulkan image interop, where the AMD driver exposes no SRD-query
+// extension). Disjoint from the small SRD-format versions (1, ...) used when data[0..7] already hold
+// a full driver SRD (GL/D3D/Linux). "WMDS" in ASCII.
+#define HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA 0x574D4453u
 
 /**
  * @brief Creates an image from an opaque vendor specific image format.
@@ -2392,7 +2404,8 @@ typedef struct hsa_amd_memory_copy_op_s {
  * Each operation is self-describing via its @c type field. A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
- * @c dst_size.
+ * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
+ * and 32-byte aligned for gfx1250.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
@@ -3986,7 +3999,7 @@ typedef struct hsa_amd_queue_create_desc_s {
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support
  * queues of the requested type, or a descriptor requested an @c engine_type
  * that is recognised by the API but not yet implemented by the runtime (for
- * example ::HSA_AMD_QUEUE_ENGINE_SDMA or ::HSA_AMD_QUEUE_ENGINE_AIE).
+ * example ::HSA_AMD_QUEUE_ENGINE_AIE).
  */
 hsa_status_t HSA_API hsa_amd_queue_create(
     hsa_agent_t agent,
@@ -4925,6 +4938,30 @@ typedef enum {
    * is true.  The type of this attribute is uint32_t.
    */
   HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
+  /*
+   * Hardware engine type targeted by this queue.
+   * The type of this attribute is hsa_amd_queue_engine_t.
+   */
+  HSA_AMD_QUEUE_INFO_ENGINE_TYPE,
+  /*
+   * Resolved hardware SDMA engine ID. Automatic SDMA queue creation returns
+   * the selected engine ID, never HSA_AMD_SDMA_ENGINE_ID_ANY. This attribute
+   * is valid only for queues whose engine type is HSA_AMD_QUEUE_ENGINE_SDMA.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID,
+  /*
+   * Address of the queue's monotonic hardware read pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_READ_POINTER,
+  /*
+   * Address of the queue's canonical monotonic write pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_WRITE_POINTER,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
