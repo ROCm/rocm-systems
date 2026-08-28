@@ -6,6 +6,13 @@
 from amdisa.codegen._generator import CodeGenerator, _OperandCtx
 
 
+def test_ttmp_prefix_maps_to_architectural_register_class():
+    assert CodeGenerator._reg_class_for_prefix('ttmp') == 'RegClass::TTMP'
+    assert CodeGenerator._named_reg_ref('TTMP0') == ('RegClass::TTMP', 0)
+    assert CodeGenerator._named_reg_ref('ttmp15') == ('RegClass::TTMP', 15)
+    assert CodeGenerator._named_reg_ref('ttmp16') is None
+
+
 def test_legacy_buffer_vaddr_width_follows_address_mode():
     for enc_name in ('ENC_MUBUF', 'ENC_MTBUF'):
         assert CodeGenerator._buffer_vaddr_operand_size_expr(enc_name, 'vaddr') == (
