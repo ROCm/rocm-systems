@@ -1195,6 +1195,21 @@ WriteInterceptor(const void* packets,
                     tracer_data);
             }
 
+            // gfx12.5 cluster-dispatch packets carry a single dep_signal directly on
+            // the kernel dispatch packet rather than on a preceding BARRIER_AND. Scan
+            // it here so that deferred hipStreamWaitEvent dependencies are captured.
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            if(is_ext_kernel_dispatch && hip::event::has_pending_waits())
+            {
+                const auto dep = _packets[i].ext_kernel_dispatch.dep_signal;
+                if(dep.handle != 0)
+                {
+                    auto pw = hip::event::consume_pending_wait(dep.handle);
+                    if(pw.corr_id_ref) _info_session.pending_waits.emplace_back(std::move(pw));
+                }
+            }
+#endif
+
             _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
