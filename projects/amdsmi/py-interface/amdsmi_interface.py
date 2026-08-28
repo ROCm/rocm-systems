@@ -5432,10 +5432,7 @@ def amdsmi_get_utilization_count(
             counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
             counter_type = "AMDSMI_FINE_DECODER_ACTIVITY"
-        counter_value = _validate_if_max_uint(
-            util_counter_list[index].value, MaxUIntegerTypes.UINT64_T
-        )
-        result.append({"type": counter_type, "value": counter_value})
+        result.append({"type": counter_type, "value": util_counter_list[index].value})
 
     return result
 
@@ -7113,7 +7110,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T)
+    return gpu_busy_percent.value
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
