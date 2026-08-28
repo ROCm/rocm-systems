@@ -46,15 +46,19 @@
 // RCCL_PARAM redirector: routes every generated rcclParamXxx() through
 // g_loadParam on each call (no caching), so a test can flip one param's
 // value between cases -- same mechanism and env-string convention
-// ("RCCL_" + env) as init-test.cc's redirect, replicated here rather than
-// linking fakes/nccl_fakes.cc (this file's own fakes stay self-contained,
-// see wrap_stubs.cc's header comment).
+// ("RCCL_" + env) as init-test.cc's redirect. g_loadParam itself is NOT
+// declared here: fakes/nccl_fakes.h/.cc (p2p.cc's fakes, already part of
+// this binary since the rccl-UnitTestsMicro merge) already define and
+// export it for exactly this purpose -- p2p-test.cc's own NCCL_PARAM
+// redirect uses the same global, just without the "RCCL_" prefix at its
+// own call site. Declaring a second copy here would be a duplicate-symbol
+// error.
 #include "param.h"
+#include "fakes/nccl_fakes.h"  // extern g_loadParam
 
 #include <functional>
 
 static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal) { return deftVal; }
-std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
 #undef RCCL_PARAM
 #define RCCL_PARAM(name, env, deftVal) \
