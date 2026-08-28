@@ -96,6 +96,14 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_alltoall_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_alltoall_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_alltoall_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
+
 __device__ ATTR_NO_INLINE void rocshmem_float_alltoall_wg(
     rocshmem_team_t team, float *dest, const float *source, int nelems);
 
@@ -134,6 +142,12 @@ __device__ ATTR_NO_INLINE void rocshmem_ulong_alltoall_wg(
 
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
     rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_half_alltoall_wg(
+    rocshmem_team_t team, __half *dest, const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_alltoall_wg(
+    rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nelems);
 
 /**
  * @name ROCSHMEM_ALLTOALLMEM_WG
@@ -222,6 +236,14 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_alltoall_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_alltoall_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_half_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
 
 /**
  * @name ROCSHMEM_ALLTOALLMEM_WAVE
@@ -492,6 +514,28 @@ __host__ void rocshmem_ctx_ulonglong_broadcast(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems, int pe_root);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_broadcast_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems, int pe_root);
+__host__ void rocshmem_ctx_half_broadcast(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    int nelems, int pe_root, int pe_start, int log_pe_stride,
+    int pe_size, long *p_sync);
+__host__ void rocshmem_ctx_half_broadcast(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems, int pe_root);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_broadcast_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems, int pe_root);
+__host__ void rocshmem_ctx_bfloat16_broadcast(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    int nelems, int pe_root, int pe_start, int log_pe_stride,
+    int pe_size, long *p_sync);
+__host__ void rocshmem_ctx_bfloat16_broadcast(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems, int pe_root);
+
 /**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WG
  * @brief Perform a broadcast between PEs in the active set. The caller
@@ -571,6 +615,12 @@ __device__ int rocshmem_ctx_ulong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_te
 
 __device__ int rocshmem_ctx_ulonglong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
               unsigned long long *dest, const unsigned long long *source, int nelems, int PE_root);
+
+__device__ int rocshmem_ctx_half_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              __half *dest, const __half *source, int nelems, int PE_root);
+
+__device__ int rocshmem_ctx_bfloat16_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nelems, int PE_root);
 
 /**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WAVE
@@ -663,6 +713,14 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_fcollect_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_fcollect_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
+
 /**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
@@ -750,6 +808,14 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_fcollect_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_fcollect_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_half_fcollect_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest,
+    const __half *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_fcollect_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, int nelems);
 
 /**
  * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE

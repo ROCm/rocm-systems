@@ -391,6 +391,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamBroadcastTester<double>(args));
       testers.push_back(new TeamBroadcastTester<char>(args));
       testers.push_back(new TeamBroadcastTester<unsigned char>(args));
+      testers.push_back(new TeamBroadcastTester<__half>(args));
+      testers.push_back(new TeamBroadcastTester<__hip_bfloat16>(args));
       break;
     case BroadcastWaveTestType:
       test_name = "Broadcast Wave Test";
@@ -402,6 +404,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAllToAllTestType:
       test_name = "Alltoall Test";
       testers.push_back(new TeamAlltoallTester<float>(args));
+      testers.push_back(new TeamAlltoallTester<__half>(args));
+      testers.push_back(new TeamAlltoallTester<__hip_bfloat16>(args));
       break;
     case TeamAllToAllvTestType:
       test_name = "Alltoallv Test";
@@ -568,6 +572,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamFcollectTester<double>(args));
       testers.push_back(new TeamFcollectTester<char>(args));
       testers.push_back(new TeamFcollectTester<unsigned char>(args));
+      testers.push_back(new TeamFcollectTester<__half>(args));
+      testers.push_back(new TeamFcollectTester<__hip_bfloat16>(args));
       break;
     case FcollectWaveTestType:
       test_name = "Fcollect Wave Test";
