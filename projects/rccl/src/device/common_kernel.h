@@ -773,6 +773,7 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
   }
 
   const void* src = srcPtrs[0];
+  if (src == nullptr || ((uintptr_t)src & (RCCL_TDM_ALIGN - 1))) return false;
   for (int dst = 0; dst < nDsts; dst++) {
     if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) {
       return false;
