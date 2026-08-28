@@ -11,6 +11,8 @@
 #ifndef RCCL_TEST_DEVRUNTIMETESTSSTUBS_H_
 #define RCCL_TEST_DEVRUNTIMETESTSSTUBS_H_
 
+#include "nccl.h"  // ncclResult_t, for the proxy seam below
+
 #include <hip/hip_runtime_api.h>
 
 #include <cstddef>
@@ -32,6 +34,15 @@ extern std::function<hipError_t(hipStream_t*, unsigned int)> g_hipStreamCreateWi
 extern std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode*)> g_hipThreadExchangeStreamCaptureMode;
+
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)>
+    g_hipMemImportFromShareableHandle;
+extern std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)>
+    g_hipMemMap;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease;
+
+// Hands back an fd the caller must close; the default opens /dev/null.
+extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_proxyClientGetFdBlocking;
 
 // Backs every NCCL_PARAM in the unit under test. DevRuntimeTests.cpp redefines
 // the macro to call this instead of param.h's caching body, so a param's value

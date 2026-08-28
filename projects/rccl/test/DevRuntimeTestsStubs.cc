@@ -32,6 +32,7 @@
 #include <cassert>
 #include <cstdarg>
 #include <cstdlib>
+#include <fcntl.h>
 #include <functional>
 #include <sys/mman.h>
 
@@ -102,7 +103,22 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
 // ---------------------------------------------------------------------------
 // Proxy.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+// The real proxy hands back an fd the caller owns and closes. Returning -1
+// would make the SYSCHECK on close() in symMemoryImportAndMapSegmentHandle fail
+// and read like an import bug, so hand out a real descriptor the code can close.
+static ncclResult_t DefaultProxyClientGetFdBlocking(struct ncclComm*, int, void*, int* fd) {
+  if (fd) {
+    *fd = open("/dev/null", O_RDONLY);
+    if (*fd < 0) return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_proxyClientGetFdBlocking =
+    DefaultProxyClientGetFdBlocking;
+
+ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, int* fd) {
+  return g_proxyClientGetFdBlocking(comm, rank, handle, fd);
+}
 
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
@@ -297,13 +313,28 @@ HIP_FAKE hipError_t hipMemExportToShareableHandle(void* shareable, hipMemGeneric
                                                   hipMemAllocationHandleType type, unsigned long long flags) {
   return g_hipMemExportToShareableHandle(shareable, handle, type, flags);
 }
-HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void*,
-                                                    hipMemAllocationHandleType) {
+static hipError_t DefaultMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void*,
+                                                      hipMemAllocationHandleType) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)>
+    g_hipMemImportFromShareableHandle = DefaultMemImportFromShareableHandle;
+
+HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void* shareable,
+                                                    hipMemAllocationHandleType type) {
+  return g_hipMemImportFromShareableHandle(handle, shareable, type);
+}
+
+static hipError_t DefaultMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
   return hipSuccess;
+}
+std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)> g_hipMemMap =
+    DefaultMemMap;
+
+HIP_FAKE hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle,
+                              unsigned long long flags) {
+  return g_hipMemMap(ptr, size, offset, handle, flags);
 }
 static hipError_t DefaultMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
 std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> g_hipMemSetAccess = DefaultMemSetAccess;
@@ -313,7 +344,10 @@ HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDe
 }
 
 HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
-HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
+static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
+std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
+
+HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) { return g_hipMemRelease(handle); }
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
@@ -378,5 +412,9 @@ void ResetDevRuntimeFakes() {
   g_hipStreamSynchronize                    = DefaultStreamSynchronize;
   g_hipStreamDestroy                        = DefaultStreamDestroy;
   g_hipThreadExchangeStreamCaptureMode      = DefaultThreadExchangeStreamCaptureMode;
+  g_hipMemImportFromShareableHandle         = DefaultMemImportFromShareableHandle;
+  g_hipMemMap                               = DefaultMemMap;
+  g_hipMemRelease                           = DefaultMemRelease;
+  g_proxyClientGetFdBlocking                = DefaultProxyClientGetFdBlocking;
   g_loadParam                               = DefaultLoadParam;
 }
