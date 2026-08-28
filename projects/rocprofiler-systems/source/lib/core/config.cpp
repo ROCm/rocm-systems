@@ -26,10 +26,10 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/papi/types.hpp>
 #include <timemory/components/papi/papi_common.hpp>
 #include <timemory/components/papi/papi_config.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
 #include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
