@@ -9,7 +9,6 @@ import numpy as np
 import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU1Col1, NPU2Col1
 from aie.iron.controlflow import range_
 
@@ -52,14 +51,14 @@ def my_vector_bias_add():
     worker = Worker(core_body, fn_args=[of_in1.cons(), of_out0.prod()])
 
     # Runtime operations to move data to/from the AIE-array
-    rt = Runtime()
-    with rt.sequence(all_data_ty, all_data_ty) as (inTensor, outTensor):
-        rt.start(worker)
-        rt.fill(of_in0.prod(), inTensor)
-        rt.drain(of_out1.cons(), outTensor, wait=True)
+    def sequence(inTensor, outTensor, in_handle, out_handle):
+        in_handle.fill(inTensor)
+        out_handle.drain(outTensor, wait=True)
+
+    rt = Runtime(sequence, [all_data_ty, all_data_ty, of_in0.prod(), of_out1.cons()])
 
     # Place program components (assign them resources on the device) and generate an MLIR module
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt, workers=[worker]).resolve_program()
 
 
 module = my_vector_bias_add()
