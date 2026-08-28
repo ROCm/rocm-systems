@@ -949,6 +949,8 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     return status;
   }
 
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+
   ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
   if (ualoe_handle == -1) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -961,8 +963,14 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     return AMDSMI_STATUS_OUT_OF_RESOURCES;
   }
 
-  // Allocate array for UALoE header pointers
-  const size_t max_ualoe_entries = *entry_count;
+  // Allocate array for UALoE header pointers. *entry_count is caller-supplied,
+  // so clamp it before sizing the allocation.
+  constexpr uint64_t kMaxUaloeEntries = 4096;
+  if (*entry_count == 0 || *entry_count > kMaxUaloeEntries) {
+    free(ualoe_buf);
+    return AMDSMI_STATUS_INVAL;
+  }
+  const size_t max_ualoe_entries = static_cast<size_t>(*entry_count);
   ualoe_cper_hdr_t** ualoe_hdrs =
       static_cast<ualoe_cper_hdr_t**>(malloc(max_ualoe_entries * sizeof(ualoe_cper_hdr_t*)));
   if (ualoe_hdrs == nullptr) {
@@ -982,7 +990,7 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     if (ret == ENOSPC) {
       return AMDSMI_STATUS_OUT_OF_RESOURCES;
     }
-    return AMDSMI_STATUS_UNEXPECTED_DATA;
+    return convert_errno_to_amdsmi_status(ret);
   }
 
   // Transform UALoE records into amdsmi CPER format
@@ -991,6 +999,9 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
 
   for (uint64_t i = 0; i < ualoe_entry_count; i++) {
     const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
+    if (ualoe_hdr == nullptr || ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
+      break;
+    }
     const uint32_t ualoe_payload_size =
         static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
     const uint32_t amdsmi_record_length = sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size;
