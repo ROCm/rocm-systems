@@ -56,18 +56,14 @@ if(
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
 )
     add_compile_options(-Wno-uninitialized)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+        add_compile_options(-Wno-maybe-uninitialized -Wno-stringop-overflow)
+    endif()
 endif()
 
 # HSA/KFD headers (local copies from rocr-runtime).
 set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
-)
-
-# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
-# interposer service the amdgpu DRM ioctl surface using the real kernel structs
-# instead of hand-mirrored copies, without depending on libdrm library types.
-set(DRM_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
 )
 
 include(rj_log)
@@ -375,6 +371,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_drm_headers
         util
         flatbuffers
         Threads::Threads
@@ -391,7 +388,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_shared
         PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
     )
-    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()

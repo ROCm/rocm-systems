@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include <fcntl.h>
+#include <csignal>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include <rccl/rccl.h>
@@ -99,9 +100,18 @@ namespace RcclUnitTesting
     numActiveChildren(0),
     numActiveRanks(0)
   {
+    // Ignore SIGPIPE so a write to a dead pool worker fails with EPIPE instead
+    // of killing the parent.
+    signal(SIGPIPE, SIG_IGN);
+
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
     if (ev.verbose) TEST_INFO("Detected %d GPUs", this->numDevicesAvailable);
+
+    // Communicator process pool: ON by default; set UT_COMM_POOL=0 to disable.
+    // Parsed/registered centrally in EnvVars (shown in the config banner) like every UT_* var.
+    this->poolMode = ev.commPool;
+    this->configUsedPool = false;
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -145,65 +155,117 @@ namespace RcclUnitTesting
       }
     }
 
-    // Check that no children currently exist
+    // Guards both paths: the pool-reuse branch below would silently overwrite
+    // a non-empty childList.
     if (childList.size() > 0)
     {
-      TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms");
-      return;
+      FAIL() << "DestroyComms must be called prior to subsequent call to InitComms";
     }
 
-    // Create child-processes
-    childList.resize(this->numActiveChildren);
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    // Comm pool (UT_COMM_POOL): worker d is pinned to device d and keeps its
+    // device-code object resident, so reuse skips the ~15-30s load per config.
+    this->configUsedPool = false;
+    if (this->poolMode)
     {
-      childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-      if (childList[childId]->InitPipes() != TEST_SUCCESS)
+      // Each worker snapshots env at fork and NCCL_PARAM caches it; a test that
+      // changes env must call Finalize() to re-fork the pool.
+      if (this->poolChildren.empty())
       {
-        TEST_ERROR("Unable to create pipes to child process");
-        return;
+        // CRITICAL: no HIP call in the parent before fork -- HIP state does not
+        // survive fork() and workers SEGV. Use ev.GetNumDetectedGpus() instead.
+        int poolSize = this->numDevicesAvailable;
+        int const detectedGpus = ev.GetNumDetectedGpus();
+        if (detectedGpus > 0 && detectedGpus < poolSize)
+        {
+          poolSize = detectedGpus;
+        }
+        this->poolChildren.assign(poolSize, nullptr);
+        for (int d = 0; d < poolSize; ++d)
+        {
+          this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
+          if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
+          {
+            // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
+            // stops instead of indexing an empty childList -> SEGV.
+            TeardownPool();
+            FAIL() << "Unable to create pipes to pool child process " << d;
+          }
+          pid_t pid = fork();
+          if (pid == 0)
+          {
+            this->poolChildren[d]->StartExecutionLoop();
+            return;
+          }
+          if (pid < 0)
+          {
+            TeardownPool();
+            FAIL() << "fork() failed for pool child process " << d;
+          }
+          this->poolChildren[d]->pid = pid;
+          close(this->poolChildren[d]->childWriteFd);
+          close(this->poolChildren[d]->childReadFd);
+        }
+        // Do NOT pre-warm workers: under the runner's --jobs N it storms
+        // ncclCommInitAll across all GPUs and fails intermittently.
       }
       
       // Ensure child-side pipe descriptors remain open across execl()
       fcntl(childList[childId]->childReadFd, F_SETFD, 0);
       fcntl(childList[childId]->childWriteFd, F_SETFD, 0);
 
-      pid_t pid = fork();
-      if (pid == 0)
+      // Map this config's children onto distinct pool workers by representative device.
+      bool mappable = true;
+      std::vector<TestBedChild*> mapped(this->numActiveChildren, nullptr);
+      std::set<int> usedWorkers;
+      for (int c = 0; c < this->numActiveChildren && mappable; ++c)
       {
-        // Child process enters execution loop
-        // Close parent-side handles in child process
-        close(childList[childId]->parentWriteFd);
-        close(childList[childId]->parentReadFd);
-
-        // string arguments for execl
-         std::string sChildId      = std::to_string(childId);
-         std::string sChildReadFd  = std::to_string(childList[childId]->childReadFd);
-         std::string sChildWriteFd = std::to_string(childList[childId]->childWriteFd);
-         std::string sVerbose      = std::to_string(ev.verbose ? 1 : 0);
-         std::string sPrintVal     = std::to_string(ev.printValues);
-         std::string sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
-         std::string sMemAllocType  = std::to_string(memAllocType);
-
-         //Re-execute binary to clear inherited HIP/HSA driver state
-         execl("/proc/self/exe", "rccl_unit_test",
-            "--child",
-            sChildId.c_str(),
-            sChildReadFd.c_str(),
-            sChildWriteFd.c_str(),
-            sVerbose.c_str(),
-            sPrintVal.c_str(),
-            sThreading.c_str(),
-            sMemAllocType.c_str(),
-            NULL);
-        perror("execl failed");
-         _exit(1);
+        int const worker = deviceIdsPerProcess[c].empty() ? -1 : deviceIdsPerProcess[c][0];
+        if (worker < 0 || worker >= (int)this->poolChildren.size() ||
+            this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
+        {
+          mappable = false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU) -> fork-fresh
+          break;
+        }
+        usedWorkers.insert(worker);
+        mapped[c] = this->poolChildren[worker];
       }
-      else if (pid > 0)
+
+      if (mappable)
       {
-        // Parent records child process ID and closes unused ends of pipe
-        childList[childId]->pid = pid;
-        close(childList[childId]->childWriteFd);
-        close(childList[childId]->childReadFd);
+        // Reuse: childList borrows the selected pool workers (pool retains ownership).
+        childList = mapped;
+        this->configUsedPool = true;
+      }
+    }
+
+    if (!this->configUsedPool)
+    {
+      // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
+      // (The "DestroyComms must precede InitComms" guard is hoisted above, covering both paths.)
+      childList.resize(this->numActiveChildren);
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
+        if (childList[childId]->InitPipes() != TEST_SUCCESS)
+        {
+          TEST_ERROR("Unable to create pipes to child process");
+          return;
+        }
+
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+          // Child process enters execution loop
+          childList[childId]->StartExecutionLoop();
+          return;
+        }
+        else
+        {
+          // Parent records child process ID and closes unused ends of pipe
+          childList[childId]->pid = pid;
+          close(childList[childId]->childWriteFd);
+          close(childList[childId]->childReadFd);
+        }
       }
       else {
         TEST_ERROR("fork() failed when creating child process %d", childId);
@@ -663,8 +725,20 @@ namespace RcclUnitTesting
       }
     }();
 
-    // Close any open child processes (always, even if the teardown above failed)
-    Finalize();
+    if (this->configUsedPool)
+    {
+      // Pool mode: comms/streams were freed on the workers, but keep the workers alive for
+      // the next config (their device-code kernels stay resident). Drop the borrowed refs;
+      // the pool keeps ownership. Finalize() (between sweeps / at teardown) reaps the pool.
+      this->childList.clear();
+      this->numActiveChildren = 0;
+      this->numActiveRanks = 0;
+    }
+    else
+    {
+      // Classic / fork-fresh: reap the per-config children this call owns.
+      TeardownOwnedChildList();
+    }
 
     InteractiveWait("Finishing DestroyComms");
   }
@@ -695,7 +769,18 @@ namespace RcclUnitTesting
 
   void TestBed::Finalize()
   {
-    if (this->numActiveChildren == 0)
+    // Reap per-config fork-fresh children (if any), then the persistent pool. Finalize()
+    // is the pool-reset boundary: tests that change env between sweeps call it, so the
+    // next sweep re-forks a pool that inherits the new env.
+    TeardownOwnedChildList();
+    TeardownPool();
+  }
+
+  void TestBed::TeardownOwnedChildList()
+  {
+    // Only reaps children that childList OWNS (classic / fork-fresh path). In pool mode
+    // childList holds borrowed pool refs (cleared by DestroyComms), so this is a no-op.
+    if (this->configUsedPool || this->numActiveChildren == 0)
       return;
 
     InteractiveWait("Starting Finalize");
@@ -735,6 +820,50 @@ namespace RcclUnitTesting
     this->numActiveRanks = 0;
 
     InteractiveWait("Finishing Finalize");
+  }
+
+  void TestBed::TeardownPool()
+  {
+    if (this->poolChildren.empty())
+      return;
+
+    // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
+    int const cmd = TestBedChild::CHILD_STOP;
+    for (TestBedChild* c : this->poolChildren)
+    {
+      if (!c)
+      {
+        continue;
+      }
+      // Only a forked worker (pid > 0) has a reader on the pipe; skip the STOP write for a
+      // never-forked entry. close(-1) on an unopened fd is a harmless no-op.
+      if (c->pid > 0)
+      {
+        ssize_t const w = write(c->parentWriteFd, &cmd, sizeof(cmd));
+        (void)w;
+      }
+      close(c->parentWriteFd);
+      close(c->parentReadFd);
+    }
+    for (TestBedChild* c : this->poolChildren)
+    {
+      if (!c)
+      {
+        continue;
+      }
+      // Reap only workers we actually forked; a never-forked entry has pid == -1.
+      if (c->pid > 0)
+      {
+        int returnVal = 0;
+        waitpid(c->pid, &returnVal, 0);
+      }
+      delete c;
+    }
+    this->poolChildren.clear();
+    this->childList.clear();      // borrowed refs only; do not delete
+    this->configUsedPool = false;
+    this->numActiveChildren = 0;
+    this->numActiveRanks = 0;
   }
 
   TestBed::~TestBed()

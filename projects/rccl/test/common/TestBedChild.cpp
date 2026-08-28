@@ -120,6 +120,12 @@ namespace RcclUnitTesting
     this->verbose = verbose;
     this->printValues = printValues;
     this->useRankThreading = useRankThreading;
+    // -1 sentinel: teardown skips waitpid()/close() for a never-forked child.
+    this->pid          = -1;
+    this->parentWriteFd = -1;
+    this->parentReadFd  = -1;
+    this->childWriteFd  = -1;
+    this->childReadFd   = -1;
   }
 
   int TestBedChild::InitPipes()
