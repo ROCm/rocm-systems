@@ -669,10 +669,10 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    amdgpu::vop::append_vop3p_disassembly(out, inst->opsel,
-                                          inst->opsel_hi | (inst->opsel_hi_2 << 2), inst->neg,
-                                          inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
-                                          inst_.op <= 16 || (inst_.op >= 27 && inst_.op <= 30));
+    amdgpu::vop::append_vop3p_disassembly(
+        out, inst->opsel, inst->opsel_hi | (inst->opsel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
+        inst_.op <= 16 || inst_.op == 19 || (inst_.op >= 26 && inst_.op <= 30));
     if (has_encoded_dpp())
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,

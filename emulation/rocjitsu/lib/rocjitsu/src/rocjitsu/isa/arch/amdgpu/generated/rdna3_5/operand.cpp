@@ -690,8 +690,30 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_SENDMSG:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_SENDMSG_RTN:
+  case OperandType::OPR_SENDMSG_RTN: {
+    switch (static_cast<uint32_t>(encoding_value_) & 0xFFFF) {
+    case 128:
+      return "sendmsg(MSG_RTN_GET_DOORBELL)";
+    case 129:
+      return "sendmsg(MSG_RTN_GET_DDID)";
+    case 130:
+      return "sendmsg(MSG_RTN_GET_TMA)";
+    case 131:
+      return "sendmsg(MSG_RTN_GET_REALTIME)";
+    case 132:
+      return "sendmsg(MSG_RTN_SAVE_WAVE)";
+    case 133:
+      return "sendmsg(MSG_RTN_GET_TBA)";
+    case 134:
+      return "sendmsg(MSG_RTN_GET_TBA_TO_PC)";
+    default:
+      break;
+    }
+    const uint32_t value = static_cast<uint32_t>(encoding_value_) & 0xFFFF;
+    if (value <= 0xFF)
+      return std::format("sendmsg({}, 0, 0)", value);
     return std::to_string(encoding_value_);
+  }
   case OperandType::OPR_SIMM16:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM32:

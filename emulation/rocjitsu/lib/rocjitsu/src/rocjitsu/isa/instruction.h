@@ -354,6 +354,13 @@ public:
         if (src_operands_[operand_index]->size_bits() == 0 ||
             src_operands_[operand_index]->is_fieldless())
           continue;
+        if (omit_repeated_destination_sources_) {
+          bool repeats_dst = false;
+          for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+          if (repeats_dst)
+            continue;
+        }
         disassembly_ += (first ? " " : ", ");
         append_src_operand(disassembly_, operand_index);
         first = false;
@@ -377,6 +384,8 @@ protected:
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
+  /// @brief Whether read/write operands are rendered only in destination position.
+  bool omit_repeated_destination_sources_ = false;
   /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
   /// The default matches mnemonic(); encoding decorations may override it.
   virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }
