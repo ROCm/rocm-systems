@@ -55,6 +55,7 @@ target_sources(
 target_link_libraries(
     counter_test_constants
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime)
@@ -77,6 +78,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-static-library
             GTest::gtest
             GTest::gtest_main)
