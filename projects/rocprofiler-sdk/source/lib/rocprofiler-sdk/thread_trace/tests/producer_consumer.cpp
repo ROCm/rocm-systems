@@ -206,6 +206,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     producer_data.control_packet   = std::move(control_packet);
     producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;
+    producer_data.num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
     producer_data.buffer_packets   = std::move(mock_buffer);
     producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
         return att_queue_submit_packets(*queue, packet->before_krn_pkt);
@@ -416,6 +417,16 @@ TEST(thread_trace, timestamps_follow_buffer_boundaries)
         EXPECT_LT(timestamps.first.system_clock, timestamps.second.system_clock);
         EXPECT_EQ(timestamps.first.system_clock, timestamps.first.gpu_clock * 10);
         EXPECT_EQ(timestamps.second.system_clock, timestamps.second.gpu_clock * 10);
+    }
+}
+
+TEST(thread_trace, chunk_index_is_independent_per_shader_engine)
+{
+    auto chunk_indices = std::vector<uint64_t>(4);
+    for(uint64_t i = 0; i < 20; ++i)
+    {
+        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 0), i);
+        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 2), i);
     }
 }
 

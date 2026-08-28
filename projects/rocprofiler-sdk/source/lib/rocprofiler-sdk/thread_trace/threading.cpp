@@ -173,9 +173,9 @@ producer_loop(
 
     auto& submit_signal = *parameters.submit_signal;
 
-    auto     start_t0 = std::chrono::system_clock::now();
-    bool     do_sleep{false};
-    uint64_t next_chunk_index = 0;
+    auto                  start_t0 = std::chrono::system_clock::now();
+    bool                  do_sleep{false};
+    std::vector<uint64_t> next_chunk_indices(parameters.num_shader_engines);
 
     std::vector<rocprofiler_thread_trace_timestamp_t> current_timestamps{};
     for(const auto& packet : buffer_packets)
@@ -219,7 +219,7 @@ producer_loop(
         buffer.flags           = flags;
         buffer.size            = size;
         buffer.se_id           = shader_engine_id;
-        buffer.chunk_index     = next_chunk_index++;
+        buffer.chunk_index     = next_chunk_id(next_chunk_indices, shader_engine_id);
         buffer.read_offset     = read_offset;
         buffer.start_timestamp = start_ts;
         buffer.end_timestamp   = end_ts;
