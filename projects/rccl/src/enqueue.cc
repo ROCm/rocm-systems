@@ -2356,7 +2356,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
   // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
   // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#else
+  CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
   comm->lastStreamTag = ncclStreamTag(launchStream);
 
 do_return:
