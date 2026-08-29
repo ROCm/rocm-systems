@@ -274,15 +274,24 @@ TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
 
 TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {
   ConSanMoiResourcePlanningResult planning;
+  planning.attempted_operating_point.moi_exec_save_sgpr = 12u;
   ConSanCandidateResourcePlan unsupported;
   unsupported.source = ConSanRegisterAllocationSource::Unsupported;
   unsupported.reason = ConSanRegisterPlanReason::NoLegalWindow;
   planning.plans.push_back(unsupported);
   EXPECT_TRUE(planning.success());
 
+  ConSanMoiResourcePlanningResult accepted_attempt = planning;
+  const auto accepted = std::move(accepted_attempt).accept();
+  ASSERT_TRUE(accepted);
+  EXPECT_EQ(accepted->operating_point.moi_exec_save_sgpr, 12u);
+  ASSERT_EQ(accepted->site_plans.size(), 1u);
+  EXPECT_EQ(accepted->site_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+
   planning.errors.emplace_back("inconsistent physical alias");
   EXPECT_FALSE(planning.success());
   EXPECT_EQ(planning.plans.size(), 1u);
+  EXPECT_FALSE(std::move(planning).accept());
 }
 
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {

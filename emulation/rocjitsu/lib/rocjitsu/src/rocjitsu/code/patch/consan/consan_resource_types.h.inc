@@ -76,6 +76,15 @@ struct ConSanCandidateResourcePlan {
   std::vector<ConSanResourcePlanAlternative> alternatives;
 };
 
+/// Accepted immutable resource solution consumed by native emission.
+///
+/// The operating point and site plans move together so an emitter cannot pair
+/// plans from one solver iteration with register state from another.
+struct ConSanMoiAcceptedResources {
+  ConSanMoiOperatingPoint operating_point;
+  std::vector<ConSanCandidateResourcePlan> site_plans;
+};
+
 /// Complete, unpublished output of one MOI resource-planning attempt.
 ///
 /// `plans` contains every access and synchronization-site allocation derived
@@ -86,6 +95,8 @@ struct ConSanCandidateResourcePlan {
 /// This prevents a retry from exposing a partial vector or mutating transform
 /// diagnostics while it is still evaluating a candidate operating point.
 struct ConSanMoiResourcePlanningResult {
+  /// Exact operating point against which every site plan was derived.
+  ConSanMoiOperatingPoint attempted_operating_point;
   /// Resource alternatives and selected allocation for every planned site.
   std::vector<ConSanCandidateResourcePlan> plans;
   /// Fatal structural diagnostics produced while deriving this plan set.
@@ -94,6 +105,17 @@ struct ConSanMoiResourcePlanningResult {
   /// Whether planning completed without a structural diagnostic. Individual
   /// sites may still carry a typed Unsupported allocation in a successful set.
   [[nodiscard]] bool success() const { return errors.empty(); }
+
+  /// Accept a structurally complete attempt as one indivisible emission input.
+  /// Typed Unsupported site plans remain part of a valid accepted solution.
+  [[nodiscard]] std::optional<ConSanMoiAcceptedResources> accept() && {
+    if (!success())
+      return std::nullopt;
+    return ConSanMoiAcceptedResources{
+        .operating_point = std::move(attempted_operating_point),
+        .site_plans = std::move(plans),
+    };
+  }
 };
 
 /// Aggregate telemetry derived from completed resource plans and emitted

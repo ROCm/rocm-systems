@@ -686,6 +686,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
                          std::span<const ConSanMoiCandidate> candidates,
                          const ConSanTransformArtifacts &result) {
   ConSanMoiResourcePlanningResult planning;
+  planning.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
   append_moi_resource_plans(state, options, candidates, planning.plans);
   append_moi_operational_resource_plans(state, options, result, planning.errors, planning.plans);
   if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
