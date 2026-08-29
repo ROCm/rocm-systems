@@ -68,17 +68,24 @@ if(NOT AIEBU_ASM)
   message(FATAL_ERROR "aiebu-asm not found")
 endif()
 
-# aiecc drives aiebu-asm with the 'aie2_config' target; older aiebu releases
-# only know it as 'config' and silently exit without producing an ELF.
+# aiecc drives aiebu-asm with the 'aie2_config' target. Older aiebu releases
+# (e.g. the one shipped with XRT 2.20.0) only know that target as 'config', and
+# aiebu-asm exits 0 on an unrecognised target -- so aiecc reports success and
+# never writes an ELF. Detect that here rather than letting the build silently
+# produce nothing.
 execute_process(
   COMMAND "${AIEBU_ASM}" --help
   OUTPUT_VARIABLE AIEBU_ASM_HELP
   ERROR_VARIABLE AIEBU_ASM_HELP
 )
-if(NOT AIEBU_ASM_HELP MATCHES "aie2_config")
-  message(WARNING "aiebu-asm at ${AIEBU_ASM} does not support the 'aie2_config' target. "
-                  "The full-ELF kernel will not be generated and "
-                  "vector-scalar-add-xrt-elf will fail at run time. Update XRT/aiebu.")
+if(AIEBU_ASM_HELP MATCHES "aie2_config")
+  set(AIE_FULL_ELF_SUPPORTED TRUE)
+else()
+  set(AIE_FULL_ELF_SUPPORTED FALSE)
+  message(WARNING
+    "aiebu-asm at ${AIEBU_ASM} does not support the 'aie2_config' target, so "
+    "the full-ELF kernel cannot be built; vector-scalar-add-xrt-elf will be "
+    "skipped.")
 endif()
 
 # Python (for kernel build pipeline)
@@ -131,7 +138,7 @@ message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
 set(KERNEL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/kernel_build")
 set(VECTOR_SCALAR_ADD_PY "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add.py")
 
-# Step 1: Python -> MLIR
+# Step 1: Python -> MLIR (xclbin/PDI variant)
 set(AIE_MLIR "${KERNEL_BUILD_DIR}/aie.mlir")
 add_custom_command(
   OUTPUT "${AIE_MLIR}"
@@ -139,6 +146,25 @@ add_custom_command(
   COMMAND "${Python3_EXECUTABLE}" "${VECTOR_SCALAR_ADD_PY}" "${NPU_TARGET}" > "${AIE_MLIR}"
   DEPENDS "${VECTOR_SCALAR_ADD_PY}"
   COMMENT "Generating aie.mlir from vector_scalar_add.py (target: ${NPU_TARGET})"
+  VERBATIM
+)
+
+# Step 1b: Python -> MLIR (full-ELF variant)
+#
+# The full-ELF design differs from the xclbin one: its runtime sequence starts
+# with aiex.npu.load_pdi, because no xclbin configures the array for it. It also
+# gets its own directory -- aiecc writes <input>.prj next to its input, so
+# sharing a directory would make the two aiecc runs clobber each other's
+# intermediates under 'make -j'.
+set(FULL_ELF_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/kernel_build_full_elf")
+set(AIE_ELF_MLIR "${FULL_ELF_BUILD_DIR}/aie.mlir")
+add_custom_command(
+  OUTPUT "${AIE_ELF_MLIR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${FULL_ELF_BUILD_DIR}"
+  COMMAND "${Python3_EXECUTABLE}" "${VECTOR_SCALAR_ADD_PY}" "${NPU_TARGET}" --full-elf
+          > "${AIE_ELF_MLIR}"
+  DEPENDS "${VECTOR_SCALAR_ADD_PY}"
+  COMMENT "Generating full-ELF aie.mlir from vector_scalar_add.py (target: ${NPU_TARGET})"
   VERBATIM
 )
 
@@ -173,22 +199,30 @@ add_custom_target(aie_kernel_artifacts
 # Step 3: MLIR -> full ELF (standalone, contains PDI + instructions)
 # aiecc needs aiebu-asm on PATH to assemble the embedded control code.
 get_filename_component(AIEBU_ASM_DIR "${AIEBU_ASM}" DIRECTORY)
-set(FULL_ELF "${KERNEL_BUILD_DIR}/aie.elf")
-add_custom_command(
-  OUTPUT "${FULL_ELF}"
-  COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:${AIEBU_ASM_DIR}:$ENV{PATH}"
-          aiecc
-          --peano=${PEANO_INSTALL_DIR}
-          --get-full-elf
-          --full-elf-name=aie.elf
-          "${AIE_MLIR}"
-  WORKING_DIRECTORY "${KERNEL_BUILD_DIR}"
-  DEPENDS "${AIE_MLIR}"
-  COMMENT "Generating full ELF from AIE kernel"
-  VERBATIM
-)
+set(FULL_ELF "${FULL_ELF_BUILD_DIR}/aie.elf")
+if(AIE_FULL_ELF_SUPPORTED)
+  add_custom_command(
+    OUTPUT "${FULL_ELF}"
+    # aiebu-asm exits 0 even when it fails, and aiecc does not check that the
+    # ELF appeared. Delete first so that a silent failure leaves nothing behind
+    # and the build stops, instead of resurrecting the previous ELF.
+    COMMAND "${CMAKE_COMMAND}" -E rm -f "${FULL_ELF}"
+    COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:${AIEBU_ASM_DIR}:$ENV{PATH}"
+            aiecc
+            --peano=${PEANO_INSTALL_DIR}
+            --get-full-elf
+            --full-elf-name=aie.elf
+            "${AIE_ELF_MLIR}"
+    # Errors out (non-zero) if aiecc produced no ELF.
+    COMMAND "${CMAKE_COMMAND}" -E md5sum "${FULL_ELF}"
+    WORKING_DIRECTORY "${FULL_ELF_BUILD_DIR}"
+    DEPENDS "${AIE_ELF_MLIR}"
+    COMMENT "Generating full ELF from AIE kernel"
+    VERBATIM
+  )
 
-add_custom_target(aie_full_elf DEPENDS "${FULL_ELF}")
+  add_custom_target(aie_full_elf DEPENDS "${FULL_ELF}")
+endif()
 
 # ---------------------------------------------------------------------------
 # XRT PDI/insts benchmark
@@ -210,18 +244,24 @@ add_dependencies(vector-scalar-add-xrt aie_kernel_artifacts)
 # XRT full-ELF benchmark
 # ---------------------------------------------------------------------------
 
-add_executable(vector-scalar-add-xrt-elf vector_scalar_add_xrt_elf.cpp)
-target_compile_features(vector-scalar-add-xrt-elf PRIVATE cxx_std_20)
-target_include_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_INC_DIR}")
-target_compile_definitions(vector-scalar-add-xrt-elf PRIVATE
-  DEFAULT_ELF_PATH=${FULL_ELF}
-  DEFAULT_KERNEL_NAME="vector_scalar_add:sequence"
-)
-target_link_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_LIB_DIR}")
-target_link_libraries(vector-scalar-add-xrt-elf PRIVATE
-  benchmark::benchmark_main
-  xrt_coreutil)
-add_dependencies(vector-scalar-add-xrt-elf aie_full_elf)
+# The kernel is addressed as "<device>:<sequence>", the names aiecc writes into
+# aie.mlir.prj/full_elf_config.json. vector_scalar_add.py leaves the aie.device
+# and the runtime sequence unnamed, so aiecc defaults them to "main" and
+# "sequence".
+if(AIE_FULL_ELF_SUPPORTED)
+  add_executable(vector-scalar-add-xrt-elf vector_scalar_add_xrt_elf.cpp)
+  target_compile_features(vector-scalar-add-xrt-elf PRIVATE cxx_std_20)
+  target_include_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_INC_DIR}")
+  target_compile_definitions(vector-scalar-add-xrt-elf PRIVATE
+    DEFAULT_ELF_PATH=${FULL_ELF}
+    DEFAULT_KERNEL_NAME="main:sequence"
+  )
+  target_link_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_LIB_DIR}")
+  target_link_libraries(vector-scalar-add-xrt-elf PRIVATE
+    benchmark::benchmark_main
+    xrt_coreutil)
+  add_dependencies(vector-scalar-add-xrt-elf aie_full_elf)
+endif()
 
 # ---------------------------------------------------------------------------
 # HSA PDI/insts benchmark

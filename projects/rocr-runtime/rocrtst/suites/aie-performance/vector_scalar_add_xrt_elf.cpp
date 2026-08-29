@@ -12,55 +12,151 @@
 
 #include "xrt/experimental/xrt_elf.h"
 #include "xrt/experimental/xrt_ext.h"
+#include "xrt/experimental/xrt_kernel.h"
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <numeric>
 #include <string>
+#include <vector>
 
 #define STRINGIFY2(x) #x
 #define STRINGIFY(x) STRINGIFY2(x)
 
 static std::string g_elf_path = STRINGIFY(DEFAULT_ELF_PATH);
-static std::string g_kernel_name = STRINGIFY(DEFAULT_KERNEL_NAME);
+static std::string g_kernel_name = DEFAULT_KERNEL_NAME;
 
 static constexpr int N = 1024;
 
-static void VectorScalarAddELF(benchmark::State& state) {
-  // Load full ELF (contains PDI + instructions + metadata)
-  xrt::elf elf(g_elf_path);
+namespace {
 
-  // Open device; ELF configures the hardware context directly
-  auto device = xrt::device(0);
-  xrt::hw_context context(device, elf);
+// Per-benchmark fixture: load the ELF, open the device and allocate one input
+// and one output buffer per dispatch.
+struct ElfHarness {
+  xrt::elf elf;
+  xrt::device device;
+  xrt::hw_context context;
+  xrt::ext::kernel kernel;
+  std::vector<xrt::bo> bo_ins;
+  std::vector<xrt::bo> bo_outs;
 
-  // Create kernel from the ELF-configured context
-  auto kernel = xrt::ext::kernel(context, g_kernel_name);
+  explicit ElfHarness(std::int32_t num_dispatches)
+      : elf(g_elf_path),
+        device(0),
+        // The ELF configures the hardware context directly; no xclbin needed.
+        context(device, elf),
+        kernel(context, g_kernel_name) {
+    bo_ins.reserve(num_dispatches);
+    bo_outs.reserve(num_dispatches);
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      // xrt::ext::bo is host-only, matching the flags the xclbin benchmark uses.
+      bo_ins.emplace_back(xrt::ext::bo{device, N * sizeof(int32_t)});
+      bo_outs.emplace_back(xrt::ext::bo{device, N * sizeof(int32_t)});
 
-  // Allocate buffer objects (no group_id needed with ext::bo)
-  xrt::bo bo_in = xrt::ext::bo{device, N * sizeof(int32_t)};
-  xrt::bo bo_out = xrt::ext::bo{device, N * sizeof(int32_t)};
+      // Initialize input: [1, 2, ..., 1024]
+      auto* buf_in = bo_ins[i].map<int32_t*>();
+      std::iota(buf_in, buf_in + N, 1);
 
-  // Initialize input: [1, 2, 3, ..., 1024]
-  auto* buf_in = bo_in.map<int32_t*>();
-  std::iota(buf_in, buf_in + N, 1);
+      // Initialize output: all zeros. The mapping is cached, so the write has
+      // to be flushed before the first dispatch -- otherwise the dirty lines
+      // write back over the DMA'd result and the head of the output reads as
+      // zero.
+      auto* buf_out = bo_outs[i].map<int32_t*>();
+      std::fill_n(buf_out, N, 0);
+      bo_outs[i].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    }
+  }
 
-  // Zero output
-  auto* buf_out = bo_out.map<int32_t*>();
-  std::memset(buf_out, 0, N * sizeof(int32_t));
+  // Verify the kernel actually ran; otherwise the numbers are timing a no-op
+  // dispatch.
+  bool verify() const {
+    for (const auto& bo_out : bo_outs) {
+      const auto* buf_out = bo_out.map<const int32_t*>();
+      for (int i = 0; i < N; ++i) {
+        if (buf_out[i] != i + 2) return false;
+      }
+    }
+    return true;
+  }
+};
 
-  // Benchmark loop: sync in -> dispatch -> wait -> sync out
-  for (auto _ : state) {
-    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+}  // namespace
 
-    unsigned int opcode = 3;
-    auto run = kernel(opcode, 0, 0, bo_in, bo_out);
-    run.wait2();
+static void VectorScalarAddELFKernel(benchmark::State& state) {
+  const std::int32_t num_dispatches = state.range(0);
+  try {
+    ElfHarness h(num_dispatches);
 
-    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    // Benchmark loop: sync in -> dispatch -> wait -> sync out (all dispatches)
+    std::vector<xrt::run> runs(num_dispatches);
+    for (auto _ : state) {
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        h.bo_ins[i].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        xrt::run run(h.kernel);
+        run.set_arg(0, h.bo_ins[i]);
+        run.set_arg(1, h.bo_outs[i]);
+        run.start();
+        runs[i] = std::move(run);
+      }
 
-    benchmark::ClobberMemory();
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        runs[i].wait();
+        h.bo_outs[i].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+      }
+
+      benchmark::ClobberMemory();
+    }
+
+    if (!h.verify()) state.SkipWithError("Incorrect kernel output");
+  } catch (const std::exception& e) {
+    // Google Benchmark does not catch, so without this a missing artifact or a
+    // failed dispatch terminates the whole run instead of failing one case.
+    state.SkipWithError(e.what());
   }
 }
 
-BENCHMARK(VectorScalarAddELF)->Unit(benchmark::kMicrosecond);
+static void VectorScalarAddELFRunlist(benchmark::State& state) {
+  const std::int32_t num_dispatches = state.range(0);
+  try {
+    ElfHarness h(num_dispatches);
+
+    // Bind once outside the loop; the runlist is re-executed each iteration.
+    xrt::runlist runlist(h.context);
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      xrt::run run(h.kernel);
+      run.set_arg(0, h.bo_ins[i]);
+      run.set_arg(1, h.bo_outs[i]);
+      runlist.add(std::move(run));
+    }
+
+    // Benchmark loop: sync inputs -> execute -> wait -> sync outputs
+    for (auto _ : state) {
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        h.bo_ins[i].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+      }
+
+      runlist.execute();
+      runlist.wait();
+
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        h.bo_outs[i].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+      }
+
+      benchmark::ClobberMemory();
+    }
+
+    if (!h.verify()) state.SkipWithError("Incorrect kernel output");
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+  }
+}
+
+BENCHMARK(VectorScalarAddELFKernel)
+    ->Unit(benchmark::kMicrosecond)
+    ->RangeMultiplier(2)
+    ->Range(1, 32);
+BENCHMARK(VectorScalarAddELFRunlist)
+    ->Unit(benchmark::kMicrosecond)
+    ->RangeMultiplier(2)
+    ->Range(1, 32);
