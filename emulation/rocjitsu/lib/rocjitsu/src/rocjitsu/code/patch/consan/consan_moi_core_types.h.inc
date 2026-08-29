@@ -293,73 +293,35 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
                                                 uint16_t vcc_save_sgpr, uint16_t scc_save_sgpr,
                                                 rj_code_arch_t arch);
 
-[[nodiscard]] constexpr ConSanMoiInlineAtomicSupport
+[[nodiscard]] inline ConSanMoiInlineAtomicSupport
 classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
                                           ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch,
                                           bool is_rmw = true) {
-  const bool is_flat = site.mnemonic.starts_with("flat_atomic") ||
-                       (!is_rmw && (site.mnemonic.starts_with("flat_load") ||
-                                    site.mnemonic.starts_with("flat_store")));
-  const bool is_vglobal = site.mnemonic.starts_with("global_atomic") ||
-                          (!is_rmw && (site.mnemonic.starts_with("global_load") ||
-                                       site.mnemonic.starts_with("global_store")));
-  if (!is_flat && !is_vglobal)
-    return ConSanMoiInlineAtomicSupport::NonFlatAddress;
-  const bool is_compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
   (void)event_kind;
-  if (site.width_bits != 32)
+  switch (classify_consan_atomic_lowering(site, arch, is_rmw).exact_ordering_reason) {
+  case ConSanAtomicClassifierReason::None:
+    return ConSanMoiInlineAtomicSupport::Supported;
+  case ConSanAtomicClassifierReason::UnsupportedAddressSource:
+  case ConSanAtomicClassifierReason::TargetUnavailable:
+    return ConSanMoiInlineAtomicSupport::NonFlatAddress;
+  case ConSanAtomicClassifierReason::InvalidAccessWidth:
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
-  const bool is_cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const bool is_rdna3 = consan_uses_gfx11_encoding(arch);
-  const bool is_gfx12 = consan_uses_gfx12_encoding(arch);
-  const bool gfx12_flat_saddr =
-      site.raw_saddr &&
-      (*site.raw_saddr == 0x7cu || (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
-                                    *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
-  const bool gfx12_flat_encoding =
-      is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) && gfx12_flat_saddr;
-  const bool cdna_flat_encoding = is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) &&
-                                  site.raw_saddr && *site.raw_saddr == 0u;
-  const bool rdna3_flat_encoding = is_flat && is_rdna3 && site.size == 2u * sizeof(uint32_t) &&
-                                   site.raw_saddr && *site.raw_saddr == kRdna3FlatNoSaddrEncoding;
-  const bool cdna_vglobal_saddr =
-      site.raw_saddr && (*site.raw_saddr == kCdnaGlobalNoSaddrEncoding ||
-                         (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
-                          *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
-  const bool cdna_vglobal_encoding =
-      is_vglobal && is_cdna && site.size == 2u * sizeof(uint32_t) && cdna_vglobal_saddr;
-  const bool rdna3_vglobal_saddr =
-      site.raw_saddr && (*site.raw_saddr == kRdna3GlobalNoSaddrEncoding ||
-                         (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
-                          *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
-  const bool rdna3_vglobal_encoding =
-      is_vglobal && is_rdna3 && site.size == 2u * sizeof(uint32_t) && rdna3_vglobal_saddr;
-  const bool gfx12_vglobal_encoding = is_vglobal && is_gfx12 && site.size == 3u * sizeof(uint32_t);
-  const bool vglobal_encoding =
-      cdna_vglobal_encoding || rdna3_vglobal_encoding || gfx12_vglobal_encoding;
-  if (!gfx12_flat_encoding && !cdna_flat_encoding && !rdna3_flat_encoding && !vglobal_encoding)
+  case ConSanAtomicClassifierReason::UnsupportedEncoding:
     return ConSanMoiInlineAtomicSupport::UnsupportedEncoding;
-  if (!site.raw_ioffset || (is_flat && *site.raw_ioffset != 0))
+  case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
     return ConSanMoiInlineAtomicSupport::NonzeroOffset;
-  if (!site.addr_vgpr || *site.addr_vgpr >= 255 || !site.data_vgpr ||
-      (is_compare_exchange && *site.data_vgpr >= 255))
+  case ConSanAtomicClassifierReason::MissingOperands:
     return ConSanMoiInlineAtomicSupport::MissingOperands;
-  // A no-return compare-exchange has no destination operand by construction.
-  // Classify its missing success evidence before requiring the destination
-  // that only the returning form can provide.
-  if (is_compare_exchange && site.returns_old_value && !*site.returns_old_value)
+  case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
     return ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable;
-  if (is_compare_exchange && !site.dst_vgpr)
-    return ConSanMoiInlineAtomicSupport::MissingOperands;
-  if (!site.raw_scope || !site.raw_th || !site.returns_old_value)
+  case ConSanAtomicClassifierReason::MissingOrderingMetadata:
     return ConSanMoiInlineAtomicSupport::MissingOrderingMetadata;
-  // Wave scope is not an inter-wave handoff. Workgroup, agent, and system
-  // atomics are all valid causal publication/import events; the Inline keys
-  // already include dispatch and workgroup identity, so scope 1 needs no
-  // broader alias domain than the existing transaction.
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+  case ConSanAtomicClassifierReason::UnsupportedScope:
     return ConSanMoiInlineAtomicSupport::UnsupportedScope;
-  return ConSanMoiInlineAtomicSupport::Supported;
+  case ConSanAtomicClassifierReason::Count:
+    break;
+  }
+  return ConSanMoiInlineAtomicSupport::UnsupportedEncoding;
 }
 
 [[nodiscard]] constexpr std::string_view

@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file consan_atomic_classifier.h
+/// @brief Exact target classification for ordered ConSan atomic operations.
+
+#pragma once
+
+#include "rocjitsu/code/rj_code.h"
+
+#include <cstdint>
+#include <optional>
+#include <string_view>
+
+namespace rocjitsu {
+
+struct ConSanAtomicSite;
+
+/// Architecture-normalized address family for one ordered atomic operation.
+enum class ConSanAtomicLoweringFormKind : uint8_t {
+  FlatVectorAddress,
+  FlatScalarVectorAddress,
+  GlobalVectorAddress,
+  GlobalScalarVectorAddress,
+  LdsVectorOffset,
+  BufferResourceVectorOffset,
+  Count,
+};
+
+/// Exact normalized facts consumed by ordered-atomic target mechanisms.
+struct ConSanAtomicLoweringForm {
+  ConSanAtomicLoweringFormKind kind = ConSanAtomicLoweringFormKind::Count;
+  uint32_t instruction_size = 0;
+  uint32_t value_width_bits = 0;
+  uint16_t value_register_count = 0;
+  uint16_t address_vgpr = 0;
+  uint16_t address_vgpr_count = 0;
+  uint16_t data_vgpr = 0;
+  std::optional<uint16_t> destination_vgpr;
+  std::optional<uint16_t> scalar_base_sgpr;
+  int32_t signed_byte_offset = 0;
+  uint32_t scope = 0;
+  bool scale_vector_offset = false;
+  bool is_rmw = true;
+  bool compare_exchange = false;
+  bool returns_old_value = false;
+
+  bool operator==(const ConSanAtomicLoweringForm &) const = default;
+};
+
+/// Typed reason why an exact ordered-atomic mechanism cannot consume a site.
+enum class ConSanAtomicClassifierReason : uint8_t {
+  None,
+  UnsupportedAddressSource,
+  InvalidAccessWidth,
+  UnsupportedEncoding,
+  NonzeroImmediateOffset,
+  MissingOperands,
+  CompareExchangeOutcomeUnavailable,
+  MissingOrderingMetadata,
+  UnsupportedScope,
+  TargetUnavailable,
+  Count,
+};
+
+struct ConSanAtomicLoweringClassification {
+  std::optional<ConSanAtomicLoweringForm> form;
+  ConSanAtomicClassifierReason normalization_reason =
+      ConSanAtomicClassifierReason::TargetUnavailable;
+  ConSanAtomicClassifierReason exact_ordering_reason =
+      ConSanAtomicClassifierReason::TargetUnavailable;
+
+  [[nodiscard]] bool normalized() const {
+    return form.has_value() && normalization_reason == ConSanAtomicClassifierReason::None;
+  }
+  [[nodiscard]] bool exact_ordering_available() const {
+    return exact_ordering_reason == ConSanAtomicClassifierReason::None;
+  }
+
+  bool operator==(const ConSanAtomicLoweringClassification &) const = default;
+};
+
+/// Normalize one operand-rich atomic or ordered ordinary-memory decode and
+/// classify its exact-ordering operation. This is the sole authority for raw
+/// target encoding admission shared by policy and native lowerers.
+[[nodiscard]] ConSanAtomicLoweringClassification
+classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arch,
+                                bool is_rmw = true);
+
+[[nodiscard]] std::string_view
+consan_atomic_classifier_reason_name(ConSanAtomicClassifierReason reason);
+
+} // namespace rocjitsu

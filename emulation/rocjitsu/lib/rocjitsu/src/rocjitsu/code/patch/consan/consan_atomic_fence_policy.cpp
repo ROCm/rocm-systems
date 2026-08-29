@@ -246,59 +246,30 @@ atomic_capability_form(const ConSanSyncEvent &event) {
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
-classify_exact_atomic_encoding(const ConSanAtomicSite &site, rj_code_arch_t arch, bool is_rmw) {
-  const bool is_flat = site.mnemonic.starts_with("flat_atomic") ||
-                       (!is_rmw && (site.mnemonic.starts_with("flat_load") ||
-                                    site.mnemonic.starts_with("flat_store")));
-  const bool is_vglobal = site.mnemonic.starts_with("global_atomic") ||
-                          (!is_rmw && (site.mnemonic.starts_with("global_load") ||
-                                       site.mnemonic.starts_with("global_store")));
-  if (!is_flat && !is_vglobal)
+atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
+  switch (reason) {
+  case ConSanAtomicClassifierReason::None:
+    return ConSanAtomicPolicyReason::None;
+  case ConSanAtomicClassifierReason::UnsupportedAddressSource:
     return ConSanAtomicPolicyReason::UnsupportedAddressSource;
-  if (site.width_bits != 32u)
+  case ConSanAtomicClassifierReason::InvalidAccessWidth:
     return ConSanAtomicPolicyReason::InvalidAccessWidth;
-
-  const bool is_cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const bool is_rdna3 = consan_uses_gfx11_encoding(arch);
-  const bool is_gfx12 = consan_uses_gfx12_encoding(arch);
-  const bool gfx12_flat_saddr =
-      site.raw_saddr &&
-      (*site.raw_saddr == 0x7cu || (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
-                                    *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
-  const bool gfx12_flat_encoding =
-      is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) && gfx12_flat_saddr;
-  const bool cdna_flat_encoding = is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) &&
-                                  site.raw_saddr && *site.raw_saddr == 0u;
-  const bool rdna3_flat_encoding = is_flat && is_rdna3 && site.size == 2u * sizeof(uint32_t) &&
-                                   site.raw_saddr && *site.raw_saddr == 0x7cu;
-  const bool vglobal_saddr =
-      site.raw_saddr && (*site.raw_saddr == (is_cdna ? 0x7fu : 0x7cu) ||
-                         (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
-                          *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
-  const bool pre_gfx12_vglobal_encoding =
-      is_vglobal && (is_cdna || is_rdna3) && site.size == 2u * sizeof(uint32_t) && vglobal_saddr;
-  const bool gfx12_vglobal_encoding = is_vglobal && is_gfx12 && site.size == 3u * sizeof(uint32_t);
-  if (!gfx12_flat_encoding && !cdna_flat_encoding && !rdna3_flat_encoding &&
-      !pre_gfx12_vglobal_encoding && !gfx12_vglobal_encoding) {
+  case ConSanAtomicClassifierReason::UnsupportedEncoding:
+  case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
     return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  }
-  if (!site.raw_ioffset || (is_flat && *site.raw_ioffset != 0))
-    return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
-  if (!site.addr_vgpr || *site.addr_vgpr >= 255u || !site.data_vgpr ||
-      (compare_exchange && *site.data_vgpr >= 255u)) {
+  case ConSanAtomicClassifierReason::MissingOperands:
     return ConSanAtomicPolicyReason::MissingOperands;
-  }
-  if (compare_exchange && site.returns_old_value && !*site.returns_old_value) {
+  case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
     return ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable;
-  }
-  if (compare_exchange && !site.dst_vgpr)
-    return ConSanAtomicPolicyReason::MissingOperands;
-  if (!site.raw_scope || !site.raw_th || !site.returns_old_value)
+  case ConSanAtomicClassifierReason::MissingOrderingMetadata:
     return ConSanAtomicPolicyReason::MissingScope;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+  case ConSanAtomicClassifierReason::UnsupportedScope:
     return ConSanAtomicPolicyReason::UnsupportedScope;
-  return ConSanAtomicPolicyReason::None;
+  case ConSanAtomicClassifierReason::TargetUnavailable:
+  case ConSanAtomicClassifierReason::Count:
+    return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
+  }
+  return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
@@ -352,8 +323,10 @@ classify_cdna5_buffer_ordinary_encoding(const ConSanAtomicSite &site, rj_code_ar
     return classify_cdna5_buffer_ordinary_encoding(site, inventory.arch());
   }
 
-  if (engine == ConSanCapabilityEngine::InlineShadow || ordinary)
-    return classify_exact_atomic_encoding(site, inventory.arch(), !ordinary);
+  if (engine == ConSanCapabilityEngine::InlineShadow || ordinary) {
+    return atomic_classifier_reason(
+        classify_consan_atomic_lowering(site, inventory.arch(), !ordinary).exact_ordering_reason);
+  }
 
   const bool allowed_lds = site.mnemonic.starts_with("ds_") &&
                            consan_arch_supports_capability_form(
