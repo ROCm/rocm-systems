@@ -138,6 +138,7 @@ public:
   void close_all_processes();
 
   [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
+  [[nodiscard]] int get_allocation_memfd(uint32_t process_id, uint64_t handle) const;
   /// @}
 
   /// @brief Local-mode get_mmap_memfd (uses local process).
@@ -286,6 +287,7 @@ private:
                       off_t offset);
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
   int dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const;
+  int dispatch_get_allocation_memfd(KfdProcess &proc, uint64_t handle) const;
 
   int get_process_apertures_ioctl(void *arg) override;
   int acquire_vm_ioctl(void *arg) override;
@@ -442,7 +444,10 @@ private:
   kfd_process_device_apertures gpu_apertures(uint32_t ordinal) const;
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
-  bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
+  bool allocate_scratch_backing(uint32_t gpu_ordinal, uint32_t process_id, uint64_t gpu_va,
+                                size_t size, bool requires_owned_pool);
+  bool is_scratch_backing_owned(uint32_t gpu_ordinal, uint32_t process_id, uint64_t gpu_va,
+                                size_t size) const;
 
   /// @brief Lazily create the backing memfd exactly once across racing opens.
   /// @details CAS-publishes fd_ so concurrent open()/open_process() callers agree
@@ -478,7 +483,7 @@ private:
   ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
   ///   hw_queue_mutex_ (CP) < scratch_backing_mutex_ (KfdProcess) < alloc_mutex_
-  ///                                                    (allocate_scratch_backing)
+  ///                                                    (scratch pool reservation)
   /// The op_mutex_ in the debug rule is always the CALLER's, while runtime_mutex_
   /// may belong to a DIFFERENT process (the debug target resolved by client pid).
   /// debug_trap_ioctl holds only the caller's op_mutex_ and never acquires the
@@ -487,10 +492,9 @@ private:
   /// descends into EventState::mutex_, and close() takes it only after releasing
   /// process_mutex_, so there is no cycle.
   /// The CP engine thread acquires hw_queue_mutex_ first, then reaches
-  /// process_mutex_ (scratch resolver) or alloc_mutex_ (scratch allocator) through
-  /// the callbacks — hw_queue_mutex_ -> process_mutex_ and, separately,
-  /// hw_queue_mutex_ -> alloc_mutex_ (never both nested). To avoid an ABBA against
-  /// that thread, an ioctl MUST NOT hold a per-process lock (alloc_mutex_) across a
+  /// process_mutex_ (scratch resolver) or scratch_backing_mutex_/alloc_mutex_
+  /// (scratch allocator) through callbacks. To avoid an ABBA against that thread,
+  /// an ioctl MUST NOT hold a per-process lock (alloc_mutex_) across a
   /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;

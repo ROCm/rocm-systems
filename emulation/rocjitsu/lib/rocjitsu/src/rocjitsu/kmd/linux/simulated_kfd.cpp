@@ -34,6 +34,7 @@ RJ_DIAGNOSTIC_POP
 #include <fcntl.h>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <linux/types.h>
 #include <poll.h>
 #include <sstream>
@@ -125,6 +126,206 @@ bool ranges_overlap(const void *lhs, size_t lhs_size, const void *rhs, size_t rh
   const auto lhs_base = reinterpret_cast<uintptr_t>(lhs);
   const auto rhs_base = reinterpret_cast<uintptr_t>(rhs);
   return lhs_base <= rhs_base ? rhs_base - lhs_base < lhs_size : lhs_base - rhs_base < rhs_size;
+}
+
+bool gpu_ranges_overlap(uint64_t lhs_va, uint64_t lhs_size, uint64_t rhs_va, uint64_t rhs_size) {
+  if (lhs_size == 0 || rhs_size == 0)
+    return false;
+  return lhs_va <= rhs_va ? rhs_va - lhs_va < lhs_size : lhs_va - rhs_va < rhs_size;
+}
+
+bool gpu_range_contains(uint64_t outer_va, uint64_t outer_size, uint64_t inner_va,
+                        uint64_t inner_size) {
+  if (outer_size == 0 || inner_size == 0)
+    return false;
+  if (inner_va < outer_va)
+    return false;
+  const uint64_t offset = inner_va - outer_va;
+  return offset <= outer_size && inner_size <= outer_size - offset;
+}
+
+bool gpu_range_overflows(uint64_t gpu_va, uint64_t size) {
+  return size != 0 && gpu_va > std::numeric_limits<uint64_t>::max() - size;
+}
+
+bool gpuvm_range_contains(uint64_t gpu_va, uint64_t size) {
+  if (size == 0 || gpu_va < KfdProcess::kGpuVmBase)
+    return false;
+  constexpr uint64_t kApertureSize = KfdProcess::kGpuVmLimit - KfdProcess::kGpuVmBase + 1;
+  const uint64_t offset = gpu_va - KfdProcess::kGpuVmBase;
+  return offset < kApertureSize && size <= kApertureSize - offset;
+}
+
+bool fallback_scratch_base(uint32_t gpu_ordinal, uint64_t *gpu_va) {
+  constexpr uint64_t kGpuVmEnd = KfdProcess::kGpuVmLimit + 1;
+  constexpr uint64_t kReserveSize = KfdProcess::kFallbackScratchReserveSize;
+  const uint64_t ordinal_count = static_cast<uint64_t>(gpu_ordinal) + 1;
+  if (kReserveSize == 0 || ordinal_count > kGpuVmEnd / kReserveSize)
+    return false;
+  const uint64_t base = kGpuVmEnd - ordinal_count * kReserveSize;
+  if (!gpuvm_range_contains(base, KfdProcess::kPageSize))
+    return false;
+  *gpu_va = base;
+  return true;
+}
+
+bool fallback_scratch_window(uint32_t gpu_ordinal, uint64_t *gpu_va, uint64_t *size) {
+  if (!fallback_scratch_base(gpu_ordinal, gpu_va))
+    return false;
+  *size = KfdProcess::kFallbackScratchReserveSize;
+  return gpuvm_range_contains(*gpu_va, *size);
+}
+
+bool decode_scratch_base(uint64_t encoded_va, uint64_t *gpu_va) {
+  if (encoded_va > (std::numeric_limits<uint64_t>::max() >> 16))
+    return false;
+  *gpu_va = encoded_va << 16;
+  return true;
+}
+
+bool allocation_overlaps_gpu_range(const KfdProcess::GpuAllocation &alloc, uint64_t gpu_va,
+                                   uint64_t size) {
+  if (alloc.gpu_va == 0)
+    return false;
+  return gpu_ranges_overlap(alloc.gpu_va, alloc.size, gpu_va, size);
+}
+
+bool scratch_pool_overlaps_gpu_range(const KfdProcess::ScratchPool &pool, uint64_t gpu_va,
+                                     uint64_t size) {
+  if (pool.gpu_va == 0)
+    return false;
+  return gpu_ranges_overlap(pool.gpu_va, pool.size, gpu_va, size);
+}
+
+bool scratch_pool_contains_gpu_range(const KfdProcess::ScratchPool &pool, uint64_t gpu_va,
+                                     uint64_t size) {
+  if (pool.gpu_va == 0)
+    return false;
+  return gpu_range_contains(pool.gpu_va, pool.size, gpu_va, size);
+}
+
+bool gpu_va_align_up(uint64_t gpu_va, uint64_t *aligned) {
+  constexpr uint64_t kMask = KfdProcess::kPageSize - 1;
+  if (gpu_va > std::numeric_limits<uint64_t>::max() - kMask)
+    return false;
+  *aligned = (gpu_va + kMask) & ~kMask;
+  return true;
+}
+
+bool allocations_overlap_gpu_range(const KfdProcess &proc, uint64_t gpu_va, uint64_t size,
+                                   uint64_t allowed_handle = 0) {
+  for (const std::pair<const uint64_t, KfdProcess::GpuAllocation> &entry : proc.allocations_) {
+    const uint64_t handle = entry.first;
+    const KfdProcess::GpuAllocation &existing = entry.second;
+    if (handle == allowed_handle)
+      continue;
+    if (allocation_overlaps_gpu_range(existing, gpu_va, size))
+      return true;
+  }
+  return false;
+}
+
+constexpr uint32_t kNoScratchGpuOrdinal = std::numeric_limits<uint32_t>::max();
+
+bool fallback_reservations_overlap_gpu_range(
+    const KfdProcess &proc, uint64_t gpu_va, uint64_t size,
+    uint32_t allowed_fallback_ordinal = kNoScratchGpuOrdinal) {
+  for (uint32_t ordinal = 0; ordinal < proc.gpu_state_.size(); ++ordinal) {
+    if (ordinal == allowed_fallback_ordinal)
+      continue;
+    uint64_t reserve_base = 0;
+    uint64_t reserve_size = 0;
+    if (fallback_scratch_window(ordinal, &reserve_base, &reserve_size) &&
+        gpu_ranges_overlap(reserve_base, reserve_size, gpu_va, size)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool fallback_window_contains_gpu_range(uint32_t gpu_ordinal, uint64_t gpu_va, uint64_t size) {
+  uint64_t reserve_base = 0;
+  uint64_t reserve_size = 0;
+  return fallback_scratch_window(gpu_ordinal, &reserve_base, &reserve_size) &&
+         gpu_range_contains(reserve_base, reserve_size, gpu_va, size);
+}
+
+bool process_ranges_overlap_gpu_range(const KfdProcess &proc, uint64_t gpu_va, uint64_t size,
+                                      uint64_t allowed_handle = 0,
+                                      uint32_t allowed_scratch_ordinal = kNoScratchGpuOrdinal,
+                                      uint64_t allowed_scratch_base = 0,
+                                      uint32_t allowed_fallback_ordinal = kNoScratchGpuOrdinal) {
+  if (allocations_overlap_gpu_range(proc, gpu_va, size, allowed_handle))
+    return true;
+  if (fallback_reservations_overlap_gpu_range(proc, gpu_va, size, allowed_fallback_ordinal))
+    return true;
+  for (const std::pair<const KfdProcess::ScratchPoolKey, KfdProcess::ScratchPool> &entry :
+       proc.scratch_pools_) {
+    const KfdProcess::ScratchPoolKey &key = entry.first;
+    const KfdProcess::ScratchPool &pool = entry.second;
+    if (key.gpu_ordinal == allowed_scratch_ordinal && key.gpu_va == allowed_scratch_base)
+      continue;
+    if (scratch_pool_overlaps_gpu_range(pool, gpu_va, size))
+      return true;
+  }
+  return false;
+}
+
+bool find_available_gpu_range(KfdProcess &proc, uint64_t size, uint64_t *gpu_va) {
+  if (!gpuvm_range_contains(KfdProcess::kGpuVmBase, size))
+    return false;
+
+  uint64_t candidate = std::max(proc.next_gpu_va_, KfdProcess::kGpuVmBase);
+  for (;;) {
+    if (!gpu_va_align_up(candidate, &candidate) || gpu_range_overflows(candidate, size))
+      return false;
+    if (!gpuvm_range_contains(candidate, size))
+      return false;
+
+    bool overlapped = false;
+    for (const std::pair<const uint64_t, KfdProcess::GpuAllocation> &entry : proc.allocations_) {
+      const KfdProcess::GpuAllocation &existing = entry.second;
+      if (!allocation_overlaps_gpu_range(existing, candidate, size))
+        continue;
+      if (gpu_range_overflows(existing.gpu_va, existing.size))
+        return false;
+      candidate = existing.gpu_va + existing.size;
+      overlapped = true;
+      break;
+    }
+    if (overlapped)
+      continue;
+    for (const std::pair<const KfdProcess::ScratchPoolKey, KfdProcess::ScratchPool> &entry :
+         proc.scratch_pools_) {
+      const KfdProcess::ScratchPool &existing = entry.second;
+      if (!scratch_pool_overlaps_gpu_range(existing, candidate, size))
+        continue;
+      if (gpu_range_overflows(existing.gpu_va, existing.size))
+        return false;
+      candidate = existing.gpu_va + existing.size;
+      overlapped = true;
+      break;
+    }
+    if (overlapped)
+      continue;
+    for (uint32_t ordinal = 0; ordinal < proc.gpu_state_.size(); ++ordinal) {
+      uint64_t reserve_base = 0;
+      uint64_t reserve_size = 0;
+      if (!fallback_scratch_window(ordinal, &reserve_base, &reserve_size) ||
+          !gpu_ranges_overlap(reserve_base, reserve_size, candidate, size)) {
+        continue;
+      }
+      if (gpu_range_overflows(reserve_base, reserve_size))
+        return false;
+      candidate = reserve_base + reserve_size;
+      overlapped = true;
+      break;
+    }
+    if (!overlapped) {
+      *gpu_va = candidate;
+      return true;
+    }
+  }
 }
 
 /// @brief Return whether one non-empty address range fully contains another.
@@ -653,7 +854,8 @@ void SimulatedKfd::init_command_processors_locked() {
     // must be what the runtime and the debugger were told.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
+    const uint32_t gpu_ordinal = static_cast<uint32_t>(i);
+    g.soc->for_each_cp([this, gpu_ordinal](amdgpu::CommandProcessor *cp) {
       cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
         auto it = event_dispatch_.find(process_id);
@@ -666,24 +868,38 @@ void SimulatedKfd::init_command_processors_locked() {
                            " found=false");
         }
       });
-      cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
-        std::lock_guard<std::mutex> plk(process_mutex_);
-        for (auto &[fd, proc] : processes_) {
-          if (proc->process_id() == process_id) {
-            for (auto &gs : proc->gpu_state_) {
-              if (gs.scratch_backing_va != 0)
-                return gs.scratch_backing_va << 16;
+      cp->set_scratch_backing_resolver(
+          [this, gpu_ordinal](uint32_t process_id) -> amdgpu::CommandProcessor::ScratchBacking {
+            std::lock_guard<std::mutex> plk(process_mutex_);
+            for (const std::pair<const uint32_t, std::shared_ptr<KfdProcess>> &entry : processes_) {
+              const std::shared_ptr<KfdProcess> &proc = entry.second;
+              if (proc->process_id() == process_id) {
+                if (gpu_ordinal >= proc->gpu_state_.size())
+                  return {};
+                uint64_t scratch_base = 0;
+                if (!decode_scratch_base(proc->gpu(gpu_ordinal).scratch_backing_va, &scratch_base))
+                  return {};
+                if (scratch_base == 0) {
+                  uint64_t fallback = 0;
+                  if (!fallback_scratch_base(gpu_ordinal, &fallback))
+                    return {};
+                  return {.gpu_va = fallback, .requires_owned_pool = true};
+                }
+                return {.gpu_va = scratch_base, .requires_owned_pool = false};
+              }
             }
-          }
-        }
-        return 0;
+            return {};
+          });
+      cp->set_scratch_backing_allocator([this, gpu_ordinal](uint32_t process_id, uint64_t gpu_va,
+                                                            size_t size,
+                                                            bool requires_owned_pool) -> bool {
+        return allocate_scratch_backing(gpu_ordinal, process_id, gpu_va, size, requires_owned_pool);
       });
-      cp->set_scratch_backing_allocator(
-          [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
-            return allocate_scratch_backing(process_id, gpu_va, size);
+      cp->set_scratch_backing_verifier(
+          [this, gpu_ordinal](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
+            return is_scratch_backing_owned(gpu_ordinal, process_id, gpu_va, size);
           });
       for (auto *cu : cp->compute_units()) {
-        const uint32_t gpu_ordinal = static_cast<uint32_t>(i);
         cu->set_trap_handler_resolver([this, gpu_ordinal](const amdgpu::Wavefront &wf) {
           return resolve_trap_handler(wf, gpu_ordinal);
         });
@@ -1013,16 +1229,6 @@ int SimulatedKfd::close(uint32_t process_id) {
   proc.event_state_.notify_closing();
   proc.event_state_.signal_page_shutdown();
 
-  {
-    std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-    event_dispatch_.erase(process_id);
-  }
-
-  for (auto &g : gpus_) {
-    if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-      mem->unregister_process(process_id);
-  }
-
   const bool trace_enabled = vm_trace_enabled();
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
@@ -1034,7 +1240,23 @@ int SimulatedKfd::close(uint32_t process_id) {
     queue_ids.assign(proc.active_queue_ids_.begin(), proc.active_queue_ids_.end());
     proc.active_queue_ids_.clear();
     proc.queue_snapshot_map_.clear();
+  }
 
+  for (uint32_t qid : queue_ids) {
+    for (GpuDevice &g : gpus_)
+      if (g.soc)
+        g.soc->for_each_cp([qid, process_id](amdgpu::CommandProcessor *cp) {
+          cp->unregister_queue(qid, process_id);
+        });
+  }
+
+  {
+    std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+    event_dispatch_.erase(process_id);
+  }
+
+  {
+    std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
     if (trace_enabled)
       leaked_handles.reserve(proc.allocations_.size());
     for (auto &[handle, alloc] : proc.allocations_) {
@@ -1043,7 +1265,8 @@ int SimulatedKfd::close(uint32_t process_id) {
       if (trace_enabled)
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
-        unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+        if (alloc.gpu_va != 0)
+          unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
         libc_passthrough().munmap(alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
         alloc.host_ptr_owned = false;
@@ -1060,12 +1283,16 @@ int SimulatedKfd::close(uint32_t process_id) {
     proc.allocations_.clear();
   }
 
-  for (uint32_t qid : queue_ids) {
-    for (auto &g : gpus_)
-      if (g.soc)
-        g.soc->for_each_cp([qid, process_id](amdgpu::CommandProcessor *cp) {
-          cp->unregister_queue(qid, process_id);
-        });
+  {
+    std::lock_guard<std::mutex> scratch_lock(proc.scratch_backing_mutex_);
+    std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
+    for (const std::pair<const KfdProcess::ScratchPoolKey, KfdProcess::ScratchPool> &entry :
+         proc.scratch_pools_) {
+      const KfdProcess::ScratchPool &pool = entry.second;
+      if (pool.size != 0)
+        unmap_from_gpu(proc, pool.gpu_va, pool.size);
+    }
+    proc.scratch_pools_.clear();
   }
 
   // Doorbell mappings live in gpu_state_, not allocations_. Snapshot and clear
@@ -1103,6 +1330,12 @@ int SimulatedKfd::close(uint32_t process_id) {
       }
       libc_passthrough().close(doorbell_memfd);
     }
+  }
+
+  for (GpuDevice &g : gpus_) {
+    amdgpu::GpuMemory *mem = g.soc ? g.soc->memory() : nullptr;
+    if (mem != nullptr)
+      mem->unregister_process(process_id);
   }
 
   leaked_queues = queue_ids.size();
@@ -1236,7 +1469,18 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       return debug_trap_ioctl(proc, arg, target_mem_fd, target_proc_fd);
     case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
       auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
+      if (!find_gpu(a->gpu_id))
+        return -EINVAL;
       uint32_t ord = gpu_ordinal(a->gpu_id);
+      uint64_t scratch_base = 0;
+      if (!decode_scratch_base(a->va_addr, &scratch_base))
+        return -EINVAL;
+      if (scratch_base != 0) {
+        if (!gpuvm_range_contains(scratch_base, KfdProcess::kPageSize) ||
+            fallback_reservations_overlap_gpu_range(proc, scratch_base, KfdProcess::kPageSize)) {
+          return -EINVAL;
+        }
+      }
       {
         std::lock_guard<std::mutex> plk(process_mutex_);
         proc.gpu(ord).scratch_backing_va = a->va_addr;
@@ -1797,8 +2041,8 @@ kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const
       .scratch_limit = scratch_base + 0xFFFFFFFFULL,
       // rocjitsu maps GPU VAs directly to host pointers, so the aperture must
       // cover the host addresses accepted by the runtime.
-      .gpuvm_base = 0x10000ULL,
-      .gpuvm_limit = 0x7FFFFFFFFFFFULL,
+      .gpuvm_base = KfdProcess::kGpuVmBase,
+      .gpuvm_limit = KfdProcess::kGpuVmLimit,
       .gpu_id = ordinal < gpus_.size() ? gpus_[ordinal].gpu_id : 0,
       .pad = 0,
   };
@@ -1886,67 +2130,104 @@ int SimulatedKfd::unmap_memory_ioctl(void *arg) {
 int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
 
+  if (args->size == 0)
+    return -EINVAL;
+  if (args->size > std::numeric_limits<uint64_t>::max() - (KfdProcess::kPageSize - 1))
+    return -EINVAL;
+  const uint64_t aligned_size =
+      (args->size + KfdProcess::kPageSize - 1) & ~(KfdProcess::kPageSize - 1);
+  if (args->va_addr != 0 && ((args->va_addr & (KfdProcess::kPageSize - 1)) != 0 ||
+                             (args->size & (KfdProcess::kPageSize - 1)) != 0))
+    return -EINVAL;
+
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
-  bool user_provided_va = (args->va_addr != 0);
+  const bool user_provided_va = (args->va_addr != 0);
   uint64_t va = args->va_addr;
   if (va == 0) {
-    va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += (args->size + 0xFFF) & ~0xFFFULL;
+    if (!find_available_gpu_range(proc, aligned_size, &va))
+      return -ENOMEM;
+  } else if (gpu_range_overflows(va, args->size)) {
+    return -EINVAL;
+  } else if (!gpuvm_range_contains(va, aligned_size)) {
+    return -EINVAL;
   }
 
+  if (process_ranges_overlap_gpu_range(proc, va, aligned_size)) {
+    util::Logger::cp([&](auto &os) {
+      os << std::format("ALLOC_MEMORY_FAIL gpu_va={:#x} size={:#x} overlaps existing GPUVA range",
+                        va, aligned_size);
+    });
+    return user_provided_va ? -EINVAL : -ENOMEM;
+  }
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
   alloc.size = args->size;
   alloc.flags = args->flags;
-  alloc.handle = proc.next_handle_++;
   alloc.host_ptr = nullptr;
   alloc.gpu_id = args->gpu_id;
   alloc.user_va = user_provided_va;
 
-  auto alloc_mtype = pte_mtype_for_flags(args->flags);
-  bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
-  bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  const amdgpu::Mtype alloc_mtype = pte_mtype_for_flags(args->flags);
+  const bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
+  const bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  if (is_userptr && args->mmap_offset == 0)
+    args->mmap_offset = va;
   if (is_userptr && !daemon_mode_) {
-    alloc.host_ptr = reinterpret_cast<void *>(va);
-    map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
+    const uint64_t cpu_va = args->mmap_offset;
+    if ((cpu_va & (KfdProcess::kPageSize - 1)) != 0 || gpu_range_overflows(cpu_va, args->size))
+      return -EINVAL;
+    void *host_ptr = reinterpret_cast<void *>(cpu_va);
+    if (libc_passthrough().mprotect(host_ptr, args->size, PROT_READ | PROT_WRITE) != 0)
+      return -errno;
+    alloc.host_ptr = host_ptr;
+    map_to_gpu(proc, va, host_ptr, args->size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va) {
-    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (raw_fd >= 0) {
-      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
-      if (alloc.memfd < 0)
-        alloc.memfd = raw_fd;
-      else
-        libc_passthrough().close(raw_fd);
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.insert(alloc.memfd);
-      }
-      if (alloc.memfd >= 0) {
-        [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
-        fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-        safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+    int raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (raw_fd < 0)
+      return -errno;
+    UniqueDriverFd backing_fd(raw_fd);
+    int high_fd = safe_fcntl(backing_fd.get(), F_DUPFD_CLOEXEC, 4096);
+    if (high_fd >= 0)
+      backing_fd.reset(high_fd);
 
-        if (daemon_mode_ && !is_doorbell) {
-          auto *mapped =
-              safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
-          if (mapped != MAP_FAILED) {
-            alloc.host_ptr = mapped;
-            alloc.host_ptr_owned = true;
-            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
-          }
-        }
-      }
+    if (ftruncate(backing_fd.get(), static_cast<off_t>(alloc.size)) != 0)
+      return -errno;
+    if (fallocate(backing_fd.get(), 0, 0, static_cast<off_t>(alloc.size)) != 0)
+      return -errno;
+    safe_fcntl(backing_fd.get(), F_ADD_SEALS, F_SEAL_SHRINK);
+
+    UniqueMapping daemon_mapping;
+    if (daemon_mode_ && !is_doorbell) {
+      void *mapped =
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, backing_fd.get(), 0);
+      if (mapped == MAP_FAILED)
+        return errno > 0 ? -errno : -ENOMEM;
+      daemon_mapping.reset(mapped, static_cast<size_t>(alloc.size));
+      alloc.host_ptr = mapped;
+      alloc.host_ptr_owned = true;
+      map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
     }
+
+    alloc.memfd = backing_fd.get();
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(alloc.memfd);
+    }
+    static_cast<void>(backing_fd.release());
+    static_cast<void>(daemon_mapping.release());
   }
 
+  alloc.handle = proc.next_handle_++;
   proc.allocations_[alloc.handle] = alloc;
+  if (!user_provided_va)
+    proc.next_gpu_va_ = va + aligned_size;
 
   args->handle = alloc.handle;
   args->va_addr = va;
   if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) {
     args->mmap_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(args->gpu_id);
-  } else {
+  } else if (!is_userptr) {
     args->mmap_offset = alloc.handle << 12;
   }
 
@@ -1964,16 +2245,22 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size) {
+bool SimulatedKfd::allocate_scratch_backing(uint32_t gpu_ordinal, uint32_t process_id,
+                                            uint64_t gpu_va, size_t size,
+                                            bool requires_owned_pool) {
   if (size == 0)
+    return false;
+  if (gpu_ordinal >= gpus_.size())
     return false;
 
   std::shared_ptr<KfdProcess> proc;
   {
     std::lock_guard<std::mutex> plk(process_mutex_);
-    for (auto &[fd, p] : processes_) {
-      if (p->process_id() == process_id) {
-        proc = p;
+    for (std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>>::const_iterator it =
+             processes_.begin();
+         it != processes_.end(); ++it) {
+      if (it->second->process_id() == process_id) {
+        proc = it->second;
         break;
       }
     }
@@ -1981,83 +2268,89 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (!proc)
     return false;
 
-  size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  constexpr size_t kPageSize = static_cast<size_t>(KfdProcess::kPageSize);
+  if (size > std::numeric_limits<size_t>::max() - (kPageSize - 1))
+    return false;
+  const size_t aligned_size = (size + kPageSize - 1) & ~(kPageSize - 1);
+  if (gpu_range_overflows(gpu_va, aligned_size))
+    return false;
+  if (!gpuvm_range_contains(gpu_va, aligned_size))
+    return false;
+  if (requires_owned_pool && !fallback_window_contains_gpu_range(gpu_ordinal, gpu_va, aligned_size))
+    return false;
 
   // Every XCD of a fanned-out dispatch races here for the same process-wide pool
   // VA, each having independently found it unbacked. Only the first may map it:
   // mapping again would repoint the pool underneath waves the first XCD already
-  // launched and leak the original. The requested size is grid-scale and therefore
-  // identical for every XCD of one grid, so a pool already at least that large
-  // satisfies all of them and this covers the whole fan-out race.
-  //
-  // A later dispatch in the same process needing a LARGER pool still falls through
-  // and remaps, as it did before fan-out existed. That path is unchanged here.
+  // launched. Keep the GPUVA and PTE backing identity stable; growth resizes the
+  // internal backing and maps only the newly exposed tail.
   std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    for (const auto &[handle, alloc] : proc->allocations_) {
-      if (alloc.gpu_va == gpu_va && alloc.size >= aligned_size)
-        return true;
-    }
-  }
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
 
-  auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
-  if (raw_fd < 0)
+  const KfdProcess::ScratchPoolKey key{.gpu_ordinal = gpu_ordinal, .gpu_va = gpu_va};
+  KfdProcess::ScratchPoolMap::iterator existing = proc->scratch_pools_.find(key);
+  if (existing != proc->scratch_pools_.end() && existing->second.size >= aligned_size)
+    return true;
+  const uint32_t allowed_fallback_ordinal =
+      requires_owned_pool ? gpu_ordinal : kNoScratchGpuOrdinal;
+  if (process_ranges_overlap_gpu_range(*proc, gpu_va, aligned_size, 0, gpu_ordinal, gpu_va,
+                                       allowed_fallback_ordinal))
     return false;
 
-  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
-  if (memfd < 0)
-    memfd = raw_fd;
-  else
-    libc_passthrough().close(raw_fd);
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.insert(memfd);
-  }
-
-  if (ftruncate(memfd, static_cast<off_t>(aligned_size)) != 0) {
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
+  std::shared_ptr<KfdProcess::BackingStore> backing;
+  size_t old_size = 0;
+  if (existing != proc->scratch_pools_.end()) {
+    backing = existing->second.backing;
+    old_size = static_cast<size_t>(existing->second.size);
+  } else {
+    try {
+      backing = std::make_shared<KfdProcess::BackingStore>();
+    } catch (const std::bad_alloc &) {
+      return false;
     }
-    libc_passthrough().close(memfd);
+  }
+  if (!backing || !backing->resize(aligned_size))
     return false;
-  }
-  auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-  if (host_ptr == MAP_FAILED) {
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
-    }
-    libc_passthrough().close(memfd);
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.erase(memfd);
-  }
-  libc_passthrough().close(memfd);
-  std::memset(host_ptr, 0, aligned_size);
-  proc->map_pages(gpu_va, host_ptr, aligned_size);
 
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    KfdProcess::GpuAllocation alloc{};
-    alloc.gpu_va = gpu_va;
-    alloc.size = aligned_size;
-    alloc.host_ptr = host_ptr;
-    alloc.host_ptr_owned = true;
-    alloc.handle = proc->next_handle_++;
-    alloc.memfd = -1;
-    proc->allocations_[alloc.handle] = alloc;
+  if (old_size == 0) {
+    proc->map_backing_pages(gpu_va, backing, 0, aligned_size);
+    KfdProcess::ScratchPool pool{};
+    pool.gpu_va = gpu_va;
+    pool.size = aligned_size;
+    pool.backing = backing;
+    proc->scratch_pools_[key] = std::move(pool);
+  } else {
+    proc->map_backing_pages(gpu_va + old_size, backing, old_size, aligned_size - old_size);
+    existing->second.size = aligned_size;
   }
 
   util::Logger::vm([&](auto &os) {
-    os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va << " size=0x"
-       << aligned_size << std::dec << " host=" << host_ptr;
+    os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va
+       << " old_size=0x" << old_size << " size=0x" << aligned_size << std::dec
+       << " backing=" << backing.get();
   });
 
   return true;
+}
+
+bool SimulatedKfd::is_scratch_backing_owned(uint32_t gpu_ordinal, uint32_t process_id,
+                                            uint64_t gpu_va, size_t size) const {
+  if (size == 0)
+    return false;
+  std::shared_ptr<KfdProcess> proc = find_process(process_id);
+  if (!proc)
+    return false;
+
+  std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+  for (const std::pair<const KfdProcess::ScratchPoolKey, KfdProcess::ScratchPool> &entry :
+       proc->scratch_pools_) {
+    const KfdProcess::ScratchPoolKey &key = entry.first;
+    const KfdProcess::ScratchPool &pool = entry.second;
+    if (key.gpu_ordinal == gpu_ordinal && scratch_pool_contains_gpu_range(pool, gpu_va, size))
+      return true;
+  }
+  return false;
 }
 
 int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
@@ -2075,8 +2368,12 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    if (alloc.host_ptr) {
+      if (alloc.gpu_va != 0)
+        unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+      if (alloc.host_ptr_owned)
+        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
+    }
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
@@ -2117,11 +2414,25 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
     return -EINVAL;
   }
   auto &alloc = it->second;
+  if (alloc.gpu_va == 0) {
+    args->n_success = 0;
+    return -EINVAL;
+  }
   util::Logger::cp([&](auto &os) {
     os << std::format("MAP_MEMORY handle={} gpu_va={:#x} size={:#x} n_devices={} host_ptr={}",
                       alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
                       alloc.host_ptr != nullptr);
   });
+  if (!daemon_mode_ && alloc.user_va && alloc.host_ptr == nullptr &&
+      !(alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL))) {
+    auto *host_ptr = reinterpret_cast<void *>(alloc.gpu_va);
+    if (libc_passthrough().mprotect(host_ptr, alloc.size, PROT_READ | PROT_WRITE) == 0)
+      alloc.host_ptr = host_ptr;
+    else {
+      args->n_success = 0;
+      return -errno;
+    }
+  }
   if (alloc.host_ptr)
     map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
   args->n_success = args->n_devices;
@@ -2138,7 +2449,7 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
     // releases it. Erasing here would leak those fds and make a later FREE a
     // no-op for this handle.
     auto &alloc = it->second;
-    if (alloc.host_ptr)
+    if (alloc.host_ptr && alloc.gpu_va != 0)
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
   }
   args->n_success = args->n_devices;
@@ -2371,40 +2682,58 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   struct stat st {};
   if (safe_fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
+  if (st.st_size <= 0)
+    return -EINVAL;
   uint64_t size = static_cast<uint64_t>(st.st_size);
+  if (size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+    return -EOVERFLOW;
+  if (args->va_addr != 0 && gpu_range_overflows(args->va_addr, size))
+    return -EINVAL;
+  if (args->va_addr != 0 && !gpuvm_range_contains(args->va_addr, size))
+    return -EINVAL;
 
   int dupfd = safe_fcntl(args->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
   if (dupfd < 0)
     return -errno;
+  UniqueDriverFd imported_fd(dupfd);
+  void *mapped = safe_mmap(nullptr, static_cast<size_t>(size), PROT_READ | PROT_WRITE, MAP_SHARED,
+                           imported_fd.get(), 0);
+  if (mapped == MAP_FAILED)
+    return errno > 0 ? -errno : -ENOMEM;
+  UniqueMapping imported_mapping(mapped, static_cast<size_t>(size));
 
   uint64_t handle;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    if (args->va_addr != 0 && process_ranges_overlap_gpu_range(proc, args->va_addr, size))
+      return -EINVAL;
+
     handle = proc.next_handle_++;
     KfdProcess::GpuAllocation alloc{};
     alloc.gpu_va = args->va_addr;
     alloc.size = size;
     alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
     alloc.handle = handle;
-    alloc.user_va = true;
+    alloc.user_va = args->va_addr != 0;
     alloc.imported = true;
-    alloc.dmabuf_fd = dupfd;
-    alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    alloc.dmabuf_fd = imported_fd.get();
+    alloc.host_ptr = mapped;
+    alloc.host_ptr_owned = true;
+    if (args->va_addr)
+      map_to_gpu(proc, args->va_addr, mapped, size, amdgpu::Mtype::UC);
     proc.allocations_[handle] = alloc;
 
     KfdProcess::ImportedDmabuf info{};
     info.handle = handle;
-    info.fd = dupfd;
+    info.fd = imported_fd.get();
     info.size = size;
     info.va = args->va_addr;
     info.gpu_id = args->gpu_id;
     proc.imported_dmabufs_[handle] = info;
-    proc.fd_to_import_handle_[dupfd] = handle;
+    proc.fd_to_import_handle_[imported_fd.get()] = handle;
+    static_cast<void>(imported_mapping.release());
+    (void)imported_fd.release();
   }
-
-  if (args->va_addr)
-    map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
-               amdgpu::Mtype::UC);
 
   args->handle = handle;
   return 0;
@@ -2441,54 +2770,10 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     if (it == proc.allocations_.end())
       return -EINVAL;
     auto &alloc = it->second;
-
-    if (alloc.memfd < 0 && alloc.host_ptr) {
-      int promoted_fd = memfd_create("rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-      if (promoted_fd < 0)
-        return -errno;
-      if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
-        libc_passthrough().close(promoted_fd);
-        return -errno;
-      }
-      auto *new_host_ptr =
-          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
-      if (new_host_ptr == MAP_FAILED) {
-        libc_passthrough().close(promoted_fd);
-        return -ENOMEM;
-      }
-      std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
-
-      if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-        util::Logger::vm("ipc_export: promoting USERPTR to memfd-backed (snapshot copy, not "
-                         "true sharing)");
-      }
-
-      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
-
-      if (alloc.host_ptr_owned)
-        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
-
-      alloc.host_ptr = new_host_ptr;
-      alloc.host_ptr_owned = true;
-      alloc.memfd = promoted_fd;
-      {
-        std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-        owned_fds_.insert(promoted_fd);
-      }
-    } else if (alloc.memfd < 0) {
-      int new_fd = memfd_create("rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-      if (new_fd < 0)
-        return -errno;
-      if (ftruncate(new_fd, static_cast<off_t>(alloc.size)) != 0) {
-        libc_passthrough().close(new_fd);
-        return -errno;
-      }
-      alloc.memfd = new_fd;
-      {
-        std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-        owned_fds_.insert(new_fd);
-      }
-    }
+    if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      return -EINVAL;
+    if (alloc.memfd < 0)
+      return -EINVAL;
 
     // Upgrade the exporter's PTE mtype to CC (cache coherent) so that
     // the local GPU sees writes from the importing GPU.  On real hardware
@@ -2562,30 +2847,31 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
   if (dup_fd < 0)
     return -errno;
 
-  {
-    std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-    owned_fds_.insert(dup_fd);
-  }
+  UniqueDriverFd imported_fd(dup_fd);
 
-  auto *host_ptr = safe_mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED, dup_fd, 0);
-  if (host_ptr == MAP_FAILED) {
-    {
-      std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-      owned_fds_.erase(dup_fd);
-    }
-    libc_passthrough().close(dup_fd);
+  void *host_ptr =
+      safe_mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED, imported_fd.get(), 0);
+  if (host_ptr == MAP_FAILED)
     return -ENOMEM;
-  }
+  UniqueMapping imported_mapping(host_ptr, static_cast<size_t>(alloc_size));
 
   uint64_t gpu_va;
   uint64_t handle;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
-    if (args->va_addr != 0)
+    if (args->va_addr != 0) {
+      if (gpu_range_overflows(args->va_addr, alloc_size) ||
+          !gpuvm_range_contains(args->va_addr, alloc_size) ||
+          process_ranges_overlap_gpu_range(proc, args->va_addr, alloc_size)) {
+        return -EINVAL;
+      }
       gpu_va = args->va_addr;
-    else {
-      gpu_va = proc.next_gpu_va_;
-      proc.next_gpu_va_ += (alloc_size + 0xFFF) & ~0xFFFULL;
+    } else {
+      if (!find_available_gpu_range(proc, alloc_size, &gpu_va))
+        return -ENOMEM;
+      const uint64_t aligned_size =
+          (alloc_size + KfdProcess::kPageSize - 1) & ~(KfdProcess::kPageSize - 1);
+      proc.next_gpu_va_ = gpu_va + aligned_size;
     }
     handle = proc.next_handle_++;
 
@@ -2596,17 +2882,18 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.handle = handle;
     alloc.host_ptr = host_ptr;
     alloc.host_ptr_owned = true;
-    alloc.memfd = dup_fd;
+    alloc.memfd = imported_fd.get();
     alloc.gpu_id = source_gpu_id;
     alloc.imported = true;
+    map_to_gpu(proc, gpu_va, host_ptr, alloc_size, amdgpu::Mtype::CC);
+    {
+      std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+      owned_fds_.insert(imported_fd.get());
+    }
     proc.allocations_[handle] = alloc;
+    (void)imported_mapping.release();
+    (void)imported_fd.release();
   }
-
-  // IPC-imported memory uses CC (cache coherent) mtype to emulate the
-  // cross-GPU coherence that real hardware provides via xGMI snoops.
-  // Without this, the importing GPU's L2 cache serves stale data when
-  // the exporting GPU writes to the shared buffer.
-  map_to_gpu(proc, gpu_va, host_ptr, alloc_size, amdgpu::Mtype::CC);
 
   args->handle = handle;
   args->mmap_offset = handle << 12;
@@ -2646,12 +2933,7 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   args->size = size;
   args->gpu_id = gpu_id;
   args->flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
-  // metadata_ptr is a client-process address that cannot be dereferenced in
-  // daemon mode. ROCR currently queries with metadata_size == 0; reject
-  // metadata-bearing calls rather than risk a cross-process pointer deref.
-  if (args->metadata_size > 0 && daemon_mode_)
-    return -EINVAL;
-  if (args->metadata_ptr && args->metadata_size && !daemon_mode_) {
+  if (args->metadata_ptr && args->metadata_size) {
     std::memset(reinterpret_cast<void *>(args->metadata_ptr), 0,
                 static_cast<size_t>(args->metadata_size));
   }
@@ -4839,6 +5121,13 @@ int SimulatedKfd::get_mmap_memfd(uint32_t process_id, off_t offset) const {
   return dispatch_get_mmap_memfd(*p, offset);
 }
 
+int SimulatedKfd::get_allocation_memfd(uint32_t process_id, uint64_t handle) const {
+  std::shared_ptr<KfdProcess> p = find_process(process_id);
+  if (!p)
+    return -1;
+  return dispatch_get_allocation_memfd(*p, handle);
+}
+
 int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const {
   uint64_t type = static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK;
 
@@ -4880,6 +5169,15 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
     return it->second.memfd;
 
   return -1;
+}
+
+int SimulatedKfd::dispatch_get_allocation_memfd(KfdProcess &proc, uint64_t handle) const {
+  std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  std::unordered_map<uint64_t, KfdProcess::GpuAllocation>::iterator it =
+      proc.allocations_.find(handle);
+  if (it == proc.allocations_.end())
+    return -1;
+  return it->second.memfd;
 }
 
 } // namespace rocjitsu

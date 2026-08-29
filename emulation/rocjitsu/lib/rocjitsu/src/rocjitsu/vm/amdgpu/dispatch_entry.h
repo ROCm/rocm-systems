@@ -150,6 +150,7 @@ struct DispatchEntry {
   uint16_t workgroup_size_y = 1;
   uint16_t workgroup_size_z = 1;
   uint64_t scratch_backing_addr = 0;
+  bool scratch_requires_owned_pool = false;
   uint32_t private_segment_fixed_size = 0;
   uint32_t group_segment_fixed_size = 0;
 

@@ -188,6 +188,14 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
       args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
+  case AMDKFD_IOC_GET_DMABUF_INFO: {
+    auto *args = static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg);
+    if (args->metadata_ptr != 0 && args->metadata_size > inline_size)
+      return false;
+    if (args->metadata_ptr != 0 && args->metadata_size > 0)
+      args->metadata_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_DBG_TRAP: {
     auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
     switch (args->op) {
@@ -378,23 +386,22 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
     return ROCJITSU_STATUS_SUCCESS;
   }
 
-  // For DBG_TRAP ENABLE the debugger's notifier pipe arrives as an SCM_RIGHTS
-  // fd in cmd->in_handle (already in the daemon's fd space). Substitute it for
-  // the client-side fd number in the payload so the driver signals the right
-  // pipe when a wave stops (the kernel receives the same fd via the ioctl). On
-  // success the debug session takes ownership (cmd->in_handle cleared so the
-  // transport does not close it); otherwise the transport reclaims it. Only
-  // daemon mode transfers the fd; local mode passes the debugger's own fd
-  // through the interposer and leaves cmd->in_handle at -1.
+  // Daemon-mode fd arguments arrive as SCM_RIGHTS descriptors in cmd->in_handle,
+  // already in the daemon's fd space. Substitute that descriptor for payload
+  // fields that would otherwise be client-local fd numbers; local mode passes
+  // the caller's own descriptors through the interposer and leaves
+  // cmd->in_handle at -1.
   //
-  // The client-supplied dbg_fd is a number in the *client's* fd table and is
-  // never trusted in the daemon's namespace. Overwrite it unconditionally for
-  // ENABLE: with the transferred fd when one arrived via SCM_RIGHTS, otherwise
-  // with KFD_INVALID_FD so the handler's fcntl() check rejects it. Leaving the
-  // client's integer in place would let a client that omits the ancillary fd
-  // point the session at an arbitrary daemon-owned descriptor (a confused-deputy
-  // fd substitution).
+  // The client-supplied dbg_fd and dmabuf_fd values are numbers in the client's
+  // fd table and are never trusted in the daemon namespace. Overwrite them with
+  // the transferred fd when one arrived, otherwise with an invalid fd so the
+  // handler's fcntl()/fstat() check rejects the ioctl. DBG_TRAP ENABLE is the
+  // only command here that adopts cmd->in_handle on success; DMABUF ioctls only
+  // borrow the transferred fd and restore the client-visible fd field before
+  // the response is sent.
   bool adopting_notifier = false;
+  bool restore_dmabuf_fd = false;
+  uint32_t saved_dmabuf_fd = KFD_INVALID_FD;
   if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(cmd->buf);
     if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE) {
@@ -405,6 +412,18 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
         dbg->enable.dbg_fd = KFD_INVALID_FD;
       }
     }
+  } else if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_IMPORT_DMABUF) {
+    auto *import = static_cast<kfd_ioctl_import_dmabuf_args *>(cmd->buf);
+    saved_dmabuf_fd = import->dmabuf_fd;
+    restore_dmabuf_fd = true;
+    import->dmabuf_fd =
+        cmd->in_handle >= 0 ? static_cast<uint32_t>(cmd->in_handle) : static_cast<uint32_t>(-1);
+  } else if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_GET_DMABUF_INFO) {
+    auto *info = static_cast<kfd_ioctl_get_dmabuf_info_args *>(cmd->buf);
+    saved_dmabuf_fd = info->dmabuf_fd;
+    restore_dmabuf_fd = true;
+    info->dmabuf_fd =
+        cmd->in_handle >= 0 ? static_cast<uint32_t>(cmd->in_handle) : static_cast<uint32_t>(-1);
   }
 
   cmd->result =
@@ -412,15 +431,23 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   cmd->shared_handle = -1;
   if (adopting_notifier && cmd->result == 0)
     cmd->in_handle = -1;
+  if (restore_dmabuf_fd) {
+    if (cmd->cmd == AMDKFD_IOC_IMPORT_DMABUF)
+      static_cast<kfd_ioctl_import_dmabuf_args *>(cmd->buf)->dmabuf_fd = saved_dmabuf_fd;
+    else if (cmd->cmd == AMDKFD_IOC_GET_DMABUF_INFO)
+      static_cast<kfd_ioctl_get_dmabuf_info_args *>(cmd->buf)->dmabuf_fd = saved_dmabuf_fd;
+  }
 
   if (cmd->cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && cmd->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(cmd->buf);
-    cmd->shared_handle =
-        driver->get_mmap_memfd(process_id, static_cast<off_t>(alloc_args->mmap_offset));
+    cmd->shared_handle = driver->get_allocation_memfd(process_id, alloc_args->handle);
   } else if (cmd->cmd == AMDKFD_IOC_IPC_IMPORT_HANDLE && cmd->result == 0) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(cmd->buf);
     cmd->shared_handle =
         driver->get_mmap_memfd(process_id, static_cast<off_t>(import_args->mmap_offset));
+  } else if (cmd->cmd == AMDKFD_IOC_EXPORT_DMABUF && cmd->result == 0) {
+    auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(cmd->buf);
+    cmd->shared_handle = static_cast<rj_handle_t>(export_args->dmabuf_fd);
   }
 
   return ROCJITSU_STATUS_SUCCESS;

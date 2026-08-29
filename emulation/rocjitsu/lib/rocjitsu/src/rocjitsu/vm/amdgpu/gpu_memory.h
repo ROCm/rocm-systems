@@ -284,7 +284,7 @@ public:
     for_each_page_chunk(addr, size, [&](uint64_t ea, size_t offset, size_t chunk) {
       if (!contiguous)
         return;
-      auto *host_ptr = translate(ea, vmid, chunk);
+      uint8_t *host_ptr = translate(ea, vmid, chunk);
       if (!host_ptr || (first_host_ptr && host_ptr != first_host_ptr + offset)) {
         contiguous = false;
         return;
@@ -316,6 +316,38 @@ public:
   /// A zero size, or a range that wraps the address space, is not mapped.
   bool is_range_mapped(uint64_t addr, size_t size, uint32_t vmid = 0) const {
     return every_page(addr, size, [&](uint64_t page_addr) { return is_mapped(page_addr, vmid); });
+  }
+
+  /// @brief Return whether every byte in a process VMID range has host backing.
+  /// @details Unlike is_range_mapped(), this verifies the clipped HostExtent
+  /// intervals inside each mapped page. A page-table entry whose live host
+  /// extent is disjoint from the requested bytes does not satisfy this predicate.
+  /// Passthrough is deliberately ignored for vmid != 0.
+  bool is_range_host_backed(uint64_t addr, size_t size, uint32_t vmid = 0) const {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    if (vmid == 0)
+      return resolve_host_ptr(addr, vmid, size) != nullptr;
+
+    std::shared_lock vmid_lock(vmid_mutex_);
+    std::unordered_map<uint32_t, VmidEntry>::const_iterator vmid_entry = vmid_table_.find(vmid);
+    if (vmid_entry == vmid_table_.end())
+      return false;
+
+    const VmidEntry &entry = vmid_entry->second;
+    std::shared_lock page_table_lock(*entry.mutex);
+    bool backed = true;
+    for_each_page_chunk(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      if (!backed)
+        return;
+      KfdProcess::PageTable::const_iterator page = entry.page_table->find(ea >> PAGE_SHIFT);
+      if (page == entry.page_table->end()) {
+        backed = false;
+        return;
+      }
+      backed = page_range_host_backed(page->second, ea & PAGE_MASK, chunk);
+    });
+    return backed;
   }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
@@ -512,7 +544,7 @@ public:
 
       const size_t page_offset = addr & PAGE_MASK;
       const auto *current_extent = host_extent_at(page_entry->second, page_offset);
-      if (!current_extent)
+      if (!current_extent || !current_extent->has_raw_host_ptr())
         return {0, 0};
 
       uint64_t first_page = page;
@@ -523,7 +555,7 @@ public:
         if (previous_page_entry == page_table->end())
           break;
         const auto *previous_extent = host_extent_ending_at_page(previous_page_entry->second);
-        if (!previous_extent ||
+        if (!previous_extent || !previous_extent->has_raw_host_ptr() ||
             previous_extent->host_ptr + previous_extent->host_backed_bytes != first_host_byte)
           break;
         --first_page;
@@ -538,7 +570,7 @@ public:
         if (next_page_entry == page_table->end())
           break;
         const auto *next_extent = host_extent_starting_at_page(next_page_entry->second);
-        if (!next_extent ||
+        if (!next_extent || !next_extent->has_raw_host_ptr() ||
             next_extent->host_ptr != last_extent->host_ptr + last_extent->host_backed_bytes)
           break;
         ++last_page;
@@ -673,21 +705,27 @@ public:
           (void)passthrough_page; // Passthrough pages keep the addressability-checked copy.
           if (!pte)
             return;
-          uint8_t *whole = nullptr;
-          size_t spans = 0;
-          const size_t mapped_bytes =
-              for_each_mapped_span(*pte, addr & PAGE_MASK, kLen,
-                                   [&](size_t value_offset, uint8_t *host_ptr, size_t span_size) {
-                                     ++spans;
-                                     if (value_offset == 0 && span_size == kLen)
-                                       whole = host_ptr;
-                                   });
-          if (mapped_bytes != kLen || spans != 1 || whole == nullptr ||
-              reinterpret_cast<uintptr_t>(whole) % alignof(uint64_t) != 0)
+          const size_t page_offset = addr & PAGE_MASK;
+          const KfdProcess::HostExtent *extent = host_extent_at(*pte, page_offset);
+          if (!extent || kLen > extent->host_backed_bytes - (page_offset - extent->gpu_page_offset))
             return;
-          *out = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(whole))
-                     .load(std::memory_order_acquire);
-          loaded = true;
+          const size_t extent_offset = page_offset - extent->gpu_page_offset;
+          auto load_atomic = [&](uint8_t *whole) {
+            if (reinterpret_cast<uintptr_t>(whole) % alignof(uint64_t) != 0)
+              return;
+            *out = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(whole))
+                       .load(std::memory_order_acquire);
+            loaded = true;
+          };
+          if (extent->has_raw_host_ptr()) {
+            uint8_t *whole = extent->host_ptr + extent_offset;
+            if (addressable_prefix(whole, kLen) == kLen)
+              load_atomic(whole);
+            return;
+          }
+          if (extent->has_backing_store())
+            (void)extent->backing->with_span(extent->backing_offset + extent_offset, kLen,
+                                             load_atomic);
         });
     return mapped && loaded;
   }
@@ -811,12 +849,26 @@ private:
   template <typename F>
   static bool atomic_rmw_mapped_page(const KfdProcess::PageTableEntry &pte, size_t page_offset,
                                      size_t size, F &fn) {
-    const auto *extent = host_extent_at(pte, page_offset);
+    const KfdProcess::HostExtent *extent = host_extent_at(pte, page_offset);
     if (extent && size <= extent->host_backed_bytes - (page_offset - extent->gpu_page_offset)) {
-      auto *target = extent->host_ptr + (page_offset - extent->gpu_page_offset);
-      if (addressable_prefix(target, size) == size) {
-        atomic_rmw_mapped(target, fn);
-        return true;
+      const size_t extent_offset = page_offset - extent->gpu_page_offset;
+      if (extent->has_raw_host_ptr()) {
+        uint8_t *target = extent->host_ptr + extent_offset;
+        if (addressable_prefix(target, size) == size) {
+          atomic_rmw_mapped(target, fn);
+          return true;
+        }
+      }
+      if (extent->has_backing_store()) {
+        bool ran = false;
+        (void)extent->backing->with_span(
+            extent->backing_offset + extent_offset, size, [&](uint8_t *target) {
+              std::lock_guard lock(backing_atomic_mutex(
+                  extent->backing->atomic_key(extent->backing_offset + extent_offset)));
+              fn(target);
+              ran = true;
+            });
+        return ran;
       }
     }
 
@@ -827,6 +879,21 @@ private:
     };
     std::array<AtomicSpan, sizeof(uint64_t)> spans{};
     size_t span_count = 0;
+    bool saw_indirect_span = false;
+    const size_t access_end = page_offset + size;
+    for (const KfdProcess::HostExtent &candidate : pte.host_extents) {
+      const size_t extent_begin = candidate.gpu_page_offset;
+      const size_t extent_end = extent_begin + candidate.host_backed_bytes;
+      if (std::max(page_offset, extent_begin) < std::min(access_end, extent_end) &&
+          candidate.has_backing_store()) {
+        saw_indirect_span = true;
+        break;
+      }
+    }
+    if (saw_indirect_span) {
+      atomic_rmw_discarded(fn);
+      return false;
+    }
     const size_t mapped_bytes = for_each_mapped_span(
         pte, page_offset, size, [&](size_t value_offset, uint8_t *host_ptr, size_t span_size) {
           assert(span_count < spans.size());
@@ -1094,24 +1161,51 @@ private:
     return extent.gpu_page_offset + extent.host_backed_bytes == PAGE_SIZE ? &extent : nullptr;
   }
 
+  static bool page_range_host_backed(const KfdProcess::PageTableEntry &pte, size_t access_begin,
+                                     size_t len) {
+    const size_t access_end = access_begin + len;
+    size_t cursor = access_begin;
+    while (cursor < access_end) {
+      const KfdProcess::HostExtent *extent = host_extent_at(pte, cursor);
+      if (!extent)
+        return false;
+      const size_t extent_end = extent->gpu_page_offset + extent->host_backed_bytes;
+      cursor = std::min(access_end, extent_end);
+    }
+    return true;
+  }
+
   template <typename F>
   static size_t for_each_mapped_span(const KfdProcess::PageTableEntry &pte, size_t access_begin,
                                      size_t len, F &&fn) {
     const size_t access_end = access_begin + len;
     size_t mapped_bytes = 0;
-    for (const auto &extent : pte.host_extents) {
+    for (const KfdProcess::HostExtent &extent : pte.host_extents) {
       const size_t extent_begin = extent.gpu_page_offset;
       const size_t extent_end = extent_begin + extent.host_backed_bytes;
       const size_t overlap_begin = std::max(access_begin, extent_begin);
       const size_t overlap_end = std::min(access_end, extent_end);
       if (overlap_begin >= overlap_end)
         continue;
-      auto *host_begin = extent.host_ptr + (overlap_begin - extent_begin);
-      for_each_bounded_addressable_span(
-          host_begin, overlap_end - overlap_begin, [&](size_t span_offset, size_t span_size) {
-            mapped_bytes += span_size;
-            fn(overlap_begin - access_begin + span_offset, host_begin + span_offset, span_size);
-          });
+      const size_t overlap_size = overlap_end - overlap_begin;
+      const size_t extent_offset = overlap_begin - extent_begin;
+      if (extent.has_raw_host_ptr()) {
+        uint8_t *host_begin = extent.host_ptr + extent_offset;
+        for_each_bounded_addressable_span(
+            host_begin, overlap_size, [&](size_t span_offset, size_t span_size) {
+              mapped_bytes += span_size;
+              fn(overlap_begin - access_begin + span_offset, host_begin + span_offset, span_size);
+            });
+        continue;
+      }
+      if (extent.has_backing_store()) {
+        if (extent.backing->with_span(extent.backing_offset + extent_offset, overlap_size,
+                                      [&](uint8_t *host_begin) {
+                                        mapped_bytes += overlap_size;
+                                        fn(overlap_begin - access_begin, host_begin, overlap_size);
+                                      }))
+          continue;
+      }
     }
     return mapped_bytes;
   }
@@ -1208,9 +1302,11 @@ private:
       page_table_lock.unlock();
       vmid_lock.unlock();
       run_asan_page_table_unlocked_hook();
-      for (auto &extent : candidate.host_extents)
-        extent.host_backed_bytes =
-            heap_allocation_bounded_length(extent.host_ptr, extent.host_backed_bytes);
+      for (KfdProcess::HostExtent &extent : candidate.host_extents) {
+        if (extent.has_raw_host_ptr())
+          extent.host_backed_bytes =
+              heap_allocation_bounded_length(extent.host_ptr, extent.host_backed_bytes);
+      }
 
       vmid_lock.lock();
       if (vmid_registry_generation_ != registry_generation) {
@@ -1361,38 +1457,46 @@ private:
         });
   }
 
-  /// @brief Run @p fn over a fully-backed, page-bounded host span with the
-  /// page-table lock held for the duration.
+  /// @brief Run @p fn over a fully-backed, page-bounded mapped span.
   /// @details Applies exactly translate()'s resolution rules -- the range must
-  /// be contiguous, host-backed and addressable -- but hands the pointer to a
-  /// callback instead of returning it, so a concurrent unmap or VMID
-  /// unregistration cannot free the storage between resolution and use.
+  /// be contiguous, host-backed and addressable for raw host mappings -- but
+  /// hands the pointer to a callback instead of returning it, so a concurrent
+  /// unmap, VMID unregistration, or backing-store resize cannot free or move the
+  /// storage between resolution and use.
   /// @return true if the span resolved and @p fn ran.
   template <typename F>
   bool with_translated_span(uint64_t addr, uint32_t vmid, size_t size, F &&fn) const {
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return false;
     bool copied = false;
-    with_page_mapping(addr, vmid,
-                      [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
-                        const size_t page_offset = addr & PAGE_MASK;
-                        uint8_t *candidate = nullptr;
-                        if (pte) {
-                          const auto *extent = host_extent_at(*pte, page_offset);
-                          if (!extent || size > extent->host_backed_bytes -
-                                                    (page_offset - extent->gpu_page_offset))
-                            return;
-                          candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
-                        } else {
-                          if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
-                            return;
-                          candidate = passthrough_page + page_offset;
-                        }
-                        if (addressable_prefix(candidate, size) != size)
-                          return;
-                        fn(candidate);
-                        copied = true;
-                      });
+    with_page_mapping(
+        addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
+          const size_t page_offset = addr & PAGE_MASK;
+          uint8_t *candidate = nullptr;
+          if (pte) {
+            const KfdProcess::HostExtent *extent = host_extent_at(*pte, page_offset);
+            if (!extent ||
+                size > extent->host_backed_bytes - (page_offset - extent->gpu_page_offset))
+              return;
+            const size_t extent_offset = page_offset - extent->gpu_page_offset;
+            if (extent->has_backing_store()) {
+              copied = extent->backing->with_span(extent->backing_offset + extent_offset, size,
+                                                  [&](uint8_t *ptr) { fn(ptr); });
+              return;
+            }
+            if (!extent->has_raw_host_ptr())
+              return;
+            candidate = extent->host_ptr + extent_offset;
+          } else {
+            if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+              return;
+            candidate = passthrough_page + page_offset;
+          }
+          if (addressable_prefix(candidate, size) != size)
+            return;
+          fn(candidate);
+          copied = true;
+        });
     return copied;
   }
 
@@ -1416,11 +1520,13 @@ private:
         addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
           const size_t page_offset = addr & PAGE_MASK;
           if (pte) {
-            const auto *extent = host_extent_at(*pte, page_offset);
+            const KfdProcess::HostExtent *extent = host_extent_at(*pte, page_offset);
             if (!extent ||
                 size > extent->host_backed_bytes - (page_offset - extent->gpu_page_offset))
               return;
-            auto *candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
+            if (!extent->has_raw_host_ptr())
+              return;
+            uint8_t *candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
             if (addressable_prefix(candidate, size) == size)
               host_ptr = candidate;
             return;

@@ -159,9 +159,12 @@ Memfds are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary
 data. This is the standard Unix mechanism for cross-process file descriptor
 sharing (same pattern as QEMU vhost-user and CRIU).
 
-Two RPC operations carry memfds:
-- `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing memfd
-- `RPC_MMAP` (response) --- doorbell and event page memfds
+RPC carries memfds in both directions:
+- `RPC_IOCTL` request for `DBG_TRAP ENABLE` --- debugger notifier and target-process authorization fds
+- `RPC_IOCTL` request for `GET_DMABUF_INFO` and `IMPORT_DMABUF` --- the client dmabuf fd
+- `RPC_IOCTL` response for `ALLOC_MEMORY` and `IPC_IMPORT_HANDLE` --- allocation backing memfd
+- `RPC_IOCTL` response for `EXPORT_DMABUF` --- exported duplicate fd
+- `RPC_MMAP` response --- doorbell and event page memfds
 
 ### Thread Safety
 
@@ -169,15 +172,38 @@ ROCR is heavily multithreaded. The `rpc_mutex_` in `RemoteDriver` serializes
 all send+recv pairs. `WAIT_EVENTS` uses client-side polling with `ppoll` on
 a shutdown `eventfd` between daemon timeout=0 polls, avoiding mutex starvation.
 
-## Memory Sharing (Same-VA Architecture)
+## Memory Sharing
 
-Both client and daemon map every memfd at the **same virtual address** using
-MAP_FIXED. GPU VAs are in the GPUVM aperture (`0x1000000000` - `0x3FFFFFFFFFFF`),
-which doesn't collide with either process's normal address space.
+Ordinary GPU allocations use GPUVM addresses chosen inside the reported
+aperture. The daemon backs them with memfds and publishes process page-table
+entries so GPU accesses translate through the simulated KFD process state. In
+daemon mode the daemon maps each backing at a daemon-local host address; the
+client maps the received memfd at ROCR's requested address with `MAP_FIXED` when
+CPU access is required. The daemon does not rely on direct
+`reinterpret_cast<void *>(gpu_va)` dereferences for shared allocations.
 
-This means `reinterpret_cast<void*>(gpu_va)` works in both processes ---
-AQL packets, kernarg pointers, signal handles, ring buffers, and rptr/wptr
-all resolve correctly without VA translation.
+USERPTR is intentionally different. `va_addr` is the GPU VA, while
+`mmap_offset` is the caller's CPU VMA. In daemon mode the client stages that CPU
+range into the daemon-created memfd and replaces the caller VMA only after the
+staging copy succeeds. The daemon may use a different host address internally;
+GPU access still goes through the process page table rather than by
+reinterpret-casting every GPU VA as a host pointer.
+
+DMABUF imports also use the daemon's local fd namespace. The client sends the
+dmabuf with the request, the daemon duplicates and maps it locally, and the
+client-visible fd number is restored in the response. Imports with a nonzero
+`va_addr` publish GPU PTEs immediately. Imports with `va_addr == 0` are
+handle-only graphics registrations: the daemon retains the backing under the
+returned KFD handle but does not map GPU address zero.
+
+Scratch backing follows libhsakmt's split address model. The advertised scratch
+aperture is the logical shader/debugger private-address window, while
+`SET_SCRATCH_BACKING_VA` carries a GPUVM/SVM backing address. When the runtime
+has not programmed backing, the simulator uses a per-GPU fallback reserve near
+the top of GPUVM rather than the logical scratch aperture. These fallback
+windows are reserved from process creation: ordinary driver-selected
+allocations skip them, explicit allocations/imports reject overlap, and
+fallback dispatches require the simulator-owned scratch pool for that GPU.
 
 ### Allocation Flow
 
@@ -190,29 +216,32 @@ Client                                     Daemon
 2. ROCR: hsaKmtAllocMemory()
    RemoteDriver::send_ioctl(ALLOC)  ---->  alloc_memory_ioctl()
                                             memfd_create + ftruncate + fallocate
-                                            MAP_FIXED memfd at VA (proactive)
+                                            mmap memfd at daemon-local host VA
+                                            publish GPUVA -> host PTEs
                                     <----  response + memfd (SCM_RIGHTS)
-   [USERPTR: mincore+copy, MAP_FIXED]
+   [USERPTR: copy mmap_offset CPU range, MAP_FIXED only after staging succeeds]
 
 3. ROCR: fmm_map_to_cpu()
    mmap(drm_fd, MAP_FIXED, offset)
-   interposer routes DRM fd     ---->     mmap() -> already mapped, return
-                                    <----  response
+   RemoteDriver maps memfd locally at requested VA
 ```
 
-### Proactive Mapping
+### Daemon-Local Backing
 
-The daemon MAP_FIXED maps all allocations at ALLOC_MEMORY time, not at
-mmap time. This prevents a race where the CP thread dereferences kernarg
-pointers before the client's fmm_map_to_cpu RPC arrives.
+The daemon creates and maps ordinary allocation backing during ALLOC_MEMORY, but
+the mapping is daemon-local. GPU-visible addresses are resolved through the
+process page table. Client `MAP_FIXED` mappings are created later by the
+RemoteDriver when ROCR asks for CPU access, or by the anonymous-MAP_FIXED
+interception path for already registered daemon-shared ranges.
 
 ### USERPTR Sharing
 
 For USERPTR allocations (ring buffer, rptr/wptr), the client receives the
-daemon's memfd, copies committed pages via mincore, then MAP_FIXED replaces
-the anonymous pages with the shared memfd. The interposer suppresses
-MADV_HUGEPAGE and MADV_DONTFORK on GPUVM addresses to prevent kernel 6.17
-shmem fault failures.
+daemon's memfd, copies the full valid CPU range named by `mmap_offset`, then
+MAP_FIXED replaces those CPU pages with the shared memfd. If promotion fails,
+the client rolls back the daemon allocation and leaves the original VMA in
+place. The interposer suppresses MADV_HUGEPAGE and MADV_DONTFORK on GPUVM
+addresses to prevent kernel 6.17 shmem fault failures.
 
 ### Trust Model
 

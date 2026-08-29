@@ -148,15 +148,26 @@ public:
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
-  using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
+  struct ScratchBacking {
+    uint64_t gpu_va = 0;
+    bool requires_owned_pool = false;
+  };
+
+  using ScratchBackingResolver = std::function<ScratchBacking(uint32_t process_id)>;
   void set_scratch_backing_resolver(ScratchBackingResolver cb) {
     scratch_resolver_ = std::move(cb);
   }
 
-  using ScratchBackingAllocator =
-      std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  using ScratchBackingAllocator = std::function<bool(uint32_t process_id, uint64_t gpu_va,
+                                                     size_t size, bool requires_owned_pool)>;
   void set_scratch_backing_allocator(ScratchBackingAllocator cb) {
     scratch_allocator_ = std::move(cb);
+  }
+
+  using ScratchBackingVerifier =
+      std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  void set_scratch_backing_verifier(ScratchBackingVerifier cb) {
+    scratch_verifier_ = std::move(cb);
   }
 
   /// @brief Number of shader engines per XCC (array_count / simd_arrays_per_engine).
@@ -695,6 +706,7 @@ private:
   InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  ScratchBackingVerifier scratch_verifier_;
   uint32_t scratch_wave_divisor_ = 1;
   uint32_t scratch_shader_engine_count_ = 1;
   uint32_t scratch_waves_per_se_ = 1;

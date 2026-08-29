@@ -49,7 +49,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 3;
+inline constexpr uint32_t kRpcProtocolVersion = 4;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header

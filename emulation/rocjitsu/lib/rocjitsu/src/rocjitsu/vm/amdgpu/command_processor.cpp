@@ -462,19 +462,34 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // across all CUs and workgroups in the dispatch.
   if (pkt.private_segment_fixed_size > 0) {
     uint64_t scratch_pool = pkt.scratch_backing_addr;
+    bool scratch_requires_owned_pool = pkt.scratch_requires_owned_pool;
+    if (scratch_pool == 0 && scratch_resolver_) {
+      const ScratchBacking resolved = scratch_resolver_(pkt.process_id);
+      scratch_pool = resolved.gpu_va;
+      scratch_requires_owned_pool = resolved.requires_owned_pool;
+    }
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
     // Round the per-wave region to the 1 KB COMPUTE_TMPRING_SIZE.WAVESIZE granule
     // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
     // which is exactly what rocm-dbgapi computes to locate a wave's private
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
-    uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
-    uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
-    uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
-                             std::max<uint16_t>(1, pkt.workgroup_size_y) *
-                             std::max<uint16_t>(1, pkt.workgroup_size_z);
-    uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
-    uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
+    const uint64_t raw_per_wave =
+        static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
+    if (raw_per_wave > std::numeric_limits<uint64_t>::max() - 1023)
+      throw std::runtime_error("scratch backing size overflow");
+    const uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
+    const uint64_t wg_total_size = static_cast<uint64_t>(pkt.workgroup_size_x) *
+                                   std::max<uint16_t>(1, pkt.workgroup_size_y) *
+                                   std::max<uint16_t>(1, pkt.workgroup_size_z);
+    const uint64_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
+    if (waves_per_wg != 0 &&
+        static_cast<uint64_t>(global_wg_id) > std::numeric_limits<uint64_t>::max() / waves_per_wg)
+      throw std::runtime_error("scratch wave index overflow");
+    const uint64_t global_wave_base = static_cast<uint64_t>(global_wg_id) * waves_per_wg;
+    const uint64_t global_wave_idx = global_wave_base + wf_index_in_wg;
+    if (global_wave_idx < global_wave_base)
+      throw std::runtime_error("scratch wave index overflow");
     uint64_t scratch_slot = global_wave_idx;
     if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
       const uint32_t shader_engine_count =
@@ -491,22 +506,82 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       // Legacy CWSR records use the dispatch-wide logical scratch slot.
       wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     }
-    uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
+    if (per_wave_size != 0 && scratch_slot > std::numeric_limits<uint64_t>::max() / per_wave_size)
+      throw std::runtime_error("scratch wave address overflow");
+    const uint64_t scratch_offset = scratch_slot * per_wave_size;
+    if (scratch_pool > std::numeric_limits<uint64_t>::max() - scratch_offset)
+      throw std::runtime_error("scratch wave address overflow");
+    const uint64_t wave_scratch = scratch_pool + scratch_offset;
+    auto scratch_range_backed = [&](uint64_t addr, size_t size) {
+      if (scratch_requires_owned_pool) {
+        return scratch_verifier_ && scratch_verifier_(pkt.process_id, addr, size) &&
+               memory_->is_range_host_backed(addr, size, pkt.process_id);
+      }
+      if (pkt.process_id != 0)
+        return memory_->is_range_host_backed(addr, size, pkt.process_id);
+      if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+        return false;
+      size_t offset = 0;
+      while (offset < size) {
+        const uint64_t ea = addr + offset;
+        if (!memory_->has_page(ea))
+          return false;
+        offset += std::min(size - offset,
+                           GpuMemory::PAGE_SIZE - static_cast<size_t>(ea & GpuMemory::PAGE_MASK));
+      }
+      return true;
+    };
+    auto scratch_allocator_needed = [&]() {
+      if (pkt.process_id == 0)
+        return memory_->resolve_host_ptr(wave_scratch, pkt.process_id, per_wave_size) == nullptr;
+      return !scratch_range_backed(wave_scratch, per_wave_size);
+    };
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
-        scratch_allocator_) {
+    if (memory_ && scratch_allocator_ && scratch_allocator_needed()) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
-      uint64_t scratch_slots = static_cast<uint64_t>(pkt.grid_total_wgs()) * waves_per_wg;
+      uint64_t scratch_slots = 0;
       if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
         const uint32_t shader_engine_count =
             std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
-        scratch_slots =
-            static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count * scratch_waves_per_se_;
+        const uint64_t xcc_se_slots =
+            static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count;
+        if (scratch_waves_per_se_ != 0 &&
+            xcc_se_slots > std::numeric_limits<uint64_t>::max() / scratch_waves_per_se_)
+          throw std::runtime_error("scratch backing size overflow");
+        scratch_slots = xcc_se_slots * scratch_waves_per_se_;
+      } else {
+        const uint64_t highest_exclusive_wg =
+            static_cast<uint64_t>(pkt.workgroup_id_offset) + pkt.total_wgs;
+        if (highest_exclusive_wg < pkt.workgroup_id_offset)
+          throw std::runtime_error("scratch backing size overflow");
+        const uint64_t scratch_wgs = std::max<uint64_t>(pkt.grid_total_wgs(), highest_exclusive_wg);
+        if (scratch_wgs != 0 && waves_per_wg > std::numeric_limits<uint64_t>::max() / scratch_wgs)
+          throw std::runtime_error("scratch backing size overflow");
+        scratch_slots = scratch_wgs * waves_per_wg;
       }
-      uint64_t total_scratch = per_wave_size * scratch_slots;
-      scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
+      if (per_wave_size != 0 &&
+          scratch_slots > std::numeric_limits<uint64_t>::max() / per_wave_size)
+        throw std::runtime_error("scratch backing size overflow");
+      const uint64_t total_scratch = per_wave_size * scratch_slots;
+      if (scratch_pool > std::numeric_limits<uint64_t>::max() - total_scratch)
+        throw std::runtime_error("scratch backing address overflow");
+      if (total_scratch > std::numeric_limits<size_t>::max())
+        throw std::runtime_error("scratch backing size overflow");
+      const bool allocated =
+          scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch),
+                             scratch_requires_owned_pool);
+      if (!allocated || !scratch_range_backed(wave_scratch, per_wave_size)) {
+        throw std::runtime_error(
+            std::format("scratch backing allocation failed for range {:#x}+{:#x}", wave_scratch,
+                        per_wave_size));
+      }
+    }
+    if (memory_ && scratch_requires_owned_pool &&
+        !scratch_range_backed(wave_scratch, per_wave_size)) {
+      throw std::runtime_error(std::format(
+          "scratch backing allocation failed for range {:#x}+{:#x}", wave_scratch, per_wave_size));
     }
 
     wf->set_scratch_base(wave_scratch);
@@ -521,12 +596,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       cu->write_sgpr(sbase + 33, 0);
     }
     util::Logger::cp([&](auto &os) {
-      os << std::format(
-          "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-          "backing_addr={:#x} mapped={}",
-          wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
-          pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+      os << std::format("SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
+                        "backing_addr={:#x} mapped={}",
+                        wf->wf_id(), scratch_pool, wave_scratch, per_wave_size,
+                        pkt.private_segment_fixed_size, pkt.scratch_backing_addr,
+                        memory_ ? scratch_range_backed(wave_scratch, per_wave_size) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
@@ -1945,8 +2019,15 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       uint64_t scratch_loc_va =
           dp.queue_ptr + offsetof(amd_queue_t, scratch_backing_memory_location);
       dp.scratch_backing_addr = read_gpu_u64(scratch_loc_va, queue.process_id);
-      if (dp.scratch_backing_addr == 0 && scratch_resolver_)
-        dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
+      if (scratch_resolver_) {
+        const ScratchBacking resolved = scratch_resolver_(queue.process_id);
+        if (dp.scratch_backing_addr == 0) {
+          dp.scratch_backing_addr = resolved.gpu_va;
+          dp.scratch_requires_owned_pool = resolved.requires_owned_pool;
+        } else if (resolved.requires_owned_pool && dp.scratch_backing_addr == resolved.gpu_va) {
+          dp.scratch_requires_owned_pool = true;
+        }
+      }
 
       // Publish the scratch backing location and COMPUTE_TMPRING_SIZE into the
       // ABI-stable part of amd_queue_t so rocm-dbgapi can compute each wave's
@@ -1979,7 +2060,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
           // Older debugger layouts interpret WAVES as a device-wide count and
           // require it to be divisible by the shader-engine count.
           uint32_t se = std::max(1u, scratch_wave_divisor_);
-          uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
+          if (workgroup_id_offset_ > std::numeric_limits<uint32_t>::max() - total_wgs)
+            throw std::runtime_error("scratch backing wave count overflow");
+          uint64_t scratch_wgs = static_cast<uint64_t>(workgroup_id_offset_) + total_wgs;
+          uint64_t total_waves = scratch_wgs * wfs_per_wg;
           waves_field =
               static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
         }

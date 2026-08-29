@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -44,6 +45,22 @@ namespace rocjitsu {
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
+  /// @brief Log2 of the simulated KFD GPU page size.
+  static constexpr uint64_t kPageShift = 12;
+  /// @brief Simulated KFD GPU page size in bytes.
+  /// @details This is the simulator's GPU translation granule. It is kept at
+  /// 4 KiB to match KFD page-table contracts and is intentionally independent
+  /// of the host system page size.
+  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
+  /// @brief Lowest address in the GPUVM aperture reported to userspace.
+  static constexpr uint64_t kGpuVmBase = 0x10000ULL;
+  /// @brief Inclusive highest address in the GPUVM aperture reported to userspace.
+  static constexpr uint64_t kGpuVmLimit = 0x7FFFFFFFFFFFULL;
+  /// @brief Per-GPU high-GPUVM reserve used for simulator fallback scratch backing.
+  static constexpr uint64_t kFallbackScratchReserveSize = 0x100000000ULL;
+  /// @brief First GPUVA considered for allocations selected by the simulated driver.
+  static constexpr uint64_t kGpuVmAllocationBase = 0x1000000000ULL;
+
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
     /// @brief One live client mapping of the canonical doorbell backing.
@@ -70,7 +87,7 @@ public:
   /// @param process_id Unique identifier (analogous to PASID) for CP routing.
   /// @param num_gpus Number of GPU devices (sizes per-GPU state vector).
   explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1)
-      : process_id_(process_id), next_gpu_va_(0x1000000000ULL), gpu_state_(num_gpus) {}
+      : process_id_(process_id), next_gpu_va_(kGpuVmAllocationBase), gpu_state_(num_gpus) {}
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
@@ -290,10 +307,72 @@ public:
     }
   };
 
-  // GPUVM uses the simulator's fixed 4 KiB translation granule. This models
-  // the GPU page table and is intentionally independent of the host page size.
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
+  /// @brief Driver-owned storage that can move without changing PTE identity.
+  class BackingStore {
+  public:
+    using ResizeContentionHook = std::function<void()>;
+
+    BackingStore() = default;
+    explicit BackingStore(size_t size) : storage_(size) {}
+
+    BackingStore(const BackingStore &) = delete;
+    BackingStore &operator=(const BackingStore &) = delete;
+
+    [[nodiscard]] size_t size() const {
+      std::shared_lock lock(mutex_);
+      return storage_.size();
+    }
+
+    [[nodiscard]] bool resize(size_t size) {
+      std::unique_lock<std::shared_mutex> lock(mutex_, std::defer_lock);
+      if (resize_contention_hook_) {
+        if (!lock.try_lock()) {
+          (*resize_contention_hook_)();
+          lock.lock();
+        }
+      } else {
+        lock.lock();
+      }
+      if (size <= storage_.size())
+        return true;
+      try {
+        storage_.resize(size);
+      } catch (...) {
+        return false;
+      }
+      return true;
+    }
+
+    /// @brief Run @p fn with a stable pointer into this backing store.
+    /// @details Holds a shared lock for the full callback. The supplied pointer
+    /// is borrowed and becomes invalid when the callback returns; callers must
+    /// not store it or use it while another thread may resize the backing.
+    template <typename F> bool with_span(size_t offset, size_t size, F &&fn) {
+      if (size == 0)
+        return false;
+      std::shared_lock lock(mutex_);
+      if (offset > storage_.size() || size > storage_.size() - offset)
+        return false;
+      fn(storage_.data() + offset);
+      return true;
+    }
+
+    /// @brief Install a borrowed test hook called when resize waits on a live span.
+    /// @details The hook pointer is not owned and must outlive this BackingStore
+    /// or be reset to nullptr before the pointed-to callable is destroyed.
+    void set_resize_contention_hook_for_testing(ResizeContentionHook *hook) {
+      resize_contention_hook_ = hook;
+    }
+
+    [[nodiscard]] uintptr_t atomic_key(size_t offset) const {
+      return reinterpret_cast<uintptr_t>(this) ^ offset;
+    }
+
+  private:
+    mutable std::shared_mutex mutex_;
+    std::vector<uint8_t> storage_;
+    ResizeContentionHook *resize_contention_hook_ = nullptr;
+  };
 
   /// @brief One host-backed interval within a GPU page.
   struct HostExtent {
@@ -302,6 +381,18 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+    /// Stable internal backing for driver-owned memory such as fallback scratch.
+    std::shared_ptr<BackingStore> backing;
+    /// Byte offset within backing that corresponds to gpu_page_offset.
+    size_t backing_offset = 0;
+
+    [[nodiscard]] bool has_backing() const { return host_ptr != nullptr || backing != nullptr; }
+    [[nodiscard]] bool has_raw_host_ptr() const {
+      return host_ptr != nullptr && backing == nullptr;
+    }
+    [[nodiscard]] bool has_backing_store() const {
+      return host_ptr == nullptr && backing != nullptr;
+    }
 
     bool operator==(const HostExtent &) const = default;
   };
@@ -455,16 +546,43 @@ public:
   struct PageTableEntry {
     PageTableEntry() = default;
     PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype)
-        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0}} {}
+        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0, nullptr, 0}} {}
     PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype, size_t host_backed_bytes,
                    size_t gpu_page_offset)
-        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset}} {}
+        : mtype(page_mtype),
+          host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, nullptr, 0}} {}
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
 
     bool operator==(const PageTableEntry &) const = default;
   };
+
+  /// @brief Process-local scratch pool key.
+  struct ScratchPoolKey {
+    uint32_t gpu_ordinal = 0;
+    uint64_t gpu_va = 0;
+
+    bool operator==(const ScratchPoolKey &) const = default;
+  };
+
+  struct ScratchPoolKeyHash {
+    size_t operator()(const ScratchPoolKey &key) const {
+      size_t hash_value = std::hash<uint32_t>{}(key.gpu_ordinal);
+      hash_value ^= std::hash<uint64_t>{}(key.gpu_va) + 0x9e3779b97f4a7c15ULL + (hash_value << 6) +
+                    (hash_value >> 2);
+      return hash_value;
+    }
+  };
+
+  /// @brief Internal scratch pool keyed by GPU ordinal and base VA.
+  struct ScratchPool {
+    uint64_t gpu_va = 0;
+    size_t size = 0;
+    std::shared_ptr<BackingStore> backing;
+  };
+
+  using ScratchPoolMap = std::unordered_map<ScratchPoolKey, ScratchPool, ScratchPoolKeyHash>;
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
   /// @details Managed by the driver's mmap/munmap handlers. GpuMemory holds a
@@ -489,7 +607,8 @@ public:
                                                       mtype, host_backed_bytes, gpu_page_offset);
       if (!inserted) {
         page->second.mtype = mtype;
-        replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset});
+        replace_host_extent(page->second,
+                            {base + host_offset, host_backed_bytes, gpu_page_offset, nullptr, 0});
       }
       mapped_va += host_backed_bytes;
       host_offset += host_backed_bytes;
@@ -497,6 +616,31 @@ public:
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.
+    publish_page_table_mutation_locked();
+  }
+
+  /// @brief Map driver-owned backing into this process's GPU page table.
+  void map_backing_pages(uint64_t gpu_va, const std::shared_ptr<BackingStore> &backing,
+                         size_t backing_offset, size_t size,
+                         amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+    assert(backing != nullptr);
+    std::unique_lock request_lock(*page_table_request_mutex_);
+    std::unique_lock lock(page_table_mutex_);
+    uint64_t mapped_va = gpu_va;
+    size_t mapped_bytes = 0;
+    while (mapped_bytes < size) {
+      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+      const size_t host_backed_bytes =
+          std::min<size_t>(kPageSize - gpu_page_offset, size - mapped_bytes);
+      std::pair<PageTable::iterator, bool> insertion =
+          page_table_.try_emplace(mapped_va >> kPageShift);
+      PageTable::iterator page = insertion.first;
+      page->second.mtype = mtype;
+      replace_host_extent(page->second, {nullptr, host_backed_bytes, gpu_page_offset, backing,
+                                         backing_offset + mapped_bytes});
+      mapped_va += host_backed_bytes;
+      mapped_bytes += host_backed_bytes;
+    }
     publish_page_table_mutation_locked();
   }
 
@@ -608,14 +752,15 @@ public:
   mutable std::mutex alloc_mutex_;
   /// @brief Serializes scratch-pool backing allocation for this process.
   /// @details Every XCD of a fanned-out dispatch independently finds the same
-  /// process-wide pool VA unbacked and races to map it; remapping a pool that
-  /// already has live waves spilling into it would drop their data. Per-process
-  /// rather than driver-wide so daemon clients do not serialize against each
-  /// other. Lock order: hw_queue_mutex_ (held by the calling command processor)
-  /// -> scratch_backing_mutex_ -> {alloc_mutex_, owned_fds_mutex_,
-  /// page_table_mutex_}; nothing taken under it reaches a command processor.
+  /// process-wide pool VA unbacked and races to map it. Per-process rather
+  /// than driver-wide so daemon clients do not serialize against each other.
+  /// Lock order: hw_queue_mutex_ (held by the calling command processor) ->
+  /// scratch_backing_mutex_ -> {alloc_mutex_, page_table_mutex_}; backing-store
+  /// resize takes only the backing's internal mutex and never calls back into a
+  /// command processor.
   std::mutex scratch_backing_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
+  ScratchPoolMap scratch_pools_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;
 
@@ -674,6 +819,33 @@ public:
   RuntimeState runtime_state_;
 
 private:
+  static HostExtent slice_host_extent(const HostExtent &extent, size_t slice_begin,
+                                      size_t slice_end) {
+    assert(slice_begin >= extent.gpu_page_offset);
+    assert(slice_end >= slice_begin);
+    assert(slice_end <= extent.gpu_page_offset + extent.host_backed_bytes);
+    HostExtent sliced = extent;
+    const size_t delta = slice_begin - extent.gpu_page_offset;
+    sliced.host_backed_bytes = slice_end - slice_begin;
+    sliced.gpu_page_offset = slice_begin;
+    if (sliced.host_ptr)
+      sliced.host_ptr += delta;
+    if (sliced.backing)
+      sliced.backing_offset += delta;
+    return sliced;
+  }
+
+  static bool can_merge_host_extents(const HostExtent &previous, const HostExtent &current) {
+    if (previous.gpu_page_offset + previous.host_backed_bytes != current.gpu_page_offset)
+      return false;
+    if (previous.has_raw_host_ptr() && current.has_raw_host_ptr())
+      return previous.host_ptr + previous.host_backed_bytes == current.host_ptr;
+    if (previous.has_backing_store() && current.has_backing_store())
+      return previous.backing == current.backing &&
+             previous.backing_offset + previous.host_backed_bytes == current.backing_offset;
+    return false;
+  }
+
   static void normalize_host_extents(PageTableEntry &page) {
     auto &extents = page.host_extents;
     if (extents.size() > 1)
@@ -682,12 +854,11 @@ private:
       });
     size_t out = 0;
     for (const auto &extent : extents) {
-      if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0)
+      if (!extent.has_backing() || extent.host_backed_bytes == 0)
         continue;
       if (out > 0) {
         auto &previous = extents[out - 1];
-        if (previous.gpu_page_offset + previous.host_backed_bytes == extent.gpu_page_offset &&
-            previous.host_ptr + previous.host_backed_bytes == extent.host_ptr) {
+        if (can_merge_host_extents(previous, extent)) {
           previous.host_backed_bytes += extent.host_backed_bytes;
           continue;
         }
@@ -714,10 +885,9 @@ private:
         continue;
       }
       if (extent_begin < replacement_begin)
-        updated.push_back({extent.host_ptr, replacement_begin - extent_begin, extent_begin});
+        updated.push_back(slice_host_extent(extent, extent_begin, replacement_begin));
       if (replacement_end < extent_end)
-        updated.push_back({extent.host_ptr + (replacement_end - extent_begin),
-                           extent_end - replacement_end, replacement_end});
+        updated.push_back(slice_host_extent(extent, replacement_end, extent_end));
     }
     updated.push_back(replacement);
     page.host_extents = std::move(updated);
@@ -736,10 +906,9 @@ private:
         continue;
       }
       if (extent_begin < erased_begin)
-        updated.push_back({extent.host_ptr, erased_begin - extent_begin, extent_begin});
+        updated.push_back(slice_host_extent(extent, extent_begin, erased_begin));
       if (erased_end < extent_end)
-        updated.push_back(
-            {extent.host_ptr + (erased_end - extent_begin), extent_end - erased_end, erased_end});
+        updated.push_back(slice_host_extent(extent, erased_end, extent_end));
     }
     page.host_extents = std::move(updated);
     normalize_host_extents(page);

@@ -125,6 +125,7 @@ public:
 
 private:
   int send_ioctl(unsigned long request, void *arg);
+  int rollback_remote_allocation(uint64_t handle);
   int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
 
   /// @brief Mark the RPC stream unusable and make the connection terminal.

@@ -54,12 +54,20 @@ typedef enum rj_vm_mode_t {
 
 /// @brief Device command descriptor for rj_vm_execute.
 typedef struct rj_vm_cmd_t {
-  uint32_t cmd;               ///< Platform-specific command number.
-  void *buf;                  ///< Command arguments buffer (with inlined arrays).
-  size_t buf_size;            ///< Total size of the arguments buffer.
-  int32_t result;             ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle;  ///< [out] Borrowed backing handle, or -1; owned by the VM.
-  rj_handle_t in_handle;      ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  uint32_t cmd;    ///< Platform-specific command number.
+  void *buf;       ///< Command arguments buffer (with inlined arrays).
+  size_t buf_size; ///< Total size of the arguments buffer.
+  int32_t result;  ///< [out] Return code (0 on success, negative errno on failure).
+  /// @brief Response fd returned by command execution, or -1.
+  /// @details When shared backing exists, successful ALLOC_MEMORY and
+  /// IPC_IMPORT_HANDLE return a VM-owned borrowed backing fd that callers must
+  /// not close and may use only while the allocation/process remains alive.
+  /// Local explicit-VA ALLOC_MEMORY can succeed without shared backing and
+  /// therefore leaves this field as -1. Successful EXPORT_DMABUF returns a
+  /// one-shot duplicate that the caller owns and should close after
+  /// transfer/use. Other commands leave this field as -1.
+  rj_handle_t shared_handle;
+  rj_handle_t in_handle;      ///< [in,out] Request fd such as DBG_TRAP notifier or dmabuf, or -1.
   rj_handle_t in_mem_handle;  ///< [in,out] Debugger-authorized target /proc/pid/mem fd, or -1.
   rj_handle_t in_proc_handle; ///< [in] Pinned target /proc/pid directory fd, or -1.
 } rj_vm_cmd_t;
@@ -264,12 +272,13 @@ RJ_API_EXPORT rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd);
 /// @brief Execute a device command for a specific process (daemon mode).
 ///
 /// @details In daemon mode, if @p cmd carries a client-provided input fd in
-/// cmd->in_handle (e.g. the debugger's notifier pipe for AMDKFD_IOC_DBG_TRAP
-/// ENABLE), the VM substitutes it into the command payload and, on success,
-/// adopts it — clearing cmd->in_handle to -1 so the caller does not close the
-/// descriptor. If the command does not consume the fd, cmd->in_handle is left
-/// unchanged for the caller to reclaim. Set cmd->in_handle to -1 when there is
-/// no fd to transfer.
+/// cmd->in_handle, the VM substitutes it into ioctl payloads whose descriptor
+/// fields are process-local. DBG_TRAP ENABLE consumes and adopts the notifier,
+/// clearing cmd->in_handle to -1 so the caller does not close it. GET_DMABUF_INFO
+/// and IMPORT_DMABUF borrow the fd only long enough for the KFD layer to inspect
+/// or duplicate it, leaving cmd->in_handle unchanged for the caller to reclaim.
+/// See rj_vm_cmd_t::shared_handle for response-fd ownership. Set
+/// cmd->in_handle to -1 when there is no fd to transfer.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The target process ID.
 /// @param[in,out] cmd Command descriptor.
