@@ -1,7 +1,31 @@
-struct ByteRange {
-  uint64_t begin = 0;
-  uint64_t end = 0;
-};
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This retained `.inc` path is compiled directly as a C++ translation unit.
+// It is never textually included; the filename remains only because repository
+// files may not be deleted or moved during this refactoring.
+
+#include "rocjitsu/code/patch/consan/consan_placement.h"
+
+#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <ranges>
+
+namespace rocjitsu {
 
 [[nodiscard]] std::optional<uint64_t>
 text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_offset,
@@ -81,35 +105,9 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
   return ranges;
 }
 
-struct InPlaceNopSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-};
-
-struct InPlaceInstructionSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-};
-
-struct BarrierSite {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  std::string range_name;
-  std::string mnemonic;
-};
-
 struct TextRange {
   uint64_t begin = 0;
   uint64_t end = 0;
-};
-
-struct LocalNopCave {
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t word_count = 0;
-  uint64_t owner_entry_text_offset = 0;
 };
 
 struct LocalCaveOwnerRange {
@@ -604,11 +602,6 @@ void update_max_sgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_sg
   });
 }
 
-struct KernelMaxRegisterRefs {
-  std::optional<uint16_t> sgpr;
-  std::optional<uint16_t> vgpr;
-};
-
 [[nodiscard]] KernelMaxRegisterRefs
 max_register_refs_in_kernel(const ConSanKernelInfo &kernel, std::span<BasicBlock *const> blocks) {
   KernelMaxRegisterRefs max_refs;
@@ -642,7 +635,7 @@ max_register_refs_in_kernel(const ConSanKernelInfo &kernel, std::span<BasicBlock
   return true;
 }
 
-void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) {
+void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) {
   const size_t old_size = bytes.size();
   const size_t added_size = words.size() * sizeof(uint32_t);
   bytes.resize(old_size + added_size);
@@ -671,3 +664,5 @@ void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) 
   }
   return true;
 }
+
+} // namespace rocjitsu

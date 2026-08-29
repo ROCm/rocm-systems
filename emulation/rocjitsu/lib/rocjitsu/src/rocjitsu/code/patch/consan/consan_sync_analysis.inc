@@ -2836,7 +2836,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
         result.errors.emplace_back("ConSan SC perturbation emitted a stale appended-cave mapping");
         return;
       }
-      append_words(new_text, patch.body_words);
+      append_consan_patch_words(new_text, patch.body_words);
     } else {
       std::memcpy(new_text.data() + patch.placement.body_offset, patch.body_words.data(),
                   trampoline_size);

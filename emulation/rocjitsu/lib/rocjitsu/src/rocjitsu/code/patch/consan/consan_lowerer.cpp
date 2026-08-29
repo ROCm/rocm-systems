@@ -32,6 +32,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -84,8 +85,6 @@ namespace rocjitsu {
 namespace {
 
 namespace kd = rocr::llvm::amdhsa;
-
-#include "rocjitsu/code/patch/consan/consan_placement.inc"
 
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.inc"
 

@@ -3851,9 +3851,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     anchor_words.size() * sizeof(uint32_t));
         std::memcpy(new_text.data() + donor.host_offset, host_words.data(),
                     host_words.size() * sizeof(uint32_t));
-        append_words(new_text, donor.host_original_words);
+        append_consan_patch_words(new_text, donor.host_original_words);
         const uint32_t host_return_word = build_s_branch(*host_return, arch);
-        append_words(new_text, std::span<const uint32_t>(&host_return_word, 1));
+        append_consan_patch_words(new_text,
+                                  std::span<const uint32_t>(&host_return_word, 1));
 
         ConSanPatchInfo anchor_info;
         anchor_info.kind = ConSanPatchKind::TrampolineScBranchRelayDonor;
@@ -3922,7 +3923,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         const uint32_t body_prefix =
             wave32_vcc ? build_s_mov_b32(kRdna4VccLo, reservoir.saved_vcc_sgpr, arch)
                        : build_s_nop(0, arch);
-        append_words(new_text, std::span<const uint32_t>(&body_prefix, 1u));
+        append_consan_patch_words(new_text, std::span<const uint32_t>(&body_prefix, 1u));
         new_text.insert(new_text.end(), pristine_text.begin() + reservoir.anchor_offset,
                         pristine_text.begin() + reservoir.anchor_offset + reservoir.original_size);
         std::vector<uint32_t> return_words;
@@ -3939,7 +3940,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               "ConSan LDS check/trap could not encode its relay-reservoir return");
           return false;
         }
-        append_words(new_text, return_words);
+        append_consan_patch_words(new_text, return_words);
 
         ConSanPatchInfo info;
         info.kind = ConSanPatchKind::TrampolineBranchRelayReservoir;
@@ -4069,7 +4070,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               "ConSan LDS check/trap dense-call dispatcher changed after planning");
           return false;
         }
-        append_words(new_text, dispatcher_words);
+        append_consan_patch_words(new_text, dispatcher_words);
 
         std::vector<uint32_t> host_body = group.displaced_host_words;
         if (!append_lds_check_trap_indirect_jump(
@@ -4082,7 +4083,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               "ConSan LDS check/trap could not encode its dense-call host return");
           return false;
         }
-        append_words(new_text, host_body);
+        append_consan_patch_words(new_text, host_body);
 
         ConSanPatchInfo dispatcher_info;
         dispatcher_info.kind = ConSanPatchKind::TrampolineScDenseCallDispatcher;
@@ -4171,7 +4172,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
         std::memcpy(new_text.data() + site.physical_id.original_text_offset,
                     planned.anchor_words.data(), planned.anchor_words.size() * sizeof(uint32_t));
-        append_words(new_text, planned.cave_words);
+        append_consan_patch_words(new_text, planned.cave_words);
         for (uint64_t trailing_relay_offset : planned.trailing_relay_offsets) {
           if (new_text.size() != trailing_relay_offset) {
             result.errors.emplace_back(
@@ -4182,7 +4183,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             result.patches.clear();
             return;
           }
-          append_words(new_text, std::span<const uint32_t>(&padding_nop, 1));
+          append_consan_patch_words(new_text,
+                                    std::span<const uint32_t>(&padding_nop, 1));
         }
       } else {
         std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),

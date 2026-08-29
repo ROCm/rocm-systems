@@ -50,6 +50,7 @@ target_sources(
         consan_observation_policy.cpp
         consan_perturbation_policy.cpp
         consan_pipeline.cpp
+        consan_placement.cpp
         consan_program_analysis.cpp
         consan_resource.cpp
         consan_relay_target_ops.cpp

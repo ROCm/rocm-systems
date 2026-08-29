@@ -1289,7 +1289,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
             "ConSan markerless barrier move emitted a stale appended-cave mapping");
         return;
       }
-      append_words(new_text, cave_words);
+      append_consan_patch_words(new_text, cave_words);
     } else {
       std::memcpy(new_text.data() + placement->body_offset, cave_words.data(),
                   cave_words.size() * sizeof(uint32_t));
