@@ -73,8 +73,9 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
 size_t
 get_hsa_pcs_buffer_size(uint32_t gfx_target_version)
 {
-    // To increase the throughput and reduce the number of dropped samples, ROCr allocates a buffer per XCC.
-    // Thus, we increase the overall ROCr PC sampling buffer size for the multi-chiplet architectures like gfx942 and gfx1250.
+    // To increase the throughput and reduce the number of dropped samples, ROCr allocates a buffer
+    // per XCC. Thus, we increase the overall ROCr PC sampling buffer size for the multi-chiplet
+    // architectures like gfx942 and gfx1250.
     const auto is_multi_xcc = [](uint32_t gfx_version) -> bool {
         // gfx_target_version encodes major*10000 + minor*100 + patch
         switch(gfx_version / 100)
