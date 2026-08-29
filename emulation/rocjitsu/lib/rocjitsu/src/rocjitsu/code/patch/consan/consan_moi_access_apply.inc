@@ -243,9 +243,9 @@ template <typename PlannedPatch, typename Eligible>
       continue;
     }
     if (!emit_moi_dense_access_group(std::span<const PlannedPatch *const>(group), dispatcher_offset,
-                                     dense_entry_hosts, group_options, arch, access_slot_words,
-                                     collapse_spill_router_for_explicit_key, probe_name, new_text,
-                                     patches, errors)) {
+                                     dense_entry_hosts, group_options, group_options, arch,
+                                     access_slot_words, collapse_spill_router_for_explicit_key,
+                                     probe_name, new_text, patches, errors)) {
       return false;
     }
   }

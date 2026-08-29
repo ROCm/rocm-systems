@@ -2614,15 +2614,16 @@ build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t bod
 /// `placement`, and `entry_island_offset` facts to this routing mechanism.
 /// The boolean parameter preserves the Record/Replay-versus-Sampled policy for
 /// equal indirect-PC and call-return assignments on explicit-key targets.
-/// Inline Shadow selects its distinct scalar ABI through `group_options`; its
+/// Inline Shadow selects its distinct scalar ABI through the request and
+/// owner-bound operating point; its
 /// SCC-tagged explicit key and indirect-PC dependency wait remain explicit
 /// branches of this shared routing mechanism. Evidence construction and
 /// per-site resource admission remain outside this function.
 template <typename PlannedPatch>
 [[nodiscard]] bool emit_moi_dense_access_group(
     std::span<const PlannedPatch *const> group, uint64_t dispatcher_offset,
-    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const MoiOptions &group_options,
-    rj_code_arch_t arch, uint64_t dispatcher_words_per_site,
+    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const ConSanRequest &request,
+    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, uint64_t dispatcher_words_per_site,
     bool collapse_spill_router_for_explicit_key, std::string_view diagnostic_subject,
     std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
     std::vector<std::string> &errors) {
@@ -2637,7 +2638,7 @@ template <typename PlannedPatch>
   if (target == nullptr)
     return fail("has no target profile");
 
-  const bool inline_shadow_route = group_options.moi_engine == ConSanMoiEngine::InlineShadow;
+  const bool inline_shadow_route = request.moi_engine == ConSanMoiEngine::InlineShadow;
   uint16_t pc_sgpr = 0u;
   uint16_t scc_save_sgpr = 0u;
   uint16_t key_sgpr = 0u;
@@ -2649,7 +2650,7 @@ template <typename PlannedPatch>
   uint32_t relocated_entry_return_words = 0u;
 
   if (inline_shadow_route) {
-    const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
+    const auto scalar_abi = moi_inline_dense_router_scalar_abi(request, point, arch);
     if (!scalar_abi)
       return fail("lost its inline-shadow dense scalar ABI");
     pc_sgpr = scalar_abi->indirect_jump.pc_sgpr;
@@ -2661,24 +2662,24 @@ template <typename PlannedPatch>
     island_capacity_words = kMoiInlineShadowIndirectIslandWords;
     relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords;
   } else {
-    const bool spill_backed = group_options.automatic_moi_record_replay_sgpr_spill;
-    if (!group_options.moi_exec_save_sgpr ||
-        (spill_backed && (!group_options.moi_inline_indirect_pc_sgpr ||
-                          !group_options.moi_record_replay_dispatch_key_sgpr ||
-                          !group_options.moi_record_replay_call_return_sgpr))) {
+    const bool spill_backed = point.automatic_moi_record_replay_sgpr_spill;
+    if (!point.moi_exec_save_sgpr ||
+        (spill_backed &&
+         (!point.moi_inline_indirect_pc_sgpr || !point.moi_record_replay_dispatch_key_sgpr ||
+          !point.moi_record_replay_call_return_sgpr))) {
       return fail("lost its recording dense scalar ABI");
     }
-    const uint16_t base = *group_options.moi_exec_save_sgpr;
+    const uint16_t base = *point.moi_exec_save_sgpr;
     const std::optional<MoiSpecialStateSgprs> special_state =
-        moi_special_state_sgprs(group_options, group_options);
+        moi_special_state_sgprs(request, point);
     if (!special_state)
       return fail("lost its dense special-state scalar ABI");
-    pc_sgpr = spill_backed ? *group_options.moi_inline_indirect_pc_sgpr : base;
+    pc_sgpr = spill_backed ? *point.moi_inline_indirect_pc_sgpr : base;
     scc_save_sgpr = special_state->scc_save_sgpr;
-    key_sgpr = spill_backed ? *group_options.moi_record_replay_dispatch_key_sgpr
+    key_sgpr = spill_backed ? *point.moi_record_replay_dispatch_key_sgpr
                             : static_cast<uint16_t>(base + 5u);
-    call_return_sgpr = spill_backed ? *group_options.moi_record_replay_call_return_sgpr
-                                    : static_cast<uint16_t>(base + 6u);
+    call_return_sgpr =
+        spill_backed ? *point.moi_record_replay_call_return_sgpr : static_cast<uint16_t>(base + 6u);
     explicit_key = !consan_arch_has_s_call_i64(arch);
     collapsed_spill_router = spill_backed && *call_return_sgpr == pc_sgpr &&
                              (!explicit_key || collapse_spill_router_for_explicit_key);
