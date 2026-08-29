@@ -13,6 +13,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <bit>
 #include <cerrno>
 #include <cstring>
 #include <format>
@@ -204,6 +207,40 @@ constexpr uint32_t kIhRingSpaceMask = 0x7;
 /// @details Narrower than the register's own field, which is seventeen bits,
 /// because the driver only ever writes eight of them.
 constexpr uint64_t kIhRingBaseHighMask = 0xff;
+
+/// @brief Dwords one interrupt entry occupies, and the bytes that comes to.
+///
+/// @details The driver advances its read pointer by this much per entry and
+/// decodes exactly this many dwords, so an entry of any other size would put
+/// every later entry at an offset it does not look at.
+constexpr uint32_t kInterruptEntryDwords = 8;
+constexpr uint32_t kInterruptEntryBytes = kInterruptEntryDwords * 4;
+
+/// @brief Bits of the write-pointer register that carry the offset.
+///
+/// @details `IH_RB_WPTR__OFFSET_MASK`. The offset occupies bits 17:2; bits 1:0
+/// are the overflow flag, so the register does not carry the low two bits of an
+/// address at all. Anything above the field is not part of one either.
+constexpr uint32_t kIhWritePointerOffsetMask = 0x0003fffc;
+
+/// @brief Largest ring whose every entry the write-pointer register can name.
+///
+/// @details The offset field is sixteen bits wide, so it addresses exactly one
+/// 256 KiB ring. A larger one would have entries the device could never point
+/// at, and worse, the device would wrap at the field width while the driver
+/// wrapped at the ring size -- the two would disagree about which entry a
+/// pointer names, and the driver would decode the never-written remainder as
+/// entries. The size field is five bits and guest-writable, so it can ask for
+/// far more than this.
+constexpr uint64_t kLargestAddressableRingBytes =
+    (uint64_t{kIhWritePointerOffsetMask} & ~uint64_t{kInterruptEntryBytes - 1}) +
+    kInterruptEntryBytes;
+
+/// @brief The message vector an entry is announced on.
+///
+/// @details The device advertises one, so this is it. A second would need the
+/// capability to advertise it before anything could be delivered on it.
+constexpr uint32_t kInterruptVector = 0;
 
 /// @brief Acknowledge value reporting every VMID's flush already complete.
 ///
@@ -572,6 +609,101 @@ bool GpuPciDevice::segment_within_aperture(uint64_t segment) const {
     return false;
   }
   return true;
+}
+
+bool GpuPciDevice::deliver_interrupt(const InterruptEntry &entry) {
+  const IpBlock *osssys = published_block(IpHardwareId::OssSys);
+  if (osssys == nullptr || !segment_within_aperture(osssys->register_bases.front())) {
+    return false;
+  }
+  const uint64_t wptr_register = (osssys->register_bases.front() + kIhRingWritePointer) * 4;
+  if (wptr_register + 4 > spec_.register_aperture_bytes) {
+    return false;
+  }
+
+  const InterruptRing ring = interrupt_ring();
+  if (!ring.enabled || ring.bytes < kInterruptEntryBytes ||
+      ring.bytes > kLargestAddressableRingBytes) {
+    return false;
+  }
+  // An address in a space this device cannot resolve would be written to
+  // whatever guest page happens to sit at that number. That is worse than
+  // declining: the driver would carry on waiting while memory it owns was
+  // quietly changed underneath it.
+  if (ring.space != InterruptRingSpace::BusAddress) {
+    return false;
+  }
+  if (dma_ == nullptr || irq_ == nullptr) {
+    return false;
+  }
+
+  // Publishing to nowhere is not publishing: the driver reads the pointer from
+  // memory, so a ring switched on before that address was given has no way to
+  // be told anything, and guest-physical zero is a real page to write over.
+  //
+  // The ring's own base is the same question and the same answer. A driver may
+  // set the enable bit before it has written the base -- the registers are
+  // separate and it writes them in its own order -- and zero there means unset,
+  // not "the ring is at address zero". Writing entries into guest-physical zero
+  // would corrupt whatever the guest keeps in its first page.
+  if (ring.base == 0 || ring.wptr_address == 0) {
+    return false;
+  }
+
+  // The pointers are byte offsets into the ring and wrap with it. Taking the
+  // current one from the register rather than from a member keeps the device's
+  // idea of it and the driver's the same object rather than two that drift --
+  // every driver-side re-init writes this register back to zero.
+  //
+  // It is a *guest-writable* register, though, and this is where its value
+  // becomes an address. So it is put through the field mask the hardware
+  // defines and then aligned down to an entry, because the driver's own write-
+  // and read-pointer shadows sit immediately after the ring: an entry placed
+  // at an unaligned offset would run off the end and overwrite exactly the two
+  // words the interrupt protocol depends on.
+  const uint64_t stated =
+      registers_[static_cast<uint32_t>(wptr_register / 4)] & kIhWritePointerOffsetMask;
+  const auto at =
+      static_cast<uint32_t>((stated & ~uint64_t{kInterruptEntryBytes - 1}) % ring.bytes);
+
+  std::array<uint32_t, kInterruptEntryDwords> words = {};
+  words[0] = static_cast<uint32_t>(entry.client_id) | (static_cast<uint32_t>(entry.source_id) << 8);
+  words[4] = entry.data[0];
+  words[5] = entry.data[1];
+  words[6] = entry.data[2];
+  words[7] = entry.data[3];
+
+  std::array<std::byte, kInterruptEntryBytes> raw = {};
+  std::memcpy(raw.data(), words.data(), raw.size());
+  if (!dma_->write(ring.base + at, raw)) {
+    return false;
+  }
+
+  // Only now is there something to point at. Publishing the pointer first would
+  // invite the driver to read an entry that is not yet there -- the driver orders
+  // its read of the ring against its read of this pointer with a barrier, so the
+  // device owes it the matching store order.
+  //
+  // That order is DmaEngine::write()'s to keep, not this function's: it returns
+  // only once the bytes are guest-visible, and writes become visible in the order
+  // they return. A fence here would not have been enough anyway, since it cannot
+  // order stores an implementation has only queued.
+  const auto next = static_cast<uint32_t>((uint64_t{at} + kInterruptEntryBytes) % ring.bytes);
+  const auto published = std::bit_cast<std::array<std::byte, sizeof(uint32_t)>>(next);
+  if (!dma_->write(ring.wptr_address, published)) {
+    return false;
+  }
+  define_register(wptr_register, next);
+
+  // The ring can be switched on while messages for it are switched off, in
+  // which case entries accumulate and the driver finds them when it next looks.
+  // The driver moves the two bits together, so this is a state it never asks
+  // for -- but the field is decoded, and decoding a field and then ignoring it
+  // is how a model starts disagreeing with itself.
+  if (!ring.raises_messages) {
+    return true;
+  }
+  return irq_->trigger(kInterruptVector);
 }
 
 std::string GpuPciDevice::describe(const InterruptRing &ring) {

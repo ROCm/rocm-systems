@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
+#include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "vfio_user_client.h"
 
 #include <gtest/gtest.h>
@@ -40,9 +41,11 @@ extern "C" {
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <future>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -97,6 +100,19 @@ public:
   }
 
   rocjitsu::ScratchPciDevice &device() { return device_; }
+
+  rocjitsu::VfioDeviceHost &host() { return host_; }
+
+  /// @brief Identify the serving thread, so work can assert it ran there.
+  [[nodiscard]] std::thread::id serving_thread_id() const { return serving_.get_id(); }
+
+  /// @brief Stop serving and join, without waiting for the destructor.
+  void stop_serving() {
+    serving_.request_stop();
+    if (serving_.joinable()) {
+      serving_.join();
+    }
+  }
 
 private:
   static inline std::atomic<int> instance_counter_ = 0;
@@ -535,3 +551,129 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
 }
 
 } // namespace
+
+// The handoff the request signal depends on. Nothing else links an outside
+// request to the device: the delivery tests call deliver_interrupt() directly,
+// so without this the only untested part is the step that actually gets that
+// call onto the thread allowed to make it.
+// The serving loop needs a process, a socket and a connected client before it
+// runs a line, so nothing that exercises it exercises only this mapping -- and
+// the mapping is what silently breaks. A signal routed to the wrong arm, or the
+// request arm deleted, leaves every other test passing.
+TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
+  EXPECT_EQ(rocjitsu::action_for_signal(SIGINT), rocjitsu::ServerSignalAction::Stop);
+  EXPECT_EQ(rocjitsu::action_for_signal(SIGTERM), rocjitsu::ServerSignalAction::Stop);
+  EXPECT_EQ(rocjitsu::action_for_signal(SIGUSR1), rocjitsu::ServerSignalAction::DeliverInterrupt)
+      << "the interrupt request is the one arm with no other coverage at all";
+
+  // A timed-out wait returns negative, and anything else is not this server's.
+  EXPECT_EQ(rocjitsu::action_for_signal(-1), rocjitsu::ServerSignalAction::KeepServing);
+  EXPECT_EQ(rocjitsu::action_for_signal(SIGUSR2), rocjitsu::ServerSignalAction::KeepServing)
+      << "a signal this server does not handle must not stop it or fire an interrupt";
+}
+
+// An empty target is a caller's mistake, and the serving thread is the wrong
+// place to discover it: invoking one throws bad_function_call there, which is
+// reported as work that ran and failed -- indistinguishable from work that
+// could not be done -- while the single slot is spent on nothing.
+TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
+
+  // And the slot is still free, so a real request is not lost behind it.
+  std::atomic<bool> ran = false;
+  EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
+      << "the refused request consumed the one outstanding slot";
+}
+
+TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  std::promise<std::thread::id> ran_on;
+  std::future<std::thread::id> where = ran_on.get_future();
+  ASSERT_TRUE(served.host().ask_serving_thread(
+      [&ran_on] { ran_on.set_value(std::this_thread::get_id()); }));
+
+  // Bounded by one transport poll, per the documented contract; the generous
+  // wait here is for a loaded machine, not for the contract.
+  ASSERT_EQ(where.wait_for(std::chrono::seconds(10)), std::future_status::ready)
+      << "asked work never ran";
+  EXPECT_EQ(where.get(), served.serving_thread_id())
+      << "asked work must run on the serving thread, not the caller's";
+}
+
+// One outstanding request, refused rather than dropped. The earlier version kept
+// a 64-deep queue and discarded silently past that, which gave a caller no way to
+// tell that its request had been thrown away.
+TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  // Block the first request inside the serving thread so it stays outstanding
+  // while the second is offered.
+  std::promise<void> running;
+  std::future<void> is_running = running.get_future();
+  std::promise<void> release;
+  std::future<void> may_finish = release.get_future();
+  ASSERT_TRUE(served.host().ask_serving_thread([&running, &may_finish] {
+    running.set_value();
+    (void)may_finish.wait_for(std::chrono::seconds(10));
+  }));
+  ASSERT_EQ(is_running.wait_for(std::chrono::seconds(10)), std::future_status::ready);
+
+  bool second_ran = false;
+  EXPECT_FALSE(served.host().ask_serving_thread([&second_ran] { second_ran = true; }))
+      << "a second request must be refused while one is outstanding";
+  release.set_value();
+  EXPECT_FALSE(second_ran) << "a refused request must not run";
+}
+
+// A request that throws must not take the process with it: it runs on the serving
+// thread, where an escaping exception would terminate rather than propagate.
+TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  std::promise<void> threw;
+  std::future<void> did_throw = threw.get_future();
+  ASSERT_TRUE(served.host().ask_serving_thread([&threw] {
+    threw.set_value();
+    throw std::runtime_error("request failed");
+  }));
+  ASSERT_EQ(did_throw.wait_for(std::chrono::seconds(10)), std::future_status::ready);
+
+  // Still serving afterwards, which is the point: the request failed, the device
+  // did not. Retried because the throwing request signalled before it threw, so
+  // it is legitimately still outstanding -- and therefore still refusing -- for
+  // the moment it takes the serving thread to unwind and clear it.
+  std::promise<void> ran_after;
+  std::future<void> after = ran_after.get_future();
+  bool accepted = false;
+  for (int attempt = 0; attempt < 200 && !accepted; ++attempt) {
+    accepted = served.host().ask_serving_thread([&ran_after] { ran_after.set_value(); });
+    if (!accepted) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ASSERT_TRUE(accepted) << "the host never accepted a request again after one threw";
+  EXPECT_EQ(after.wait_for(std::chrono::seconds(10)), std::future_status::ready)
+      << "serving stopped after a request threw";
+}
+
+// Documented: a request may never run. Accepting one after serving has stopped
+// must not leave a caller waiting for work that has nothing left to run it.
+TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+  served.stop_serving();
+
+  bool ran = false;
+  // Accepted or refused is not the contract here; running is. Nothing is left to
+  // drain the request, so it must simply never execute.
+  (void)served.host().ask_serving_thread([&ran] { ran = true; });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
+}

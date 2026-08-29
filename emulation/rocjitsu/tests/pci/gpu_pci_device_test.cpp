@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 
 namespace {
 
@@ -252,6 +253,272 @@ TEST(GpuDeviceFlushes, RefusesASegmentThatWrapsIntoTheAperture) {
 
   EXPECT_FALSE(wrapped.interrupt_ring().programmed())
       << "a wrapped segment resolved the ring's control register onto byte zero";
+}
+
+/// @brief Guest memory and an interrupt line, recorded rather than delivered.
+class RecordingTransport : public simdojo::DmaEngine, public simdojo::IrqSink {
+public:
+  [[nodiscard]] bool read(uint64_t guest_phys, std::span<std::byte> dst) override {
+    for (std::size_t i = 0; i < dst.size(); ++i) {
+      const auto found = memory.find(guest_phys + i);
+      dst[i] = found == memory.end() ? std::byte{0} : found->second;
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool write(uint64_t guest_phys, std::span<const std::byte> src) override {
+    if (refuse_writes || writes_before_refusing == 0) {
+      return false;
+    }
+    if (writes_before_refusing > 0) {
+      --writes_before_refusing;
+    }
+    writes.emplace_back(guest_phys, src.size());
+    for (std::size_t i = 0; i < src.size(); ++i) {
+      memory[guest_phys + i] = src[i];
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool trigger(uint32_t vector) override {
+    triggered.push_back(vector);
+    return !refuse_trigger;
+  }
+
+  [[nodiscard]] uint32_t dword_at(uint64_t guest_phys) {
+    std::array<std::byte, 4> raw{};
+    (void)read(guest_phys, raw);
+    return std::bit_cast<uint32_t>(raw);
+  }
+
+  std::map<uint64_t, std::byte> memory;
+  /// @brief Every write, as address and length, so a transfer that overran can
+  /// be told apart from a legitimate one to the address it overran into.
+  std::vector<std::pair<uint64_t, std::size_t>> writes;
+  std::vector<uint32_t> triggered;
+  bool refuse_writes = false;
+  bool refuse_trigger = false;
+  /// @brief Writes to accept before refusing, or negative for no limit.
+  int writes_before_refusing = -1;
+};
+
+// Delivering an interrupt is three things that mean nothing apart: the entry
+// goes into the ring, the write pointer is published so the driver knows it is
+// there, and the message is raised so the driver looks. The driver reads that
+// pointer out of *guest memory* rather than out of the register, so publishing
+// it only to the register would leave the driver waiting forever.
+class GpuDeviceDelivery : public GpuDevice {
+protected:
+  static constexpr uint64_t kRingBase = 0x900000000;
+  static constexpr uint64_t kWptrAddress = 0x900001000;
+  static constexpr uint64_t kRingBytes = 4096;
+  static constexpr uint64_t kInterruptEntryBytes = 32;
+
+  RecordingTransport transport_;
+
+  void SetUp() override {
+    ASSERT_TRUE(device_.usable());
+    device_.set_dma_engine(&transport_);
+    device_.set_irq_sink(&transport_);
+    // A 4 KiB ring above the 32-bit boundary, its write pointer published just
+    // past it, switched on and at a bus address. 4 KiB is 1024 dwords, so the
+    // size field is 10.
+    write_register_at(0x448c, static_cast<uint32_t>(kRingBase >> 8));
+    write_register_at(0x4490, static_cast<uint32_t>(kRingBase >> 40) & 0xff);
+    write_register_at(0x4498, static_cast<uint32_t>(kWptrAddress));
+    write_register_at(0x4494, static_cast<uint32_t>(kWptrAddress >> 32) & 0xffff);
+    write_register_at(0x4480, (10u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+  }
+
+  void TearDown() override {
+    device_.set_dma_engine(nullptr);
+    device_.set_irq_sink(nullptr);
+  }
+};
+
+TEST_F(GpuDeviceDelivery, PutsTheEntryInTheRingThenPointsAtItThenRaises) {
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34, .data = {0xaaaa}}));
+
+  // The two identifiers the driver looks a handler up by share the first dword.
+  EXPECT_EQ(transport_.dword_at(kRingBase) & 0xffff, 0x3412u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 16), 0xaaaau) << "the source's own data";
+  // Everything describing work this device does not run stays zero.
+  EXPECT_EQ(transport_.dword_at(kRingBase + 4), 0u) << "timestamp";
+  EXPECT_EQ(transport_.dword_at(kRingBase + 12), 0u) << "process and node";
+
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 32u)
+      << "the driver reads the write pointer from memory, not from the register";
+  ASSERT_EQ(transport_.triggered.size(), 1u);
+  EXPECT_EQ(transport_.triggered[0], 0u) << "the one vector the device advertises";
+}
+
+// The write pointer says where the next entry goes, so an entry must land at
+// it. A device that always wrote to the start of the ring would pass every
+// other test here.
+TEST_F(GpuDeviceDelivery, PlacesEachEntryAtTheCurrentWritePointer) {
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 1, .source_id = 1}));
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 2, .source_id = 2}));
+
+  EXPECT_EQ(transport_.dword_at(kRingBase) & 0xffff, 0x0101u) << "the first entry stays put";
+  EXPECT_EQ(transport_.dword_at(kRingBase + 32) & 0xffff, 0x0202u)
+      << "the second follows it rather than overwriting it";
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 64u);
+  EXPECT_EQ(read_register_at(0x4488), 64u) << "the register shadows the published pointer";
+}
+
+// The write pointer is a register the guest can write, and this is where its
+// value becomes an address. The driver's own pointer shadows sit immediately
+// after the ring, so an entry placed at an unaligned offset would run off the
+// end and overwrite exactly the words the interrupt protocol depends on.
+TEST_F(GpuDeviceDelivery, NeverWritesPastTheRingHoweverTheGuestSetsThePointer) {
+  for (const uint32_t hostile : {static_cast<uint32_t>(kRingBytes - 1),
+                                 static_cast<uint32_t>(kRingBytes - 4), 0xffffffffu, 0x7u}) {
+    // All three, so a failure names the pointer that actually caused it rather
+    // than re-reporting an earlier iteration's write against this one's value.
+    transport_.memory.clear();
+    transport_.writes.clear();
+    transport_.triggered.clear();
+    write_register_at(0x4488, hostile);
+
+    ASSERT_TRUE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}))
+        << "pointer " << hostile;
+
+    // Checked per write rather than by highest address touched: the driver puts
+    // its pointer shadows immediately after the ring, so an entry that overran
+    // would land on exactly the address the pointer is legitimately published
+    // to, and the two are indistinguishable by address alone.
+    for (const auto &[address, length] : transport_.writes) {
+      if (length != kInterruptEntryBytes) {
+        continue;
+      }
+      EXPECT_LE(address + length, kRingBase + kRingBytes)
+          << "an entry written at " << std::hex << address << " with the pointer set to " << hostile
+          << " runs past the ring, onto the driver's own pointer shadows";
+    }
+  }
+}
+
+TEST_F(GpuDeviceDelivery, WrapsTheWritePointerAtTheEndOfTheRing) {
+  constexpr std::size_t kEntries = kRingBytes / 32;
+  for (std::size_t i = 0; i < kEntries; ++i) {
+    ASSERT_TRUE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+  }
+
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 0u) << "a filled ring wraps to its start";
+  EXPECT_EQ(transport_.triggered.size(), kEntries);
+}
+
+// Nothing partial: a delivery that cannot finish must not leave a pointer
+// naming an entry that was never written, which the driver would decode out of
+// whatever the ring happened to contain.
+// The registers are separate and the driver writes them in whatever order it
+// likes, so a ring can be switched on before its base has been given. Zero
+// there means unset, not "the ring is at address zero" -- delivering anyway
+// would write entries over whatever the guest keeps in its first page.
+TEST_F(GpuDeviceDelivery, DeclinesARingEnabledBeforeItsBaseWasProgrammed) {
+  write_register_at(0x448c, 0);
+  write_register_at(0x4490, 0);
+  ASSERT_EQ(device_.interrupt_ring().base, 0u) << "the base must be unset for this to prove it";
+  ASSERT_TRUE(device_.interrupt_ring().enabled) << "and the ring still switched on";
+
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34, .data = {0xaaaa}}));
+  EXPECT_TRUE(transport_.writes.empty()) << "an entry was written into guest-physical zero";
+  EXPECT_TRUE(transport_.triggered.empty()) << "a message was raised for an entry never written";
+}
+
+TEST_F(GpuDeviceDelivery, PublishesNothingWhenGuestMemoryCannotBeReached) {
+  transport_.refuse_writes = true;
+
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  EXPECT_TRUE(transport_.triggered.empty()) << "a message with nothing behind it";
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 0u);
+}
+
+// Publishing the pointer is the second of two writes. If it fails, the entry is
+// already in the ring -- harmless, since nothing points at it -- but the message
+// must not go out, or the driver would read a pointer that never moved.
+TEST_F(GpuDeviceDelivery, RaisesNothingWhenThePointerCannotBePublished) {
+  transport_.writes_before_refusing = 1;
+
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  EXPECT_TRUE(transport_.triggered.empty());
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 0u) << "the pointer never moved";
+  EXPECT_NE(transport_.dword_at(kRingBase), 0u)
+      << "the entry stays in the ring with nothing pointing at it, to be overwritten";
+}
+
+// The third outcome the contract describes: everything is published and only
+// the message fails. The entry and the pointer must stay, so the next message
+// covers them -- rolling them back would lose an entry the driver may already
+// have seen.
+TEST_F(GpuDeviceDelivery, LeavesTheEntryPublishedWhenTheMessageIsRefused) {
+  transport_.refuse_trigger = true;
+
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 32u) << "the pointer stays advanced";
+  EXPECT_NE(transport_.dword_at(kRingBase), 0u) << "and the entry stays in the ring";
+}
+
+// A ring may be switched on with messages switched off, in which case entries
+// accumulate for the driver to find when it next looks. The device decodes that
+// field, so it has to act on it.
+TEST_F(GpuDeviceDelivery, FillsTheRingWithoutRaisingWhenMessagesAreOff) {
+  write_register_at(0x4480, (10u << 1) | (1u << 0) | (2u << 28));
+
+  EXPECT_TRUE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  EXPECT_NE(transport_.dword_at(kRingBase), 0u) << "the entry is written";
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), 32u) << "and pointed at";
+  EXPECT_TRUE(transport_.triggered.empty()) << "but no message goes out";
+}
+
+// A ring the driver has not switched on, one whose addresses are in a space
+// this device cannot resolve, one too small to hold an entry, or one with
+// nowhere to publish its pointer, is declined rather than written to: such an
+// address still names a real guest page and would quietly corrupt it.
+TEST_F(GpuDeviceDelivery, DeclinesARingItCannotSafelyWriteTo) {
+  write_register_at(0x4480, (10u << 1) | (1u << 17) | (2u << 28));
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2})) << "not enabled";
+
+  write_register_at(0x4480, (10u << 1) | (1u << 0) | (1u << 17) | (4u << 28));
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2})) << "translated";
+
+  write_register_at(0x4480, (2u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}))
+      << "a ring too small to hold one entry";
+
+  // The size field is five bits, so a guest can ask for a ring far larger than
+  // the sixteen-bit write-pointer field can name. Accepting one would have the
+  // device wrap at the field width while the driver wrapped at the ring size,
+  // and the driver would decode the never-written remainder as entries.
+  write_register_at(0x4480, (17u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}))
+      << "a ring with entries the write pointer could never name";
+
+  write_register_at(0x4480, (10u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+  write_register_at(0x4498, 0);
+  write_register_at(0x4494, 0);
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}))
+      << "nowhere to publish the pointer";
+
+  EXPECT_TRUE(transport_.triggered.empty());
+  EXPECT_TRUE(transport_.memory.empty()) << "nothing was written anywhere";
+}
+
+// Without a transport there is no guest to reach and no line to raise, which is
+// the state between construction and being served.
+TEST_F(GpuDeviceDelivery, DeclinesWithNoTransportAttached) {
+  device_.set_dma_engine(nullptr);
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  device_.set_dma_engine(&transport_);
+  device_.set_irq_sink(nullptr);
+  EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+
+  EXPECT_TRUE(transport_.memory.empty());
 }
 
 // The HDP flush is a write to a hole the bus reserves rather than to any block's

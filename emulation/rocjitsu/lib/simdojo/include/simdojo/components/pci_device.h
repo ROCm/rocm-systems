@@ -206,8 +206,19 @@ public:
   /// @brief Write @p src to guest memory at @p guest_phys.
   /// @param[in] guest_phys Guest-physical destination address.
   /// @param[in] src Source bytes; their size is the transfer length.
-  /// @retval true The full range was written.
+  /// @retval true The full range was written AND is visible to the guest.
   /// @retval false The access failed or fell outside a mapped window.
+  /// @details Writes are ORDERED AND COMPLETE on return. A true result means the
+  /// bytes are guest-visible, not merely accepted for later transfer, and two
+  /// writes that return in order become visible to the guest in that order.
+  ///
+  /// This is part of the contract rather than something a caller can arrange,
+  /// because a caller cannot: publishing a ring entry and then its write pointer
+  /// is only safe if the entry is already visible when the pointer write starts,
+  /// and no fence a caller issues can order stores an implementation has merely
+  /// queued. A driver reads the pointer and the entry with a barrier between
+  /// them, so an implementation that buffers has to flush here to hold up its
+  /// side -- an implementation that cannot must fail rather than return true.
   [[nodiscard]] virtual bool write(uint64_t guest_phys, std::span<const std::byte> src) = 0;
 };
 
