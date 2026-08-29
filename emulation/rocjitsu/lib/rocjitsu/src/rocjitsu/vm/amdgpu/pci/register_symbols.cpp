@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 
+#include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
+
 #include <utility>
 
 namespace rocjitsu {
@@ -29,15 +31,18 @@ std::string_view RegisterSymbols::lookup(int bar, uint64_t byte_offset) const {
 }
 
 void add_pre_discovery_symbols(RegisterSymbols &symbols, int bar) {
-  symbols.add_dword(bar, 0x0, "MM_INDEX");
-  symbols.add_dword(bar, 0x1, "MM_DATA");
-  symbols.add_dword(bar, 0x6, "MM_INDEX_HI");
-  symbols.add_dword(bar, 0x94, "DRIVER_SCRATCH_0");
-  symbols.add_dword(bar, 0x95, "DRIVER_SCRATCH_1");
-  symbols.add_dword(bar, 0x96, "DRIVER_SCRATCH_2");
-  symbols.add_dword(bar, 0xde3, "RCC_CONFIG_MEMSIZE");
-  symbols.add_dword(bar, 0x16061, "MP0_SMN_C2PMSG_33");
-  symbols.add_dword(bar, 0x16a00, "IP_DISCOVERY_VERSION");
+  const auto name_register = [&symbols, bar](MmioRegister reg, std::string name) {
+    symbols.add(bar, byte_offset_of(reg), std::move(name));
+  };
+  name_register(MmioRegister::MmIndex, "MM_INDEX");
+  name_register(MmioRegister::MmData, "MM_DATA");
+  name_register(MmioRegister::MmIndexHi, "MM_INDEX_HI");
+  name_register(MmioRegister::DriverScratch0, "DRIVER_SCRATCH_0");
+  name_register(MmioRegister::DriverScratch1, "DRIVER_SCRATCH_1");
+  name_register(MmioRegister::DriverScratch2, "DRIVER_SCRATCH_2");
+  name_register(MmioRegister::RccConfigMemsize, "RCC_CONFIG_MEMSIZE");
+  name_register(MmioRegister::Mp0SmnC2pmsg33, "MP0_SMN_C2PMSG_33");
+  name_register(MmioRegister::IpDiscoveryVersion, "IP_DISCOVERY_VERSION");
 }
 
 } // namespace rocjitsu

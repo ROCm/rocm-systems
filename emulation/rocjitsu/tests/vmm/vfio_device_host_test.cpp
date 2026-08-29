@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
@@ -223,6 +225,102 @@ TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
   EXPECT_EQ(served.device().mapped_regions(), 1u)
       << "one logical window must produce one device mapping";
   ::close(backing);
+}
+
+// A device whose BARs all trap can be served again: nothing of it outlives the
+// connection, so a VMM may be restarted against a running server.
+TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  {
+    rocjitsu::test::VfioUserClient first;
+    ASSERT_TRUE(served.attach(first));
+    auto written = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xa5a5a5a5});
+    ASSERT_TRUE(first.region_write(VFU_PCI_DEV_BAR0_REGION_IDX, 0, written));
+  }
+
+  rocjitsu::test::VfioUserClient second;
+  ASSERT_TRUE(served.attach(second)) << "a trapped-only device must accept a replacement client";
+  std::array<std::byte, 4> read{};
+  EXPECT_TRUE(second.region_read(VFU_PCI_DEV_BAR0_REGION_IDX, 0, read));
+}
+
+// A device that shared video memory by descriptor cannot take that mapping back
+// when the client goes away, so serving ends rather than handing a second
+// client memory the first can still reach.
+TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
+  const std::string socket_path =
+      std::format("/tmp/rj-vfu-test-gpu-{}.sock", static_cast<int>(::getpid()));
+  std::filesystem::remove(socket_path);
+
+  rocjitsu::config::KfdDeviceConfig identity;
+  identity.vendor_id = 0x1002;
+  identity.device_id = 0x1250;
+  identity.local_mem_size = 8ULL * 1024 * 1024;
+  rocjitsu::GpuPciDevice gpu("gpu", rocjitsu::gpu_pci_spec_from_config(identity, {}), nullptr);
+  ASSERT_TRUE(gpu.usable());
+
+  rocjitsu::VfioDeviceHost host(socket_path, gpu);
+  ASSERT_TRUE(host.build());
+
+  std::atomic<bool> finished = false;
+  auto result = rocjitsu::VfioDeviceHost::ServeResult::Failed;
+  std::jthread serving([&](std::stop_token stop) {
+    result = host.run(stop);
+    finished = true;
+  });
+
+  {
+    rocjitsu::test::VfioUserClient client;
+    bool connected = false;
+    for (int attempt = 0; attempt < 200 && !connected; ++attempt) {
+      connected = client.connect(socket_path);
+      if (!connected) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    }
+    ASSERT_TRUE(connected);
+    uint32_t regions = 0;
+    uint32_t irqs = 0;
+    ASSERT_TRUE(client.device_info(regions, irqs));
+  }
+
+  // No stop is requested: the disconnect alone must end serving.
+  for (int attempt = 0; attempt < 500 && !finished.load(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_TRUE(finished.load()) << "serving must end on its own once the client is gone";
+  serving.request_stop();
+  serving.join();
+  host.detach();
+  std::filesystem::remove(socket_path);
+
+  EXPECT_EQ(result, rocjitsu::VfioDeviceHost::ServeResult::Stopped)
+      << "ending because the sole client left is orderly, not a failure";
+}
+
+// The device refuses a bus shape the transport would reject; the two must also
+// agree on what is acceptable, or a device reports itself fine and then fails
+// while the transport is being built around it.
+TEST(VfioDeviceHostLifecycle, BuildsTheSmallestBusShapeTheDeviceAccepts) {
+  const std::string socket_path =
+      std::format("/tmp/rj-vfu-test-floor-{}.sock", static_cast<int>(::getpid()));
+  std::filesystem::remove(socket_path);
+
+  rocjitsu::config::KfdDeviceConfig identity;
+  identity.local_mem_size = 64 * 1024 * 1024;
+  rocjitsu::config::PciDeviceConfig pci;
+  pci.vram_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
+  pci.doorbell_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
+
+  rocjitsu::GpuPciDevice gpu("floor", rocjitsu::gpu_pci_spec_from_config(identity, pci), nullptr);
+  ASSERT_TRUE(gpu.usable()) << "the PCI minimum must be acceptable to the device";
+
+  rocjitsu::VfioDeviceHost host(socket_path, gpu);
+  EXPECT_TRUE(host.build()) << "and to the transport, or the two disagree";
+  host.detach();
+  std::filesystem::remove(socket_path);
 }
 
 } // namespace

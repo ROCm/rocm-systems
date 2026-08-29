@@ -11,4 +11,10 @@ rj_add_object_library(
     vfio_device_host.cpp
     vfio_server.cpp
 )
-target_link_libraries(rocjitsu_vmm_vfu PRIVATE libvfio-user::libvfio-user)
+target_link_libraries(
+    rocjitsu_vmm_vfu
+    PRIVATE libvfio-user::libvfio-user flatbuffers
+)
+# The server reads the simulation config, whose parser is generated.
+target_include_directories(rocjitsu_vmm_vfu PRIVATE ${GENERATED_DIR})
+add_dependencies(rocjitsu_vmm_vfu flatbuffers_schemas)

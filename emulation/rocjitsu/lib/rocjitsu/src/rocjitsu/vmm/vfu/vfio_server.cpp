@@ -3,16 +3,21 @@
 
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 
+#include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
-#include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "util/log.h"
+
+#include "embedded_schema.h"
 
 #include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <ctime>
+#include <exception>
 #include <format>
 #include <stop_token>
 #include <thread>
@@ -25,23 +30,24 @@ constexpr long kSignalPollNanoseconds = 100'000'000;
 
 } // namespace
 
-int run_vfio_server(const std::string &socket_path) {
+int run_vfio_server(const std::string &config_path, const std::string &socket_path) {
+  config::DeviceIdentityConfig identity;
+  try {
+    identity = config::load_device_identity(config_path, kEmbeddedSchema);
+  } catch (const std::exception &error) {
+    util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, error.what()));
+    return 1;
+  }
   RegisterSymbols symbols;
-  add_pre_discovery_symbols(symbols, ScratchPciDevice::kBarIndex);
+  add_pre_discovery_symbols(symbols, GpuPciDevice::kRegisterBar);
   BarAccessTrace trace(symbols);
 
-  // Vendor 0x1002 is AMD; the device ID is a placeholder until the emulated GPU
-  // supplies its own identity. Class 0x12/0x00 is a processing accelerator,
-  // which is what a compute GPU without a display presents as.
-  const simdojo::PciId id = {.vendor = 0x1002,
-                             .device = 0x0000,
-                             .subsys_vendor = 0x1002,
-                             .subsys = 0x0000,
-                             .cls = 0x12,
-                             .subcls = 0x00,
-                             .prog_if = 0x00,
-                             .revision = 0x00};
-  ScratchPciDevice device("rocjitsu-scratch", id, &trace);
+  const std::string device_name =
+      identity.device.marketing_name.empty() ? "gpu" : identity.device.marketing_name;
+  GpuPciDevice device(device_name, gpu_pci_spec_from_config(identity.device, identity.pci), &trace);
+  if (!device.usable()) {
+    return 1;
+  }
 
   // Shutdown signals are blocked and then consumed synchronously, the way the
   // daemon does it. Almost nothing is safe to touch from a signal handler, least

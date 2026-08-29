@@ -37,6 +37,11 @@
 /// practice a VMM shares guest RAM mmap-ably and the supported case is the
 /// ordinary one.
 ///
+/// A device that shares a BAR by descriptor is served to one client only. The
+/// mapping outlives the connection and cannot be taken back, so a later client
+/// would inherit whatever the first left behind, and the first could keep
+/// reading and writing it.
+///
 /// Teardown has a required order, because the device holds this host through
 /// raw sink pointers: stop the serving thread, join it, then destroy the host.
 /// @ref rocjitsu::VfioDeviceHost::detach clears the sinks so a device that
@@ -77,18 +82,24 @@ public:
 
   /// @brief Why serving ended.
   enum class ServeResult {
-    Stopped, ///< The stop token was signalled; an orderly shutdown.
+    Stopped, ///< An orderly end: the stop token was signalled, or the sole
+             ///< client of a descriptor-backed device disconnected.
     Failed   ///< The transport broke; the reason has been logged.
   };
 
   /// @brief Serve the socket until @p stop_token is signalled or serving fails.
   /// @param[in] stop_token Cooperative stop for the serving thread.
   /// @returns Why serving ended.
-  /// @details Blocks. Accepts one client at a time and returns to waiting for a
-  /// new one when a client disconnects, so a VMM can be restarted against a
-  /// running server. A caller must observe the result: once this returns, the
-  /// socket is no longer served, and a process that keeps running is advertising
-  /// a device nobody is behind.
+  /// @details Blocks, and accepts one client at a time. What a disconnect means
+  /// depends on the device. One whose BARs all trap can be served again, so this
+  /// returns to waiting and a VMM may be restarted against a running server. One
+  /// that shares a BAR by descriptor cannot: the mapping outlives the connection
+  /// and cannot be reclaimed, so serving ends and this returns @ref
+  /// ServeResult::Stopped.
+  ///
+  /// A caller must observe the result either way: once this returns, the socket
+  /// is no longer served, and a process that keeps running is advertising a
+  /// device nobody is behind.
   [[nodiscard]] ServeResult run(std::stop_token stop_token);
 
   /// @brief Detach this host from the device.
@@ -140,6 +151,14 @@ private:
   std::recursive_mutex vfu_mutex_;
   vfu_ctx *ctx_ = nullptr;
   bool attached_ = false;
+
+  /// @brief Whether serving ends when the client disconnects.
+  ///
+  /// @details Set when the device shares a BAR by descriptor. Closing the socket
+  /// cannot revoke a mapping the client already holds, so a second client could
+  /// neither be isolated from the first nor given clean state; refusing to serve
+  /// one is honest, where quietly reattaching is not.
+  bool single_client_ = false;
   GuestRegionMap guest_regions_;
   bool warned_unreachable_region_ = false;
   uint64_t declined_regions_ = 0;

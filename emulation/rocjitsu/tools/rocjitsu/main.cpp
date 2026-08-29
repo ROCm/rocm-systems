@@ -10,7 +10,7 @@
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
 ///
 /// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
-///   rocjitsu --vfio-socket <path>                    (serve a PCI device to a VMM)
+///   rocjitsu --config foo.json --vfio-socket <path>  (serve a PCI device to a VMM)
 
 #include "rocjitsu/daemon/rj_daemon.h"
 #if defined(RJ_ENABLE_VFIO_USER)
@@ -387,16 +387,16 @@ void print_usage() {
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
-         "  rocjitsu --vfio-socket <path>\n"
+         "  rocjitsu --config foo.json --vfio-socket <path>\n"
          "                                               Serve a PCI device to a VMM\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
          "  --vfio-socket <path>\n"
-         "                    Serve a scratch PCI function to a VMM over the vfio-user\n"
-         "                    protocol on this AF_UNIX socket, for transport bring-up\n"
-         "                    rather than the emulated GPU, instead of launching an\n"
-         "                    application. Requires a build with ROCJITSU_ENABLE_VFIO.\n"
+         "                    Serve the configured GPU as a PCI function to a VMM over\n"
+         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
+         "                    launching an application. Requires a build with\n"
+         "                    ROCJITSU_ENABLE_VFIO.\n"
          "                    The VMM must share guest RAM through an mmap-able\n"
          "                    descriptor or the device cannot reach it; with QEMU that\n"
          "                    means -object\n"
@@ -444,32 +444,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // Transport bring-up serves a scratch function that no configuration
-  // describes, so requiring one here would demand a file with no effect on the
-  // run. Dispatched before the config check for that reason; every other mode
-  // simulates the configured machine and still needs one.
-  const bool serving_scratch_over_vfio = vfio_socket != nullptr;
-  if (serving_scratch_over_vfio) {
-    if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
-      std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
-                   "--daemon, --attach, or an application\n";
-      return 1;
-    }
-    // Not an error to pass one: later stages serve the configured GPU here, so
-    // rejecting it now would make the option come and go between commits.
-    if (config_path != nullptr) {
-      std::cerr << "rocjitsu: --vfio-socket serves a scratch function for transport "
-                   "bring-up; ignoring --config\n";
-    }
-#if defined(RJ_ENABLE_VFIO_USER)
-    return rocjitsu::run_vfio_server(vfio_socket);
-#else
-    std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
-                 "-DROCJITSU_ENABLE_VFIO=ON\n";
-    return 1;
-#endif
-  }
-
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
     print_usage();
@@ -480,6 +454,23 @@ int main(int argc, char *argv[]) {
   if (!std::filesystem::exists(abs_config)) {
     std::cerr << std::format("rocjitsu: config file not found: {}\n", abs_config);
     return 1;
+  }
+
+  // Serving a VMM needs the device's identity, not a simulated machine, so this
+  // is dispatched before the parse that builds one.
+  if (vfio_socket != nullptr) {
+    if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
+      std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
+                   "--daemon, --attach, or an application\n";
+      return 1;
+    }
+#if defined(RJ_ENABLE_VFIO_USER)
+    return rocjitsu::run_vfio_server(abs_config, vfio_socket);
+#else
+    std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                 "-DROCJITSU_ENABLE_VFIO=ON\n";
+    return 1;
+#endif
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
