@@ -19,7 +19,8 @@ using consan_moi_detail::append_word_bytes;
 
 [[nodiscard]] std::optional<ConSanCommittedLowering>
 make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
-                                const ConSanMoiCandidate &candidate, const ConSanPatchInfo &patch) {
+                                const ConSanMoiCandidate &candidate,
+                                const ConSanPatchLoweringProduct &patch) {
   std::vector<ConSanCommittedLoweringLocation> locations;
   locations.push_back({
       .original_site = candidate.physical_id,

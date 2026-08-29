@@ -50,7 +50,7 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
 
 [[nodiscard]] std::optional<ConSanCommittedLowering> make_sc_access_lowering_commit(
     const ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanAccessInventorySite &site, const ConSanPatchInfo &patch) {
+    const ConSanAccessInventorySite &site, const ConSanCommittedPatchGeometry &patch) {
   std::vector<ConSanCommittedLoweringLocation> locations;
   locations.push_back({
       .original_site = site.physical_id,

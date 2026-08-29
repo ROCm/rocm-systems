@@ -109,9 +109,10 @@ void block_pipeline_after(TransformResult &result, ConSanPipelineStage completed
   }
 }
 
+template <typename PatchRange>
 [[nodiscard]] ConSanDispatchRequirements
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
-                            std::span<const ConSanPatchInfo> patches) {
+                            const PatchRange &patches) {
   std::map<std::string, ConSanKernelDispatchRequirement> requirements_by_name;
   const auto note_kernel = [&](const ConSanKernelInfo &kernel, const auto &apply) {
     if (kernel.name.empty())
@@ -168,7 +169,7 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
       note_physical_site(semantic.physical, mark_instrumented);
   }
 
-  for (const ConSanPatchInfo &patch : patches) {
+  for (const ConSanPatchLoweringProduct &patch : patches) {
     const bool has_segment_requirement = patch.required_private_segment_size != 0u ||
                                          patch.dynamic_private_segment_addend != 0u ||
                                          patch.required_group_segment_size != 0u;
@@ -282,7 +283,7 @@ const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value
 ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &result) {
   ConSanResourcePlanSummary resource_summary =
       summarize_consan_resource_plans(result.private_lowering_.resource_plans);
-  for (const ConSanPatchInfo &patch : result.private_lowering_.patches)
+  for (const ConSanPatchAbiEffects &patch : result.private_lowering_.patches)
     accumulate_consan_emitted_spill(resource_summary, patch);
   ConSanTransformDebugReport report{
       .fault_sites = result.private_lowering_.fault_sites,
@@ -294,7 +295,7 @@ ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &
       .patches = {},
   };
   report.patches.reserve(result.private_lowering_.patches.size());
-  for (const ConSanPatchInfo &patch : result.private_lowering_.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.private_lowering_.patches) {
     report.patches.push_back({
         .kind = patch.kind,
         .anchor_offset = patch.anchor_offset,

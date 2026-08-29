@@ -479,13 +479,14 @@ moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
 void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
                                           const MoiPlannedAccessPatch &patch);
 
-void note_moi_access_patch_info(ConSanPatchInfo &info, const MoiPlannedAccessPatch &patch);
+void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
+                                const MoiPlannedAccessPatch &patch);
 
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
                                const ResolvedMoiScratchPlan &plan,
                                const ConSanMoiWorkgroupShadowLayout &layout);
 
-void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
+void note_moi_replay_access_patch_info(ConSanPatchPlacementEffects &effects,
                                        const MoiPlannedReplayAccessPatch &patch);
 
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);

@@ -195,7 +195,7 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
       source_owner_descriptor_file_offset = owner->descriptor_file_offset;
     }
     const auto dropped =
-        std::ranges::find_if(mutation_stage.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::find_if(mutation_stage.patches, [&](const ConSanPatchMutationProduct &patch) {
           return patch.kind == ConSanPatchKind::InlineBarrierNopRewrite &&
                  ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch.anchor_offset,
                                 patch.original_size);
@@ -205,16 +205,16 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
       return std::nullopt;
     }
 
-    std::vector<const ConSanPatchInfo *> move_sources;
-    const ConSanPatchInfo *move_target = nullptr;
-    for (const ConSanPatchInfo &patch : mutation_stage.patches) {
+    std::vector<const ConSanPatchMutationProduct *> move_sources;
+    const ConSanPatchMutationProduct *move_target = nullptr;
+    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
       if (patch.kind == ConSanPatchKind::InlineBarrierMoveSourceRewrite)
         move_sources.push_back(&patch);
       else if (patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite)
         move_target = &patch;
     }
     const auto selected_source =
-        std::ranges::find_if(move_sources, [&](const ConSanPatchInfo *patch) {
+        std::ranges::find_if(move_sources, [&](const ConSanPatchMutationProduct *patch) {
           return ranges_overlap(plan.anchor_text_offset, plan.anchor_size, patch->anchor_offset,
                                 patch->original_size);
         });
@@ -235,7 +235,7 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
       translated_offset = pair_offset + source_delta;
     }
 
-    for (const ConSanPatchInfo &patch : mutation_stage.patches) {
+    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
       if (patch.phase == ConSanPatchPhase::Mutation &&
           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
         const auto event = std::ranges::find_if(
@@ -648,7 +648,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // instrumentation-only pass has no mutation of its own to count.
     instrument_options.fault_require_exactly_one = false;
     instrument_options.abort_unmatched_barrier_wait = false;
-    for (const ConSanPatchInfo &patch : mutation_stage.patches) {
+    for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
       if (patch.original_size != 0) {
         instrument_preapplied.reserved_ranges.push_back(
             {.text_offset = patch.anchor_offset, .size = patch.original_size});
@@ -734,7 +734,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     };
     for (ConSanCandidateResourcePlan &plan : instrument_result.resource_plans)
       normalize_owner_offsets(plan.owner_descriptor_file_offsets);
-    for (ConSanPatchInfo &patch : instrument_result.patches)
+    for (ConSanPatchAbiEffects &patch : instrument_result.patches)
       normalize_owner_offsets(patch.owner_descriptor_file_offsets);
     prepend_stage_diagnostics(instrument_result, mutation_stage);
     switch (instrument_result.outcome) {
@@ -1027,7 +1027,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       } else {
         const uint32_t max_patches = redundant_options.max_patches;
         const uint32_t access_patches = static_cast<uint32_t>(
-            std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
+            std::ranges::count_if(result.patches, [](const ConSanPatchLoweringProduct &patch) {
               switch (patch.kind) {
               case ConSanPatchKind::InlineLdsLoadCheckTrap:
               case ConSanPatchKind::InlineLdsStoreCheckTrap:

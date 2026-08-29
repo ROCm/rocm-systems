@@ -707,6 +707,16 @@ struct ConSanPatchAbiEffects {
   std::vector<uint64_t> owner_descriptor_file_offsets;
 };
 
+/// Placement's complete mechanical output: control-flow proof plus the ABI
+/// effects that make the emitted route executable by every owner.
+struct ConSanPatchPlacementEffects : ConSanPatchRoutingProof, ConSanPatchAbiEffects {};
+
+/// Complete product visible to ordinary lowering composition. Validation-only
+/// mutation and fault identities are deliberately absent from this contract.
+struct ConSanPatchLoweringProduct : ConSanCommittedPatchGeometry,
+                                    ConSanPatchPlacementEffects,
+                                    ConSanPatchEvidenceEffect {};
+
 /// Pristine identities and decoded operands used only to validate fault
 /// mutations against the original code object.
 struct ConSanPatchFaultProof {
@@ -721,12 +731,11 @@ struct ConSanPatchFaultProof {
   std::optional<uint16_t> fault_target_address_vgpr;
 };
 
+/// Product visible to staged mutation composition. It can translate and
+/// reserve mutation geometry without seeing pristine fault identities.
+struct ConSanPatchMutationProduct : ConSanPatchLoweringProduct, ConSanPatchMutationProof {};
+
 /// Private construction record joining the independently owned patch products.
 /// Consumers should accept the narrow base contract they need; only final
 /// validation is expected to inspect the complete joined proof.
-struct ConSanPatchInfo : ConSanCommittedPatchGeometry,
-                         ConSanPatchRoutingProof,
-                         ConSanPatchEvidenceEffect,
-                         ConSanPatchMutationProof,
-                         ConSanPatchAbiEffects,
-                         ConSanPatchFaultProof {};
+struct ConSanPatchInfo : ConSanPatchMutationProduct, ConSanPatchFaultProof {};

@@ -96,7 +96,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return;
     }
     const auto overlaps_existing_patch = std::any_of(
-        result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+        result.patches.begin(), result.patches.end(), [&](const ConSanPatchLoweringProduct &patch) {
           const bool exact_atomic_mutation =
               patch.phase == ConSanPatchPhase::Mutation &&
               patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite &&
@@ -346,7 +346,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + planned_candidates.size());
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (patch.original_size != 0u)
         fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
     }

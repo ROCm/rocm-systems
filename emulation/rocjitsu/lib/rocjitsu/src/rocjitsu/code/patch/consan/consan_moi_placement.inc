@@ -3402,8 +3402,8 @@ private:
 
 class MoiPatchOwnerIndex {
 public:
-  explicit MoiPatchOwnerIndex(std::span<const ConSanPatchInfo> patches) {
-    for (const ConSanPatchInfo &patch : patches) {
+  template <typename PatchRange> explicit MoiPatchOwnerIndex(const PatchRange &patches) {
+    for (const ConSanPatchLoweringProduct &patch : patches) {
       if (!is_persistent_access_patch(patch))
         continue;
       for (uint64_t owner : patch.owner_descriptor_file_offsets)
@@ -3411,7 +3411,7 @@ public:
     }
   }
 
-  [[nodiscard]] const ConSanPatchInfo *
+  [[nodiscard]] const ConSanPatchLoweringProduct *
   persistent_access_patch_for(std::span<const uint64_t> owners) {
     std::vector<uint64_t> key(owners.begin(), owners.end());
     if (const auto cached = persistent_access_cache_.find(key);
@@ -3419,7 +3419,7 @@ public:
       return cached->second;
     }
 
-    const ConSanPatchInfo *match = nullptr;
+    const ConSanPatchLoweringProduct *match = nullptr;
     if (!owners.empty()) {
       const auto candidates = persistent_access_patches_by_owner_.find(owners.front());
       if (candidates != persistent_access_patches_by_owner_.end()) {
@@ -3438,7 +3438,7 @@ public:
   }
 
 private:
-  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchInfo &patch) {
+  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchLoweringProduct &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
@@ -3446,9 +3446,9 @@ private:
            patch.scratch_vgpr && patch.persistent_epoch_private_offset;
   }
 
-  std::unordered_map<uint64_t, std::vector<const ConSanPatchInfo *>>
+  std::unordered_map<uint64_t, std::vector<const ConSanPatchLoweringProduct *>>
       persistent_access_patches_by_owner_;
-  std::map<std::vector<uint64_t>, const ConSanPatchInfo *> persistent_access_cache_;
+  std::map<std::vector<uint64_t>, const ConSanPatchLoweringProduct *> persistent_access_cache_;
 };
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
@@ -6710,33 +6710,34 @@ void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requ
 /// identity fields not present in the common access plan. This projection owns
 /// scratch and descriptor identity, common private epoch/owner state, fixed
 /// and dynamic spill extent, and the selected branch-only relay route.
-void note_moi_access_patch_info(ConSanPatchInfo &info, const MoiPlannedAccessPatch &patch) {
-  info.scratch_vgpr = patch.resources.base;
-  info.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
-  info.persistent_epoch_private_offset = patch.private_epoch_offset;
-  info.persistent_owner_private_offset =
+void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
+                                const MoiPlannedAccessPatch &patch) {
+  effects.scratch_vgpr = patch.resources.base;
+  effects.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
+  effects.persistent_epoch_private_offset = patch.private_epoch_offset;
+  effects.persistent_owner_private_offset =
       patch.owner_derivation ? patch.owner_derivation->entry_workitem_x_private_offset
                              : std::nullopt;
   if (patch.private_epoch_offset)
-    info.persistent_private_state_end = patch.persistent_private_state_end;
-  info.required_private_segment_size = patch.required_private_bytes;
-  info.branch_only_continuation = patch.branch_only_route.has_value();
+    effects.persistent_private_state_end = patch.persistent_private_state_end;
+  effects.required_private_segment_size = patch.required_private_bytes;
+  effects.branch_only_continuation = patch.branch_only_route.has_value();
   if (patch.branch_only_route) {
-    info.branch_only_entry_relay_offsets = patch.branch_only_route->entry_relay_offsets;
-    info.branch_only_return_relay_offsets = patch.branch_only_route->return_relay_offsets;
+    effects.branch_only_entry_relay_offsets = patch.branch_only_route->entry_relay_offsets;
+    effects.branch_only_return_relay_offsets = patch.branch_only_route->return_relay_offsets;
   }
   if (patch.spill) {
-    info.spilled_vgpr_count = patch.spill->vgpr_count;
-    note_dynamic_stack_private_requirement(info, &*patch.spill);
+    effects.spilled_vgpr_count = patch.spill->vgpr_count;
+    note_dynamic_stack_private_requirement(effects, &*patch.spill);
   }
 }
 
 /// Publish the extra private-workgroup and persistent-state facts carried by
 /// an access body that relocates and replays the guest instruction.
-void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
+void note_moi_replay_access_patch_info(ConSanPatchPlacementEffects &effects,
                                        const MoiPlannedReplayAccessPatch &patch) {
-  note_moi_access_patch_info(info, patch);
-  info.persistent_record_replay_workgroup_private_offsets = patch.private_workgroup_offsets;
+  note_moi_access_patch_info(effects, patch);
+  effects.persistent_record_replay_workgroup_private_offsets = patch.private_workgroup_offsets;
 }
 
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,

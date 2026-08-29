@@ -852,7 +852,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     for (const ConSanPreappliedReservedRange &range :
          result.program_inventory.preapplied_mutation().reserved_ranges)
       protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       protected_ranges.emplace_back(patch.anchor_offset,
                                     patch.anchor_offset +
                                         std::max<uint32_t>(patch.original_size, sizeof(uint32_t)));

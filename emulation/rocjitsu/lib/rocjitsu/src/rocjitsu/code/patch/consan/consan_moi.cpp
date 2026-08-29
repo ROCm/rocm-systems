@@ -499,7 +499,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
                                          prologue_scratch_assignments, arch, result);
     owner_epoch_prologue_applied_early =
-        std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
           return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
         });
   }
@@ -529,7 +529,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches,
-                           [](const ConSanPatchInfo &patch) {
+                           [](const ConSanPatchLoweringProduct &patch) {
                              return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
                                     patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
                            }) &&
@@ -585,9 +585,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   publish_pending_moi_lowering_rejections(result);
   if (result.modified()) {
     const auto patch_count = [&result](ConSanPatchKind kind) {
-      return static_cast<uint32_t>(
-          std::count_if(result.patches.begin(), result.patches.end(),
-                        [kind](const ConSanPatchInfo &patch) { return patch.kind == kind; }));
+      return static_cast<uint32_t>(std::count_if(
+          result.patches.begin(), result.patches.end(),
+          [kind](const ConSanPatchLoweringProduct &patch) { return patch.kind == kind; }));
     };
     if (patch_count(ConSanPatchKind::InlineMoiAccessRecordStore) != 0) {
       result.warnings.emplace_back(std::string("ConSan MOI ") +

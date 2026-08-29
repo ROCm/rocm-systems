@@ -116,7 +116,7 @@ build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
 class MoiPatchAnchorRangeIndex {
 public:
   explicit MoiPatchAnchorRangeIndex(const ConSanTransformArtifacts &result) {
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (patch.original_size != 0u)
         ranges_.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
     }
@@ -163,8 +163,8 @@ private:
 
 class MoiBarrierPatchOwnerIndex {
 public:
-  explicit MoiBarrierPatchOwnerIndex(std::span<const ConSanPatchInfo> patches) {
-    for (const ConSanPatchInfo &patch : patches) {
+  template <typename PatchRange> explicit MoiBarrierPatchOwnerIndex(const PatchRange &patches) {
+    for (const ConSanPatchLoweringProduct &patch : patches) {
       if (!is_persistent_access_patch(patch))
         continue;
       for (uint64_t owner : patch.owner_descriptor_file_offsets)
@@ -172,7 +172,7 @@ public:
     }
   }
 
-  [[nodiscard]] const ConSanPatchInfo *
+  [[nodiscard]] const ConSanPatchLoweringProduct *
   persistent_access_patch_for(std::span<const uint64_t> owners) const {
     if (owners.empty())
       return nullptr;
@@ -189,7 +189,7 @@ public:
   }
 
 private:
-  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchInfo &patch) {
+  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchLoweringProduct &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
@@ -197,7 +197,7 @@ private:
            patch.scratch_vgpr && patch.persistent_epoch_private_offset;
   }
 
-  std::unordered_map<uint64_t, std::vector<const ConSanPatchInfo *>>
+  std::unordered_map<uint64_t, std::vector<const ConSanPatchLoweringProduct *>>
       persistent_access_patches_by_owner_;
 };
 
@@ -533,27 +533,28 @@ build_inline_shadow_private_epoch_barrier_cave_words(
                                                                 ConSanTransformArtifacts &result,
                                                                 std::vector<std::string> &errors) {
   const uint32_t nop = build_s_nop(0u, arch);
-  const auto is_direct_reservoir = [](const ConSanPatchInfo &patch) {
+  const auto is_direct_reservoir = [](const ConSanPatchLoweringProduct &patch) {
     return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
            patch.original_size >= 2u * sizeof(uint32_t) &&
            patch.trampoline_size == patch.original_size + sizeof(uint32_t);
   };
   bool pruned_any = false;
   for (;;) {
-    const auto unused = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      if (!is_direct_reservoir(patch) || patch.anchor_offset > text.size() ||
-          patch.original_size > text.size() - patch.anchor_offset) {
-        return false;
-      }
-      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t)) {
-        uint32_t word = 0u;
-        std::memcpy(&word, text.data() + offset, sizeof(word));
-        if (word != nop)
-          return false;
-      }
-      return true;
-    });
+    const auto unused =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
+          if (!is_direct_reservoir(patch) || patch.anchor_offset > text.size() ||
+              patch.original_size > text.size() - patch.anchor_offset) {
+            return false;
+          }
+          for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
+               offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t)) {
+            uint32_t word = 0u;
+            std::memcpy(&word, text.data() + offset, sizeof(word));
+            if (word != nop)
+              return false;
+          }
+          return true;
+        });
     if (unused == result.patches.end())
       break;
 
@@ -586,7 +587,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
       }
     }
 
-    std::erase_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    std::erase_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
       if (is_direct_reservoir(patch) && patch.anchor_offset == reservoir.anchor_offset &&
           patch.trampoline_offset == reservoir.trampoline_offset)
         return true;
@@ -614,7 +615,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 
   std::unordered_set<uint64_t> access_anchors;
   uint64_t first_access_body = std::numeric_limits<uint64_t>::max();
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::InlineMoiExactShadowStore &&
         patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore &&
         patch.kind != ConSanPatchKind::InlineMoiAccessRecordStore &&
@@ -628,7 +629,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 
   uint64_t access_island_begin = std::numeric_limits<uint64_t>::max();
   uint64_t access_island_end = 0u;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
         !access_anchors.contains(patch.anchor_offset)) {
       continue;
@@ -652,7 +653,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
   }
 
   std::unordered_set<uint64_t> generated_branch_relays;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
         patch.original_size == 0u && patch.trampoline_size == sizeof(uint32_t)) {
       generated_branch_relays.insert(patch.trampoline_offset);
@@ -872,7 +873,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   // Every direct, dense, and shared-dispatcher placement below publishes the
   // same resource transaction. Keep that mechanical projection beside the
   // plan so placement alternatives cannot silently omit private-state facts.
-  const auto note_planned_resource_info = [](ConSanPatchInfo &info,
+  const auto note_planned_resource_info = [](ConSanPatchAbiEffects &info,
                                              const PlannedInlineEpochBarrier &planned) {
     info.scratch_vgpr = planned.scratch_vgpr;
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
@@ -920,7 +921,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       if (!owner_options.automatic_moi_private_epoch)
         continue;
-      const ConSanPatchInfo *access_patch = patch_owner_index.persistent_access_patch_for(owners);
+      const ConSanPatchLoweringProduct *access_patch =
+          patch_owner_index.persistent_access_patch_for(owners);
       if (access_patch == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no common access-probe state in " +
@@ -1526,9 +1528,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (size != 0u && begin <= std::numeric_limits<uint64_t>::max() - size)
         occupied_ranges.emplace_back(begin, begin + size);
     };
-    for (const ConSanPatchInfo &patch : result.patches)
+    for (const ConSanCommittedPatchGeometry &patch : result.patches)
       append_occupied_range(patch.anchor_offset, patch.original_size);
-    for (const ConSanPatchInfo &patch : patches)
+    for (const ConSanCommittedPatchGeometry &patch : patches)
       append_occupied_range(patch.anchor_offset, patch.original_size);
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates)
       append_occupied_range(candidate.site.text_offset, candidate.site.size);
@@ -1549,7 +1551,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::map<std::vector<uint64_t>, std::vector<ReusableDenseAccessRelay>> reusable_access_relays;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       for (size_t patch_index = 0; patch_index < result.patches.size(); ++patch_index) {
-        const ConSanPatchInfo &dispatcher = result.patches[patch_index];
+        const ConSanPatchLoweringProduct &dispatcher = result.patches[patch_index];
         if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
             dispatcher.original_size != 0u || !dispatcher.moi_dense_entry_island_offset ||
             dispatcher.owner_descriptor_file_offsets.empty()) {
@@ -1630,7 +1632,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         return std::nullopt;
       };
 
-      ConSanPatchInfo &dispatcher = result.patches[relay->dispatcher_patch_index];
+      ConSanPatchLoweringProduct &dispatcher = result.patches[relay->dispatcher_patch_index];
       if (dispatcher.trampoline_size < sizeof(uint32_t) ||
           dispatcher.trampoline_offset + dispatcher.trampoline_size > new_text.size()) {
         result.errors.emplace_back(
@@ -2154,7 +2156,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
   std::unordered_set<uint64_t> emitted_owner_descriptors;
   bool has_unscoped_emitted_patch = false;
-  for (const ConSanPatchInfo &patch : patches) {
+  for (const ConSanPatchLoweringProduct &patch : patches) {
     has_unscoped_emitted_patch |= patch.owner_descriptor_file_offsets.empty();
     emitted_owner_descriptors.insert(patch.owner_descriptor_file_offsets.begin(),
                                      patch.owner_descriptor_file_offsets.end());
@@ -2427,7 +2429,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   // remain NOPs after access routing. This gives the later barrier batch a
   // dense, already-paid original-text frontier without rediscovering guest
   // code or weakening capacity-one relay ownership.
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
       continue;
     for (uint64_t offset : patch.branch_relay_offsets) {
@@ -2451,7 +2453,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   // the durable patch record instead of rediscovering or relocating the
   // original instructions a second time.  These footholds are essential when
   // an original barrier cannot directly reach the appended generated bank.
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir ||
         patch.original_size < 2u * sizeof(uint32_t)) {
       continue;

@@ -120,12 +120,13 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
   size_t barrier_id_scope_members = 0;
   size_t exact_barrier_drop_members = 0;
   std::vector<std::string> atomic_order_mutations;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  const auto note_patch = [&](const ConSanCommittedPatchGeometry &patch,
+                              const ConSanPatchFaultProof &fault) {
     if (patch.phase != ConSanPatchPhase::Mutation)
-      continue;
+      return;
     switch (patch.kind) {
     case ConSanPatchKind::InlineBarrierNopRewrite:
-      if (!patch.fault_sequence_identity.empty()) {
+      if (!fault.fault_sequence_identity.empty()) {
         ++exact_barrier_drop_members;
       } else {
         ++count;
@@ -136,11 +137,11 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
       ++count;
       break;
     case ConSanPatchKind::InlineAtomicOrderRewrite:
-      if (patch.fault_sequence_identity.empty()) {
+      if (fault.fault_sequence_identity.empty()) {
         ++count;
-      } else if (std::ranges::find(atomic_order_mutations, patch.fault_sequence_identity) ==
+      } else if (std::ranges::find(atomic_order_mutations, fault.fault_sequence_identity) ==
                  atomic_order_mutations.end()) {
-        atomic_order_mutations.push_back(patch.fault_sequence_identity);
+        atomic_order_mutations.push_back(fault.fault_sequence_identity);
       }
       break;
     case ConSanPatchKind::InlineAtomicScopeRewrite:
@@ -159,7 +160,9 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
     default:
       break;
     }
-  }
+  };
+  for (const auto &patch : result.patches)
+    note_patch(patch, patch);
   // One whole-barrier movement currently has two target records.
   count += (move_targets + 1u) / 2u;
   // ID/scope rewriting is transactional: all member patch records represent

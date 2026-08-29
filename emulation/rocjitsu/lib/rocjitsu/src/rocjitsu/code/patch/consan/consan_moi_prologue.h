@@ -48,7 +48,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context);
 
-[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel, const ConSanPatchInfo &patch);
+[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel,
+                                     const ConSanPatchLoweringProduct &patch);
 
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,
                                                         ConSanTransformArtifacts &result);

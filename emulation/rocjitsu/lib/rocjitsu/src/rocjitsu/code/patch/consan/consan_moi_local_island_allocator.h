@@ -20,9 +20,10 @@ namespace rocjitsu::consan_moi_impl {
 
 class MoiLocalNopIslandAllocator {
 public:
+  template <typename PatchRange>
   MoiLocalNopIslandAllocator(std::span<const uint8_t> text,
                              const ProgramInventory &program_inventory,
-                             std::span<const ConSanPatchInfo> existing_patches, rj_code_arch_t arch,
+                             const PatchRange &existing_patches, rj_code_arch_t arch,
                              uint32_t island_words,
                              std::span<const ConSanPreappliedReservedRange> reserved_ranges = {})
       : text_(text), nop_(build_s_nop(0, arch)), island_words_(island_words) {
@@ -58,7 +59,7 @@ public:
     const uint64_t island_bytes = static_cast<uint64_t>(island_words) * sizeof(uint32_t);
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
     occupied_ranges.reserve(existing_patches.size() * 2u + reserved_ranges.size());
-    for (const ConSanPatchInfo &patch : existing_patches) {
+    for (const ConSanPatchLoweringProduct &patch : existing_patches) {
       occupied_ranges.emplace_back(
           patch.anchor_offset, patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u));
       if (patch.trampoline_size != 0u) {

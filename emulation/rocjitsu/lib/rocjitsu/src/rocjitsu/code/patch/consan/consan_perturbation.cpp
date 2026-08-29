@@ -247,7 +247,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   const std::span<const uint8_t> text = patcher.text_bytes();
   const std::vector<LocalNopCave> caves = find_uncovered_nop_caves(code_object, result, arch);
   DbiPatchPlacementPlanner placement_planner(arch, text.size());
-  for (const ConSanPatchInfo &existing : result.patches) {
+  for (const ConSanCommittedPatchGeometry &existing : result.patches) {
     std::string reservation_error;
     if (!placement_planner.reserve_existing_range(existing.anchor_offset, existing.original_size,
                                                   &reservation_error) ||

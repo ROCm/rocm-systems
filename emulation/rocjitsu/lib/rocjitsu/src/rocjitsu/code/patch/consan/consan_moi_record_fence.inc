@@ -58,11 +58,13 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       result.errors.emplace_back("ConSan MOI fence record patch site is outside .text");
       return;
     }
-    const bool overlaps = std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      const uint64_t patch_end = patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
-      return candidate.patch_text_offset < patch_end &&
-             patch.anchor_offset < candidate.patch_text_offset + candidate.patch_size;
-    });
+    const bool overlaps =
+        std::ranges::any_of(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
+          const uint64_t patch_end =
+              patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
+          return candidate.patch_text_offset < patch_end &&
+                 patch.anchor_offset < candidate.patch_text_offset + candidate.patch_size;
+        });
     if (overlaps) {
       result.warnings.emplace_back("ConSan MOI fence record patch skipped an overlapping patch");
       continue;
@@ -188,24 +190,24 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   };
   const auto find_dense_fence_relay =
       [&](uint64_t descriptor_offset) -> std::optional<DenseFenceRelay> {
-    const auto owns_descriptor = [&](const ConSanPatchInfo &patch) {
+    const auto owns_descriptor = [&](const ConSanPatchLoweringProduct &patch) {
       return std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
              patch.owner_descriptor_file_offsets.end();
     };
     for (size_t host_index = result.patches.size(); host_index-- > 0u;) {
-      const ConSanPatchInfo &host = result.patches[host_index];
+      const ConSanPatchLoweringProduct &host = result.patches[host_index];
       // A relocatable dense host records the complete local indirect island;
       // compact islands without displaced host ownership remain smaller.
       if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
           host.original_size < kMoiLocalIndirectIslandWords * sizeof(uint32_t) ||
           !owns_descriptor(host) || host_index + 1u >= result.patches.size())
         continue;
-      const ConSanPatchInfo &dispatcher = result.patches[host_index + 1u];
+      const ConSanPatchLoweringProduct &dispatcher = result.patches[host_index + 1u];
       if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
           dispatcher.original_size != 0u || !owns_descriptor(dispatcher))
         continue;
       uint64_t reservation_end = std::numeric_limits<uint64_t>::max();
-      for (const ConSanPatchInfo &patch : result.patches) {
+      for (const ConSanPatchLoweringProduct &patch : result.patches) {
         if ((patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier ||
              patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord) &&
             owns_descriptor(patch) && patch.trampoline_offset > dispatcher.trampoline_offset) {
@@ -283,7 +285,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       }
       const uint64_t displaced_end = patch_text_offset + displaced_words.size() * sizeof(uint32_t);
       const bool overlaps_existing_patch =
-          std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+          std::ranges::any_of(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
             const uint64_t patch_end =
                 patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
             return patch_text_offset < patch_end && patch.anchor_offset < displaced_end;
@@ -434,7 +436,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     append_words_bytes(new_text, *cave_words);
 
     if (dense_relay) {
-      ConSanPatchInfo &dispatcher = result.patches[dense_relay->dispatcher_patch_index];
+      ConSanPatchLoweringProduct &dispatcher = result.patches[dense_relay->dispatcher_patch_index];
       if (dispatcher.trampoline_size < sizeof(uint32_t) ||
           dispatcher.trampoline_offset + dispatcher.trampoline_size > new_text.size()) {
         result.errors.emplace_back("ConSan MOI fence record patch found stale dense dispatcher");

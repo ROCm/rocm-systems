@@ -65,14 +65,15 @@ bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) 
   return point.moi_dispatch_id_sgpr || point.moi_dispatch_id_vgpr;
 }
 
-void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanMoiOperatingPoint &point,
+void note_moi_persistent_vgpr_state(ConSanPatchAbiEffects &effects,
+                                    const ConSanMoiOperatingPoint &point,
                                     const ConSanMoiOperatingPoint &allocation) {
-  patch.persistent_owner_vgpr = point.moi_owner_vgpr;
-  patch.persistent_epoch_vgpr = point.moi_epoch_vgpr;
-  patch.persistent_workgroup_key_vgpr = point.moi_workgroup_key_vgpr;
-  patch.persistent_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs;
-  patch.persistent_vgpr_state_owner_local = !allocation.owner_persistent_vgprs.empty();
-  patch.persistent_vgpr_state_is_abi =
+  effects.persistent_owner_vgpr = point.moi_owner_vgpr;
+  effects.persistent_epoch_vgpr = point.moi_epoch_vgpr;
+  effects.persistent_workgroup_key_vgpr = point.moi_workgroup_key_vgpr;
+  effects.persistent_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs;
+  effects.persistent_vgpr_state_owner_local = !allocation.owner_persistent_vgprs.empty();
+  effects.persistent_vgpr_state_is_abi =
       point.moi_owner_vgpr && point.moi_epoch_vgpr && !point.moi_persistent_sgprs.complete();
 }
 

@@ -79,6 +79,15 @@ static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchEvidenceEffect>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchMutationProof>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchAbiEffects>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchFaultProof>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchLoweringProduct>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchMutationProduct>);
+static_assert(std::derived_from<ConSanPatchMutationProduct, ConSanPatchLoweringProduct>);
+static_assert(std::derived_from<ConSanPatchMutationProduct, ConSanPatchMutationProof>);
+static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanCommittedPatchGeometry>);
+static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanPatchPlacementEffects>);
+static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanPatchEvidenceEffect>);
+static_assert(std::derived_from<ConSanPatchPlacementEffects, ConSanPatchRoutingProof>);
+static_assert(std::derived_from<ConSanPatchPlacementEffects, ConSanPatchAbiEffects>);
 
 static_assert(HasCommittedPatchGeometry<ConSanCommittedPatchGeometry>);
 static_assert(!HasPatchRoutingProof<ConSanCommittedPatchGeometry>);
@@ -94,6 +103,13 @@ static_assert(HasPatchAbiEffects<ConSanPatchAbiEffects>);
 static_assert(!HasCommittedPatchGeometry<ConSanPatchAbiEffects>);
 static_assert(HasPatchFaultProof<ConSanPatchFaultProof>);
 static_assert(!HasPatchMutationProof<ConSanPatchFaultProof>);
+static_assert(!HasPatchMutationProof<ConSanPatchLoweringProduct>);
+static_assert(!HasPatchFaultProof<ConSanPatchLoweringProduct>);
+static_assert(!HasPatchFaultProof<ConSanPatchMutationProduct>);
+static_assert(!HasCommittedPatchGeometry<ConSanPatchPlacementEffects>);
+static_assert(!HasPatchEvidenceEffect<ConSanPatchPlacementEffects>);
+static_assert(!HasPatchMutationProof<ConSanPatchPlacementEffects>);
+static_assert(!HasPatchFaultProof<ConSanPatchPlacementEffects>);
 
 [[nodiscard]] RuntimeCapabilities complete_runtime_capabilities() {
   return {

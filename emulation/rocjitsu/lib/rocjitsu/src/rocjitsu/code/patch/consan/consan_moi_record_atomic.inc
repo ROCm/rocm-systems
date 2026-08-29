@@ -72,8 +72,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       result.errors.emplace_back("ConSan MOI atomic record patch site is outside .text");
       return;
     }
-    const ConSanPatchInfo *composed_access_patch = nullptr;
-    for (const ConSanPatchInfo &patch : result.patches) {
+    const ConSanPatchLoweringProduct *composed_access_patch = nullptr;
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       const bool access_patch = patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
                                 patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
       if (access_patch && patch.anchor_offset == site.text_offset &&
@@ -83,7 +83,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
     }
     const auto overlaps_existing_patch = std::any_of(
-        result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+        result.patches.begin(), result.patches.end(), [&](const ConSanPatchLoweringProduct &patch) {
           if (&patch == composed_access_patch)
             return false;
           const uint64_t patch_end =

@@ -610,7 +610,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   }
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   struct SelectedWindow {
-    const ConSanPatchInfo *patch = nullptr;
+    const ConSanPatchLoweringProduct *patch = nullptr;
     const ConSanMoiCandidate *access = nullptr;
     uint32_t first_slot = 0;
     uint32_t bank_count = 1;
@@ -624,7 +624,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       access_by_offset.try_emplace(candidate.anchor(), &candidate);
   }
   bool has_multi_range_window = false;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::InlineMoiSampledWatchpointStore &&
         patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
@@ -732,7 +732,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       std::optional<SampledBarrierWindow> selected_window;
       std::optional<SampledCfgDistance> closest;
       for (const SelectedWindow *window : owner_windows->second) {
-        const ConSanPatchInfo &patch = *window->patch;
+        const ConSanPatchLoweringProduct &patch = *window->patch;
         if (!window->access || !kernel_owns_patch(*owner_kernel, patch))
           continue;
         const auto distance = moi_cfg_forward_distance(*distance_index, patch.anchor_offset);
@@ -804,7 +804,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   MoiDescriptorPrivateRequirements private_requirements;
   std::vector<std::pair<uint64_t, uint64_t>> patch_claims;
   patch_claims.reserve(result.patches.size());
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     const uint64_t size = std::max<uint32_t>(patch.original_size, 1u);
     patch_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + size);
   }
@@ -1089,7 +1089,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + selected.size());
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (patch.original_size != 0u)
         fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
     }
@@ -1495,8 +1495,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     return;
   }
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
-  const uint32_t selected_window_count = static_cast<uint32_t>(
-      std::count_if(result.patches.begin(), result.patches.end(), [](const ConSanPatchInfo &patch) {
+  const uint32_t selected_window_count = static_cast<uint32_t>(std::count_if(
+      result.patches.begin(), result.patches.end(), [](const ConSanPatchLoweringProduct &patch) {
         return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
                patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
       }));
@@ -1616,7 +1616,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   };
   for (ConSanCandidateResourcePlan &plan : result.resource_plans)
     canonicalize_owners(plan.owner_descriptor_file_offsets);
-  for (ConSanPatchInfo &patch : result.patches)
+  for (ConSanPatchLoweringProduct &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
 
   if (!moi_resource_is_valid(resource_state)) {
@@ -1627,14 +1627,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   struct Window {
     uint32_t slot = 0;
     uint32_t bank_count = 1;
-    const ConSanPatchInfo *patch = nullptr;
+    const ConSanPatchLoweringProduct *patch = nullptr;
     ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
     uint64_t owner_descriptor_file_offset = 0;
   };
   std::vector<Window> windows;
   windows.reserve(selected_window_count);
   bool has_multi_range_window = false;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::InlineMoiSampledWatchpointStore &&
         patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
       continue;
@@ -1917,7 +1917,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         relocated_guest_size > old_text.size() - physical_anchor_offset)
       continue;
     const bool overlap = std::any_of(
-        result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+        result.patches.begin(), result.patches.end(), [&](const ConSanPatchLoweringProduct &patch) {
           if (composed_access_patch != result.patches.end() && &patch == &*composed_access_patch)
             return false;
           const uint64_t patch_end =
@@ -2155,7 +2155,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + selected.size());
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (patch.original_size != 0u)
         fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
     }

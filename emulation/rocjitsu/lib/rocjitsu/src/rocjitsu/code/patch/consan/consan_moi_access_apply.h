@@ -35,7 +35,8 @@ using consan_moi_detail::append_words_bytes;
 
 [[nodiscard]] std::optional<ConSanCommittedLowering>
 make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
-                                const ConSanMoiCandidate &candidate, const ConSanPatchInfo &patch);
+                                const ConSanMoiCandidate &candidate,
+                                const ConSanPatchLoweringProduct &patch);
 
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
           typename ApplyExtraRequirements>

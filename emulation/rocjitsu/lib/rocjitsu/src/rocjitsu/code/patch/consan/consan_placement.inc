@@ -75,7 +75,7 @@ text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_of
 reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
                                      const ConSanTransformArtifacts &result) {
   std::vector<ByteRange> ranges;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanCommittedPatchGeometry &patch : result.patches) {
     // Some structural records describe appended dispatch machinery without
     // replacing pristine text.  Their zero-byte anchors are identities, not
     // reservations, and must not make a later composed patch fail closed.

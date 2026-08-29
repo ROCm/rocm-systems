@@ -1618,12 +1618,13 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
 }
 
 [[nodiscard]] bool kernel_contains_patch_anchor(const ConSanKernelInfo &kernel,
-                                                const ConSanPatchInfo &patch) {
+                                                const ConSanCommittedPatchGeometry &patch) {
   return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
          patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
 }
 
-[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel, const ConSanPatchInfo &patch) {
+[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel,
+                                     const ConSanPatchLoweringProduct &patch) {
   if (!patch.owner_descriptor_file_offsets.empty()) {
     return std::ranges::find(patch.owner_descriptor_file_offsets, kernel.descriptor_file_offset) !=
            patch.owner_descriptor_file_offsets.end();
@@ -1638,7 +1639,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
   }
 
   std::unordered_set<std::string_view> owner_names;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (!consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan.engine,
                                                                  arch, patch))
       continue;
@@ -1889,7 +1890,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
   MoiDescriptorPrivateRequirements private_requirements;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     const auto access_patch =
-        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
           return patch.persistent_epoch_private_offset && patch.scratch_vgpr &&
                  kernel_owns_patch(kernel, patch);
         });
@@ -2136,7 +2137,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     }
     uint32_t required_private_bytes =
         entry_scalar_spill ? entry_scalar_spill->total_private_bytes : spill->total_private_bytes;
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (kernel_owns_patch(kernel, patch))
         required_private_bytes =
             std::max(required_private_bytes, patch.required_private_segment_size);
@@ -2455,7 +2456,7 @@ void try_apply_owner_epoch_prologue_patch(
     if (!kernel.has_text_range)
       continue;
     const bool owns_emitted_patch =
-        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::any_of(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
           return kernel_owns_patch(kernel, patch);
         });
     const bool owns_planned_site =
@@ -2575,7 +2576,7 @@ void try_apply_owner_epoch_prologue_patch(
           "ConSan MOI owner/epoch prologue has invalid workitem-ID dimensions");
       return;
     }
-    for (const ConSanPatchInfo &patch : result.patches) {
+    for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (!kernel_owns_patch(kernel, patch))
         continue;
       if (patch.workgroup_shadow_size == 0u)
@@ -2609,12 +2610,12 @@ void try_apply_owner_epoch_prologue_patch(
       workgroup_shadow = candidate;
     }
     const bool owns_inline_barrier =
-        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::any_of(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
           return kernel_owns_patch(kernel, patch) &&
                  patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
         });
     const bool owns_non_barrier_instrumentation =
-        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::any_of(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
           return kernel_owns_patch(kernel, patch) &&
                  patch.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
                  patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
@@ -2899,7 +2900,7 @@ void try_apply_owner_epoch_prologue_patch(
     uint64_t prologue_return_target = kernel.entry_text_offset;
     const ConSanKernelInfo *original_kernel =
         result.program_inventory.find_kernel_by_name(kernel.name);
-    const auto is_chainable_entry_patch = [](const ConSanPatchInfo &patch) {
+    const auto is_chainable_entry_patch = [](const ConSanPatchLoweringProduct &patch) {
       return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
              patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
@@ -2913,7 +2914,7 @@ void try_apply_owner_epoch_prologue_patch(
              patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
     };
     auto composed_entry_patch =
-        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+        std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
           return is_chainable_entry_patch(patch) &&
                  patch.anchor_offset == kernel.entry_text_offset && patch.original_size != 0u &&
                  patch.trampoline_size != 0u && original_kernel != nullptr &&
@@ -2992,7 +2993,7 @@ void try_apply_owner_epoch_prologue_patch(
             const uint64_t displaced_offset =
                 kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
             const auto prefix_patch =
-                std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+                std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
                   return is_chainable_entry_patch(patch) &&
                          patch.anchor_offset == displaced_offset && patch.original_size != 0u &&
                          patch.trampoline_size != 0u && original_kernel != nullptr &&
@@ -3240,7 +3241,7 @@ void try_apply_owner_epoch_prologue_patch(
       composed_entry_patch->branch_only_entry_prologue_offset = prologue_text_offset;
       // The erase below invalidates composed_entry_patch. Keep it last in this
       // composition block so later maintenance cannot accidentally reuse it.
-      std::erase_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      std::erase_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
         return patch.kind == ConSanPatchKind::TrampolineNopBranchRelay &&
                std::ranges::find(composed_branch_only_entry_relays, patch.anchor_offset) !=
                    composed_branch_only_entry_relays.end();
