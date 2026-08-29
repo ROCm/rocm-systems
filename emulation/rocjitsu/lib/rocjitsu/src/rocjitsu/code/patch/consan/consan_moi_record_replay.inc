@@ -253,7 +253,8 @@ void try_apply_first_light_access_record_patch(
   const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
       collect_moi_synchronization_ranges(result);
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    return moi_candidate_uses_branch_only_scalar_spill(result, *candidate);
+    return moi_candidate_uses_branch_only_scalar_spill(result.resource_plans,
+                                                       result.moi_operating_point, *candidate);
   };
   struct BorrowedEntryProtectedRange {
     uint64_t begin = 0u;
@@ -276,7 +277,8 @@ void try_apply_first_light_access_record_patch(
   std::ranges::sort(borrowed_entry_protected_ranges, {}, &BorrowedEntryProtectedRange::begin);
   const auto borrowed_entry_words_for_candidate =
       [&](const ConSanMoiCandidate *candidate) -> std::optional<std::vector<uint32_t>> {
-    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
+    const ConSanCandidateResourcePlan *plan =
+        resource_plan_for_candidate(result.resource_plans, *candidate);
     if (plan == nullptr || original_text.empty() ||
         !moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
             options, result.moi_operating_point, plan->owner_descriptor_file_offsets)) {
@@ -509,9 +511,11 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     const uint16_t access_scratch_count = moi_access_scratch_vgpr_count(options, candidate, arch);
-    const auto resources = resolve_moi_scratch(result, candidate, options, access_scratch_count);
+    const auto resources =
+        resolve_moi_scratch(result.resource_plans, candidate, options, access_scratch_count);
     if (!resources) {
-      const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+      const ConSanCandidateResourcePlan *plan =
+          resource_plan_for_candidate(result.resource_plans, candidate);
       if (plan != nullptr && plan->reason == ConSanRegisterPlanReason::ForbiddenOverlap &&
           options.scratch_vgpr) {
         std::vector<std::string> overlap_errors;

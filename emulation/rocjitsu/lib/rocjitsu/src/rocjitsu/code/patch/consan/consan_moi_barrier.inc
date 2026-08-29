@@ -834,7 +834,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   MoiDescriptorVgprRequirements visible_evidence_vgpr_requirements;
   MoiDescriptorSgprRequirements visible_evidence_sgpr_requirements;
   MoiDescriptorPrivateRequirements visible_evidence_private_requirements;
-  const MoiResourcePlanSiteIndex resource_plan_index(result);
+  const MoiResourcePlanSiteIndex resource_plan_index(result.resource_plans);
   MoiPatchOwnerIndex patch_owner_index(result);
   if (options.automatic_moi_private_epoch) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
@@ -2257,8 +2257,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       warnings.emplace_back("ConSan MOI barrier record patch skipped an overlapping patch");
       continue;
     }
-    const ConSanCandidateResourcePlan *existing_plan =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Barrier, site.text_offset);
+    const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
+        result.resource_plans, ConSanResourceSiteKind::Barrier, site.text_offset);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan

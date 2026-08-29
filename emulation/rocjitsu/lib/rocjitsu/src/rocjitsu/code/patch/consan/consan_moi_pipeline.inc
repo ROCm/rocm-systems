@@ -67,8 +67,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     }
     const uint16_t scratch_count =
         fence_record_scratch_count(candidate.communication_lowering_form);
-    const ConSanCandidateResourcePlan *existing_plan =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence_text_offset);
+    const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
+        result.resource_plans, ConSanResourceSiteKind::Fence, fence_text_offset);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan

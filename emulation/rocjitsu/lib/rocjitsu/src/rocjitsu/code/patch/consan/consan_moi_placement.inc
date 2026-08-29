@@ -2676,7 +2676,7 @@ struct MoiDenseAccessRoutePlan {
 };
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
-resource_plan_for_candidate(const ConSanTransformArtifacts &result,
+resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
 
 /// Returns the merged original-text ranges occupied by synchronization
@@ -2727,11 +2727,12 @@ collect_moi_synchronization_ranges(const ConSanTransformArtifacts &result) {
 /// the same capacity-one relay mechanism. A missing plan or owner set is not
 /// branch-only state.
 [[nodiscard]] bool
-moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &result,
+moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResourcePlan> plans,
+                                            const ConSanMoiOperatingPoint &operating_point,
                                             const ConSanMoiCandidate &candidate) {
-  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(plans, candidate);
   return plan != nullptr && !plan->owner_descriptor_file_offsets.empty() &&
-         moi_transient_sgpr_assignment_is_branch_only(result.moi_operating_point,
+         moi_transient_sgpr_assignment_is_branch_only(operating_point,
                                                       plan->owner_descriptor_file_offsets);
 }
 
@@ -2830,8 +2831,9 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
   std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
   for (const auto &group : plan.partition.groups) {
     const ConSanCandidateResourcePlan *group_resource =
-        group.candidates.empty() ? nullptr
-                                 : resource_plan_for_candidate(result, *group.candidates.front());
+        group.candidates.empty()
+            ? nullptr
+            : resource_plan_for_candidate(result.resource_plans, *group.candidates.front());
     MoiOptions group_options = options;
     if (group_resource != nullptr)
       (void)apply_moi_transient_sgpr_assignment(group_options, options,
@@ -2869,7 +2871,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
         is_record_replay &&
         std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
           const ConSanCandidateResourcePlan *candidate_resource =
-              resource_plan_for_candidate(result, *candidate);
+              resource_plan_for_candidate(result.resource_plans, *candidate);
           return candidate_resource != nullptr &&
                  candidate_resource->source == ConSanRegisterAllocationSource::SpillRequired;
         });
@@ -3791,23 +3793,23 @@ template <typename PersistentVgprState>
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
-resource_plan_for_candidate(const ConSanTransformArtifacts &result,
+resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate) {
-  const auto plan = std::ranges::find_if(result.resource_plans, [&](const auto &candidate_plan) {
+  const auto plan = std::ranges::find_if(plans, [&](const auto &candidate_plan) {
     return candidate_plan.site_kind == ConSanResourceSiteKind::Access &&
            candidate_plan.text_offset == candidate.anchor();
   });
-  return plan == result.resource_plans.end() ? nullptr : &*plan;
+  return plan == plans.end() ? nullptr : &*plan;
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
-resource_plan_for_site(const ConSanTransformArtifacts &result, ConSanResourceSiteKind site_kind,
-                       uint64_t text_offset) {
-  const auto it = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
+resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
+                       ConSanResourceSiteKind site_kind, uint64_t text_offset) {
+  const auto it = std::ranges::find_if(plans, [&](const auto &plan) {
     return plan.site_kind == site_kind &&
            plan.semantic_text_offset.value_or(plan.text_offset) == text_offset;
   });
-  return it == result.resource_plans.end() ? nullptr : &*it;
+  return it == plans.end() ? nullptr : &*it;
 }
 
 struct MoiResourcePlanSiteKey {
@@ -3827,10 +3829,11 @@ struct MoiResourcePlanSiteKeyHash {
 
 class MoiResourcePlanSiteIndex {
 public:
-  explicit MoiResourcePlanSiteIndex(const ConSanTransformArtifacts &result) : result_(result) {
-    indices_.reserve(result.resource_plans.size());
-    for (size_t index = 0; index < result.resource_plans.size(); ++index) {
-      const ConSanCandidateResourcePlan &plan = result.resource_plans[index];
+  explicit MoiResourcePlanSiteIndex(std::span<const ConSanCandidateResourcePlan> plans)
+      : plans_(plans) {
+    indices_.reserve(plans.size());
+    for (size_t index = 0; index < plans.size(); ++index) {
+      const ConSanCandidateResourcePlan &plan = plans[index];
       indices_.try_emplace(MoiResourcePlanSiteKey{plan.site_kind, plan.text_offset}, index);
     }
   }
@@ -3838,11 +3841,11 @@ public:
   [[nodiscard]] const ConSanCandidateResourcePlan *find(ConSanResourceSiteKind kind,
                                                         uint64_t text_offset) const {
     const auto found = indices_.find(MoiResourcePlanSiteKey{kind, text_offset});
-    return found == indices_.end() ? nullptr : &result_.resource_plans[found->second];
+    return found == indices_.end() ? nullptr : &plans_[found->second];
   }
 
 private:
-  const ConSanTransformArtifacts &result_;
+  std::span<const ConSanCandidateResourcePlan> plans_;
   std::unordered_map<MoiResourcePlanSiteKey, size_t, MoiResourcePlanSiteKeyHash> indices_;
 };
 
@@ -3898,7 +3901,8 @@ private:
 };
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const MoiOptions &options,
+resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
+                         const ConSanMoiOperatingPoint &site_point,
                          const ConSanMoiOperatingPoint &allocation, uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
@@ -3912,27 +3916,29 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const MoiOptio
     resolved.original_private_segment_size = plan.original_private_segment_size;
     resolved.owner_descriptor_file_offsets = plan.owner_descriptor_file_offsets;
     resolved.source = plan.source;
-    if (options.moi_owner_vgpr) {
+    if (site_point.moi_owner_vgpr) {
       resolved.required_vgpr_count = std::max<uint16_t>(
-          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_owner_vgpr + 1u));
+          resolved.required_vgpr_count, static_cast<uint16_t>(*site_point.moi_owner_vgpr + 1u));
     }
-    if (options.moi_epoch_vgpr) {
+    if (site_point.moi_epoch_vgpr) {
       resolved.required_vgpr_count = std::max<uint16_t>(
-          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_epoch_vgpr + 1u));
+          resolved.required_vgpr_count, static_cast<uint16_t>(*site_point.moi_epoch_vgpr + 1u));
     }
-    if (options.moi_workgroup_key_vgpr) {
+    if (site_point.moi_workgroup_key_vgpr) {
       resolved.required_vgpr_count =
           std::max<uint16_t>(resolved.required_vgpr_count,
-                             static_cast<uint16_t>(*options.moi_workgroup_key_vgpr + 1u));
+                             static_cast<uint16_t>(*site_point.moi_workgroup_key_vgpr + 1u));
     }
-    if (options.moi_dispatch_id_vgpr) {
-      resolved.required_vgpr_count = std::max<uint16_t>(
-          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + 2u));
+    if (site_point.moi_dispatch_id_vgpr) {
+      resolved.required_vgpr_count =
+          std::max<uint16_t>(resolved.required_vgpr_count,
+                             static_cast<uint16_t>(*site_point.moi_dispatch_id_vgpr + 2u));
     }
     for (const std::optional<uint16_t> reg :
-         {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-          options.moi_record_replay_workgroup_vgprs.z,
-          options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+         {site_point.moi_record_replay_workgroup_vgprs.x,
+          site_point.moi_record_replay_workgroup_vgprs.y,
+          site_point.moi_record_replay_workgroup_vgprs.z,
+          site_point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
       if (reg) {
         resolved.required_vgpr_count =
             std::max<uint16_t>(resolved.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
@@ -3964,11 +3970,13 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const MoiOptio
 }
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandidate &candidate,
-                    const MoiOptions &options, uint16_t expected_count) {
-  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
-  return plan == nullptr ? std::nullopt
-                         : resolve_moi_scratch_plan(*plan, options, options, expected_count);
+resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
+                    const ConSanMoiCandidate &candidate,
+                    const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count) {
+  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(plans, candidate);
+  return plan == nullptr
+             ? std::nullopt
+             : resolve_moi_scratch_plan(*plan, operating_point, operating_point, expected_count);
 }
 
 [[nodiscard]] std::optional<uint16_t>

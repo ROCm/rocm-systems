@@ -113,8 +113,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           candidate.container_name);
       continue;
     }
-    const ConSanCandidateResourcePlan *existing_plan =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Atomic, site.text_offset);
+    const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
+        result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
     const uint16_t scratch_count = inline_shadow_atomic_scratch_count(arch);
     if (existing_plan && existing_plan->scratch_vgpr_count != scratch_count)
       existing_plan = nullptr;

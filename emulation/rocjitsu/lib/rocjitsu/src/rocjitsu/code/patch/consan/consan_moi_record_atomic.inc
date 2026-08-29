@@ -94,8 +94,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
           candidate.container_name);
       continue;
     }
-    const ConSanCandidateResourcePlan *existing_plan =
-        resource_plan_for_site(result, ConSanResourceSiteKind::Atomic, site.text_offset);
+    const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
+        result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
     const uint16_t scratch_count = atomic_record_scratch_count(candidate.lowering_form);
     ConSanCandidateResourcePlan plan =
         existing_plan

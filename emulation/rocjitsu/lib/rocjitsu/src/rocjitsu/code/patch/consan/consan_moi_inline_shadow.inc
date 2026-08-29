@@ -172,7 +172,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
   }
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    return moi_candidate_uses_branch_only_scalar_spill(result, *candidate);
+    return moi_candidate_uses_branch_only_scalar_spill(result.resource_plans,
+                                                       result.moi_operating_point, *candidate);
   };
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   if (has_branch_only_scalar_assignment && use_indirect_appended && !original_text.empty()) {
@@ -248,7 +249,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       continue;
     }
     const ConSanCandidateResourcePlan *resource_plan =
-        resource_plan_for_candidate(result, candidate);
+        resource_plan_for_candidate(result.resource_plans, candidate);
     if (resource_plan == nullptr)
       continue;
     const bool selected_reduced_spill_recovery =

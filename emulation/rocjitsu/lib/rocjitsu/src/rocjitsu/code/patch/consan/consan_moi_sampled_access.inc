@@ -234,7 +234,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   size_t branch_only_candidate_count = 0u;
   uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
   for (const ConSanMoiCandidate *candidate : candidates) {
-    if (!moi_candidate_uses_branch_only_scalar_spill(result, *candidate)) {
+    if (!moi_candidate_uses_branch_only_scalar_spill(result.resource_plans,
+                                                     result.moi_operating_point, *candidate)) {
       continue;
     }
     ++branch_only_candidate_count;
@@ -290,7 +291,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     }
     const ConSanCandidateResourcePlan *candidate_resource_plan =
-        resource_plan_for_candidate(result, candidate);
+        resource_plan_for_candidate(result.resource_plans, candidate);
     if (candidate_resource_plan == nullptr)
       continue;
     MoiOptions candidate_options = options;
@@ -316,8 +317,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         planned_spill_backed_operand_recovery
             ? sampled_spill_backed_scratch_count(candidate_options, candidate, arch)
             : direct_sampled_scratch_count(candidate_options, candidate, arch);
-    const auto resources =
-        resolve_moi_scratch(result, candidate, candidate_options, expected_scratch_count);
+    const auto resources = resolve_moi_scratch(result.resource_plans, candidate, candidate_options,
+                                               expected_scratch_count);
     if (!resources) {
       continue;
     }
