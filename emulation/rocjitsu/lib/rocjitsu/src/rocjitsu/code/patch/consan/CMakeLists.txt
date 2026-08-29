@@ -27,6 +27,7 @@ target_sources(
         consan_moi.cpp
         consan_moi_access_apply.cpp
         consan_moi_access_target.cpp
+        consan_moi_barrier.cpp
         consan_moi_candidate_projection.cpp
         consan_moi_common_emission.cpp
         consan_moi_dynamic_record_emission.cpp

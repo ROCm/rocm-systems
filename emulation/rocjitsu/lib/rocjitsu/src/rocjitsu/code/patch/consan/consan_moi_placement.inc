@@ -266,10 +266,11 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_descriptor_workgroup_sources(
-    std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch,
-    std::vector<std::string> &errors, bool uses_cluster_workgroup_id,
-    std::optional<uint16_t> cdna_full_payload_user_sgpr_count) {
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
+                                 rj_code_arch_t arch, std::vector<std::string> &errors,
+                                 bool uses_cluster_workgroup_id,
+                                 std::optional<uint16_t> cdna_full_payload_user_sgpr_count) {
   const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
   if (!descriptor) {
     errors.emplace_back("ConSan MOI workgroup-id descriptor exceeds ELF bytes");
@@ -421,12 +422,6 @@ moi_persistent_or_descriptor_workgroup_sources(
                                           uses_cluster_workgroup_id);
 }
 
-struct MoiSgprRange {
-  uint16_t base = 0;
-  uint16_t width = 0;
-};
-
-
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
                                                     const ConSanKernelInfo &kernel,
@@ -454,7 +449,6 @@ struct MoiSgprRange {
   }
   return true;
 }
-
 
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point) {
@@ -514,7 +508,6 @@ struct MoiSgprRange {
   return true;
 }
 
-
 // A Sampled store executes its displaced guest instruction before the probe
 // uses ordinary scratch VGPRs. That ordering permits a spill-backed scratch
 // window to overlap the store's address or payload: the spill save preserves
@@ -558,7 +551,6 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
          request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
 }
 
-
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point,
                                                    const ConSanMoiCandidate &candidate,
@@ -598,9 +590,6 @@ inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       !candidate_requires_flat_address_materialization(candidate);
   return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
-
-
-
 
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
@@ -1312,16 +1301,17 @@ void MoiResourcePlanningStateDeleter::operator()(MoiResourcePlanningState *state
   delete state;
 }
 
-MoiResourcePlanningStatePtr make_moi_resource_planning_state(
-    const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
-    std::span<const ConSanCandidateResourcePlan> prior_site_plans) {
+MoiResourcePlanningStatePtr
+make_moi_resource_planning_state(const MoiResourceProblem &problem,
+                                 const ConSanMoiOperatingPoint &allocation,
+                                 std::span<const ConSanCandidateResourcePlan> prior_site_plans) {
   return MoiResourcePlanningStatePtr(
       new MoiResourcePlanningState(problem, allocation, prior_site_plans));
 }
 
 MoiResourcePlanningStatePtr make_moi_resource_planning_state(
-    std::span<const uint8_t> input, rj_code_arch_t arch,
-    const ProgramInventory &program_inventory, const ConSanObservationPlan &observation_plan,
+    std::span<const uint8_t> input, rj_code_arch_t arch, const ProgramInventory &program_inventory,
+    const ConSanObservationPlan &observation_plan,
     std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
     const BoundRuntimeResources &resources, const ConSanMoiOperatingPoint &point) {
   return MoiResourcePlanningStatePtr(new MoiResourcePlanningState(
@@ -1603,11 +1593,6 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   return assignments;
 }
 
-enum class MoiRelocatableHostScalarState : uint8_t {
-  AccessRouter,
-  BarrierRouter,
-};
-
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
 
@@ -1782,13 +1767,6 @@ template <typename Container>
   return consan_detail::MoiOccupiedTextRanges(std::move(ranges));
 }
 
-// A host discovered in existing text. Appended-body placement is deliberately
-// absent because the search has not reserved any emitted bytes.
-struct MoiDenseRelayHost {
-  uint64_t host_offset = 0;
-  std::vector<uint32_t> displaced_words;
-};
-
 struct MoiDenseRelayHostSearch {
   uint64_t owner_begin = 0;
   uint64_t owner_end = 0;
@@ -1957,6 +1935,26 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
       resource_state, search, std::forward<OverlapsReserved>(overlaps_reserved));
   return select_moi_dense_relay_host(resource_state, text, search.host_word_count, search.anchors,
                                      candidates, search.owner_begin, claimed_host_ranges);
+}
+
+std::optional<MoiDenseRelayHost> find_moi_dense_relay_host_for_owners(
+    MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
+    const MoiDenseRelayHostRequest &request,
+    const std::function<bool(uint64_t, uint64_t)> &overlaps_reserved) {
+  MoiDenseOwnerLivenessProof owner_proof = resource_state.prepare_dense_liveness_for_owners(
+      request.owner_descriptor_file_offsets, request.bootstrap_ranges);
+  return find_moi_dense_relay_host(
+      resource_state, text,
+      {
+          .owner_begin = request.owner_begin,
+          .owner_end = request.owner_end,
+          .host_word_count = request.host_word_count,
+          .anchors = request.anchors,
+          .preapplied_reserved_ranges = request.preapplied_reserved_ranges,
+          .owner_proof = owner_proof,
+          .bootstrap_ranges = request.bootstrap_ranges,
+      },
+      overlaps_reserved, request.claimed_host_ranges);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
@@ -3009,7 +3007,34 @@ std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point) {
   return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
-                                              point);
+                                             point);
+}
+
+std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
+    uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state) {
+  struct PersistentStateAdapter {
+    std::optional<uint16_t> moi_owner_vgpr;
+    std::optional<uint16_t> moi_epoch_vgpr;
+    std::optional<uint16_t> moi_workgroup_key_vgpr;
+    std::optional<uint16_t> moi_dispatch_id_vgpr;
+    ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  };
+  const PersistentStateAdapter adapter{
+      .moi_owner_vgpr = persistent_state.owner,
+      .moi_epoch_vgpr = persistent_state.epoch,
+      .moi_workgroup_key_vgpr = persistent_state.workgroup_key,
+      .moi_dispatch_id_vgpr = persistent_state.dispatch_id,
+      .moi_record_replay_workgroup_vgprs = persistent_state.record_replay_workgroup,
+  };
+  return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
+                                             adapter);
+}
+
+const ConSanMoiPersistentVgprAssignment *
+moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                               uint64_t descriptor_offset) {
+  return find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
@@ -3266,7 +3291,6 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
          overlaps(point.moi_inline_dynamic_stack_borrowed_sgpr, 2u) ||
          std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
 }
-
 
 [[nodiscard]] std::optional<MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {

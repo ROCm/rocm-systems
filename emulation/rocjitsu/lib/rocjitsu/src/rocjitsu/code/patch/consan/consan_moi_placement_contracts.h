@@ -14,6 +14,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -154,6 +155,51 @@ struct MoiAccessEntryIslandPlan {
   bool uses_preferred_island = false;
 };
 
+/// A scalar register interval that a relocated host must preserve while it
+/// bootstraps a generated router. This is a placement constraint, not an
+/// engine emission policy.
+struct MoiSgprRange {
+  uint16_t base = 0;
+  uint16_t width = 0;
+};
+
+enum class MoiRelocatableHostScalarState : uint8_t {
+  AccessRouter,
+  BarrierRouter,
+};
+
+/// A host discovered in existing text. Appended-body placement is absent:
+/// callers still own the transaction that reserves and populates generated
+/// bytes.
+struct MoiDenseRelayHost {
+  uint64_t host_offset = 0;
+  std::vector<uint32_t> displaced_words;
+};
+
+/// Engine-neutral inputs to owner-complete dense-host discovery. Placement
+/// owns the CFG/liveness proof; engine components supply only their occupied
+/// ranges and the scalar ABI that the relocated host must preserve.
+struct MoiDenseRelayHostRequest {
+  uint64_t owner_begin = 0;
+  uint64_t owner_end = 0;
+  size_t host_word_count = 0;
+  std::span<const uint64_t> anchors;
+  std::span<const ConSanPreappliedReservedRange> preapplied_reserved_ranges;
+  std::span<const uint64_t> owner_descriptor_file_offsets;
+  std::span<const MoiSgprRange> bootstrap_ranges;
+  std::span<const std::pair<uint64_t, uint64_t>> claimed_host_ranges;
+};
+
+/// Persistent VGPRs that cannot be borrowed by an entry relay before the
+/// probe's ordinary spill transaction has run.
+struct MoiPersistentVgprStateView {
+  std::optional<uint16_t> owner;
+  std::optional<uint16_t> epoch;
+  std::optional<uint16_t> workgroup_key;
+  std::optional<uint16_t> dispatch_id;
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+};
+
 [[nodiscard]] constexpr uint32_t
 moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
@@ -268,6 +314,24 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
 [[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point);
+
+[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
+    uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state);
+
+[[nodiscard]] const ConSanMoiPersistentVgprAssignment *
+moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                               uint64_t descriptor_offset);
+
+[[nodiscard]] std::vector<MoiSgprRange>
+moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
+                                   const ConSanMoiOperatingPoint &point,
+                                   MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch);
+
+[[nodiscard]] std::optional<MoiDenseRelayHost> find_moi_dense_relay_host_for_owners(
+    MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
+    const MoiDenseRelayHostRequest &request,
+    const std::function<bool(uint64_t, uint64_t)> &overlaps_reserved);
 
 void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
                                           const MoiPlannedAccessPatch &patch);

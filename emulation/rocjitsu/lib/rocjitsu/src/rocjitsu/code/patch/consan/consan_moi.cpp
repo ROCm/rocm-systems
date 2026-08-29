@@ -20,6 +20,7 @@
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
+#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
@@ -163,8 +164,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
 

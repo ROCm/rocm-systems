@@ -143,6 +143,64 @@ private:
   std::vector<std::pair<uint64_t, uint64_t>> ranges_;
 };
 
+class MoiBarrierResourcePlanIndex {
+public:
+  explicit MoiBarrierResourcePlanIndex(std::span<const ConSanCandidateResourcePlan> plans) {
+    for (const ConSanCandidateResourcePlan &plan : plans) {
+      if (plan.site_kind == ConSanResourceSiteKind::Barrier)
+        plans_by_offset_.try_emplace(plan.text_offset, &plan);
+    }
+  }
+
+  [[nodiscard]] const ConSanCandidateResourcePlan *find(uint64_t text_offset) const {
+    const auto found = plans_by_offset_.find(text_offset);
+    return found == plans_by_offset_.end() ? nullptr : found->second;
+  }
+
+private:
+  std::unordered_map<uint64_t, const ConSanCandidateResourcePlan *> plans_by_offset_;
+};
+
+class MoiBarrierPatchOwnerIndex {
+public:
+  explicit MoiBarrierPatchOwnerIndex(std::span<const ConSanPatchInfo> patches) {
+    for (const ConSanPatchInfo &patch : patches) {
+      if (!is_persistent_access_patch(patch))
+        continue;
+      for (uint64_t owner : patch.owner_descriptor_file_offsets)
+        persistent_access_patches_by_owner_[owner].push_back(&patch);
+    }
+  }
+
+  [[nodiscard]] const ConSanPatchInfo *
+  persistent_access_patch_for(std::span<const uint64_t> owners) const {
+    if (owners.empty())
+      return nullptr;
+    const auto candidates = persistent_access_patches_by_owner_.find(owners.front());
+    if (candidates == persistent_access_patches_by_owner_.end())
+      return nullptr;
+    const auto found = std::ranges::find_if(candidates->second, [&](const auto *patch) {
+      return std::ranges::all_of(owners, [&](uint64_t owner) {
+        return std::ranges::find(patch->owner_descriptor_file_offsets, owner) !=
+               patch->owner_descriptor_file_offsets.end();
+      });
+    });
+    return found == candidates->second.end() ? nullptr : *found;
+  }
+
+private:
+  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+           patch.scratch_vgpr && patch.persistent_epoch_private_offset;
+  }
+
+  std::unordered_map<uint64_t, std::vector<const ConSanPatchInfo *>>
+      persistent_access_patches_by_owner_;
+};
+
 [[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanRequest &request,
                                                            const BoundRuntimeResources &resources,
                                                            const ConSanMoiOperatingPoint &point) {
@@ -839,12 +897,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   MoiDescriptorVgprRequirements visible_evidence_vgpr_requirements;
   MoiDescriptorSgprRequirements visible_evidence_sgpr_requirements;
   MoiDescriptorPrivateRequirements visible_evidence_private_requirements;
-  const MoiResourcePlanSiteIndex resource_plan_index(result.resource_plans);
-  MoiPatchOwnerIndex patch_owner_index(result.patches);
+  const MoiBarrierResourcePlanIndex resource_plan_index(result.resource_plans);
+  const MoiBarrierPatchOwnerIndex patch_owner_index(result.patches);
   if (options.automatic_moi_private_epoch) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
-          resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
+          resource_plan_index.find(candidate.site.text_offset);
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no owned resource scope in " +
@@ -1000,7 +1058,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   } else if (options.automatic_moi_persistent_vgprs) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
-          resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
+          resource_plan_index.find(candidate.site.text_offset);
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier has no owned automatic persistent-state scope");
@@ -1008,7 +1066,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       for (uint64_t descriptor_offset : plan->owner_descriptor_file_offsets) {
         const auto *assignment =
-            find_moi_persistent_vgpr_assignment(result.moi_operating_point, descriptor_offset);
+            moi_persistent_vgpr_assignment(result.moi_operating_point, descriptor_offset);
         if (assignment)
           persistent_epoch_vgpr_requirements[descriptor_offset] =
               static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
@@ -1022,8 +1080,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   }
   for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
     std::vector<uint64_t> owners;
-    const ConSanCandidateResourcePlan *plan =
-        resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
+    const ConSanCandidateResourcePlan *plan = resource_plan_index.find(candidate.site.text_offset);
     if (plan) {
       owners = plan->owner_descriptor_file_offsets;
     }
@@ -1817,8 +1874,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       for (size_t index : indices)
         anchors.push_back(planned_candidates[index].candidate.site.text_offset);
       const ConSanCandidateResourcePlan *group_resource =
-          resource_plan_index.find(ConSanResourceSiteKind::Barrier,
-                                   planned_candidates[indices.front()].candidate.site.text_offset);
+          resource_plan_index.find(planned_candidates[indices.front()].candidate.site.text_offset);
       if (group_resource == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow barrier epoch has no dense relay resource plan in " +
@@ -1827,20 +1883,17 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
           group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
-      MoiDenseOwnerLivenessProof host_owner_proof =
-          resource_state.prepare_dense_liveness_for_owners(
-              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
-
-      auto dense_host = find_moi_dense_relay_host(
+      auto dense_host = find_moi_dense_relay_host_for_owners(
           resource_state, old_text,
           {
               .owner_begin = owner_begin,
               .owner_end = owner_end,
               .host_word_count = static_cast<size_t>(host_words_count),
               .anchors = anchors,
-              .preapplied_reserved_ranges = resource_state.reserved_ranges,
-              .owner_proof = host_owner_proof,
+              .preapplied_reserved_ranges = moi_resource_reserved_ranges(resource_state),
+              .owner_descriptor_file_offsets = group_resource->owner_descriptor_file_offsets,
               .bootstrap_ranges = host_bootstrap_ranges,
+              .claimed_host_ranges = {},
           },
           overlaps_existing);
       if (!dense_host) {
@@ -1977,14 +2030,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::vector<uint32_t> matched_words;
         if (key_encodes_scc) {
           const ConSanTargetProfile *target = consan_target_profile(arch);
-          if (target == nullptr ||
-              !consan_detail::append_restore_moi_scc_from_route_key(
-                  matched_words,
-                  consan_detail::MoiEncodedSccRestoreRequest{
-                      .encoded_sgpr = key_sgpr,
-                      .normalize_encoded_sgpr = true,
-                  },
-                  *target)) {
+          if (target == nullptr || !consan_detail::append_restore_moi_scc_from_route_key(
+                                       matched_words,
+                                       consan_detail::MoiEncodedSccRestoreRequest{
+                                           .encoded_sgpr = key_sgpr,
+                                           .normalize_encoded_sgpr = true,
+                                       },
+                                       *target)) {
             return false;
           }
         }
@@ -2265,9 +2317,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  MoiResourcePlanningState standalone_resource_state(bytes, arch, result.program_inventory,
-                                                     result.observation_plan, result.resource_plans,
-                                                     options, options, options);
+  MoiResourcePlanningStatePtr standalone_resource_state = make_moi_resource_planning_state(
+      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -2296,7 +2348,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(standalone_resource_state, options, options, options,
+            : plan_moi_resource_site(*standalone_resource_state, options, options, options,
                                      ConSanResourceSiteKind::Barrier, candidate_index,
                                      site.text_offset, candidate.kernel_descriptor_file_offset,
                                      /*scratch_count=*/6u);
@@ -2475,7 +2527,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       while (displaced_words.size() < kMoiRecordReplayBorrowedEntryIslandWords) {
         auto decoded = decode_relocatable_entry_instruction(
             old_text, site.text_offset + displaced_words.size() * sizeof(uint32_t), arch,
-            ignored_errors, standalone_resource_state.decoder.get());
+            ignored_errors, moi_resource_decoder(*standalone_resource_state));
         if (!decoded) {
           displaced_words.clear();
           break;
@@ -2487,8 +2539,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       const bool overlaps_existing_patch =
           displaced_size > std::numeric_limits<uint32_t>::max() ||
           occupied_anchors.overlaps(site.text_offset, static_cast<uint32_t>(displaced_size));
-      const bool crosses_control_flow_entry = !moi_entry_window_is_single_entry(
-          standalone_resource_state.block_index, site.text_offset, displaced_size);
+      const bool crosses_control_flow_entry = !moi_resource_entry_window_is_single_entry(
+          *standalone_resource_state, site.text_offset, displaced_size);
       auto protected_range =
           std::ranges::lower_bound(borrowed_barrier_protected_ranges, site.text_offset, {},
                                    [](const auto &range) { return range.first; });
@@ -2503,9 +2555,16 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         }
       }
       const auto jump_sgprs = moi_indirect_jump_sgprs(emission);
-      const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
-          standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
-          site.text_offset, planned.resources.required_vgpr_count, emission);
+      const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr_for_state(
+          *standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
+          site.text_offset, planned.resources.required_vgpr_count,
+          {
+              .owner = emission.moi_owner_vgpr,
+              .epoch = emission.moi_epoch_vgpr,
+              .workgroup_key = emission.moi_workgroup_key_vgpr,
+              .dispatch_id = emission.moi_dispatch_id_vgpr,
+              .record_replay_workgroup = emission.moi_record_replay_workgroup_vgprs,
+          });
       if (!displaced_words.empty() && !overlaps_existing_patch && !crosses_control_flow_entry &&
           !overlaps_other_sync && jump_sgprs && backup_vgpr) {
         borrowed_entry = build_moi_borrowed_record_replay_entry(
