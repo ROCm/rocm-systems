@@ -16,31 +16,6 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
   return offsets;
 }
 
-[[nodiscard]] bool
-initialize_sc_access_coverage(const ConSanOptions &options, ConSanTransformArtifacts &result,
-                              const ConSanLoweringObservation *prepared_observation) {
-  if (prepared_observation != nullptr) {
-    if (!prepared_observation->well_formed()) {
-      result.errors.emplace_back(
-          "ConSan SuperCollider received an invalid prepared observation product");
-      return false;
-    }
-    result.observation_plan = prepared_observation->plan;
-    result.coverage_ledger = prepared_observation->initial_coverage;
-    return true;
-  }
-  ConSanObservationProduct observation = assemble_consan_observation_product(
-      result.program_inventory, static_cast<const ConSanRequest &>(options),
-      static_cast<const ConSanDebugOverrides &>(options));
-  const bool valid = observation.valid();
-  result.observation_plan = std::move(observation.plan);
-  result.coverage_ledger = std::move(observation.initial_coverage);
-  result.errors.insert(result.errors.end(),
-                       std::make_move_iterator(observation.diagnostics.begin()),
-                       std::make_move_iterator(observation.diagnostics.end()));
-  return valid;
-}
-
 [[nodiscard]] std::vector<ConSanProbeIntentId>
 sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const PhysicalSiteId &site) {
   std::vector<ConSanProbeIntentId> intent_ids;

@@ -1281,9 +1281,7 @@ struct ConSanLoweringObservation;
 [[nodiscard]] ConSanTransformArtifacts
 try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
                      std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
-                     ConSanLoweringExecution *execution = nullptr,
-                     ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
-                     const ConSanLoweringObservation *observation = nullptr);
+                     ConSanLoweringExecution *execution = nullptr);
 
 /// Re-run only MOI planning, lowering, and validation from a semantic
 /// inventory produced for the same bytes and engine. This is used after a

@@ -295,34 +295,6 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
   return candidates;
 }
 
-/// Run pure access and synchronization policies, initialize the production
-/// coverage ledger. Current access lowerers consume the admitted candidate
-/// projection; policy decisions and final coverage retain the complete typed
-/// account of excluded and admitted sites.
-[[nodiscard]] bool
-initialize_moi_access_observation_plan(const MoiOptions &options, ConSanTransformArtifacts &result,
-                                       const ConSanLoweringObservation *prepared_observation) {
-  if (prepared_observation != nullptr) {
-    if (!prepared_observation->well_formed()) {
-      result.errors.emplace_back("ConSan MOI received an invalid prepared observation product");
-      return false;
-    }
-    result.observation_plan = prepared_observation->plan;
-    result.coverage_ledger = prepared_observation->initial_coverage;
-    return true;
-  }
-  ConSanObservationProduct observation = assemble_consan_observation_product(
-      result.program_inventory, static_cast<const ConSanRequest &>(options),
-      static_cast<const ConSanDebugOverrides &>(options));
-  const bool valid = observation.valid();
-  result.observation_plan = std::move(observation.plan);
-  result.coverage_ledger = std::move(observation.initial_coverage);
-  result.errors.insert(result.errors.end(),
-                       std::make_move_iterator(observation.diagnostics.begin()),
-                       std::make_move_iterator(observation.diagnostics.end()));
-  return valid;
-}
-
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
                                          rj_code_arch_t arch) {
   if (offset > bytes.size())

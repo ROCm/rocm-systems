@@ -363,9 +363,13 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
     }
+    if (!initialize_consan_lowering_observation(options, inventory, execution, observation)) {
+      inventory.outcome = ConSanTransformOutcome::Invalid;
+      return finalize_consan_result(std::move(inventory), code_object_bytes,
+                                    options.moi_report_dispatch_id, false, nullptr, execution);
+    }
     ConSanTransformArtifacts result =
-        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch, execution,
-                             ConSanLoweringExtent::Complete, observation);
+        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch, execution);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id, false, nullptr, execution);

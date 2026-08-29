@@ -686,11 +686,11 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
          two_address_native_lds_offset_scale(mnemonic).has_value();
 }
 
-ConSanTransformArtifacts
-try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
-                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
-                     ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-                     const ConSanLoweringObservation *observation) {
+ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
+                                              const MoiOptions &options,
+                                              std::span<const uint8_t> code_object_bytes,
+                                              rj_code_arch_t arch,
+                                              ConSanLoweringExecution *execution) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   MoiOptions effective_options = options;
@@ -718,15 +718,6 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
         "for multidimensional workgroups");
   }
   if (!result.errors.empty())
-    return result;
-  const bool observation_valid =
-      initialize_moi_access_observation_plan(effective_options, result, observation);
-  if (execution != nullptr && observation == nullptr)
-    execution->note_observation_plan();
-  if (!observation_valid) {
-    return result;
-  }
-  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
     return result;
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();

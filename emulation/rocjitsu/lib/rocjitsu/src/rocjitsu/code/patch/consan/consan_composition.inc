@@ -43,6 +43,37 @@ finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t>
                        const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
                        ConSanLoweringExecution *execution = nullptr);
 
+/// Install the transaction's immutable observation product into native
+/// lowering state. The fallback exists for focused lowerer tests and legacy
+/// mechanism entry points; it uses the same common assembly authority and is
+/// deliberately outside both engine implementations.
+[[nodiscard]] bool initialize_consan_lowering_observation(
+    const ConSanOptions &options, ConSanTransformArtifacts &result,
+    ConSanLoweringExecution *execution, const ConSanLoweringObservation *prepared_observation) {
+  if (prepared_observation != nullptr) {
+    if (!prepared_observation->well_formed()) {
+      result.errors.emplace_back("ConSan received an invalid prepared observation product");
+      return false;
+    }
+    result.observation_plan = prepared_observation->plan;
+    result.coverage_ledger = prepared_observation->initial_coverage;
+    return true;
+  }
+
+  ConSanObservationProduct observation = assemble_consan_observation_product(
+      result.program_inventory, static_cast<const ConSanRequest &>(options),
+      static_cast<const ConSanDebugOverrides &>(options));
+  const bool valid = observation.valid();
+  result.observation_plan = std::move(observation.plan);
+  result.coverage_ledger = std::move(observation.initial_coverage);
+  result.errors.insert(result.errors.end(),
+                       std::make_move_iterator(observation.diagnostics.begin()),
+                       std::make_move_iterator(observation.diagnostics.end()));
+  if (execution != nullptr)
+    execution->note_observation_plan();
+  return valid;
+}
+
 template <typename Site>
 void move_sites_in_range(std::vector<Site> &source, std::vector<Site> &destination, uint64_t begin,
                          uint32_t size) {
@@ -1009,28 +1040,24 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       return result;
   }
 
+  if (!initialize_consan_lowering_observation(options, result, execution, observation))
+    return result;
+  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
+    return result;
+
   if (options.flavor == ConSanFlavor::Moi) {
     // Incremental MOI passes reparse their current result. Release the
     // pristine inventory parser before entering them so its backing image,
     // section objects and names, and derived state cannot overlap every
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
-    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution,
-                                extent, observation);
+    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
     result.errors.emplace_back("ConSan selected unknown flavor");
     return result;
   }
-
-  const bool sc_observation_valid = initialize_sc_access_coverage(options, result, observation);
-  if (execution != nullptr && observation == nullptr)
-    execution->note_observation_plan();
-  if (!sc_observation_valid)
-    return result;
-  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
-    return result;
 
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();
