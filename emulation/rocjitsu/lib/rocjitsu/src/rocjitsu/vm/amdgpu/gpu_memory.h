@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <format>
@@ -1329,19 +1330,39 @@ private:
     return ok;
   }
 
+  /// @brief How many inaccessible passthrough pages to name before counting.
+  /// @details Eight is enough to see that it is happening and roughly where.
+  /// Diagnosing *why* the guest holds those addresses needs many more, so
+  /// RJ_PASSTHROUGH_REPORT_LIMIT raises it for an investigation without making
+  /// an ordinary run noisy.
+  static uint64_t inaccessible_passthrough_report_limit() {
+    static const uint64_t limit = [] {
+      const char *raw = std::getenv("RJ_PASSTHROUGH_REPORT_LIMIT");
+      if (raw == nullptr)
+        return kInaccessiblePassthroughReports;
+      char *end = nullptr;
+      const unsigned long long parsed = std::strtoull(raw, &end, 10);
+      if (end == raw || *end != '\0')
+        return kInaccessiblePassthroughReports;
+      return static_cast<uint64_t>(parsed);
+    }();
+    return limit;
+  }
+
   void note_inaccessible_passthrough_page(uint64_t page_addr) const {
     const uint64_t count =
         inaccessible_passthrough_pages_.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint64_t limit = inaccessible_passthrough_report_limit();
     // Loud for the first few, then counted: a workload that runs off the end of
     // an allocation can do it in every wave of every dispatch.
     // Logger::warn, not Logger::vm: the VM group is compiled out unless the
     // build sets RJ_LOG_GROUPS, and this is a fault the user needs to see in a
     // default build. It used to end the process, so silence is not an option.
-    if (count < kInaccessiblePassthroughReports)
+    if (count < limit)
       util::Logger::warn("GPU memory passthrough page is not accessible: page=0x", std::hex,
                          page_addr, std::dec, " count=", count,
                          " (access dropped; reads return zero)");
-    else if (count == kInaccessiblePassthroughReports)
+    else if (count == limit)
       // Say that the count stops here. A reader who sees exactly this many
       // reports and does not know they are capped would read the last count as
       // a total, and it is only a floor -- a kernel that runs off the end of an
