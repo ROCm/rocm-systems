@@ -2,9 +2,79 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSan, ExactBarrierDropIssuesAreTypedAndRenderEstablishedDiagnostics) {
+  using PairIssue = ExactBarrierDropPairIssue;
+  const std::array pair_messages = {
+      std::pair{PairIssue::None, std::string_view{""}},
+      std::pair{PairIssue::MissingExactIdentity,
+                std::string_view{
+                    "an exact site identity and logical sequence identity are both required"}},
+      std::pair{PairIssue::SequenceNotFound,
+                std::string_view{"the exact logical sequence identity was not found"}},
+      std::pair{PairIssue::SequenceNotQualified,
+                std::string_view{
+                    "the exact sequence is not an owned complete conservative two-member barrier"}},
+      std::pair{
+          PairIssue::PrimaryNotMember,
+          std::string_view{"the exact site is not a member of the requested logical barrier"}},
+      std::pair{PairIssue::MemberSiteMissing,
+                std::string_view{"a logical barrier member has no exact owned patch site"}},
+      std::pair{PairIssue::MemberSiteAmbiguous,
+                std::string_view{"a logical barrier member maps to multiple patch sites"}},
+      std::pair{PairIssue::InvalidPairGeometry,
+                std::string_view{
+                    "the exact logical barrier does not have two distinct one-word patch sites"}},
+  };
+  static_assert(pair_messages.size() == static_cast<size_t>(PairIssue::Count));
+  for (size_t index = 0; index < pair_messages.size(); ++index) {
+    EXPECT_EQ(static_cast<size_t>(pair_messages[index].first), index);
+    EXPECT_EQ(exact_barrier_drop_pair_issue_message(pair_messages[index].first),
+              pair_messages[index].second);
+  }
+  EXPECT_EQ(exact_barrier_drop_pair_issue_message(PairIssue::Count),
+            "invalid exact barrier-drop pair issue");
+  EXPECT_EQ(exact_barrier_drop_pair_issue_message(static_cast<PairIssue>(255u)),
+            "invalid exact barrier-drop pair issue");
+
+  using GroupIssue = ExactBarrierDropGroupIssue;
+  struct ExpectedGroupMessage {
+    GroupIssue issue;
+    PairIssue member_issue;
+    std::string_view message;
+  };
+  const std::array group_messages = {
+      ExpectedGroupMessage{GroupIssue::None, PairIssue::None, ""},
+      ExpectedGroupMessage{GroupIssue::MissingCompanionIdentity, PairIssue::None,
+                           "a grouped drop requires an exact companion site and sequence identity"},
+      ExpectedGroupMessage{
+          GroupIssue::FirstPairRejected, PairIssue::MemberSiteMissing,
+          "group member zero is invalid: a logical barrier member has no exact owned patch site"},
+      ExpectedGroupMessage{
+          GroupIssue::SecondPairRejected, PairIssue::MemberSiteAmbiguous,
+          "group member one is invalid: a logical barrier member maps to multiple patch sites"},
+      ExpectedGroupMessage{
+          GroupIssue::PairsOverlapOrUnordered, PairIssue::None,
+          "the two exact pairs are duplicate, overlapping, or not strictly ordered"},
+      ExpectedGroupMessage{
+          GroupIssue::PairsHaveDifferentOwners, PairIssue::None,
+          "the two exact pairs do not have identical container and execution owners"},
+  };
+  static_assert(group_messages.size() == static_cast<size_t>(GroupIssue::Count));
+  for (size_t index = 0; index < group_messages.size(); ++index) {
+    const auto &[issue, member_issue, expected] = group_messages[index];
+    EXPECT_EQ(static_cast<size_t>(issue), index);
+    EXPECT_EQ(exact_barrier_drop_group_issue_message(issue, member_issue), expected);
+  }
+  EXPECT_EQ(exact_barrier_drop_group_issue_message(GroupIssue::Count),
+            "invalid exact barrier-drop group issue");
+  EXPECT_EQ(exact_barrier_drop_group_issue_message(static_cast<GroupIssue>(255u)),
+            "invalid exact barrier-drop group issue");
+}
 
 [[nodiscard]] ConSanFaultMutationPlan make_well_formed_fault_plan(ConSanFaultMutationKind kind) {
   constexpr std::array<uint8_t, 3> source_bytes = {1u, 2u, 3u};

@@ -2436,7 +2436,6 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     });
     std::vector<ExactBarrierDropPair> pairs;
     bool metadata_matches = sequence_identities.size() == 1u || sequence_identities.size() == 2u;
-    std::string reason;
     for (const std::string &sequence_identity : sequence_identities) {
       const auto member = std::ranges::find_if(exact_barrier_drop_patches, [&](const auto *patch) {
         return patch->fault_sequence_identity == sequence_identity;
@@ -2449,7 +2448,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto pair = resolve_exact_barrier_drop_pair(pristine_inventory, selection, &reason);
+      const auto pair_resolution = resolve_exact_barrier_drop_pair(pristine_inventory, selection);
+      const auto &pair = pair_resolution.pair;
       const size_t member_count = static_cast<size_t>(
           std::ranges::count_if(exact_barrier_drop_patches, [&](const auto *patch) {
             return patch->fault_sequence_identity == sequence_identity;
@@ -2484,7 +2484,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto group = resolve_exact_barrier_drop_group(pristine_inventory, selection, &reason);
+      const auto group_resolution = resolve_exact_barrier_drop_group(pristine_inventory, selection);
+      const auto &group = group_resolution.group;
       metadata_matches &= exact_barrier_drop_patches.size() == 4u && group &&
                           result.mutation.applied_fault_logical_identity ==
                               exact_barrier_drop_group_identity(*group);

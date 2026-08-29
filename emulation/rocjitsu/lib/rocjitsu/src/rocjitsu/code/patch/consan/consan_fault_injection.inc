@@ -35,36 +35,32 @@ is_member_of_qualified_logical_barrier_pair(const ConSanTransformArtifacts &resu
          sequence->member_event_identities.size() == 2u;
 }
 
-[[nodiscard]] std::optional<ExactBarrierDropPair>
+[[nodiscard]] ExactBarrierDropPairResolution
 resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
-                                const ConSanOptions &options, std::string *reason) {
+                                const ConSanOptions &options) {
   return resolve_exact_barrier_drop_pair(
-      result,
-      ConSanFaultSelection{
-          .primary_site_identity = options.fault_site_identity,
-          .primary_sequence_identity = options.fault_barrier_sequence_identity,
-          .companion_site_identity = {},
-          .companion_sequence_identity = {},
-          .kernel_name_filter = options.test_kernel_name_filter,
-          .ordinal = 0,
-      },
-      reason);
+      result, ConSanFaultSelection{
+                  .primary_site_identity = options.fault_site_identity,
+                  .primary_sequence_identity = options.fault_barrier_sequence_identity,
+                  .companion_site_identity = {},
+                  .companion_sequence_identity = {},
+                  .kernel_name_filter = options.test_kernel_name_filter,
+                  .ordinal = 0,
+              });
 }
 
-[[nodiscard]] std::optional<ExactBarrierDropGroup>
+[[nodiscard]] ExactBarrierDropGroupResolution
 resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
-                                 const ConSanOptions &options, std::string *reason) {
+                                 const ConSanOptions &options) {
   return resolve_exact_barrier_drop_group(
-      result,
-      ConSanFaultSelection{
-          .primary_site_identity = options.fault_site_identity,
-          .primary_sequence_identity = options.fault_barrier_sequence_identity,
-          .companion_site_identity = options.fault_barrier_companion_site_identity,
-          .companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
-          .kernel_name_filter = options.test_kernel_name_filter,
-          .ordinal = 0,
-      },
-      reason);
+      result, ConSanFaultSelection{
+                  .primary_site_identity = options.fault_site_identity,
+                  .primary_sequence_identity = options.fault_barrier_sequence_identity,
+                  .companion_site_identity = options.fault_barrier_companion_site_identity,
+                  .companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
+                  .kernel_name_filter = options.test_kernel_name_filter,
+                  .ordinal = 0,
+              });
 }
 
 [[nodiscard]] const ConSanBarrierLifecycleGroup *
@@ -211,13 +207,20 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     if (!options.fault_barrier_sequence_identity.empty() ||
         !options.fault_barrier_companion_site_identity.empty() ||
         !options.fault_barrier_companion_sequence_identity.empty()) {
-      std::string reason;
       const bool grouped = !options.fault_barrier_companion_site_identity.empty() ||
                            !options.fault_barrier_companion_sequence_identity.empty();
-      const auto group =
-          grouped ? resolve_exact_barrier_drop_group(result, options, &reason) : std::nullopt;
-      const auto pair = grouped ? std::optional<ExactBarrierDropPair>{}
-                                : resolve_exact_barrier_drop_pair(result, options, &reason);
+      std::optional<ExactBarrierDropGroup> group;
+      std::optional<ExactBarrierDropPair> pair;
+      std::string reason;
+      if (grouped) {
+        const auto resolution = resolve_exact_barrier_drop_group(result, options);
+        group = resolution.group;
+        reason = exact_barrier_drop_group_issue_message(resolution.issue, resolution.member_issue);
+      } else {
+        const auto resolution = resolve_exact_barrier_drop_pair(result, options);
+        pair = resolution.pair;
+        reason = exact_barrier_drop_pair_issue_message(resolution.issue);
+      }
       if ((grouped && !group) || (!grouped && !pair)) {
         result.warnings.emplace_back("ConSan exact whole-barrier drop dry run rejected: " + reason);
       } else {
@@ -748,13 +751,20 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   if (!options.fault_barrier_sequence_identity.empty() ||
       !options.fault_barrier_companion_site_identity.empty() ||
       !options.fault_barrier_companion_sequence_identity.empty()) {
-    std::string reason;
     const bool grouped = !options.fault_barrier_companion_site_identity.empty() ||
                          !options.fault_barrier_companion_sequence_identity.empty();
-    const auto group =
-        grouped ? resolve_exact_barrier_drop_group(result, options, &reason) : std::nullopt;
-    const auto pair = grouped ? std::optional<ExactBarrierDropPair>{}
-                              : resolve_exact_barrier_drop_pair(result, options, &reason);
+    std::optional<ExactBarrierDropGroup> group;
+    std::optional<ExactBarrierDropPair> pair;
+    std::string reason;
+    if (grouped) {
+      const auto resolution = resolve_exact_barrier_drop_group(result, options);
+      group = resolution.group;
+      reason = exact_barrier_drop_group_issue_message(resolution.issue, resolution.member_issue);
+    } else {
+      const auto resolution = resolve_exact_barrier_drop_pair(result, options);
+      pair = resolution.pair;
+      reason = exact_barrier_drop_pair_issue_message(resolution.issue);
+    }
     if ((grouped && !group) || (!grouped && !pair)) {
       result.warnings.emplace_back("ConSan exact whole-barrier drop rejected: " + reason);
       return;

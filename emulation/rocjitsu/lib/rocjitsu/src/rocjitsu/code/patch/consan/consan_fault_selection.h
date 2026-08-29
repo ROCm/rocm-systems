@@ -49,6 +49,45 @@ struct ExactBarrierDropGroup {
   ExactBarrierDropPair second;
 };
 
+/// Stable semantic reason why an exact logical barrier could not be resolved
+/// to its two physical mutation sites.
+enum class ExactBarrierDropPairIssue : uint8_t {
+  None,
+  MissingExactIdentity,
+  SequenceNotFound,
+  SequenceNotQualified,
+  PrimaryNotMember,
+  MemberSiteMissing,
+  MemberSiteAmbiguous,
+  InvalidPairGeometry,
+  Count,
+};
+
+/// The exact pair, or the typed reason why selection rejected it.
+struct ExactBarrierDropPairResolution {
+  std::optional<ExactBarrierDropPair> pair;
+  ExactBarrierDropPairIssue issue = ExactBarrierDropPairIssue::None;
+};
+
+/// Stable semantic reason why two exact logical barriers could not be resolved
+/// as one ordered mutation group. Pair-specific detail stays typed separately.
+enum class ExactBarrierDropGroupIssue : uint8_t {
+  None,
+  MissingCompanionIdentity,
+  FirstPairRejected,
+  SecondPairRejected,
+  PairsOverlapOrUnordered,
+  PairsHaveDifferentOwners,
+  Count,
+};
+
+/// The exact group, or its typed group and optional member-pair rejection.
+struct ExactBarrierDropGroupResolution {
+  std::optional<ExactBarrierDropGroup> group;
+  ExactBarrierDropGroupIssue issue = ExactBarrierDropGroupIssue::None;
+  ExactBarrierDropPairIssue member_issue = ExactBarrierDropPairIssue::None;
+};
+
 /// Decide whether a cross-block destination carries the exact structured-CFG
 /// proof and explicit request opt-in required by barrier-move mutation.
 [[nodiscard]] bool
@@ -72,13 +111,20 @@ select_fault_site_for_plan(const ConSanTransformArtifacts &result,
 select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
                                         const ConSanFaultSelection &selection);
 
-[[nodiscard]] std::optional<ExactBarrierDropPair>
+[[nodiscard]] ExactBarrierDropPairResolution
 resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
-                                const ConSanFaultSelection &selection, std::string *reason);
+                                const ConSanFaultSelection &selection);
 
-[[nodiscard]] std::optional<ExactBarrierDropGroup>
+[[nodiscard]] ExactBarrierDropGroupResolution
 resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
-                                 const ConSanFaultSelection &selection, std::string *reason);
+                                 const ConSanFaultSelection &selection);
+
+[[nodiscard]] std::string_view
+exact_barrier_drop_pair_issue_message(ExactBarrierDropPairIssue issue);
+
+[[nodiscard]] std::string exact_barrier_drop_group_issue_message(
+    ExactBarrierDropGroupIssue issue,
+    ExactBarrierDropPairIssue member_issue = ExactBarrierDropPairIssue::None);
 
 [[nodiscard]] std::string exact_barrier_drop_group_identity(const ExactBarrierDropGroup &group);
 

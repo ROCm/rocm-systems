@@ -165,19 +165,18 @@ select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
   return std::nullopt;
 }
 
-std::optional<ExactBarrierDropPair>
+ExactBarrierDropPairResolution
 resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
-                                const ConSanFaultSelection &selection, std::string *reason) {
+                                const ConSanFaultSelection &selection) {
+  using Issue = ExactBarrierDropPairIssue;
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (selection.primary_site_identity.empty() || selection.primary_sequence_identity.empty()) {
-    *reason = "an exact site identity and logical sequence identity are both required";
-    return std::nullopt;
+    return {.pair = std::nullopt, .issue = Issue::MissingExactIdentity};
   }
   const auto sequence = std::ranges::find(sync.sync_sequences, selection.primary_sequence_identity,
                                           &ConSanSyncSequence::identity);
   if (sequence == sync.sync_sequences.end()) {
-    *reason = "the exact logical sequence identity was not found";
-    return std::nullopt;
+    return {.pair = std::nullopt, .issue = Issue::SequenceNotFound};
   }
   if (sequence->kind != ConSanSyncSequenceKind::Barrier ||
       sequence->operation != ConSanSyncOperation::BarrierFull ||
@@ -186,8 +185,7 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
       !sequence_has_exact_members(result, *sequence) ||
       !consan_execution_owners_include_requested_kernel(sequence->execution_owners, result,
                                                         selection.kernel_name_filter)) {
-    *reason = "the exact sequence is not an owned complete conservative two-member barrier";
-    return std::nullopt;
+    return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
   }
 
   const ConSanFaultSite *primary = find_fault_site_by_identity(
@@ -198,8 +196,7 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
           sequence->member_event_identities.end() ||
       !consan_execution_owners_include_requested_kernel(primary->execution_owners, result,
                                                         selection.kernel_name_filter)) {
-    *reason = "the exact site is not a member of the requested logical barrier";
-    return std::nullopt;
+    return {.pair = std::nullopt, .issue = Issue::PrimaryNotMember};
   }
 
   const ConSanFaultSite *companion = nullptr;
@@ -215,8 +212,7 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
                      candidate.execution_owners, result, selection.kernel_name_filter);
         });
     if (matching_site == result.fault_sites.end()) {
-      *reason = "a logical barrier member has no exact owned patch site";
-      return std::nullopt;
+      return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
     }
     const auto duplicate = std::ranges::find_if(
         std::next(matching_site), result.fault_sites.end(), [&](const ConSanFaultSite &candidate) {
@@ -224,61 +220,110 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
                  candidate.sync_event_identity == member_identity;
         });
     if (duplicate != result.fault_sites.end()) {
-      *reason = "a logical barrier member maps to multiple patch sites";
-      return std::nullopt;
+      return {.pair = std::nullopt, .issue = Issue::MemberSiteAmbiguous};
     }
     if (matching_site->identity != primary->identity)
       companion = &*matching_site;
   }
   if (companion == nullptr || primary->size != sizeof(uint32_t) ||
       companion->size != sizeof(uint32_t) || primary->file_offset == companion->file_offset) {
-    *reason = "the exact logical barrier does not have two distinct one-word patch sites";
-    return std::nullopt;
+    return {.pair = std::nullopt, .issue = Issue::InvalidPairGeometry};
   }
-  return ExactBarrierDropPair{&*sequence, primary, companion};
+  return {.pair = ExactBarrierDropPair{&*sequence, primary, companion}, .issue = Issue::None};
 }
 
-std::optional<ExactBarrierDropGroup>
+ExactBarrierDropGroupResolution
 resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
-                                 const ConSanFaultSelection &selection, std::string *reason) {
+                                 const ConSanFaultSelection &selection) {
+  using Issue = ExactBarrierDropGroupIssue;
   if (selection.companion_site_identity.empty() || selection.companion_sequence_identity.empty()) {
-    *reason = "a grouped drop requires an exact companion site and sequence identity";
-    return std::nullopt;
+    return {.group = std::nullopt,
+            .issue = Issue::MissingCompanionIdentity,
+            .member_issue = ExactBarrierDropPairIssue::None};
   }
-  std::string member_reason;
   ConSanFaultSelection first_selection = selection;
   first_selection.companion_site_identity = {};
   first_selection.companion_sequence_identity = {};
-  const auto first = resolve_exact_barrier_drop_pair(result, first_selection, &member_reason);
-  if (!first) {
-    *reason = "group member zero is invalid: " + member_reason;
-    return std::nullopt;
-  }
+  const auto first = resolve_exact_barrier_drop_pair(result, first_selection);
+  if (!first.pair)
+    return {.group = std::nullopt, .issue = Issue::FirstPairRejected, .member_issue = first.issue};
   ConSanFaultSelection second_selection = selection;
   second_selection.primary_site_identity = selection.companion_site_identity;
   second_selection.primary_sequence_identity = selection.companion_sequence_identity;
   second_selection.companion_site_identity = {};
   second_selection.companion_sequence_identity = {};
-  const auto second = resolve_exact_barrier_drop_pair(result, second_selection, &member_reason);
-  if (!second) {
-    *reason = "group member one is invalid: " + member_reason;
-    return std::nullopt;
-  }
-  const auto first_range = exact_barrier_drop_pair_range(*first);
-  const auto second_range = exact_barrier_drop_pair_range(*second);
-  if (first->sequence->identity == second->sequence->identity ||
+  const auto second = resolve_exact_barrier_drop_pair(result, second_selection);
+  if (!second.pair)
+    return {
+        .group = std::nullopt, .issue = Issue::SecondPairRejected, .member_issue = second.issue};
+  const auto first_range = exact_barrier_drop_pair_range(*first.pair);
+  const auto second_range = exact_barrier_drop_pair_range(*second.pair);
+  if (first.pair->sequence->identity == second.pair->sequence->identity ||
       first_range.second > second_range.first) {
-    *reason = "the two exact pairs are duplicate, overlapping, or not strictly ordered";
-    return std::nullopt;
+    return {.group = std::nullopt,
+            .issue = Issue::PairsOverlapOrUnordered,
+            .member_issue = ExactBarrierDropPairIssue::None};
   }
-  if (first->sequence->container_name != second->sequence->container_name ||
-      first->sequence->in_kernel != second->sequence->in_kernel ||
-      !same_execution_owners(first->sequence->execution_owners,
-                             second->sequence->execution_owners)) {
-    *reason = "the two exact pairs do not have identical container and execution owners";
-    return std::nullopt;
+  if (first.pair->sequence->container_name != second.pair->sequence->container_name ||
+      first.pair->sequence->in_kernel != second.pair->sequence->in_kernel ||
+      !same_execution_owners(first.pair->sequence->execution_owners,
+                             second.pair->sequence->execution_owners)) {
+    return {.group = std::nullopt,
+            .issue = Issue::PairsHaveDifferentOwners,
+            .member_issue = ExactBarrierDropPairIssue::None};
   }
-  return ExactBarrierDropGroup{*first, *second};
+  return {.group = ExactBarrierDropGroup{*first.pair, *second.pair},
+          .issue = Issue::None,
+          .member_issue = ExactBarrierDropPairIssue::None};
+}
+
+std::string_view exact_barrier_drop_pair_issue_message(ExactBarrierDropPairIssue issue) {
+  using Issue = ExactBarrierDropPairIssue;
+  switch (issue) {
+  case Issue::None:
+    return {};
+  case Issue::MissingExactIdentity:
+    return "an exact site identity and logical sequence identity are both required";
+  case Issue::SequenceNotFound:
+    return "the exact logical sequence identity was not found";
+  case Issue::SequenceNotQualified:
+    return "the exact sequence is not an owned complete conservative two-member barrier";
+  case Issue::PrimaryNotMember:
+    return "the exact site is not a member of the requested logical barrier";
+  case Issue::MemberSiteMissing:
+    return "a logical barrier member has no exact owned patch site";
+  case Issue::MemberSiteAmbiguous:
+    return "a logical barrier member maps to multiple patch sites";
+  case Issue::InvalidPairGeometry:
+    return "the exact logical barrier does not have two distinct one-word patch sites";
+  case Issue::Count:
+    break;
+  }
+  return "invalid exact barrier-drop pair issue";
+}
+
+std::string exact_barrier_drop_group_issue_message(ExactBarrierDropGroupIssue issue,
+                                                   ExactBarrierDropPairIssue member_issue) {
+  using Issue = ExactBarrierDropGroupIssue;
+  switch (issue) {
+  case Issue::None:
+    return {};
+  case Issue::MissingCompanionIdentity:
+    return "a grouped drop requires an exact companion site and sequence identity";
+  case Issue::FirstPairRejected:
+    return "group member zero is invalid: " +
+           std::string(exact_barrier_drop_pair_issue_message(member_issue));
+  case Issue::SecondPairRejected:
+    return "group member one is invalid: " +
+           std::string(exact_barrier_drop_pair_issue_message(member_issue));
+  case Issue::PairsOverlapOrUnordered:
+    return "the two exact pairs are duplicate, overlapping, or not strictly ordered";
+  case Issue::PairsHaveDifferentOwners:
+    return "the two exact pairs do not have identical container and execution owners";
+  case Issue::Count:
+    break;
+  }
+  return "invalid exact barrier-drop group issue";
 }
 
 std::string exact_barrier_drop_group_identity(const ExactBarrierDropGroup &group) {
