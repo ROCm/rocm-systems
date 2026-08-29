@@ -22,6 +22,7 @@ target_sources(
         consan_lowerer.cpp
         consan_moi.cpp
         consan_moi_candidate_projection.cpp
+        consan_moi_dynamic_record_emission.cpp
         consan_moi_engine_contracts.cpp
         consan_moi_memory_emission.cpp
         consan_moi_model.cpp
