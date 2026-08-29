@@ -1290,12 +1290,133 @@ struct MoiResourcePlanningState {
   }
 };
 
+struct MoiCfgForwardDistanceIndex {
+  const MoiResourcePlanningState *state = nullptr;
+  BasicBlock *target = nullptr;
+  uint64_t target_text_offset = 0;
+  std::unordered_map<BasicBlock *, uint32_t> block_edges;
+};
+
 std::span<const ConSanPreappliedReservedRange>
 moi_resource_reserved_ranges(const MoiResourcePlanningState &state) {
   return state.reserved_ranges;
 }
 
 Decoder *moi_resource_decoder(MoiResourcePlanningState &state) { return state.decoder.get(); }
+
+bool moi_resource_is_valid(const MoiResourcePlanningState &state) { return state.valid; }
+
+bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
+                                    uint64_t descriptor_offset) {
+  const auto found = state.context_by_descriptor.find(descriptor_offset);
+  return found != state.context_by_descriptor.end() && found->second != nullptr;
+}
+
+bool moi_resource_owner_executes_offset(const MoiResourcePlanningState &state,
+                                        uint64_t descriptor_offset, uint64_t text_offset) {
+  const auto found = state.context_by_descriptor.find(descriptor_offset);
+  if (found == state.context_by_descriptor.end() || found->second == nullptr)
+    return false;
+  BasicBlock *block = block_for_offset(state.block_index, text_offset);
+  return block != nullptr && found->second->block_set.contains(block) &&
+         instruction_at(block, text_offset) != nullptr;
+}
+
+void MoiCfgForwardDistanceIndexDeleter::operator()(MoiCfgForwardDistanceIndex *index) const {
+  delete index;
+}
+
+MoiCfgForwardDistanceIndexPtr
+make_moi_cfg_forward_distance_index(const MoiResourcePlanningState &state,
+                                    uint64_t descriptor_offset, uint64_t target_text_offset) {
+  const auto context_it = state.context_by_descriptor.find(descriptor_offset);
+  BasicBlock *target = block_for_offset(state.block_index, target_text_offset);
+  if (context_it == state.context_by_descriptor.end() || context_it->second == nullptr ||
+      target == nullptr) {
+    return {};
+  }
+  const MoiKernelResourceContext &context = *context_it->second;
+  const std::unordered_set<BasicBlock *> scope(context.scope.blocks.begin(),
+                                               context.scope.blocks.end());
+  if (!scope.contains(target))
+    return {};
+
+  std::unordered_map<BasicBlock *, std::vector<BasicBlock *>> predecessors;
+  predecessors.reserve(scope.size());
+  for (BasicBlock *block : context.scope.blocks) {
+    for (BasicBlock *successor : block->successors()) {
+      if (scope.contains(successor))
+        predecessors[successor].push_back(block);
+    }
+  }
+  for (const ScopedCfgEdge &edge : context.scope.liveness_edges) {
+    if (edge.from != nullptr && edge.to != nullptr && scope.contains(edge.from) &&
+        scope.contains(edge.to)) {
+      predecessors[edge.to].push_back(edge.from);
+    }
+  }
+
+  MoiCfgForwardDistanceIndexPtr index(new MoiCfgForwardDistanceIndex);
+  index->state = &state;
+  index->target = target;
+  index->target_text_offset = target_text_offset;
+  index->block_edges.reserve(scope.size());
+  std::vector<BasicBlock *> pending{target};
+  index->block_edges.emplace(target, 0u);
+  for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+    BasicBlock *block = pending[cursor];
+    const uint32_t next_distance = index->block_edges.at(block) + 1u;
+    auto found = predecessors.find(block);
+    if (found == predecessors.end())
+      continue;
+    std::ranges::sort(found->second);
+    found->second.erase(std::ranges::unique(found->second).begin(), found->second.end());
+    for (BasicBlock *predecessor : found->second) {
+      if (index->block_edges.emplace(predecessor, next_distance).second)
+        pending.push_back(predecessor);
+    }
+  }
+  return index;
+}
+
+std::optional<MoiCfgDistance> moi_cfg_forward_distance(const MoiCfgForwardDistanceIndex &index,
+                                                       uint64_t from_text_offset) {
+  if (index.state == nullptr)
+    return std::nullopt;
+  BasicBlock *from = block_for_offset(index.state->block_index, from_text_offset);
+  if (from == nullptr || (from == index.target && from_text_offset > index.target_text_offset))
+    return std::nullopt;
+  const auto found = index.block_edges.find(from);
+  if (found == index.block_edges.end())
+    return std::nullopt;
+  const uint64_t text_distance = from_text_offset < index.target_text_offset
+                                     ? index.target_text_offset - from_text_offset
+                                     : from_text_offset - index.target_text_offset;
+  return MoiCfgDistance{found->second, text_distance};
+}
+
+std::optional<MoiDecodedInstructionRange>
+moi_resource_preceding_instruction(const MoiResourcePlanningState &state, uint64_t text_offset) {
+  BasicBlock *block = block_for_offset(state.block_index, text_offset);
+  if (block == nullptr)
+    return std::nullopt;
+  const Instruction *prefix = nullptr;
+  for (const Instruction &instruction : block->instructions()) {
+    if (instruction.size() > 0 &&
+        instruction.src_loc() + static_cast<uint64_t>(instruction.size()) == text_offset) {
+      prefix = &instruction;
+    }
+  }
+  if (prefix == nullptr || prefix->size() < static_cast<int>(sizeof(uint32_t)) ||
+      prefix->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
+    return std::nullopt;
+  }
+  return MoiDecodedInstructionRange{
+      .text_offset = prefix->src_loc(),
+      .size = static_cast<uint32_t>(prefix->size()),
+      .is_scalar_clause = prefix->mnemonic() == "s_clause",
+  };
+}
 
 void MoiResourcePlanningStateDeleter::operator()(MoiResourcePlanningState *state) const {
   delete state;
@@ -2978,6 +3099,89 @@ bool moi_resource_owner_anchors_admit_sgpr_ranges(MoiResourcePlanningState &stat
   return true;
 }
 
+bool moi_resource_owner_anchors_admit_call_clobber_ranges(MoiResourcePlanningState &state,
+                                                          std::span<const uint64_t> owners,
+                                                          std::span<const uint64_t> anchors,
+                                                          std::span<const MoiSgprRange> ranges) {
+  const std::array complete_scalar_range{
+      MoiSgprRange{.base = 0u, .width = moi_ordinary_sgpr_limit(state.arch)}};
+  MoiDenseOwnerLivenessProof proof =
+      state.prepare_dense_liveness_for_owners(owners, complete_scalar_range);
+  if (!proof.complete || proof.contexts.empty() || anchors.empty() || ranges.empty())
+    return false;
+  for (uint64_t anchor : anchors) {
+    BasicBlock *block = block_for_offset(state.block_index, anchor);
+    const Instruction *instruction = instruction_at(block, anchor);
+    if (block == nullptr || instruction == nullptr)
+      return false;
+    bool saw_owner = false;
+    for (const MoiKernelResourceContext *context : proof.contexts) {
+      if (context == nullptr || !context->block_set.contains(block))
+        continue;
+      saw_owner = true;
+      if (context->liveness_is_restricted || context->has_indirect_sgpr_access)
+        return false;
+      const InstDefUse def_use(*instruction);
+      for (const MoiSgprRange &range : ranges) {
+        const RegisterRef registers{RegClass::SGPR, range.base, static_cast<uint8_t>(range.width)};
+        if (range.width == 0u ||
+            static_cast<uint32_t>(range.base) + range.width > context->current_sgpr_count ||
+            context->liveness->any_live_before(*instruction, registers) ||
+            def_use.defs.contains(registers) || def_use.uses.contains(registers)) {
+          return false;
+        }
+
+        std::vector<const Instruction *> lexical_tail;
+        for (BasicBlock *owner_block : context->scope.blocks) {
+          if (owner_block == nullptr || owner_block->end_offset() <= anchor)
+            continue;
+          for (const Instruction &tail_instruction : owner_block->instructions()) {
+            if (tail_instruction.src_loc() > anchor)
+              lexical_tail.push_back(&tail_instruction);
+          }
+        }
+        std::ranges::sort(lexical_tail, {}, &Instruction::src_loc);
+        std::vector<bool> redefined(range.width, false);
+        for (const Instruction *tail_instruction : lexical_tail) {
+          const InstDefUse tail_def_use(*tail_instruction);
+          for (uint16_t lane = 0u; lane < range.width; ++lane) {
+            const RegisterRef scalar{RegClass::SGPR, static_cast<uint16_t>(range.base + lane), 1u};
+            if (!redefined[lane] && tail_def_use.uses.contains(scalar))
+              return false;
+            if (tail_def_use.defs.contains(scalar))
+              redefined[lane] = true;
+          }
+          if (std::ranges::all_of(redefined, std::identity{}))
+            break;
+        }
+      }
+    }
+    if (!saw_owner)
+      return false;
+  }
+  return true;
+}
+
+bool moi_resource_owner_ranges_conflict_with_physical_vcc(MoiResourcePlanningState &state,
+                                                          std::span<const uint64_t> owners,
+                                                          std::span<const MoiSgprRange> ranges,
+                                                          rj_code_arch_t arch) {
+  const std::array complete_scalar_range{
+      MoiSgprRange{.base = 0u, .width = moi_ordinary_sgpr_limit(state.arch)}};
+  MoiDenseOwnerLivenessProof proof =
+      state.prepare_dense_liveness_for_owners(owners, complete_scalar_range);
+  if (!proof.complete || proof.contexts.empty())
+    return true;
+  std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
+  summaries.reserve(proof.contexts.size());
+  for (const MoiKernelResourceContext *context : proof.contexts) {
+    if (context == nullptr)
+      return true;
+    summaries.push_back(context->scalar_summary());
+  }
+  return moi_scalar_contexts_conflict_with_physical_vcc(summaries, ranges, arch);
+}
+
 /// Finds one owner-common VGPR that is dead immediately before @p text_offset
 /// and is present in the post-planning descriptor allocation. Borrowed-entry
 /// code runs before a spill-backed probe has saved its scratch bank, so using
@@ -3296,13 +3500,6 @@ inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
     return std::nullopt;
   return static_cast<uint16_t>(*point.moi_exec_save_sgpr +
                                (point.moi_dynamic_stack_spill ? 25u : 24u));
-}
-
-[[nodiscard]] constexpr bool
-persistent_sgpr_range_overlaps_reserved_ordinary_range(uint16_t base, uint16_t width,
-                                                       rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && consan_profile_reserved_sgpr_range_overlaps(*profile, base, width);
 }
 
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,

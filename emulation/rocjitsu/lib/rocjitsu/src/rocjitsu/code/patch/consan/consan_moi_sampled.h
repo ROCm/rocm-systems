@@ -24,4 +24,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                std::span<const ConSanMoiCandidate> admitted,
                                                ConSanTransformArtifacts &result);
 
+void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                          rj_code_arch_t arch,
+                                          MoiResourcePlanningState &resource_state,
+                                          std::span<const ConSanMoiCandidate> admitted,
+                                          ConSanTransformArtifacts &result);
+
+void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                         rj_code_arch_t arch,
+                                         MoiResourcePlanningState &resource_state,
+                                         ConSanTransformArtifacts &result);
+
 } // namespace rocjitsu::consan_moi_impl

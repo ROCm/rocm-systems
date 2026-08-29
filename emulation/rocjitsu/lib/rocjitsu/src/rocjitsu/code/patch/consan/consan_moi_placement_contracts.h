@@ -31,6 +31,7 @@ namespace rocjitsu::consan_moi_impl {
 /// Engine components may retain and pass this workspace, but cannot inspect
 /// placement's caches or owner analysis directly.
 struct MoiResourcePlanningState;
+struct MoiCfgForwardDistanceIndex;
 class MoiLocalNopIslandAllocator;
 
 struct MoiResourcePlanningStateDeleter {
@@ -39,6 +40,13 @@ struct MoiResourcePlanningStateDeleter {
 
 using MoiResourcePlanningStatePtr =
     std::unique_ptr<MoiResourcePlanningState, MoiResourcePlanningStateDeleter>;
+
+struct MoiCfgForwardDistanceIndexDeleter {
+  void operator()(MoiCfgForwardDistanceIndex *index) const;
+};
+
+using MoiCfgForwardDistanceIndexPtr =
+    std::unique_ptr<MoiCfgForwardDistanceIndex, MoiCfgForwardDistanceIndexDeleter>;
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
@@ -200,6 +208,19 @@ struct MoiPersistentVgprStateView {
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
 };
 
+struct MoiCfgDistance {
+  uint32_t block_edges = 0;
+  uint64_t text_distance = 0;
+
+  auto operator<=>(const MoiCfgDistance &) const = default;
+};
+
+struct MoiDecodedInstructionRange {
+  uint64_t text_offset = 0;
+  uint32_t size = 0;
+  bool is_scalar_clause = false;
+};
+
 [[nodiscard]] constexpr uint32_t
 moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
@@ -228,9 +249,36 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 [[nodiscard]] bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state,
                                                     uint64_t first_offset, uint64_t second_offset);
 
+[[nodiscard]] bool moi_resource_is_valid(const MoiResourcePlanningState &state);
+
+[[nodiscard]] bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
+                                                  uint64_t descriptor_offset);
+
+[[nodiscard]] bool moi_resource_owner_executes_offset(const MoiResourcePlanningState &state,
+                                                      uint64_t descriptor_offset,
+                                                      uint64_t text_offset);
+
+[[nodiscard]] MoiCfgForwardDistanceIndexPtr
+make_moi_cfg_forward_distance_index(const MoiResourcePlanningState &state,
+                                    uint64_t descriptor_offset, uint64_t target_text_offset);
+
+[[nodiscard]] std::optional<MoiCfgDistance>
+moi_cfg_forward_distance(const MoiCfgForwardDistanceIndex &index, uint64_t from_text_offset);
+
+[[nodiscard]] std::optional<MoiDecodedInstructionRange>
+moi_resource_preceding_instruction(const MoiResourcePlanningState &state, uint64_t text_offset);
+
 [[nodiscard]] bool moi_resource_owner_anchors_admit_sgpr_ranges(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners,
     std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
+
+[[nodiscard]] bool moi_resource_owner_anchors_admit_call_clobber_ranges(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
+    std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
+
+[[nodiscard]] bool moi_resource_owner_ranges_conflict_with_physical_vcc(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
+    std::span<const MoiSgprRange> ranges, rj_code_arch_t arch);
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
@@ -399,6 +447,13 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? profile->ordinary_sgpr_limit : kMaxSgprs;
+}
+
+[[nodiscard]] constexpr bool
+persistent_sgpr_range_overlaps_reserved_ordinary_range(uint16_t base, uint16_t width,
+                                                       rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && consan_profile_reserved_sgpr_range_overlaps(*profile, base, width);
 }
 
 [[nodiscard]] bool

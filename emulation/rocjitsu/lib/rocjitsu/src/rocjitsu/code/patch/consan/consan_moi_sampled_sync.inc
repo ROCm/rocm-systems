@@ -12,93 +12,15 @@ struct SampledBarrierCandidate {
   bool uses_cluster_workgroup_id = false;
 };
 
-struct SampledCfgDistance {
-  uint32_t block_edges = 0;
-  uint64_t text_distance = 0;
-
-  auto operator<=>(const SampledCfgDistance &) const = default;
-};
-
-struct SampledCfgForwardDistanceIndex {
-  BasicBlock *target = nullptr;
-  uint64_t target_text_offset = 0;
-  std::unordered_map<BasicBlock *, uint32_t> block_edges;
-};
-
-[[nodiscard]] std::optional<SampledCfgForwardDistanceIndex>
-build_sampled_cfg_forward_distance_index(const MoiResourcePlanningState &state,
-                                         const MoiKernelResourceContext &context,
-                                         uint64_t target_text_offset) {
-  BasicBlock *target = block_for_offset(state.block_index, target_text_offset);
-  if (target == nullptr)
-    return std::nullopt;
-  const std::unordered_set<BasicBlock *> scope(context.scope.blocks.begin(),
-                                               context.scope.blocks.end());
-  if (!scope.contains(target))
-    return std::nullopt;
-
-  std::unordered_map<BasicBlock *, std::vector<BasicBlock *>> predecessors;
-  predecessors.reserve(scope.size());
-  for (BasicBlock *block : context.scope.blocks) {
-    for (BasicBlock *successor : block->successors()) {
-      if (scope.contains(successor))
-        predecessors[successor].push_back(block);
-    }
-  }
-  for (const ScopedCfgEdge &edge : context.scope.liveness_edges) {
-    if (edge.from != nullptr && edge.to != nullptr && scope.contains(edge.from) &&
-        scope.contains(edge.to))
-      predecessors[edge.to].push_back(edge.from);
-  }
-
-  SampledCfgForwardDistanceIndex index;
-  index.target = target;
-  index.target_text_offset = target_text_offset;
-  index.block_edges.reserve(scope.size());
-  std::vector<BasicBlock *> pending{target};
-  index.block_edges.emplace(target, 0u);
-  for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
-    BasicBlock *block = pending[cursor];
-    const uint32_t next_distance = index.block_edges.at(block) + 1u;
-    auto found = predecessors.find(block);
-    if (found == predecessors.end())
-      continue;
-    std::ranges::sort(found->second);
-    found->second.erase(std::ranges::unique(found->second).begin(), found->second.end());
-    for (BasicBlock *predecessor : found->second) {
-      if (index.block_edges.emplace(predecessor, next_distance).second)
-        pending.push_back(predecessor);
-    }
-  }
-  return index;
-}
+using SampledCfgDistance = MoiCfgDistance;
 
 [[nodiscard]] std::optional<SampledCfgDistance>
-sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
-                             const SampledCfgForwardDistanceIndex &index,
-                             uint64_t from_text_offset) {
-  BasicBlock *from = block_for_offset(state.block_index, from_text_offset);
-  if (from == nullptr)
-    return std::nullopt;
-  if (from == index.target && from_text_offset > index.target_text_offset)
-    return std::nullopt;
-  const auto found = index.block_edges.find(from);
-  if (found == index.block_edges.end())
-    return std::nullopt;
-  const uint64_t text_distance = from_text_offset < index.target_text_offset
-                                     ? index.target_text_offset - from_text_offset
-                                     : from_text_offset - index.target_text_offset;
-  return SampledCfgDistance{found->second, text_distance};
-}
-
-[[nodiscard]] std::optional<SampledCfgDistance>
-sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
-                             const MoiKernelResourceContext &context, uint64_t from_text_offset,
-                             uint64_t to_text_offset) {
-  const auto index = build_sampled_cfg_forward_distance_index(state, context, to_text_offset);
+sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t descriptor_offset,
+                             uint64_t from_text_offset, uint64_t to_text_offset) {
+  const auto index = make_moi_cfg_forward_distance_index(state, descriptor_offset, to_text_offset);
   if (!index)
     return std::nullopt;
-  return sampled_cfg_forward_distance(state, *index, from_text_offset);
+  return moi_cfg_forward_distance(*index, from_text_offset);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
@@ -726,15 +648,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         "ConSan MOI sampled barrier sync currently attaches only the first logical range of a "
         "multi-range access");
   }
-  if (!resource_state.valid) {
+  if (!moi_resource_is_valid(resource_state)) {
     result.warnings.emplace_back("ConSan MOI sampled barrier sync lacks a complete kernel CFG");
     return;
-  }
-  std::unordered_map<uint64_t, const MoiKernelResourceContext *> context_by_descriptor;
-  context_by_descriptor.reserve(resource_state.contexts.size());
-  for (const MoiKernelResourceContext &context : resource_state.contexts) {
-    if (context.kernel != nullptr)
-      context_by_descriptor.try_emplace(context.kernel->descriptor_file_offset, &context);
   }
   std::unordered_map<uint64_t, std::vector<const SelectedWindow *>> windows_by_descriptor;
   for (const SelectedWindow &window : selected_windows) {
@@ -768,17 +684,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
     std::optional<uint16_t> common_owner_shift;
     for (const ConSanExecutionOwner &owner : sequence.execution_owners) {
-      const auto context = context_by_descriptor.find(owner.descriptor_file_offset);
-      if (context == context_by_descriptor.end() || context->second->kernel == nullptr) {
+      const ConSanKernelInfo *owner_kernel =
+          result.program_inventory.find_kernel_by_descriptor(owner.descriptor_file_offset);
+      if (owner_kernel == nullptr ||
+          !moi_resource_has_owner_context(resource_state, owner.descriptor_file_offset)) {
         owner_lowering_failure = "missing kernel resource context";
         break;
       }
-      if (!first_owner &&
-          uses_cluster_workgroup_id != context->second->kernel->uses_cluster_workgroup_id) {
+      if (!first_owner && uses_cluster_workgroup_id != owner_kernel->uses_cluster_workgroup_id) {
         owner_lowering_failure = "incompatible cluster workgroup ABI";
         break;
       }
-      uses_cluster_workgroup_id = context->second->kernel->uses_cluster_workgroup_id;
+      uses_cluster_workgroup_id = owner_kernel->uses_cluster_workgroup_id;
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
@@ -801,8 +718,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       }
       common_workgroup_sources = *workgroup_sources;
       common_owner_shift = *owner_shift;
-      const auto distance_index = build_sampled_cfg_forward_distance_index(
-          resource_state, *context->second, sequence.begin_text_offset);
+      const auto distance_index = make_moi_cfg_forward_distance_index(
+          resource_state, owner.descriptor_file_offset, sequence.begin_text_offset);
       if (!distance_index) {
         owner_lowering_failure = "missing owner CFG distance proof";
         break;
@@ -816,10 +733,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       std::optional<SampledCfgDistance> closest;
       for (const SelectedWindow *window : owner_windows->second) {
         const ConSanPatchInfo &patch = *window->patch;
-        if (!window->access || !kernel_owns_patch(*context->second->kernel, patch))
+        if (!window->access || !kernel_owns_patch(*owner_kernel, patch))
           continue;
-        const auto distance =
-            sampled_cfg_forward_distance(resource_state, *distance_index, patch.anchor_offset);
+        const auto distance = moi_cfg_forward_distance(*distance_index, patch.anchor_offset);
         if (!distance || (closest && *closest <= *distance))
           continue;
         closest = *distance;
@@ -1274,22 +1190,21 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
           group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
-      MoiDenseOwnerLivenessProof host_owner_proof =
-          resource_state.prepare_dense_liveness_for_owners(group_owners, host_bootstrap_ranges);
       std::vector<uint64_t> anchors;
       anchors.reserve(indices.size());
       for (size_t index : indices)
         anchors.push_back(selected[index].candidate.barrier.site.text_offset);
-      auto dense_host = find_moi_dense_relay_host(
+      auto dense_host = find_moi_dense_relay_host_for_owners(
           resource_state, old_text,
           {
               .owner_begin = container_begin,
               .owner_end = container_end,
               .host_word_count = static_cast<size_t>(host_words_count),
               .anchors = anchors,
-              .preapplied_reserved_ranges = resource_state.reserved_ranges,
-              .owner_proof = host_owner_proof,
+              .preapplied_reserved_ranges = moi_resource_reserved_ranges(resource_state),
+              .owner_descriptor_file_offsets = group_owners,
               .bootstrap_ranges = host_bootstrap_ranges,
+              .claimed_host_ranges = {},
           },
           overlaps_existing);
       if (!dense_host) {
@@ -1703,7 +1618,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   for (ConSanPatchInfo &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
 
-  if (!resource_state.valid) {
+  if (!moi_resource_is_valid(resource_state)) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync lacks a complete kernel CFG");
     return;
   }
@@ -1713,7 +1628,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     uint32_t bank_count = 1;
     const ConSanPatchInfo *patch = nullptr;
     ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
-    const MoiKernelResourceContext *owner = nullptr;
+    uint64_t owner_descriptor_file_offset = 0;
   };
   std::vector<Window> windows;
   windows.reserve(selected_window_count);
@@ -1727,15 +1642,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         patch.sampled_access_kind != ConSanLdsAccessKind::Atomic)
       continue;
     has_multi_range_window |= patch.sampled_access_range_count > 1u;
-    for (const MoiKernelResourceContext &context : resource_state.contexts) {
-      if (context.kernel == nullptr || !kernel_owns_patch(*context.kernel, patch))
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+      if (!moi_resource_has_owner_context(resource_state, kernel.descriptor_file_offset) ||
+          !kernel_owns_patch(kernel, patch))
         continue;
       // One physical access in a shared helper is one sampled slot, but it has
       // an independent causal view in every kernel that can execute it. Those
       // owners are mutually exclusive dispatches, so each may safely attach
       // one synchronization edge to the same metadata slot.
       windows.push_back({patch.sampled_first_slot, std::max(patch.sampled_window_bank_count, 1u),
-                         &patch, patch.sampled_access_kind, &context});
+                         &patch, patch.sampled_access_kind, kernel.descriptor_file_offset});
     }
   }
   if (has_multi_range_window) {
@@ -1753,23 +1669,18 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     Side side = Side::Release;
   };
   std::vector<Association> proposed;
-  const auto owner_executes_candidate = [&](const MoiKernelResourceContext &owner,
+  const auto owner_executes_candidate = [&](uint64_t owner_descriptor_file_offset,
                                             const Candidate &candidate) {
-    if (owner.kernel == nullptr)
-      return false;
     if (candidate.atomic.kernel_descriptor_file_offset)
-      return *candidate.atomic.kernel_descriptor_file_offset ==
-             owner.kernel->descriptor_file_offset;
+      return *candidate.atomic.kernel_descriptor_file_offset == owner_descriptor_file_offset;
     if (const ConSanCandidateResourcePlan *plan =
             resource_plan_for_site(result.resource_plans, ConSanResourceSiteKind::Atomic,
                                    candidate.atomic.site.text_offset)) {
-      return std::ranges::find(plan->owner_descriptor_file_offsets,
-                               owner.kernel->descriptor_file_offset) !=
+      return std::ranges::find(plan->owner_descriptor_file_offsets, owner_descriptor_file_offset) !=
              plan->owner_descriptor_file_offsets.end();
     }
-    return std::ranges::any_of(owner.scope.blocks, [&](BasicBlock *block) {
-      return instruction_at(block, candidate.atomic.site.text_offset) != nullptr;
-    });
+    return moi_resource_owner_executes_offset(resource_state, owner_descriptor_file_offset,
+                                              candidate.atomic.site.text_offset);
   };
   for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
     const Window &window = windows[window_index];
@@ -1777,7 +1688,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     bool ambiguous = false;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const Candidate &candidate = candidates[candidate_index];
-      if (!owner_executes_candidate(*window.owner, candidate))
+      if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
         continue;
       const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
       const bool release_side =
@@ -1791,12 +1702,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       std::optional<SampledCfgDistance> distance;
       Association::Side side = Association::Side::Release;
       if (release_side) {
-        distance =
-            sampled_cfg_forward_distance(resource_state, *window.owner, window.patch->anchor_offset,
-                                         candidate.atomic.site.text_offset);
+        distance = sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
+                                                window.patch->anchor_offset,
+                                                candidate.atomic.site.text_offset);
       } else if (acquire_side) {
         side = Association::Side::Acquire;
-        distance = sampled_cfg_forward_distance(resource_state, *window.owner,
+        distance = sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
                                                 candidate.atomic.site.text_offset,
                                                 window.patch->anchor_offset);
       }
@@ -1840,7 +1751,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       std::optional<Association> best;
       for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
         const Window &window = windows[window_index];
-        if (!owner_executes_candidate(*window.owner, candidate))
+        if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
           continue;
         const bool window_has_side = missing_side == Association::Side::Release
                                          ? window.access_kind == ConSanLdsAccessKind::Write ||
@@ -1987,12 +1898,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     if (candidate.deferred_acquire && composed_access_patch == result.patches.end() &&
         candidate.ordered_sequence_end_text_offset > site.text_offset + site.size) {
       const uint64_t sequence_end = candidate.ordered_sequence_end_text_offset;
-      const BasicBlock *atomic_block =
-          block_for_offset(resource_state.block_index, site.text_offset);
-      const BasicBlock *sequence_end_block =
-          block_for_offset(resource_state.block_index, sequence_end - sizeof(uint32_t));
       const uint64_t sequence_size = sequence_end - site.text_offset;
-      if (atomic_block == nullptr || sequence_end_block != atomic_block ||
+      if (!moi_resource_offsets_share_block(resource_state, site.text_offset,
+                                            sequence_end - sizeof(uint32_t)) ||
           sequence_size > std::numeric_limits<uint32_t>::max() ||
           sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
         result.warnings.emplace_back(
@@ -2107,8 +2015,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   const uint64_t reserved_atomic_island_begin =
       original_text_size +
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
-  std::vector<ConSanPreappliedReservedRange> local_island_reserved_ranges =
-      resource_state.reserved_ranges;
+  std::vector<ConSanPreappliedReservedRange> local_island_reserved_ranges(
+      moi_resource_reserved_ranges(resource_state).begin(),
+      moi_resource_reserved_ranges(resource_state).end());
   const uint64_t reserved_sync_island_bytes =
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t) +
       reserved_atomic_island_count * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
@@ -2324,16 +2233,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       // guest SGPRs, and the entry island similarly consumes its PC, SCC, and
       // key temporaries before entering the spill-protected body.
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-      const std::array complete_scalar_range{
-          MoiSgprRange{.base = 0u, .width = ordinary_sgpr_limit}};
-      MoiDenseOwnerLivenessProof host_owner_proof =
-          resource_state.prepare_dense_liveness_for_owners(group_owners, complete_scalar_range);
-      std::vector<consan_detail::ScalarOwnerContextSummary> scalar_summaries;
-      scalar_summaries.reserve(host_owner_proof.contexts.size());
-      for (const MoiKernelResourceContext *context : host_owner_proof.contexts) {
-        if (context != nullptr)
-          scalar_summaries.push_back(context->scalar_summary());
-      }
       const auto overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
@@ -2357,67 +2256,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         return overlaps;
       };
       const auto dead_at_atomic_anchors = [&](uint16_t base, uint16_t width) {
-        if (!host_owner_proof.complete || host_owner_proof.contexts.empty() || width == 0u ||
-            static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
+        if (width == 0u || static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
             overlaps_reserved_scalar_state(base, width)) {
           return false;
         }
-        const RegisterRef range{RegClass::SGPR, base, static_cast<uint8_t>(width)};
-        for (size_t index : indices) {
-          const uint64_t anchor = selected[index].physical_anchor_offset;
-          BasicBlock *block = block_for_offset(resource_state.block_index, anchor);
-          const Instruction *instruction = instruction_at(block, anchor);
-          if (block == nullptr || instruction == nullptr)
-            return false;
-          bool saw_owner = false;
-          for (const MoiKernelResourceContext *context : host_owner_proof.contexts) {
-            if (context == nullptr || !context->block_set.contains(block))
-              continue;
-            saw_owner = true;
-            if (context->liveness_is_restricted || context->has_indirect_sgpr_access ||
-                static_cast<uint32_t>(base) + width > context->current_sgpr_count ||
-                context->liveness->any_live_before(*instruction, range)) {
-              return false;
-            }
-            const InstDefUse def_use(*instruction);
-            if (def_use.defs.contains(range) || def_use.uses.contains(range))
-              return false;
-            // Some generated helpers have a decoded join whose local CFG
-            // edge is intentionally absent from the owner scope. Liveness is
-            // then conservative about the disconnected block as a whole, but
-            // cannot carry a value across the missing edge. Reject a tuple
-            // when the text-order continuation consumes one of its registers
-            // before redefining it. This is a safety supplement only: normal
-            // CFG liveness above remains authoritative across non-lexical
-            // successors.
-            std::vector<const Instruction *> lexical_tail;
-            for (BasicBlock *owner_block : context->scope.blocks) {
-              if (owner_block == nullptr || owner_block->end_offset() <= anchor)
-                continue;
-              for (const Instruction &tail_instruction : owner_block->instructions()) {
-                if (tail_instruction.src_loc() > anchor)
-                  lexical_tail.push_back(&tail_instruction);
-              }
-            }
-            std::ranges::sort(lexical_tail, {}, &Instruction::src_loc);
-            std::vector<bool> redefined(width, false);
-            for (const Instruction *tail_instruction : lexical_tail) {
-              const InstDefUse tail_def_use(*tail_instruction);
-              for (uint16_t lane = 0u; lane < width; ++lane) {
-                const RegisterRef scalar{RegClass::SGPR, static_cast<uint16_t>(base + lane), 1u};
-                if (!redefined[lane] && tail_def_use.uses.contains(scalar))
-                  return false;
-                if (tail_def_use.defs.contains(scalar))
-                  redefined[lane] = true;
-              }
-              if (std::ranges::all_of(redefined, std::identity{}))
-                break;
-            }
-          }
-          if (!saw_owner)
-            return false;
-        }
-        return true;
+        const std::array range{MoiSgprRange{base, width}};
+        return moi_resource_owner_anchors_admit_call_clobber_ranges(resource_state, group_owners,
+                                                                    anchors, range);
       };
       const auto tuple_is_safe = [&](uint16_t pc, uint16_t scc, uint16_t key,
                                      uint16_t call_return) {
@@ -2429,7 +2274,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                (pc == call_return || !range_overlaps(pc, 2u, call_return, 2u)) &&
                !range_overlaps(scc, 1u, key, 1u) && !range_overlaps(scc, 1u, call_return, 2u) &&
                !range_overlaps(key, 1u, call_return, 2u) &&
-               !moi_scalar_contexts_conflict_with_physical_vcc(scalar_summaries, ranges, arch);
+               !moi_resource_owner_ranges_conflict_with_physical_vcc(resource_state, group_owners,
+                                                                     ranges, arch);
       };
 
       uint16_t jump_pc_sgpr =
@@ -2492,16 +2338,17 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
           group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
-      auto dense_host = find_moi_dense_relay_host(
+      auto dense_host = find_moi_dense_relay_host_for_owners(
           resource_state, old_text,
           {
               .owner_begin = owner_begin,
               .owner_end = owner_end,
               .host_word_count = static_cast<size_t>(host_words_count),
               .anchors = anchors,
-              .preapplied_reserved_ranges = resource_state.reserved_ranges,
-              .owner_proof = host_owner_proof,
+              .preapplied_reserved_ranges = moi_resource_reserved_ranges(resource_state),
+              .owner_descriptor_file_offsets = group_owners,
               .bootstrap_ranges = host_bootstrap_ranges,
+              .claimed_host_ranges = {},
           },
           overlaps_existing);
       if (!dense_host) {
@@ -2667,7 +2514,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     result.errors.emplace_back("ConSan MOI sampled atomic dense relay reservation failed");
     return;
   }
-  std::vector<MoiLocalNopIsland> appended_indirect_islands;
+  struct MoiSampledAppendedIsland {
+    uint64_t text_offset = 0;
+    bool claimed = false;
+  };
+  std::vector<MoiSampledAppendedIsland> appended_indirect_islands;
   const size_t ordinary_selected_count =
       static_cast<size_t>(std::ranges::count(routed_by_dense_relay, false));
   if (ordinary_selected_count > 1u) {
@@ -2688,7 +2539,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
   }
   const auto claim_appended_island = [&](uint64_t anchor_offset) -> std::optional<uint64_t> {
-    for (MoiLocalNopIsland &island : appended_indirect_islands) {
+    for (MoiSampledAppendedIsland &island : appended_indirect_islands) {
       if (island.claimed || !compute_sopp_branch_simm16(anchor_offset, island.text_offset))
         continue;
       island.claimed = true;
@@ -2713,21 +2564,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                *planned.spill, planned.candidate.atomic.lowering_form));
     if (release_only_no_return && physical_anchor_offset == site.text_offset &&
         planned.relocated_guest_size == site.size) {
-      BasicBlock *block = block_for_offset(resource_state.block_index, physical_anchor_offset);
-      const Instruction *prefix = nullptr;
-      if (block != nullptr) {
-        for (const Instruction &instruction : block->instructions()) {
-          if (instruction.size() > 0 &&
-              instruction.src_loc() + static_cast<uint64_t>(instruction.size()) ==
-                  physical_anchor_offset) {
-            prefix = &instruction;
-          }
-        }
-      }
-      if (prefix != nullptr && prefix->mnemonic() != "s_clause" &&
-          prefix->size() >= static_cast<int>(sizeof(uint32_t)) &&
-          prefix->size() % static_cast<int>(sizeof(uint32_t)) == 0) {
-        const uint64_t prefix_begin = prefix->src_loc();
+      const auto prefix =
+          moi_resource_preceding_instruction(resource_state, physical_anchor_offset);
+      if (prefix && !prefix->is_scalar_clause) {
+        const uint64_t prefix_begin = prefix->text_offset;
         const uint64_t prefix_end = physical_anchor_offset;
         const bool overlaps_patch = std::ranges::any_of(result.patches, [&](const auto &patch) {
           const uint64_t patch_end =
@@ -2736,7 +2576,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         });
         if (!overlaps_patch && prefix_end <= old_text.size()) {
           entry_anchor_offset = prefix_begin;
-          entry_original_size = static_cast<uint32_t>(prefix->size());
+          entry_original_size = prefix->size;
           leading_guest_words.resize(entry_original_size / sizeof(uint32_t));
           std::memcpy(leading_guest_words.data(), old_text.data() + entry_anchor_offset,
                       entry_original_size);
@@ -2754,17 +2594,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
     if (route_options.automatic_moi_record_replay_sgpr_spill) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-      const std::array complete_scalar_range{
-          MoiSgprRange{.base = 0u, .width = ordinary_sgpr_limit}};
-      MoiDenseOwnerLivenessProof route_owner_proof =
-          resource_state.prepare_dense_liveness_for_owners(
-              planned.resources.owner_descriptor_file_offsets, complete_scalar_range);
-      std::vector<consan_detail::ScalarOwnerContextSummary> route_scalar_summaries;
-      route_scalar_summaries.reserve(route_owner_proof.contexts.size());
-      for (const MoiKernelResourceContext *context : route_owner_proof.contexts) {
-        if (context != nullptr)
-          route_scalar_summaries.push_back(context->scalar_summary());
-      }
       const auto route_overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
@@ -2788,61 +2617,21 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         return overlaps;
       };
       const auto route_dead_at_anchor = [&](uint16_t base, uint16_t width) {
-        if (!route_owner_proof.complete || route_owner_proof.contexts.empty() || width == 0u ||
-            static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
+        if (width == 0u || static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
             route_overlaps_reserved_scalar_state(base, width)) {
           return false;
         }
-        const RegisterRef range{RegClass::SGPR, base, static_cast<uint8_t>(width)};
-        BasicBlock *block = block_for_offset(resource_state.block_index, physical_anchor_offset);
-        const Instruction *instruction = instruction_at(block, physical_anchor_offset);
-        if (block == nullptr || instruction == nullptr)
-          return false;
-        bool saw_owner = false;
-        for (const MoiKernelResourceContext *context : route_owner_proof.contexts) {
-          if (context == nullptr || !context->block_set.contains(block))
-            continue;
-          saw_owner = true;
-          if (context->liveness_is_restricted || context->has_indirect_sgpr_access ||
-              static_cast<uint32_t>(base) + width > context->current_sgpr_count ||
-              context->liveness->any_live_before(*instruction, range)) {
-            return false;
-          }
-          const InstDefUse def_use(*instruction);
-          if (def_use.defs.contains(range) || def_use.uses.contains(range))
-            return false;
-          std::vector<const Instruction *> lexical_tail;
-          for (BasicBlock *owner_block : context->scope.blocks) {
-            if (owner_block == nullptr || owner_block->end_offset() <= physical_anchor_offset)
-              continue;
-            for (const Instruction &tail_instruction : owner_block->instructions()) {
-              if (tail_instruction.src_loc() > physical_anchor_offset)
-                lexical_tail.push_back(&tail_instruction);
-            }
-          }
-          std::ranges::sort(lexical_tail, {}, &Instruction::src_loc);
-          std::vector<bool> redefined(width, false);
-          for (const Instruction *tail_instruction : lexical_tail) {
-            const InstDefUse tail_def_use(*tail_instruction);
-            for (uint16_t lane = 0u; lane < width; ++lane) {
-              const RegisterRef scalar{RegClass::SGPR, static_cast<uint16_t>(base + lane), 1u};
-              if (!redefined[lane] && tail_def_use.uses.contains(scalar))
-                return false;
-              if (tail_def_use.defs.contains(scalar))
-                redefined[lane] = true;
-            }
-            if (std::ranges::all_of(redefined, std::identity{}))
-              break;
-          }
-        }
-        return saw_owner;
+        const std::array range{MoiSgprRange{base, width}};
+        const std::array anchors{physical_anchor_offset};
+        return moi_resource_owner_anchors_admit_call_clobber_ranges(
+            resource_state, planned.resources.owner_descriptor_file_offsets, anchors, range);
       };
       const auto route_tuple_is_safe = [&](uint16_t pc, uint16_t scc) {
         const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}};
         return route_dead_at_anchor(pc, 2u) && route_dead_at_anchor(scc, 1u) &&
                !range_overlaps(pc, 2u, scc, 1u) &&
-               !moi_scalar_contexts_conflict_with_physical_vcc(route_scalar_summaries, ranges,
-                                                               arch);
+               !moi_resource_owner_ranges_conflict_with_physical_vcc(
+                   resource_state, planned.resources.owner_descriptor_file_offsets, ranges, arch);
       };
       auto route_state = moi_indirect_jump_sgprs(route_options, route_options);
       if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {

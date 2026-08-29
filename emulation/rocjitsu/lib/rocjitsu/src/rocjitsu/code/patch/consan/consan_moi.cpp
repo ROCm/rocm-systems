@@ -163,8 +163,6 @@ namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
-
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.inc"
 
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,

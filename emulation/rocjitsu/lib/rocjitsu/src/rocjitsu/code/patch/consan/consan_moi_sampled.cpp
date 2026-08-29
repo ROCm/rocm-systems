@@ -22,6 +22,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
+#include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
@@ -34,6 +35,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
@@ -70,18 +72,54 @@ using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::range_overlaps;
 using consan_detail::reject_optional_scratch_range_overlap;
+using consan_moi_detail::append_atomic_fetch_add_one_u32;
+using consan_moi_detail::append_atomic_load_u32;
+using consan_moi_detail::append_atomic_or_u32_literal;
+using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
+using consan_moi_detail::append_dynamic_diagnostic_record_address;
+using consan_moi_detail::append_dynamic_record_address;
+using consan_moi_detail::append_dynamic_record_event_index_store;
+using consan_moi_detail::append_dynamic_record_store_moi_report_dispatch_id_pair;
+using consan_moi_detail::append_dynamic_record_store_u32_literal;
+using consan_moi_detail::append_dynamic_record_store_u32_scalar_src;
+using consan_moi_detail::append_dynamic_record_store_u32_vgpr;
+using consan_moi_detail::append_dynamic_record_store_workgroup_source;
+using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_moi_prepare_scc_preserving_indirect_jump;
+using consan_moi_detail::append_moi_report_dispatch_id_pair;
+using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_publish_visible_evidence_if_zero;
+using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
+using consan_moi_detail::append_store_u32_literal;
+using consan_moi_detail::append_store_u32_sgpr;
+using consan_moi_detail::append_store_u32_vgpr;
+using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
+using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
+using consan_moi_detail::ConSanMoiRecordEmitter;
+using consan_moi_detail::ConSanMoiReportDispatchIdWordSource;
 using consan_moi_detail::count_nop_padding;
 using consan_moi_detail::decode_relocatable_entry_instruction;
+using consan_moi_detail::DynamicRecordLayout;
+using consan_moi_detail::kAccessRecordLayout;
+using consan_moi_detail::kAtomicRecordLayout;
+using consan_moi_detail::kBarrierRecordLayout;
+using consan_moi_detail::kDiagnosticRecordLayout;
+using consan_moi_detail::kFenceRecordLayout;
+using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
+using consan_moi_detail::moi_permits_literal_dispatch_identity;
+using consan_moi_detail::moi_report_dispatch_id_source_permitted;
+using consan_moi_detail::moi_report_dispatch_id_word_source;
 using consan_moi_detail::note_moi_persistent_vgpr_state;
 using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu
