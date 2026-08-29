@@ -168,6 +168,43 @@ TEST_F(GpuDevice, AdvertisesAnInterruptTheDriverCanAllocate) {
   // here that called into it would leave the whole suite unlinkable without it.
 }
 
+// The message table is memory the guest writes to say where an interrupt should
+// be delivered, so it needs a BAR of its own that traps. Putting it in a corner
+// of the register aperture would let a table entry and a register land on the
+// same address, and the two are read by entirely different machinery.
+TEST_F(GpuDevice, CarriesTheMessageTableInATrappedBarOfItsOwn) {
+  ASSERT_TRUE(device_.usable());
+  const simdojo::InterruptSpec interrupts = device_.interrupts();
+  ASSERT_EQ(interrupts.kind, simdojo::InterruptKind::MsiX);
+
+  const simdojo::BarSpec *table = bar(interrupts.table_bar);
+  ASSERT_NE(table, nullptr) << "the table is advertised in a BAR that does not exist";
+  EXPECT_LT(table->backing_fd, 0) << "a mapped table would let the guest change it unobserved";
+  EXPECT_TRUE(table->mmap_areas.empty());
+  EXPECT_NE(interrupts.table_bar, rocjitsu::GpuPciDevice::kRegisterBar);
+
+  // Both structures have to fit, and the pending bits must not start inside the
+  // table: one vector's entry is 16 bytes and its pending bit is in the first 8.
+  const uint64_t table_bytes = interrupts.vectors * 16;
+  EXPECT_LE(interrupts.table_offset + table_bytes, interrupts.pending_offset);
+  EXPECT_LE(interrupts.pending_offset + 8, table->size);
+}
+
+// The table is plain storage, but it has to be storage: a write the device
+// dropped would leave the guest believing it had programmed a destination.
+TEST_F(GpuDevice, RemembersWhatTheGuestWritesIntoTheMessageTable) {
+  ASSERT_TRUE(device_.usable());
+  const simdojo::InterruptSpec interrupts = device_.interrupts();
+  const int table_bar = interrupts.table_bar;
+  auto raw = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xfeedface});
+
+  ASSERT_EQ(device_.bar_access(table_bar, raw, interrupts.table_offset, /*write=*/true), 4);
+
+  std::array<std::byte, 4> read_back{};
+  ASSERT_EQ(device_.bar_access(table_bar, read_back, interrupts.table_offset, /*write=*/false), 4);
+  EXPECT_EQ(std::bit_cast<uint32_t>(read_back), 0xfeedfaceu);
+}
+
 // The driver's PCI table wildcards the device ID and matches on the class, so
 // this is the field that decides whether amdgpu attaches at all.
 TEST_F(GpuDevice, PresentsTheClassAmdgpuBindsOn) {

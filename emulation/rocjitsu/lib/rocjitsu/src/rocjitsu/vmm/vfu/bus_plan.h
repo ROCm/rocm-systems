@@ -38,15 +38,24 @@ struct BarRegionPlan {
 
 /// @brief How a device's interrupt declaration should be registered.
 struct InterruptPlan {
-  bool supported = false;  ///< False if the transport cannot advertise this kind yet.
-  uint32_t intx_count = 0; ///< Legacy interrupt pins to advertise; zero for none.
+  /// @brief False when the declaration cannot be advertised as it stands.
+  ///
+  /// @details Either a kind this transport does not implement, or one it does
+  /// that the device described in terms a capability cannot express.
+  bool supported = false;
+  uint32_t intx_count = 0;     ///< Legacy interrupt pins to advertise; zero for none.
+  uint32_t msix_count = 0;     ///< Message vectors to advertise; zero for none.
+  int table_bar = 0;           ///< BAR holding the message table, when there is one.
+  uint64_t table_offset = 0;   ///< Byte offset of the table within that BAR.
+  uint64_t pending_offset = 0; ///< Byte offset of the pending-bit array, likewise.
 };
 
 /// @brief Decide how @p spec should be advertised.
 /// @param[in] spec The interrupt capability the device declared.
-/// @returns The plan; @ref InterruptPlan::supported is false for capabilities
-///          this transport does not implement, which the caller must refuse
-///          rather than quietly substitute something else for.
+/// @returns The plan; @ref InterruptPlan::supported is false both for
+///          capabilities this transport does not implement and for ones it does
+///          that @p spec describes inexpressibly. The caller must refuse either
+///          rather than quietly substitute something else.
 /// @details A device that raises nothing is normally advertised with nothing:
 /// telling a guest about a pin the device never asserts invites a driver to
 /// wait on it. The exception belongs to the DEVICE, not to this function: a

@@ -25,6 +25,7 @@
 
 extern "C" {
 #include <libvfio-user.h>
+#include <pci_caps/msix.h>
 }
 
 #include <poll.h>
@@ -44,6 +45,14 @@ namespace {
 /// @brief Longest a serving thread waits for socket activity before rechecking
 /// its stop token. Nothing observes this delay except shutdown latency.
 constexpr int kPollTimeoutMs = 100;
+
+/// @brief Bytes one message-table entry occupies: two address words, a data
+/// word and a vector-control word.
+constexpr uint64_t kMsixEntryBytes = 16;
+
+/// @brief Bytes one word of the pending-bit array occupies; the array is words
+/// of 64 bits rather than a byte per vector.
+constexpr uint64_t kMsixPendingWordBytes = 8;
 
 /// @brief Most scatter-gather entries one guest memory transfer may span.
 /// @brief Scatter-gather entries a transfer is attempted with before the
@@ -219,6 +228,7 @@ bool VfioDeviceHost::build() {
   // library, so the byte is written directly or the guest sees revision zero.
   vfu_pci_get_config_space(ctx_)->hdr.rid = id.revision;
 
+  std::array<uint64_t, 6> bar_sizes{};
   for (const simdojo::BarSpec &bar : device_.bars()) {
     const BarRegionPlan plan = plan_bar_region(bar);
     single_client_ = single_client_ || !plan.mmap_areas.empty();
@@ -255,19 +265,69 @@ bool VfioDeviceHost::build() {
           std::format("vfu: cannot set up BAR{}: {}", bar.index, std::strerror(errno)));
       return false;
     }
+    bar_sizes[static_cast<std::size_t>(bar.index)] = bar.size;
   }
 
   const InterruptPlan interrupts = plan_interrupts(device_.interrupts());
   if (!interrupts.supported) {
-    util::Logger::warn(std::format(
-        "vfu: device {} asked for an interrupt kind this transport does not implement yet",
-        device_.name()));
+    util::Logger::warn(
+        std::format("vfu: device {} declared interrupts this transport cannot advertise, either a "
+                    "kind it does not implement or one described in terms a capability cannot "
+                    "express",
+                    device_.name()));
     return false;
   }
+  // Both of these must happen before the device is realized: the interrupt
+  // count decides whether a pin is published in configuration space, and a
+  // capability added afterwards is not published at all. Neither call reports
+  // being too late, so the ordering is the only thing enforcing it.
   if (interrupts.intx_count != 0 &&
       vfu_setup_device_nr_irqs(ctx_, VFU_DEV_INTX_IRQ, interrupts.intx_count) < 0) {
     util::Logger::warn(std::format("vfu: cannot set up interrupts: {}", std::strerror(errno)));
     return false;
+  }
+  if (interrupts.msix_count != 0) {
+    // The capability names a BAR and two offsets, and nothing downstream
+    // checks that they describe somewhere the device actually answers. A
+    // client refuses a table that runs past its BAR or that overlaps the
+    // pending bits, but it does so at the guest's realization and in terms of
+    // the guest's own layout, naming none of the offsets involved.
+    //
+    // plan_interrupts has already bounded the index, so this indexes safely.
+    const auto table_bar = static_cast<std::size_t>(interrupts.table_bar);
+    const uint64_t table_end = interrupts.table_offset + interrupts.msix_count * kMsixEntryBytes;
+    // The pending bits are an array of 64-bit words, not a byte per vector.
+    const uint64_t pending_end =
+        interrupts.pending_offset + ((interrupts.msix_count + 63) / 64) * kMsixPendingWordBytes;
+    const bool overlap =
+        interrupts.table_offset < pending_end && interrupts.pending_offset < table_end;
+    if (table_end > bar_sizes[table_bar] || pending_end > bar_sizes[table_bar] || overlap) {
+      util::Logger::warn(std::format(
+          "vfu: device {} puts its message table at {:#x}..{:#x} and its pending bits at "
+          "{:#x}..{:#x} of BAR{}, which is {} bytes",
+          device_.name(), interrupts.table_offset, table_end, interrupts.pending_offset,
+          pending_end, interrupts.table_bar, bar_sizes[table_bar]));
+      return false;
+    }
+    if (vfu_setup_device_nr_irqs(ctx_, VFU_DEV_MSIX_IRQ, interrupts.msix_count) < 0) {
+      util::Logger::warn(
+          std::format("vfu: cannot set up message interrupts: {}", std::strerror(errno)));
+      return false;
+    }
+    // The table and pending-bit offsets are recorded in units of eight bytes,
+    // and the low three bits of each field carry the BAR index instead.
+    msixcap msix{};
+    msix.hdr.id = PCI_CAP_ID_MSIX;
+    msix.mxc.ts = static_cast<uint16_t>(interrupts.msix_count - 1);
+    msix.mtab.tbir = static_cast<uint32_t>(interrupts.table_bar);
+    msix.mtab.to = static_cast<uint32_t>(interrupts.table_offset >> 3);
+    msix.mpba.pbir = static_cast<uint32_t>(interrupts.table_bar);
+    msix.mpba.pbao = static_cast<uint32_t>(interrupts.pending_offset >> 3);
+    if (vfu_pci_add_capability(ctx_, 0, 0, &msix) < 0) {
+      util::Logger::warn(
+          std::format("vfu: cannot publish the message table: {}", std::strerror(errno)));
+      return false;
+    }
   }
 
   if (vfu_setup_device_dma(ctx_, LIBVFIO_USER_MAX_DMA_REGIONS, &dma_register_trampoline,

@@ -249,6 +249,7 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
     return;
   }
   doorbells_.resize(spec_.doorbell_aperture_bytes);
+  msix_table_.resize(kMsixBarBytes);
 
   // One entry per dword of the aperture.
   const auto register_count = static_cast<uint32_t>(spec_.register_aperture_bytes / 4);
@@ -371,7 +372,21 @@ std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
   registers.size = spec_.register_aperture_bytes;
   registers.mem = true;
 
-  return {vram, doorbell, registers};
+  // Trapped rather than mapped, so every access is seen. What this stage does
+  // with what it sees is nothing beyond storing it: the table and the pending
+  // bits are one undifferentiated buffer, the device is told nothing about
+  // which vectors the guest has masked, and it sets no pending bit of its own.
+  // That is enough for a client that emulates the table itself, which is what
+  // this transport's clients do. Modelling ownership properly -- the device
+  // setting pending bits for a masked vector and learning mask changes through
+  // a state callback -- needs an interface this device does not have yet, and
+  // trapping is the precondition for adding it without changing the bus shape.
+  simdojo::BarSpec msix;
+  msix.index = kMsixBar;
+  msix.size = kMsixBarBytes;
+  msix.mem = true;
+
+  return {vram, doorbell, registers, msix};
 }
 
 void GpuPciDevice::reset_registers() {
@@ -624,6 +639,8 @@ int64_t GpuPciDevice::bar_access(int bar, std::span<std::byte> buf, uint64_t off
     return access_registers(buf, offset, write);
   case kDoorbellBar:
     return access_memory(buf, offset, write, doorbells_);
+  case kMsixBar:
+    return access_memory(buf, offset, write, msix_table_);
   case kVramBar:
     // Reached only for a guest that did not map the aperture; a mapped one
     // never traps here.
@@ -651,6 +668,7 @@ void GpuPciDevice::reset(simdojo::ResetKind kind) {
   // memory is not cleared here: a mapping already handed out cannot be taken
   // back, which is why a device that exports one is served to a single client.
   std::ranges::fill(doorbells_, std::byte{0});
+  std::ranges::fill(msix_table_, std::byte{0});
   reset_registers();
   // The table is restored rather than assumed intact. On real hardware it lives
   // in memory the security processor reserves and the driver cannot write; here

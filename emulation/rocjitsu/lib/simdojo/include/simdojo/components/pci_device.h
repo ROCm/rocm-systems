@@ -159,6 +159,15 @@ enum class InterruptKind {
 struct InterruptSpec {
   InterruptKind kind = InterruptKind::None; ///< What to advertise.
   uint32_t vectors = 0;                     ///< Vector count, for @ref InterruptKind::MsiX.
+  /// @brief BAR holding the message table and its pending-bit array.
+  ///
+  /// @details Message-signalled interrupts are configured through a table in
+  /// the device's own memory rather than through configuration space, so the
+  /// device decides where that table lives and the transport only reports the
+  /// decision. Meaningful only for @ref InterruptKind::MsiX.
+  int table_bar = 0;
+  uint64_t table_offset = 0;   ///< Byte offset of the table within that BAR.
+  uint64_t pending_offset = 0; ///< Byte offset of the pending-bit array, likewise.
 };
 
 /// @brief Sink through which a device raises interrupts toward the guest.

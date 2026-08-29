@@ -234,6 +234,22 @@ bool VfioUserClient::irq_info(uint32_t index, uint32_t &count) {
   return true;
 }
 
+bool VfioUserClient::arm_irq(uint32_t index, int fd) {
+  // The wire struct ends in a flexible array, which C++ will not let us nest or
+  // instantiate, so the payload is built as bytes. One vector needs one
+  // descriptor, and it rides in the message's control data rather than here.
+  std::vector<std::byte> payload(sizeof(vfio_irq_set));
+  auto *set = reinterpret_cast<vfio_irq_set *>(payload.data());
+  set->argsz = static_cast<uint32_t>(payload.size());
+  set->flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
+  set->index = index;
+  set->start = 0;
+  set->count = 1;
+
+  std::vector<std::byte> reply;
+  return request(VFIO_USER_DEVICE_SET_IRQS, payload, fd, reply);
+}
+
 bool VfioUserClient::region_info(uint32_t region, uint64_t &size, uint32_t &flags) {
   vfio_region_info request_body{};
   request_body.argsz = sizeof(request_body);

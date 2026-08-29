@@ -48,6 +48,14 @@ public:
   /// @retval false The server refused the request.
   [[nodiscard]] bool irq_info(uint32_t index, uint32_t &count);
 
+  /// @brief Arm one vector of @p index to signal @p fd.
+  /// @details The descriptor travels with the message, which is the only way
+  /// the server can signal a client it shares no memory with.
+  /// @param[in] index VFIO interrupt index, e.g. VFIO_PCI_MSIX_IRQ_INDEX.
+  /// @param[in] fd Eventfd the server should write to when it triggers.
+  /// @retval false The server refused the request.
+  [[nodiscard]] bool arm_irq(uint32_t index, int fd);
+
   /// @brief Read the size and flags of one region.
   /// @param[in] region Region index.
   /// @param[out] size Region size in bytes.
