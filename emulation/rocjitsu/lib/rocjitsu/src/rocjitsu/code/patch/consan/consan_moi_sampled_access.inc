@@ -707,13 +707,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                              new_text, patches, result))
       return;
     const auto dense_groups = group_moi_dense_access_patches(planned_patches);
-    if (!emit_moi_dense_access_groups(dense_groups, dense_entry_hosts, options,
-                                      result.moi_operating_point, access_relay_words,
-                                      /*collapse_spill_router_for_explicit_key=*/true,
-                                      "sampled probe", arch, new_text, patches, result.errors,
-                                      [](const PlannedSampledPatch &planned, const MoiOptions &) {
-                                        return planned.transient_exec_save_sgpr.has_value();
-                                      }))
+    if (!emit_moi_dense_access_groups(
+            dense_groups, dense_entry_hosts, options, result.moi_operating_point,
+            access_relay_words,
+            /*collapse_spill_router_for_explicit_key=*/true, "sampled probe", arch, new_text,
+            patches, result.errors,
+            [](const PlannedSampledPatch &planned, const ConSanMoiOperatingPoint &) {
+              return planned.transient_exec_save_sgpr.has_value();
+            }))
       return;
     for (const PlannedSampledPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -1071,7 +1072,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             /*use_indirect_jump_scc_save=*/false, "sampled probe",
             "ConSan MOI sampled probe lost its dense-host transient scalar assignment",
             "ConSan MOI sampled probe could not encode its dense entry-host return", arch, new_text,
-            result.errors, [](const PlannedSampledPatch &, const MoiOptions &) { return true; },
+            result.errors,
+            [](const PlannedSampledPatch &, const ConSanMoiOperatingPoint &) { return true; },
             [](const MoiDenseEntryHost &, std::vector<uint32_t> &) { return true; }))
       return;
 

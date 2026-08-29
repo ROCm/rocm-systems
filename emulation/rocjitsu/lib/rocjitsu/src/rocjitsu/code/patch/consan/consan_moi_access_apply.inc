@@ -223,11 +223,12 @@ group_moi_dense_access_patches(const std::vector<PlannedPatch> &planned_patches)
 ///
 /// `eligible` retains the few engine-specific ABI preconditions that are not
 /// implied by the common patch plan. It observes the representative patch and
-/// its owner-bound options but does not perform placement or native emission.
+/// its owner-bound operating point but does not perform placement or native
+/// emission.
 template <typename PlannedPatch, typename Eligible>
 [[nodiscard]] bool emit_moi_dense_access_groups(
     const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups,
-    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, const MoiOptions &options,
+    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, const ConSanRequest &request,
     const ConSanMoiOperatingPoint &operating_point, uint64_t access_slot_words,
     bool collapse_spill_router_for_explicit_key, std::string_view probe_name, rj_code_arch_t arch,
     std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
@@ -235,15 +236,15 @@ template <typename PlannedPatch, typename Eligible>
   for (const auto &[dispatcher_offset, group] : groups) {
     if (group.empty() || !group.front()->entry_island_offset)
       continue;
-    MoiOptions group_options = options;
+    ConSanMoiOperatingPoint group_point = operating_point;
     if (!apply_moi_transient_sgpr_assignment(
-            group_options, group_options, operating_point,
+            request, group_point, operating_point,
             group.front()->resources.owner_descriptor_file_offsets) ||
-        !eligible(*group.front(), group_options)) {
+        !eligible(*group.front(), group_point)) {
       continue;
     }
     if (!emit_moi_dense_access_group(std::span<const PlannedPatch *const>(group), dispatcher_offset,
-                                     dense_entry_hosts, group_options, group_options, arch,
+                                     dense_entry_hosts, request, group_point, arch,
                                      access_slot_words, collapse_spill_router_for_explicit_key,
                                      probe_name, new_text, patches, errors)) {
       return false;
@@ -264,12 +265,12 @@ template <typename PlannedPatch, typename Eligible>
 template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
 [[nodiscard]] bool emit_moi_dense_entry_hosts(
     const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts,
-    const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups, const MoiOptions &options,
-    const ConSanMoiOperatingPoint &operating_point, uint32_t indirect_island_words,
-    bool pad_to_planned_offset, bool use_indirect_jump_scc_save, std::string_view probe_name,
-    std::string_view lost_assignment_error, std::string_view return_error, rj_code_arch_t arch,
-    std::vector<uint8_t> &new_text, std::vector<std::string> &errors, Eligible eligible,
-    FinalizeHostWords finalize_host_words) {
+    const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups,
+    const ConSanRequest &request, const ConSanMoiOperatingPoint &operating_point,
+    uint32_t indirect_island_words, bool pad_to_planned_offset, bool use_indirect_jump_scc_save,
+    std::string_view probe_name, std::string_view lost_assignment_error,
+    std::string_view return_error, rj_code_arch_t arch, std::vector<uint8_t> &new_text,
+    std::vector<std::string> &errors, Eligible eligible, FinalizeHostWords finalize_host_words) {
   for (const auto &[dispatcher, host] : dense_entry_hosts) {
     if (pad_to_planned_offset) {
       while (new_text.size() < host.body_offset)
@@ -288,16 +289,16 @@ template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
       continue;
     }
     const PlannedPatch &representative = *group->second.front();
-    MoiOptions group_options = options;
+    ConSanMoiOperatingPoint group_point = operating_point;
     if (!apply_moi_transient_sgpr_assignment(
-            group_options, group_options, operating_point,
+            request, group_point, operating_point,
             representative.resources.owner_descriptor_file_offsets) ||
-        !eligible(representative, group_options)) {
+        !eligible(representative, group_point)) {
       errors.emplace_back(std::string(lost_assignment_error));
       return false;
     }
-    const auto jump_sgprs = moi_indirect_jump_sgprs(group_options, group_options);
-    const auto special_state = moi_special_state_sgprs(group_options, group_options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(request, group_point);
+    const auto special_state = moi_special_state_sgprs(request, group_point);
     std::vector<uint32_t> host_words = host.displaced_words;
     if (!jump_sgprs || (!use_indirect_jump_scc_save && !special_state) ||
         !append_moi_scc_preserving_indirect_jump(

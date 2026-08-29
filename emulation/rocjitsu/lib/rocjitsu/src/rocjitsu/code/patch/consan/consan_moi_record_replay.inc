@@ -1153,8 +1153,8 @@ void try_apply_first_light_access_record_patch(
             dense_groups, dense_entry_hosts, options, result.moi_operating_point, access_slot_words,
             /*collapse_spill_router_for_explicit_key=*/false, "first-light probe", arch, new_text,
             patches, result.errors,
-            [](const PlannedAccessRecordPatch &, const MoiOptions &group_options) {
-              return group_options.moi_exec_save_sgpr.has_value();
+            [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
+              return point.moi_exec_save_sgpr.has_value();
             }))
       return;
     for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
@@ -1501,8 +1501,8 @@ void try_apply_first_light_access_record_patch(
             "ConSan MOI first-light probe lost its dense-host transient SGPR assignment",
             "ConSan MOI first-light probe could not encode its dense entry-host return", arch,
             new_text, result.errors,
-            [](const PlannedAccessRecordPatch &, const MoiOptions &group_options) {
-              return group_options.moi_exec_save_sgpr.has_value();
+            [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
+              return point.moi_exec_save_sgpr.has_value();
             },
             [&](const MoiDenseEntryHost &host, std::vector<uint32_t> &host_words) {
               while (host_words.size() < host.displaced_words.size() + kIndirectIslandWords)

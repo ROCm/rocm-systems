@@ -934,7 +934,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             access_relay_words,
             /*collapse_spill_router_for_explicit_key=*/false, "inline-shadow probe", arch, new_text,
             patches, result.errors,
-            [](const PlannedInlineShadowPatch &, const MoiOptions &) { return true; }))
+            [](const PlannedInlineShadowPatch &, const ConSanMoiOperatingPoint &) { return true; }))
       return;
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -1330,7 +1330,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             "ConSan MOI inline-shadow probe lost its dense host scalar assignment",
             "ConSan MOI inline-shadow probe could not encode its dense entry-host return", arch,
             new_text, result.errors,
-            [](const PlannedInlineShadowPatch &, const MoiOptions &) { return true; },
+            [](const PlannedInlineShadowPatch &, const ConSanMoiOperatingPoint &) { return true; },
             [&](const MoiDenseEntryHost &host, std::vector<uint32_t> &host_words) {
               const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
               if (!wait_pc)
