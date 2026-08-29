@@ -315,8 +315,7 @@ atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason
-classify_atomic_semantics(const ProgramInventory &inventory, const ConSanSyncEvent &event,
-                          const SequenceMembership &membership) {
+classify_atomic_semantics(const ConSanSyncEvent &event, const SequenceMembership &membership) {
   if (membership.ambiguous)
     return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
   const ConSanSyncSequence *sequence = membership.sequence;
@@ -336,12 +335,7 @@ classify_atomic_semantics(const ProgramInventory &inventory, const ConSanSyncEve
   case ConSanSyncMemoryRole::SequentiallyConsistent:
     return ConSanAtomicPolicyReason::UnsupportedMemoryRole;
   }
-  const std::optional<uint32_t> semantic_scope =
-      sequence->raw_scope ? sequence->raw_scope
-                          : (inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                     event.address_source == ConSanSyncAddressSource::LdsVector
-                                 ? std::optional<uint32_t>(1u)
-                                 : std::nullopt);
+  const std::optional<uint32_t> semantic_scope = sequence->raw_scope;
   if (!semantic_scope)
     return ConSanAtomicPolicyReason::MissingScope;
   if (*semantic_scope < 1u || *semantic_scope > 3u)
@@ -477,7 +471,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::ConflictingPhysicalAliases;
       result.atomic_errors.push_back(reason);
     } else {
-      reason = classify_atomic_semantics(inventory, event, membership);
+      reason = classify_atomic_semantics(event, membership);
       if (reason == ConSanAtomicPolicyReason::None)
         reason = classify_atomic_encoding(inventory, event, *membership.sequence, request.engine);
       const bool semantic_not_applicable =
