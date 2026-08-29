@@ -511,6 +511,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           uint32_t guest_instruction_offset = 0u;
           auto cave_words = build_inline_atomic_ordering_cave_words(
               active_bytes, planned.candidate, planned.address_plan, candidate_options,
+              candidate_options, candidate_options, planned.resources.base,
               planned.spill ? &*planned.spill : nullptr,
               planned.scalar_spill ? &*planned.scalar_spill : nullptr,
               planned.private_layout ? &*planned.private_layout : nullptr, arch,
@@ -738,8 +739,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_inline_atomic_ordering_cave_words(
-        active_bytes, candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr,
+        active_bytes, candidate, planned.address_plan, candidate_options, candidate_options,
+        candidate_options, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr,
         planned.private_layout ? &*planned.private_layout : nullptr, arch,
         layout.inline_atomic_release_slots_offset, layout.inline_atomic_release_capacity,
