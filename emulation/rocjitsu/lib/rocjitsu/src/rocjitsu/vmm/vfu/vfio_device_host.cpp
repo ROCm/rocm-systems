@@ -221,6 +221,7 @@ bool VfioDeviceHost::build() {
 
   for (const simdojo::BarSpec &bar : device_.bars()) {
     const BarRegionPlan plan = plan_bar_region(bar);
+    single_client_ = single_client_ || !plan.mmap_areas.empty();
     if (!plan.valid) {
       util::Logger::warn(
           std::format("vfu: device {} declared an unusable BAR{}", device_.name(), bar.index));
@@ -341,9 +342,14 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
       util::Logger::warn(std::format("vfu: serving failed: {}", std::strerror(errno)));
       return ServeResult::Failed;
     }
-    // The client went away. Everything it had mapped is gone with it, so wait
-    // for a new one rather than tearing the server down: a VMM may be restarted
-    // against a server that keeps running.
+    if (single_client_) {
+      util::Logger::warn("vfu: client disconnected; this device shares memory by descriptor, "
+                         "which cannot be reclaimed, so serving ends here");
+      return ServeResult::Stopped;
+    }
+    // The client went away and had nothing mapped, so wait for a new one rather
+    // than tearing the server down: a VMM may be restarted against a server
+    // that keeps running.
     attached_ = false;
     guest_regions_.clear();
     if (declined_regions_ != 0) {
