@@ -560,6 +560,14 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
       }
       if (sequence->raw_scope)
         plan.site.raw_scope = sequence->raw_scope;
+      if (evidence_kind == ConSanProbeIntentKind::ExactAtomicOrdering) {
+        const ConSanAtomicLoweringClassification lowering =
+            classify_consan_atomic_lowering(plan.site, result.program_inventory.arch(),
+                                            plan.is_rmw);
+        if (!lowering.exact_ordering_available() || !lowering.form)
+          return false;
+        plan.exact_ordering_form = lowering.form;
+      }
       if (descriptor_file_offset &&
           (event->execution_owners.size() != 1u ||
            event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {

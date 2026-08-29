@@ -34,21 +34,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       result, ConSanProbeIntentKind::ExactAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
-  candidates.erase(
-      std::remove_if(candidates.begin(), candidates.end(),
-                     [&](const auto &candidate) {
-                       const ConSanMoiInlineAtomicSupport support =
-                           classify_consan_moi_inline_atomic_support(
-                               candidate.site, candidate.event_kind, arch, candidate.is_rmw);
-                       if (support == ConSanMoiInlineAtomicSupport::Supported)
-                         return false;
-                       result.warnings.emplace_back(
-                           "ConSan MOI inline atomic skipped " + candidate.site.mnemonic +
-                           " at text offset " + std::to_string(candidate.site.text_offset) + ": " +
-                           std::string(consan_moi_inline_atomic_support_name(support)));
-                       return true;
-                     }),
-      candidates.end());
+  if (std::ranges::any_of(candidates, [](const MoiAtomicEvidenceSitePlan &candidate) {
+        return !candidate.exact_ordering_form.has_value();
+      })) {
+    result.errors.emplace_back(
+        "ConSan MOI admitted exact atomic evidence lost its normalized target form");
+    return;
+  }
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });

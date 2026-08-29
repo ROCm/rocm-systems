@@ -627,6 +627,11 @@ struct MoiAtomicEvidenceSitePlan {
   /// materialize its address. Semantic ordering does not come from this copy.
   ConSanAtomicSite site;
 
+  /// Classifier-owned exact target form for InlineShadow ordering. Other MOI
+  /// engines use different atomic operations and therefore leave this absent.
+  /// An InlineShadow emitter consumes this form and never re-admits `site`.
+  std::optional<ConSanAtomicLoweringForm> exact_ordering_form;
+
   /// Unique dispatchable owner descriptor, when graph ownership proved one.
   std::optional<uint64_t> kernel_descriptor_file_offset;
 
