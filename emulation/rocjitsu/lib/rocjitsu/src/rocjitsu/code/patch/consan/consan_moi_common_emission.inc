@@ -15,9 +15,8 @@
 /// SCC-tagged explicit key and indirect-PC dependency wait remain explicit
 /// branches of this shared routing mechanism. Evidence construction and
 /// per-site resource admission remain outside this function.
-template <typename PlannedPatch>
 [[nodiscard]] bool emit_moi_dense_access_group(
-    std::span<const PlannedPatch *const> group, uint64_t dispatcher_offset,
+    std::span<const MoiPlannedAccessPatch *const> group, uint64_t dispatcher_offset,
     const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const ConSanRequest &request,
     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, uint64_t dispatcher_words_per_site,
     bool collapse_spill_router_for_explicit_key, std::string_view diagnostic_subject,
@@ -203,7 +202,7 @@ template <typename PlannedPatch>
   }
 
   for (size_t route = 0; route < group.size(); ++route) {
-    const PlannedPatch &planned = *group[route];
+    const MoiPlannedAccessPatch &planned = *group[route];
     const ConSanMoiCandidate &candidate = *planned.candidate;
     if (consan_arch_has_s_call_i64(arch)) {
       if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,

@@ -56,41 +56,6 @@ struct MoiLocalNopIsland {
          range_overlaps(base, width, kDynamicFrameBaseSgpr, 1u);
 }
 
-constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
-constexpr uint32_t kMoiInlineShadowIndirectIslandWords = 8u;
-// A branch-only Record/Replay access layout retains a two-word relay pair
-// after every reserved barrier island. The seven-word island remains
-// available to the later barrier pass, while the dedicated pair forms a
-// capacity-accounted spine from pristine text into a generated access bank
-// that may otherwise begin beyond one SOPP hop. Adjacent words also let a
-// later barrier pass use the same inventory for a register-free round trip.
-constexpr uint32_t kMoiRecordReplayBarrierRelayWords = 2u;
-constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
-    kMoiRecordReplayIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
-constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
-
-// Describes the exact prefix reserved by Record/Replay access placement for a
-// later synchronization pass. The access and synchronization lowerings are
-// separate mutation stages, so the consumer must not rediscover this strided
-// layout from incidental patch ordering or from the generated instruction
-// bytes.
-struct MoiReservedBarrierIslandLayout {
-  uint64_t begin = 0u;
-  uint32_t slot_words = kMoiRecordReplayIndirectIslandWords;
-  uint64_t reserved_slot_count = 0u;
-};
-
-// Carries only the access-placement facts needed by the immediately following
-// Record/Replay synchronization lowering. Keeping this value local to the MOI
-// pipeline makes the stage dependency explicit and prevents temporary layout
-// state from becoming part of ConSanTransformArtifacts's externally visible transform
-// result. Relay ranges are half-open and contain generated storage that the
-// synchronization stage may use only while each word remains pristine.
-struct MoiRecordReplayAccessOutput {
-  std::optional<MoiReservedBarrierIslandLayout> reserved_sync_islands;
-  std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
-};
-
 /// Count synchronization entry islands that an access pass must leave for its
 /// downstream evidence pass. Placement consumes the observation plan's
 /// complete barrier-decision ledger instead of rebuilding it from decoded
@@ -140,20 +105,6 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
           : 0u;
   return barrier_count + fence_count;
 }
-
-[[nodiscard]] constexpr uint32_t
-moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
-  return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
-}
-
-// A full-pressure fixed-stack Record/Replay site can preserve a borrowed
-// PC/SCC tuple in lanes of its already-dead probe scratch VGPR. Relocating a
-// short owner-local continuation gives the anchor enough room for that backup,
-// an empty-EXEC bypass, and an indirect entry. Twenty words is deliberately a
-// layout contract rather than a body-size guess: both CDNA4 and gfx1250 fit
-// their longest literal target materialization inside this envelope.
-constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
-
 
 void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
                                      rj_code_arch_t arch) {
@@ -1350,6 +1301,13 @@ struct MoiResourcePlanningState {
   }
 };
 
+std::span<const ConSanPreappliedReservedRange>
+moi_resource_reserved_ranges(const MoiResourcePlanningState &state) {
+  return state.reserved_ranges;
+}
+
+Decoder *moi_resource_decoder(MoiResourcePlanningState &state) { return state.decoder.get(); }
+
 void MoiResourcePlanningStateDeleter::operator()(MoiResourcePlanningState *state) const {
   delete state;
 }
@@ -1652,12 +1610,6 @@ enum class MoiRelocatableHostScalarState : uint8_t {
 
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
-
-struct MoiInlineDenseRouterScalarAbi {
-  MoiIndirectJumpSgprs indirect_jump;
-  uint16_t dispatch_key_sgpr = 0;
-  std::optional<uint16_t> call_return_sgpr;
-};
 
 [[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
 moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
@@ -2007,29 +1959,6 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                                      candidates, search.owner_begin, claimed_host_ranges);
 }
 
-/// Scalar/control-flow contract used while planning a shared access-entry
-/// dispatcher. Record-like probes use the common Record/Replay entry-island
-/// shape, including its spill-backed variant. Inline Shadow instead requires
-/// the complete Inline dispatcher ABI and its fixed entry-island shape.
-enum class MoiDenseAccessRouteAbi {
-  RecordReplay,
-  Sampled,
-  InlineShadow,
-};
-
-/// Complete placement result for the dense access-entry mechanism.
-///
-/// The partition is retained because later emission must visit exactly the
-/// same owner groups and relay-bank indices chosen here. The two candidate
-/// maps identify sites admitted to a shared dispatcher; entry hosts own any
-/// pristine instructions displaced to make a common entry reachable.
-struct MoiDenseAccessRoutePlan {
-  consan_detail::MoiDenseCandidatePartition partition;
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> entry_islands;
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dispatchers;
-  std::map<uint64_t, MoiDenseEntryHost> entry_hosts;
-};
-
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
@@ -2157,7 +2086,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
     uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
     MoiDenseAccessRouteAbi abi, MoiLocalNopIslandAllocator *local_entry_islands,
-    BranchOnlyRelayRouter *relay_ownership = nullptr) {
+    BranchOnlyRelayRouter *relay_ownership) {
   MoiDenseAccessRoutePlan plan{
       .partition =
           consan_detail::partition_moi_dense_candidates(candidates, max_candidates_per_group),
@@ -2895,90 +2824,6 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
   }
 }
 
-/// Target-neutral placement and resource result shared by every planned MOI
-/// access patch.
-///
-/// This is the complete common handoff from access planning to emission. It
-/// deliberately excludes engine evidence indices, sampling gates, and shadow
-/// layouts: those values describe Record/Replay, Sampled, or Inline Shadow
-/// semantics rather than the mechanics of placing one access probe. Keeping
-/// this state in one type prevents each engine from evolving a subtly
-/// different interpretation of entry islands, displaced guest words, spill
-/// resources, private identity state, or branch-only routing.
-struct MoiPlannedAccessPatch {
-  const ConSanMoiCandidate *candidate = nullptr;
-  DbiPatchPlacement placement;
-  std::optional<uint64_t> entry_island_offset;
-  bool entry_island_at_anchor = false;
-  bool dense_call_anchor = false;
-  std::optional<uint64_t> dense_dispatcher_offset;
-  std::optional<BranchOnlyRelayRoute> branch_only_route;
-  std::vector<uint32_t> displaced_tail_words;
-  ResolvedMoiScratchPlan resources;
-  std::optional<VgprSpillSequence> spill;
-  std::optional<SgprSpillSequence> scalar_spill;
-  std::optional<uint32_t> private_epoch_offset;
-  /// Complete workitem-owner source selected during planning. When present,
-  /// emission either consumes the live entry ABI value or reloads its private
-  /// capture; it never receives an independently optional offset/shift pair.
-  std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
-  uint32_t persistent_private_state_end = 0;
-  uint32_t required_private_bytes = 0;
-  uint32_t guest_instruction_word_count = 0;
-};
-
-/// Additional common plan for Record/Replay and Sampled access bodies.
-///
-/// Both engines relocate a guest access into a replayable body and therefore
-/// share entry-island sizing, target-native selectable-bank state, private workgroup
-/// identity, the relocated guest offset, and operand-overlap handling. Inline
-/// Shadow does not replay the access and intentionally does not inherit this
-/// stronger contract.
-struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
-  /// Reserved entry-island capacity in instruction words.
-  uint64_t entry_island_word_count = 0;
-  /// Selectable-VGPR-bank state that must be restored around the relocated
-  /// guest instruction. Targets without that facility leave it absent.
-  std::optional<uint16_t> incoming_vgpr_bank_mode;
-  ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
-  uint32_t probe_guest_instruction_offset = 0;
-  bool spill_overlaps_guest_operands = false;
-  bool wrap_embedded_guest_vgpr_bank = false;
-  bool branch_only_scalar_spill = false;
-};
-
-/// Resolved entry-island geometry for one access body placed outside its
-/// original instruction range.
-///
-/// All MOI access engines use the same three-step search: try the engine's
-/// pre-reserved island, try a reachable pristine NOP island, and finally
-/// relocate a single-entry instruction prefix at the access anchor. This
-/// value records which choice succeeded and owns any guest tail displaced by
-/// the third choice. Flavor policy still decides whether an appended body is
-/// wanted and whether a particular relocated prefix is semantically safe.
-struct MoiAccessEntryIslandPlan {
-  /// Text offset of the selected entry island. An absent value represents an
-  /// access that needs no indirect entry because it remains inline.
-  std::optional<uint64_t> offset;
-
-  /// Number of instruction words reserved for the island at `offset`.
-  uint64_t word_count = 0u;
-
-  /// Total original access-prefix size replaced by the entry branch.
-  uint32_t original_size = 0u;
-
-  /// Guest instructions following the admitted access when the island
-  /// replaces a longer, single-entry prefix at the original anchor.
-  std::vector<uint32_t> displaced_tail_words;
-
-  /// Whether the island itself occupies the original access anchor.
-  bool at_anchor = false;
-
-  /// Whether planning selected the engine's pre-reserved island rather than
-  /// a pristine local island or a relocated anchor prefix.
-  bool uses_preferred_island = false;
-};
-
 [[nodiscard]] bool moi_entry_window_is_single_entry(const BlockOffsetIndex &block_index,
                                                     uint64_t text_offset, uint64_t byte_count);
 
@@ -3049,6 +2894,18 @@ template <typename RelocationAllowed>
   return plan;
 }
 
+std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
+    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
+    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
+    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
+    MoiResourcePlanningState &resource_state, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
+  return plan_moi_access_entry_island(
+      original_text, candidate, required_island_words, preferred_offset, preferred_island_words,
+      use_preferred_without_direct_branch, local_islands, resource_state.block_index,
+      resource_state.decoder.get(), arch, errors, [](uint64_t, uint64_t) { return true; });
+}
+
 /// An at-anchor entry island replaces a multi-instruction owner-local window.
 /// Every original control-flow edge into that window must therefore enter at
 /// its first instruction. Staying within the anchor's original basic block is
@@ -3062,6 +2919,11 @@ template <typename RelocationAllowed>
   BasicBlock *block = block_for_offset(block_index, text_offset);
   return block != nullptr && text_offset >= block->start_offset() &&
          text_offset <= block->end_offset() && byte_count <= block->end_offset() - text_offset;
+}
+
+bool moi_resource_entry_window_is_single_entry(const MoiResourcePlanningState &state,
+                                               uint64_t text_offset, uint64_t byte_count) {
+  return moi_entry_window_is_single_entry(state.block_index, text_offset, byte_count);
 }
 
 /// Finds one owner-common VGPR that is dead immediately before @p text_offset
@@ -3141,6 +3003,13 @@ template <typename PersistentVgprState>
       return candidate;
   }
   return std::nullopt;
+}
+
+std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
+    uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point) {
+  return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
+                                              point);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *

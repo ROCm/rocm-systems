@@ -6,16 +6,22 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
+#include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
+#include "rocjitsu/code/patch/trampoline_builder.h"
 
+#include <map>
 #include <memory>
 #include <unordered_map>
 
 namespace rocjitsu {
 class AmdGpuCodeObject;
 class CodeObjectPatcher;
+class Decoder;
 } // namespace rocjitsu
 
 namespace rocjitsu::consan_moi_impl {
@@ -24,6 +30,7 @@ namespace rocjitsu::consan_moi_impl {
 /// Engine components may retain and pass this workspace, but cannot inspect
 /// placement's caches or owner analysis directly.
 struct MoiResourcePlanningState;
+class MoiLocalNopIslandAllocator;
 
 struct MoiResourcePlanningStateDeleter {
   void operator()(MoiResourcePlanningState *state) const;
@@ -34,6 +41,16 @@ using MoiResourcePlanningStatePtr =
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
+inline constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+inline constexpr uint32_t kMoiInlineShadowIndirectIslandWords = 8u;
+// A branch-only access layout retains a two-word relay pair after every
+// reserved synchronization island. The island remains available to the later
+// sync pass while the dedicated pair forms a capacity-accounted relay spine.
+inline constexpr uint32_t kMoiRecordReplayBarrierRelayWords = 2u;
+inline constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
+    kMoiRecordReplayIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
+inline constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
+inline constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
 
 [[nodiscard]] constexpr bool moi_supports_dynamic_stack_spill(rj_code_arch_t arch,
                                                               ConSanMoiEngine engine) {
@@ -73,6 +90,142 @@ struct MoiDenseEntryHost {
   uint64_t body_offset = 0;
 };
 
+/// Target-neutral placement and resource result shared by every planned MOI
+/// access patch. Engine evidence semantics are deliberately absent.
+struct MoiPlannedAccessPatch {
+  const ConSanMoiCandidate *candidate = nullptr;
+  DbiPatchPlacement placement;
+  std::optional<uint64_t> entry_island_offset;
+  bool entry_island_at_anchor = false;
+  bool dense_call_anchor = false;
+  std::optional<uint64_t> dense_dispatcher_offset;
+  std::optional<BranchOnlyRelayRoute> branch_only_route;
+  std::vector<uint32_t> displaced_tail_words;
+  ResolvedMoiScratchPlan resources;
+  std::optional<VgprSpillSequence> spill;
+  std::optional<SgprSpillSequence> scalar_spill;
+  std::optional<uint32_t> private_epoch_offset;
+  std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> owner_derivation;
+  uint32_t persistent_private_state_end = 0;
+  uint32_t required_private_bytes = 0;
+  uint32_t guest_instruction_word_count = 0;
+};
+
+/// Common replay-body placement state used by Record/Replay and Sampled.
+struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
+  uint64_t entry_island_word_count = 0;
+  std::optional<uint16_t> incoming_vgpr_bank_mode;
+  ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
+  uint32_t probe_guest_instruction_offset = 0;
+  bool spill_overlaps_guest_operands = false;
+  bool wrap_embedded_guest_vgpr_bank = false;
+  bool branch_only_scalar_spill = false;
+};
+
+enum class MoiDenseAccessRouteAbi {
+  RecordReplay,
+  Sampled,
+  InlineShadow,
+};
+
+struct MoiInlineDenseRouterScalarAbi {
+  MoiIndirectJumpSgprs indirect_jump;
+  uint16_t dispatch_key_sgpr = 0;
+  std::optional<uint16_t> call_return_sgpr;
+};
+
+[[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
+moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
+                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+
+struct MoiDenseAccessRoutePlan {
+  consan_detail::MoiDenseCandidatePartition partition;
+  std::unordered_map<const ConSanMoiCandidate *, uint64_t> entry_islands;
+  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dispatchers;
+  std::map<uint64_t, MoiDenseEntryHost> entry_hosts;
+};
+
+struct MoiAccessEntryIslandPlan {
+  std::optional<uint64_t> offset;
+  uint64_t word_count = 0u;
+  uint32_t original_size = 0u;
+  std::vector<uint32_t> displaced_tail_words;
+  bool at_anchor = false;
+  bool uses_preferred_island = false;
+};
+
+[[nodiscard]] constexpr uint32_t
+moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
+  return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
+}
+
+[[nodiscard]] std::vector<const ConSanMoiCandidate *>
+order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
+                                   const ConSanObservationPlan &observation_plan,
+                                   bool track_atomics);
+
+[[nodiscard]] uint64_t
+moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
+                                      const ConSanObservationPlan &observation_plan,
+                                      const ConSanRequest &request, const TransformPolicy &policy,
+                                      const ConSanMoiOperatingPoint &point);
+
+[[nodiscard]] std::span<const ConSanPreappliedReservedRange>
+moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
+
+[[nodiscard]] Decoder *moi_resource_decoder(MoiResourcePlanningState &state);
+
+[[nodiscard]] bool moi_resource_entry_window_is_single_entry(const MoiResourcePlanningState &state,
+                                                             uint64_t text_offset,
+                                                             uint64_t byte_count);
+
+[[nodiscard]] const ConSanCandidateResourcePlan *
+resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
+                            const ConSanMoiCandidate &candidate);
+
+[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
+    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
+    std::span<const uint64_t> owner_descriptor_offsets);
+
+[[nodiscard]] bool
+moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
+                                             std::span<const uint64_t> owner_descriptor_offsets);
+
+[[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
+collect_moi_synchronization_ranges(const ProgramInventory &program_inventory);
+
+[[nodiscard]] bool
+moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResourcePlan> plans,
+                                            const ConSanMoiOperatingPoint &operating_point,
+                                            const ConSanMoiCandidate &candidate);
+
+[[nodiscard]] bool plan_moi_access_direct_reservoirs(
+    const ProgramInventory &program_inventory, const TransformPolicy &policy, rj_code_arch_t arch,
+    const MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
+    std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
+    std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
+    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, uint64_t route_frontier_source,
+    size_t target_relay_count, DbiPatchPlacementPlanner &placement_planner,
+    BranchOnlyRelayRouter &branch_router, BranchOnlyDirectRelayReservoirSet &reservoirs,
+    std::string *error_out);
+
+[[nodiscard]] MoiDenseAccessRoutePlan plan_moi_dense_access_routes(
+    const ProgramInventory &program_inventory,
+    std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
+    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
+    std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
+    uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
+    MoiDenseAccessRouteAbi abi, MoiLocalNopIslandAllocator *local_entry_islands,
+    BranchOnlyRelayRouter *relay_ownership = nullptr);
+
+[[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
+    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
+    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
+    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
+    MoiResourcePlanningState &resource_state, rj_code_arch_t arch,
+    std::vector<std::string> &errors);
+
 [[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
     const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
     std::span<const ConSanCandidateResourcePlan> prior_site_plans = {});
@@ -100,6 +253,27 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
                          const ConSanMoiOperatingPoint &allocation, uint16_t expected_count);
+
+[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const ConSanRequest &request,
+                                                     const BoundRuntimeResources &resources,
+                                                     const ConSanMoiOperatingPoint &point,
+                                                     const ConSanMoiCandidate &candidate,
+                                                     rj_code_arch_t arch);
+
+[[nodiscard]] std::optional<ResolvedMoiScratchPlan>
+resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
+                    const ConSanMoiCandidate &candidate,
+                    const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count);
+
+[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
+    uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point);
+
+void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
+                                          const MoiPlannedAccessPatch &patch);
+
+void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
+                                       const MoiPlannedReplayAccessPatch &patch);
 
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);

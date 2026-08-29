@@ -164,7 +164,8 @@ void try_apply_first_light_access_record_patch(
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(text_bytes, result.program_inventory, result.patches, arch,
-                                local_entry_island_words, resource_state.reserved_ranges);
+                                local_entry_island_words,
+                                moi_resource_reserved_ranges(resource_state));
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result.program_inventory, result.resource_plans, options, options, arch, resource_state,
@@ -266,14 +267,15 @@ void try_apply_first_light_access_record_patch(
   };
   std::vector<BorrowedEntryProtectedRange> borrowed_entry_protected_ranges;
   borrowed_entry_protected_ranges.reserve(candidates.size() + synchronization_ranges.size() +
-                                          resource_state.reserved_ranges.size());
+                                          moi_resource_reserved_ranges(resource_state).size());
   for (const ConSanMoiCandidate *candidate : candidates) {
     borrowed_entry_protected_ranges.push_back(
         {candidate->anchor(), candidate->anchor() + candidate->size(), candidate});
   }
   for (const auto &[begin, end] : synchronization_ranges)
     borrowed_entry_protected_ranges.push_back({begin, end, nullptr});
-  for (const ConSanPreappliedReservedRange &range : resource_state.reserved_ranges) {
+  for (const ConSanPreappliedReservedRange &range :
+       moi_resource_reserved_ranges(resource_state)) {
     borrowed_entry_protected_ranges.push_back(
         {range.text_offset, range.text_offset + range.size, nullptr});
   }
@@ -292,14 +294,14 @@ void try_apply_first_light_access_record_patch(
     while (displaced_words.size() < kMoiRecordReplayBorrowedEntryIslandWords) {
       auto decoded = decode_relocatable_entry_instruction(
           original_text, candidate->anchor() + displaced_words.size() * sizeof(uint32_t), arch,
-          ignored_errors, resource_state.decoder.get());
+          ignored_errors, moi_resource_decoder(resource_state));
       if (!decoded)
         return std::nullopt;
       displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
     }
     const uint64_t displaced_end = candidate->anchor() + displaced_words.size() * sizeof(uint32_t);
-    if (!moi_entry_window_is_single_entry(resource_state.block_index, candidate->anchor(),
-                                          displaced_words.size() * sizeof(uint32_t))) {
+    if (!moi_resource_entry_window_is_single_entry(
+            resource_state, candidate->anchor(), displaced_words.size() * sizeof(uint32_t))) {
       return std::nullopt;
     }
     auto protected_range =
@@ -730,7 +732,7 @@ void try_apply_first_light_access_record_patch(
               borrowed_entry_words_for_candidate(candidate_ptr).value_or(std::vector<uint32_t>{});
           const size_t candidate_words = candidate.size() / sizeof(uint32_t);
           const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
-          const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
+          const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr_for_point(
               resource_state, resources->owner_descriptor_file_offsets, candidate.anchor(),
               resources->required_vgpr_count, candidate_options);
           if (jump_sgprs && backup_vgpr && candidate_words <= displaced_words.size() &&
@@ -818,9 +820,8 @@ void try_apply_first_light_access_record_patch(
         auto entry_plan = plan_moi_access_entry_island(
             original_text, candidate, candidate_entry_island_words, preferred_entry_island,
             use_dense_call ? candidate_entry_island_words : access_relay_words, use_dense_call,
-            local_entry_islands ? &*local_entry_islands : nullptr, resource_state.block_index,
-            resource_state.decoder.get(), arch, candidate_errors,
-            [](uint64_t, uint64_t) { return true; });
+            local_entry_islands ? &*local_entry_islands : nullptr, resource_state, arch,
+            candidate_errors);
         if (!entry_plan) {
           result.warnings.emplace_back(
               "ConSan MOI first-light probe skipped load/store site: entry island is unreachable");

@@ -9,6 +9,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
+#include "rocjitsu/code/patch/consan/consan_moi_common_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
@@ -160,10 +161,11 @@ template <typename PlannedPatch, typename Eligible>
         !eligible(*group.front(), group_point)) {
       continue;
     }
-    if (!emit_moi_dense_access_group(std::span<const PlannedPatch *const>(group), dispatcher_offset,
-                                     dense_entry_hosts, request, group_point, arch,
-                                     access_slot_words, collapse_spill_router_for_explicit_key,
-                                     probe_name, new_text, patches, errors)) {
+    std::vector<const MoiPlannedAccessPatch *> common_group(group.begin(), group.end());
+    if (!emit_moi_dense_access_group(common_group, dispatcher_offset, dense_entry_hosts, request,
+                                     group_point, arch, access_slot_words,
+                                     collapse_spill_router_for_explicit_key, probe_name, new_text,
+                                     patches, errors)) {
       return false;
     }
   }
