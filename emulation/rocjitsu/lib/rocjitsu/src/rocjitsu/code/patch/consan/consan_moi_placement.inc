@@ -1350,6 +1350,26 @@ struct MoiResourcePlanningState {
   }
 };
 
+void MoiResourcePlanningStateDeleter::operator()(MoiResourcePlanningState *state) const {
+  delete state;
+}
+
+MoiResourcePlanningStatePtr make_moi_resource_planning_state(
+    const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
+    std::span<const ConSanCandidateResourcePlan> prior_site_plans) {
+  return MoiResourcePlanningStatePtr(
+      new MoiResourcePlanningState(problem, allocation, prior_site_plans));
+}
+
+MoiResourcePlanningStatePtr make_moi_resource_planning_state(
+    std::span<const uint8_t> input, rj_code_arch_t arch,
+    const ProgramInventory &program_inventory, const ConSanObservationPlan &observation_plan,
+    std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
+    const BoundRuntimeResources &resources, const ConSanMoiOperatingPoint &point) {
+  return MoiResourcePlanningStatePtr(new MoiResourcePlanningState(
+      input, arch, program_inventory, observation_plan, site_plans, request, resources, point));
+}
+
 /// Conservatively summarize every instruction in a code object's declared
 /// function ranges when those ranges cover the complete text section except
 /// for verified compiler/linker padding.
@@ -2365,9 +2385,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
                        const ConSanDebugOverrides &debug, const ConSanMoiOperatingPoint &point,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
                        uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
-                       uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
-                       const ConSanAtomicLoweringForm *atomic_form = nullptr,
-                       bool require_spill = false) {
+                       uint16_t scratch_count, const ConSanMoiCandidate *access_candidate,
+                       const ConSanAtomicLoweringForm *atomic_form, bool require_spill) {
   ConSanCandidateResourcePlan plan;
   plan.site_kind = site_kind;
   plan.candidate_index = candidate_index;

@@ -10,6 +10,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 
+#include <memory>
 #include <unordered_map>
 
 namespace rocjitsu {
@@ -18,6 +19,18 @@ class CodeObjectPatcher;
 } // namespace rocjitsu
 
 namespace rocjitsu::consan_moi_impl {
+
+/// Opaque decoded-CFG and liveness workspace owned by resource placement.
+/// Engine components may retain and pass this workspace, but cannot inspect
+/// placement's caches or owner analysis directly.
+struct MoiResourcePlanningState;
+
+struct MoiResourcePlanningStateDeleter {
+  void operator()(MoiResourcePlanningState *state) const;
+};
+
+using MoiResourcePlanningStatePtr =
+    std::unique_ptr<MoiResourcePlanningState, MoiResourcePlanningStateDeleter>;
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
@@ -60,6 +73,34 @@ struct MoiDenseEntryHost {
   uint64_t body_offset = 0;
 };
 
+[[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
+    const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
+    std::span<const ConSanCandidateResourcePlan> prior_site_plans = {});
+
+[[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
+    std::span<const uint8_t> input, rj_code_arch_t arch, const ProgramInventory &program_inventory,
+    const ConSanObservationPlan &observation_plan,
+    std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
+    const BoundRuntimeResources &resources, const ConSanMoiOperatingPoint &point);
+
+[[nodiscard]] ConSanCandidateResourcePlan
+plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &semantic_request,
+                       const ConSanDebugOverrides &debug, const ConSanMoiOperatingPoint &point,
+                       ConSanResourceSiteKind site_kind, size_t candidate_index,
+                       uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
+                       uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
+                       const ConSanAtomicLoweringForm *atomic_form = nullptr,
+                       bool require_spill = false);
+
+[[nodiscard]] const ConSanCandidateResourcePlan *
+resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
+                       ConSanResourceSiteKind site_kind, uint64_t text_offset);
+
+[[nodiscard]] std::optional<ResolvedMoiScratchPlan>
+resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
+                         const ConSanMoiOperatingPoint &site_point,
+                         const ConSanMoiOperatingPoint &allocation, uint16_t expected_count);
+
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);
 [[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &descriptor);
@@ -101,6 +142,9 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
     const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets);
+
+void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
+                                  const ResolvedMoiScratchPlan &plan);
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &plan, const ConSanRequest &request,

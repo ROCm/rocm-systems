@@ -35,6 +35,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
+#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
@@ -170,8 +171,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_record_atomic.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
 
