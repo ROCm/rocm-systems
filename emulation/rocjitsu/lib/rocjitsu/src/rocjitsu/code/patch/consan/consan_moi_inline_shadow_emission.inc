@@ -3269,10 +3269,6 @@
   return words;
 }
 
-[[nodiscard]] bool append_moi_scc_preserving_indirect_jump(
-    std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
-    uint16_t pc_sgpr, uint16_t saved_scc_sgpr, bool capture_scc, rj_code_arch_t arch);
-
 struct MoiDenseBarrierRouterScalarAbi {
   uint16_t jump_pc_sgpr = 0;
   uint16_t saved_scc_sgpr = 0;

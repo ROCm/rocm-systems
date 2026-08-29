@@ -376,38 +376,6 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   return true;
 }
 
-[[nodiscard]] bool append_moi_scc_preserving_indirect_jump(
-    std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
-    uint16_t pc_sgpr, uint16_t saved_scc_sgpr, bool capture_scc, rj_code_arch_t arch) {
-  if (capture_scc) {
-    const auto save_scc = instrumentation::build_s_cselect_b32(
-        saved_scc_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-    if (!save_scc)
-      return false;
-    words.push_back(*save_scc);
-  }
-  const uint64_t getpc_text_offset =
-      words_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
-  words.push_back(build_s_getpc_b64(pc_sgpr, arch));
-  const uint64_t pc_after_getpc = getpc_text_offset + sizeof(uint32_t);
-  if (target_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-    return false;
-  }
-  const int64_t delta =
-      static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch)))
-    return false;
-  const auto restore_scc =
-      instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
-  if (!restore_scc)
-    return false;
-  words.push_back(*restore_scc);
-  words.push_back(build_s_setpc_b64(pc_sgpr, arch));
-  return true;
-}
-
 [[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry>
 build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t body_text_offset,
                                        uint16_t backup_vgpr, const MoiIndirectJumpSgprs &jump_sgprs,

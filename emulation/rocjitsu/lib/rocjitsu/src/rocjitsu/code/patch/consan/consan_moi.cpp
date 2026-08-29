@@ -108,6 +108,7 @@ using consan_moi_detail::append_dynamic_record_store_workgroup_source;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
+using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_publish_visible_evidence_if_zero;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;

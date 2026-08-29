@@ -2552,10 +2552,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                       uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
                                       uint16_t temporary_vgpr, rj_code_arch_t arch);
 
-[[nodiscard]] bool append_moi_scc_preserving_indirect_jump(
-    std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
-    uint16_t pc_sgpr, uint16_t saved_scc_sgpr, bool capture_scc, rj_code_arch_t arch);
-
 /// Entry-island transaction used when a spill-backed Record/Replay probe must
 /// borrow its indirect-jump scalar tuple before the ordinary body save can
 /// protect it. The entry carrier and matching scalar restore are one plan so
