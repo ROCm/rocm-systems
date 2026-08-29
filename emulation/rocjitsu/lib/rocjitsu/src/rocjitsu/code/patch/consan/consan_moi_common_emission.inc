@@ -2348,27 +2348,28 @@ private:
 }
 
 [[nodiscard]] bool append_inline_shadow_owner_field(
-    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t low_vgpr, uint16_t tmp_vgpr,
+    std::vector<uint32_t> &words, const ConSanRequest &request,
+    const ConSanMoiOperatingPoint &point, uint16_t low_vgpr, uint16_t tmp_vgpr,
     uint16_t owner_backup_vgpr, rj_code_arch_t arch,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors) {
-  if (options.moi_owner_vgpr) {
-    return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
+  if (point.moi_owner_vgpr) {
+    return append_add_shifted_vgpr_field(words, low_vgpr, *point.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
   }
-  if (options.moi_persistent_sgprs.owner) {
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_sgprs.owner, arch));
+  if (point.moi_persistent_sgprs.owner) {
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *point.moi_persistent_sgprs.owner, arch));
     return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
   }
-  if (!options.automatic_moi_private_epoch) {
+  if (!point.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no persistent owner representation");
     return false;
   }
 
-  switch (options.moi_owner_source) {
+  switch (request.moi_owner_source) {
   case ConSanMoiOwnerSource::Automatic:
     errors.emplace_back("ConSan MOI inline-shadow probe has an unresolved automatic owner source");
     return false;
@@ -2386,14 +2387,14 @@ private:
     break;
   }
   case ConSanMoiOwnerSource::HwId: {
-    if (!options.moi_owner_sgpr) {
+    if (!point.moi_owner_sgpr) {
       errors.emplace_back("ConSan MOI private owner hw_id source requires "
                           "RJ_CONSAN_MOI_OWNER_SGPR");
       return false;
     }
-    if (options.automatic_moi_owner_sgpr) {
+    if (point.automatic_moi_owner_sgpr) {
       const auto save = instrumentation::build_v_writelane_b32(owner_backup_vgpr,
-                                                               *options.moi_owner_sgpr, 0u, arch);
+                                                               *point.moi_owner_sgpr, 0u, arch);
       if (!save) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not save its borrowed owner scalar");
@@ -2402,20 +2403,20 @@ private:
       words.insert(words.end(), save->begin(), save->end());
     }
     const ConSanTargetProfile *target = consan_target_profile(arch);
-    const consan_detail::MoiResidentWaveOwnerRequest request{
-        .destination_sgpr = *options.moi_owner_sgpr,
+    const consan_detail::MoiResidentWaveOwnerRequest owner_request{
+        .destination_sgpr = *point.moi_owner_sgpr,
         .one_based = true,
     };
     if (target == nullptr ||
-        !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
+        !consan_detail::append_moi_resident_wave_owner(words, owner_request, *target)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not encode its resident-wave owner");
       return false;
     }
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_owner_sgpr, arch));
-    if (options.automatic_moi_owner_sgpr) {
-      const auto restore = instrumentation::build_v_readlane_b32(*options.moi_owner_sgpr,
-                                                                 owner_backup_vgpr, 0u, arch);
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *point.moi_owner_sgpr, arch));
+    if (point.automatic_moi_owner_sgpr) {
+      const auto restore =
+          instrumentation::build_v_readlane_b32(*point.moi_owner_sgpr, owner_backup_vgpr, 0u, arch);
       const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!restore || !wait) {
         errors.emplace_back(
@@ -2435,23 +2436,23 @@ private:
 }
 
 [[nodiscard]] bool append_inline_shadow_epoch_field(std::vector<uint32_t> &words,
-                                                    const MoiOptions &options,
+                                                    const ConSanMoiOperatingPoint &point,
                                                     std::optional<uint32_t> private_epoch_offset,
                                                     uint16_t low_vgpr, uint16_t tmp_vgpr,
                                                     rj_code_arch_t arch,
                                                     std::vector<std::string> &errors) {
-  if (options.moi_epoch_vgpr) {
-    return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_epoch_vgpr,
+  if (point.moi_epoch_vgpr) {
+    return append_add_shifted_vgpr_field(words, low_vgpr, *point.moi_epoch_vgpr,
                                          consan_moi_exact_shadow::epoch_shift,
                                          consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
   }
-  if (options.moi_persistent_sgprs.epoch) {
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_sgprs.epoch, arch));
+  if (point.moi_persistent_sgprs.epoch) {
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *point.moi_persistent_sgprs.epoch, arch));
     return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                          consan_moi_exact_shadow::epoch_shift,
                                          consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
   }
-  if (!options.automatic_moi_private_epoch || !private_epoch_offset) {
+  if (!point.automatic_moi_private_epoch || !private_epoch_offset) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no persistent epoch representation");
     return false;
   }
@@ -2524,11 +2525,11 @@ append_add_exact_shadow_generation(std::vector<uint32_t> &words, uint16_t packed
 }
 
 [[nodiscard]] MoiWorkgroupKeyRegisterPlan
-moi_workgroup_key_register_plan(const MoiOptions &options) {
+moi_workgroup_key_register_plan(const ConSanMoiOperatingPoint &point) {
   return MoiWorkgroupKeyRegisterPlan{
-      .exec_save_sgpr = options.moi_exec_save_sgpr,
-      .cached_key_vgpr = options.moi_workgroup_key_vgpr,
-      .cached_key_sgpr = options.moi_persistent_sgprs.workgroup_key,
+      .exec_save_sgpr = point.moi_exec_save_sgpr,
+      .cached_key_vgpr = point.moi_workgroup_key_vgpr,
+      .cached_key_sgpr = point.moi_persistent_sgprs.workgroup_key,
   };
 }
 

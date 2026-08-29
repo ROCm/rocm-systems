@@ -2666,7 +2666,8 @@
   const bool generation_tagged_local_shadow =
       workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
-  MoiWorkgroupKeyRegisterPlan key_registers = moi_workgroup_key_register_plan(options);
+  MoiWorkgroupKeyRegisterPlan key_registers =
+      moi_workgroup_key_register_plan(static_cast<const ConSanMoiOperatingPoint &>(options));
   // Eagerly initialized and bitmap-backed workgroup-local mirrors are
   // physically unreachable from every other live workgroup and omit the
   // generation field. A generation-tagged local mirror deliberately retains
@@ -2815,13 +2816,16 @@
     return std::nullopt;
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, high_vgpr, arch,
-                                        owner_derivation, errors)) {
+  if (!append_inline_shadow_owner_field(words, static_cast<const ConSanRequest &>(options),
+                                        static_cast<const ConSanMoiOperatingPoint &>(options),
+                                        low_vgpr, tmp_vgpr, high_vgpr, arch, owner_derivation,
+                                        errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }
-  if (!append_inline_shadow_epoch_field(words, options, private_epoch_offset, low_vgpr, tmp_vgpr,
-                                        arch, errors)) {
+  if (!append_inline_shadow_epoch_field(words,
+                                        static_cast<const ConSanMoiOperatingPoint &>(options),
+                                        private_epoch_offset, low_vgpr, tmp_vgpr, arch, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode epoch field");
     return std::nullopt;
   }

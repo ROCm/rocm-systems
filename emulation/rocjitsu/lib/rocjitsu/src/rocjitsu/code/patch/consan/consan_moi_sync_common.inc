@@ -2609,10 +2609,11 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   failure.stage = "transaction initialization";
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
-      !append_inline_workgroup_key(words, workgroup_sources,
-                                   moi_workgroup_key_register_plan(options), workgroup_key,
-                                   static_cast<uint16_t>(base + 6u), temporary,
-                                   /*original_exec_save_offset=*/12u, arch)) {
+      !append_inline_workgroup_key(
+          words, workgroup_sources,
+          moi_workgroup_key_register_plan(static_cast<const ConSanMoiOperatingPoint &>(options)),
+          workgroup_key, static_cast<uint16_t>(base + 6u), temporary,
+          /*original_exec_save_offset=*/12u, arch)) {
     errors.emplace_back("ConSan MOI inline release could not initialize its EXEC transaction");
     return false;
   }
@@ -3521,10 +3522,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u), arch);
     if (!restore_original_exec ||
         !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
-        !append_inline_workgroup_key(words, *workgroup_sources,
-                                     moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
-                                     temporary_vgpr, value_vgpr,
-                                     /*original_exec_save_offset=*/12u, arch) ||
+        !append_inline_workgroup_key(
+            words, *workgroup_sources,
+            moi_workgroup_key_register_plan(static_cast<const ConSanMoiOperatingPoint &>(options)),
+            workgroup_key_vgpr, temporary_vgpr, value_vgpr,
+            /*original_exec_save_offset=*/12u, arch) ||
         !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,
                                            address_vgpr, *options.scratch_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline acquire could not snapshot release version");
@@ -3620,10 +3622,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
 
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
-      !append_inline_workgroup_key(words, *workgroup_sources,
-                                   moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
-                                   temporary_vgpr, value_vgpr,
-                                   /*original_exec_save_offset=*/12u, arch) ||
+      !append_inline_workgroup_key(
+          words, *workgroup_sources,
+          moi_workgroup_key_register_plan(static_cast<const ConSanMoiOperatingPoint &>(options)),
+          workgroup_key_vgpr, temporary_vgpr, value_vgpr,
+          /*original_exec_save_offset=*/12u, arch) ||
       !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,
                                          address_vgpr, *options.scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI inline atomic patch could not derive an address-indexed slot");
