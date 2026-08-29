@@ -1344,6 +1344,47 @@ closures.
 textual translation units or on include-order visibility between conceptual
 components.
 
+#### F6 checkpoint — complete (2026-08-29)
+
+F6 was implemented by commits `4f56ace115` through `2152c3da24`. Inventory
+analysis, semantic classification, policy assembly, placement, perturbation,
+composition, fault selection and mutation, SuperCollider, final validation,
+and the MOI subsystems are now registered compiled sources. MOI has compiled
+components for target-address operations, native ABI and relocation,
+candidate/probe planning, resource solving, placement, shared lowering,
+prologue and synchronization support, and the Record/Replay, Sampled, and
+InlineShadow engines. The former target-address tail of
+`consan_moi_model.cpp` is owned by `consan_moi_target_address.cpp`.
+
+Implementation fragments now have one owning translation unit rather than
+depending on visibility established by a preceding include. `consan_moi.cpp`
+is a 671-line top-level coordinator with no implementation `.inc` include.
+The largest compiled implementation body is the approximately 6,750-line MOI
+placement component; the SuperCollider family component is approximately
+7,100 lines including its named common, LDS, and flat regions. Neither is
+textually combined with the coordinator or another conceptual component.
+
+The MOI placement workspace is opaque outside its component and is created and
+owned through `MoiResourcePlanningStatePtr`. Engines and the resource pipeline
+consume semantic placement queries instead of inspecting CFG blocks, liveness
+objects, owner contexts, decoder caches, or reservation storage. Record/Replay
+fence lowering and Sampled synchronization were moved out of the coordinator;
+Sampled scratch sizing and operand-recovery rules form a pure mode-specific
+resource contract rather than leaking from an emission header into placement.
+The placement source no longer includes engine or target-emission headers.
+
+Target-operation sources do not decide observation coverage or engine evidence
+policy, and engine sources do not include generated target encodings. Exact
+multi-mode behavior and family-shared mechanics are named compiled components,
+including exact-shadow emission, shared MOI lowering, synchronization emission,
+relay operations, and SuperCollider target operations, rather than accidental
+include-order closures.
+
+The complete nonphysical gate passed 4,702/4,702 tests at `-j16` in 242.80
+seconds across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. The
+serialized physical `gfx1201` gate passed 635/635 tests at `-j1` in 106.93
+seconds.
+
 ### F7. Split the host report path
 
 Decompose `AutoMoiReportBufferRegistry::summarize` into directly testable
