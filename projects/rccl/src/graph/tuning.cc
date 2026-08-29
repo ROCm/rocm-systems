@@ -1836,7 +1836,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ceArMin     = 4ULL   * 1024 * 1024,   // 2-shot lower bound (stored; not a selector gate)
   .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging / rcclUseCeAllReduce cap
   .ceArRegMax  = 8ULL * 1024 * 1024 * 1024,   // registered CE AUTO cap (0 = unlimited)
-  // symMaxR2: suppress symk in favour of CE when recv is registered and msg > threshold.
+  // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
+  // msg > threshold.
   // AR set to 512 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
   // All other collectives: 0 (no suppression).
   .symMaxR2 = {
@@ -1844,7 +1845,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no CE path for AG symk suppression
     0,                    // [3] ReduceScatter   -- no suppression (placeholder)
-    512ULL*1024,          // [4] AllReduce       -- CE wins above 512 KiB for R2
+    512ULL*1024,          // [4] AllReduce       -- CE-registered wins above 512 KiB for R2
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
