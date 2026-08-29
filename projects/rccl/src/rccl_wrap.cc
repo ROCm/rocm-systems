@@ -646,7 +646,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
+                    size_t gfx1250Default, int minRanks) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -654,11 +654,11 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Defaul
   if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    // Default DDA requires the full 8-rank clique. With RCCL_DDA_NRANKS_RELAX=1,
-    // 2/4-rank comms clear this floor too; per-collective eligibility (only the
-    // IPC AllReduce path is relaxed) still rejects unsupported participant counts.
-    const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
-    if (comm->nRanks < ddaMinRanks) return false;
+    // minRanks is the participant-count floor supplied by the caller. Shared
+    // collectives (AllGather/ReduceScatter/AllToAll) keep the default 8-rank clique;
+    // only the AllReduce IPC path passes a relaxed floor (2) via RCCL_DDA_NRANKS_RELAX,
+    // so this gate stays uniform for every other collective.
+    if (comm->nRanks < minRanks) return false;
     if (IsArchMatch(comm->archName, "gfx942")) {
       threshold = gfx942Default;
     } else {

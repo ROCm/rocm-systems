@@ -47,12 +47,13 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   // Skip DDA if:
-  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
+  // - nRanks is not a supported DDA IPC participant count (kDdaNranks by default;
+  //   2/4/8 when RCCL_DDA_NRANKS_RELAX=1)
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
   // - the arch is not one the DDA algorithm actually runs on. The dispatch path
-  //   (rcclDdaEnabled() in collectives.cc) only enables DDA on gfx942/gfx950; on
+  //   (rcclDdaEnabled() in rccl_wrap.cc) only enables DDA on gfx942/gfx950; on
   //   every other arch the algorithm is never selected, so allocating the IPC
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
@@ -137,7 +138,19 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  void* h_ptrs[kDdaNranks];
+  // Zero the full peer table so any slot past the live prefix (nActiveRanks) reads
+  // as null rather than uninitialized device memory when RCCL_DDA_NRANKS_RELAX
+  // shrinks the participant set below kDdaNranks.
+  cudaError_t mce = cudaMemset(peerDev, 0, kDdaNranks * sizeof(void*));
+  if (mce != cudaSuccess) {
+    CUDACHECKIGNORE(cudaFree(peerDev));
+    delete handler;
+    CUDACHECKIGNORE(cudaFree(scratch));
+    WARN("ncclDdaIpcCommInit: cudaMemset(peer table) failed (%s)", cudaGetErrorString(mce));
+    return ncclSuccess;
+  }
+
+  void* h_ptrs[kDdaNranks] = {};
   for (int i = 0; i < nActiveRanks; ++i) {
     void* p = nullptr;
     res = handler->getPeerDeviceMemPtr(i, &p);
