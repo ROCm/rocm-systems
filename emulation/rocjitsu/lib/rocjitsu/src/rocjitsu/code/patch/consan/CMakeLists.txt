@@ -40,6 +40,7 @@ target_sources(
         consan_moi_sampled_access_emission.cpp
         consan_moi_sampled_atomic_emission.cpp
         consan_moi_support.cpp
+        consan_moi_sync_emission.cpp
         consan_moi_target_address.cpp
         consan_observation_policy.cpp
         consan_perturbation_policy.cpp

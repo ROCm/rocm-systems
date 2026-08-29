@@ -36,6 +36,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
@@ -169,8 +170,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_sync_common.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 

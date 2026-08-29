@@ -11,6 +11,11 @@
 
 #include <unordered_map>
 
+namespace rocjitsu {
+class AmdGpuCodeObject;
+class CodeObjectPatcher;
+} // namespace rocjitsu
+
 namespace rocjitsu::consan_moi_impl {
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
