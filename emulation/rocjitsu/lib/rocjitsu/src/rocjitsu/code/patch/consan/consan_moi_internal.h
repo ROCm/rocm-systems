@@ -1320,7 +1320,7 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
 /// Validate the site-local VGPR half of scalar-persistent MOI state before
 /// emission. This remains release-active because ConSan rewrites untrusted
 /// code objects and must fail cleanly if placement and emission ever diverge.
-[[nodiscard]] bool validate_scalar_state_temporaries(const MoiOptions &options,
+[[nodiscard]] bool validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
                                                      std::string_view consumer,
                                                      std::vector<std::string> &errors);
 
