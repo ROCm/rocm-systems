@@ -760,7 +760,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    scalar_spill_guard_bytes;
       const bool needs_chainable_entry_patch =
-          options.moi_init_owner_epoch &&
+          moi_initializes_owner_epoch(options, options) &&
           std::ranges::any_of(
               resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
                 const ConSanKernelInfo *kernel =

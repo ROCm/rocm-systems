@@ -778,6 +778,10 @@ struct ConSanOptions : ConSanRequest,
 /// lowering may copy the operating point and bind one owner assignment without
 /// changing the accepted code-object-wide value.
 struct ConSanMoiOperatingPoint {
+  /// Placement's effective owner/epoch-prologue decision. An empty value
+  /// preserves the immutable request; a concrete value records a solver-owned
+  /// enable or disable decision without rewriting caller configuration.
+  std::optional<bool> moi_initialize_owner_epoch;
   /// First SGPR in the code-object-wide EXEC/VCC/SCC save window accepted by
   /// placement. This is seeded from the corresponding caller override when
   /// present, but thereafter records the selected lowering state rather than

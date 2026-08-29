@@ -468,6 +468,11 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
   };
 }
 
+bool moi_initializes_owner_epoch(const ConSanRequest &request,
+                                 const ConSanMoiOperatingPoint &operating_point) {
+  return operating_point.moi_initialize_owner_epoch.value_or(request.moi_init_owner_epoch);
+}
+
 uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement, rj_code_arch_t arch) {
   const auto dynamic_stack_count = [](ConSanMoiEngine engine) -> std::optional<uint16_t> {
     const auto frame_save_offset = moi_dynamic_stack_frame_save_sgpr_offset(engine);
@@ -907,7 +912,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // Standalone barrier, atomic, and fence records still require an exact
     // entry-captured workgroup tuple, so only the true no-consumer case can
     // disable the prologue.
-    effective_options.moi_init_owner_epoch = false;
+    effective_options.moi_initialize_owner_epoch = false;
     effective_options.moi_track_barriers = false;
     result.warnings.emplace_back(
         "ConSan MOI record/replay skipped persistent state for a code object "
@@ -940,15 +945,29 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
       });
-  if (configure_automatic_moi_owner_sgpr(effective_options, result, resource_planning_state))
+  if (configure_automatic_moi_owner_sgpr(effective_options, resource_problem, result.resource_plans,
+                                         result.warnings, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
-  if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  ConSanMoiOperatingPointUpdate dispatch_placement = configure_automatic_moi_dispatch_id_sgprs(
+      effective_options, resource_problem, result.resource_plans, resource_planning_state);
+  result.warnings.insert(result.warnings.end(),
+                         std::make_move_iterator(dispatch_placement.diagnostics.begin()),
+                         std::make_move_iterator(dispatch_placement.diagnostics.end()));
+  if (!dispatch_placement.accepted()) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+  } else {
+    const bool dispatch_placement_changed = dispatch_placement.changed;
+    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
+        std::move(dispatch_placement.attempted_operating_point);
+    if (dispatch_placement_changed)
+      rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates,
+                                 result);
+  }
   ConSanMoiResourcePlanningResult exec_planning = solve_automatic_moi_exec_save_resources(
       resource_planning_state, effective_options, effective_options, resource_problem,
       moi_candidates, result);
@@ -963,7 +982,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                            std::make_move_iterator(accepted->diagnostics.begin()),
                            std::make_move_iterator(accepted->diagnostics.end()));
   }
-  if (configure_inline_moi_owner_sgpr(effective_options, result))
+  if (configure_inline_moi_owner_sgpr(effective_options, effective_options, result.warnings))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   // Preserve the last complete scalar-placement proof even if a subsequent
   // dispatch override rejects the transform. Unsupported results use this
@@ -1019,7 +1038,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     return result;
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
-      effective_options.moi_init_owner_epoch) {
+      moi_initializes_owner_epoch(effective_options, effective_options)) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
@@ -1059,7 +1078,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                plan.source != ConSanRegisterAllocationSource::Unsupported;
       });
   if (result.errors.empty() && inline_atomic_without_access && has_usable_atomic_plan &&
-      effective_options.moi_init_owner_epoch) {
+      moi_initializes_owner_epoch(effective_options, effective_options)) {
     // Atomic-only objects do not need access-layout information in their
     // owner/epoch prologue. Emit it before the large atomic helpers so the
     // original kernel entry can reach it without consuming a scarce local
@@ -1104,7 +1123,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       !has_supported_barrier && !atomic_or_fence_relevant) {
     // Planning may admit access sites whose bodies all fail placement. Drop
     // automatic state only when no standalone record can consume it.
-    effective_options.moi_init_owner_epoch = false;
+    effective_options.moi_initialize_owner_epoch = false;
     effective_options.moi_owner_vgpr.reset();
     effective_options.moi_epoch_vgpr.reset();
     effective_options.moi_record_replay_workgroup_vgprs = {};

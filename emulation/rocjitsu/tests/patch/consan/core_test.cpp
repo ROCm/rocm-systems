@@ -76,6 +76,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
 
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   const ConSanMoiOperatingPoint state{
+      .moi_initialize_owner_epoch = true,
       .moi_exec_save_sgpr = 2u,
       .moi_owner_sgpr = 3u,
       .moi_owner_vgpr = 4u,
@@ -122,6 +123,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
     mutate(changed);
     EXPECT_NE(changed, state);
   };
+  expect_field_participates([](auto &value) { value.moi_initialize_owner_epoch = false; });
   expect_field_participates([](auto &value) { value.moi_exec_save_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_owner_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_owner_vgpr.reset(); });
@@ -223,6 +225,24 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
       resolve_moi_exec_save_requirement(request, resources, point).automatic_banked_record_capture);
 }
 
+TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {
+  ConSanRequest request;
+  ConSanMoiOperatingPoint point;
+
+  EXPECT_FALSE(moi_initializes_owner_epoch(request, point));
+  request.moi_init_owner_epoch = true;
+  EXPECT_TRUE(moi_initializes_owner_epoch(request, point));
+
+  point.moi_initialize_owner_epoch = false;
+  EXPECT_FALSE(moi_initializes_owner_epoch(request, point));
+  EXPECT_TRUE(request.moi_init_owner_epoch);
+
+  request.moi_init_owner_epoch = false;
+  point.moi_initialize_owner_epoch = true;
+  EXPECT_TRUE(moi_initializes_owner_epoch(request, point));
+  EXPECT_FALSE(request.moi_init_owner_epoch);
+}
+
 TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   const std::array<uint8_t, 4> image{1u, 2u, 3u, 4u};
   ConSanRequest request;
@@ -313,6 +333,22 @@ TEST(ConSan, MoiOperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
   EXPECT_EQ(*accepted.accepted_fallback, ConSanMoiFallbackKind::SampledLiteralDispatchId);
   EXPECT_EQ(accepted.attempted_operating_point.moi_exec_save_sgpr, 44u);
   EXPECT_EQ(accepted.diagnostics.size(), 1u);
+}
+
+TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionTogether) {
+  ConSanMoiOperatingPointUpdate accepted;
+  accepted.attempted_operating_point.moi_dispatch_id_sgpr = 40u;
+  accepted.changed = true;
+  accepted.diagnostics.emplace_back("accepted placement");
+  EXPECT_TRUE(accepted.accepted());
+  EXPECT_TRUE(accepted.changed);
+  EXPECT_EQ(accepted.attempted_operating_point.moi_dispatch_id_sgpr, 40u);
+  EXPECT_EQ(accepted.diagnostics, std::vector<std::string>{"accepted placement"});
+
+  ConSanMoiOperatingPointUpdate rejected = accepted;
+  rejected.rejection = ConSanMoiPlacementRejection::DispatchIdSgprUnavailable;
+  EXPECT_FALSE(rejected.accepted());
+  EXPECT_EQ(rejected.rejection, ConSanMoiPlacementRejection::DispatchIdSgprUnavailable);
 }
 
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {

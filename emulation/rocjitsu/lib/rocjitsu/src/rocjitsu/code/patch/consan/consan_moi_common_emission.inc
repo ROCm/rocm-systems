@@ -50,7 +50,7 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
 }
 
 [[nodiscard]] bool moi_record_uses_private_owner(const MoiOptions &options) {
-  return options.moi_init_owner_epoch && options.automatic_moi_private_epoch &&
+  return moi_initializes_owner_epoch(options, options) && options.automatic_moi_private_epoch &&
          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
          !options.moi_persistent_sgprs.owner;
 }

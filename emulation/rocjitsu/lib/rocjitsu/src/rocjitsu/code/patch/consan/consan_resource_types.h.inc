@@ -125,6 +125,26 @@ struct ConSanMoiOperatingPointAttempt {
   [[nodiscard]] bool accepted() const { return accepted_fallback.has_value(); }
 };
 
+/// Typed reason that an operating-point placement step rejected its input.
+enum class ConSanMoiPlacementRejection : uint8_t {
+  DispatchIdSgprUnavailable,
+};
+
+/// Unpublished output of one operating-point placement step.
+///
+/// The attempted point and its diagnostics travel together so orchestration
+/// cannot publish messages from an unselected mutation or retain only part of
+/// a placement decision. A rejection is explicit and leaves the caller, not
+/// the placement component, responsible for changing the transform outcome.
+struct ConSanMoiOperatingPointUpdate {
+  ConSanMoiOperatingPoint attempted_operating_point;
+  bool changed = false;
+  std::optional<ConSanMoiPlacementRejection> rejection;
+  std::vector<std::string> diagnostics;
+
+  [[nodiscard]] bool accepted() const { return !rejection.has_value(); }
+};
+
 /// Complete, unpublished output of one MOI resource-planning attempt.
 ///
 /// `plans` contains every access and synchronization-site allocation derived

@@ -1167,8 +1167,8 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
   // above still require a concrete persistent owner VGPR, so private/scalar
   // fallbacks or failed placement cannot turn this planning allowance into
   // generated code.
-  return request.moi_init_owner_epoch || request.moi_track_atomics || request.moi_track_barriers ||
-         request.moi_runtime_sample_stride > 1u;
+  return moi_initializes_owner_epoch(request, point) || request.moi_track_atomics ||
+         request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
 }
 
 [[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
@@ -4362,7 +4362,8 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
   // special state, while persistent owner/epoch values live in VGPRs. Do not
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
-  if (options.moi_init_owner_epoch && options.moi_engine != ConSanMoiEngine::InlineShadow) {
+  if (moi_initializes_owner_epoch(options, options) &&
+      options.moi_engine != ConSanMoiEngine::InlineShadow) {
     for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
@@ -5195,7 +5196,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, const MoiResourcePr
     if (!plan.owner_descriptor_file_offsets.empty())
       include_site(plan.text_offset);
   }
-  if (options.moi_init_owner_epoch) {
+  if (moi_initializes_owner_epoch(options, options)) {
     for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
@@ -5427,109 +5428,121 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, const MoiResourcePr
   return false;
 }
 
-[[nodiscard]] bool configure_automatic_moi_owner_sgpr(MoiOptions &options,
-                                                      ConSanTransformArtifacts &result,
-                                                      const MoiResourcePlanningState &state) {
+[[nodiscard]] bool configure_automatic_moi_owner_sgpr(
+    ConSanMoiOperatingPoint &point, const MoiResourceProblem &problem,
+    std::span<const ConSanCandidateResourcePlan> site_plans, std::vector<std::string> &diagnostics,
+    const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
-  if (options.moi_owner_source != ConSanMoiOwnerSource::HwId || options.moi_owner_sgpr)
+  if (problem.request().moi_owner_source != ConSanMoiOwnerSource::HwId || point.moi_owner_sgpr)
     return false;
-  if (options.moi_engine == ConSanMoiEngine::InlineShadow)
+  if (problem.request().moi_engine == ConSanMoiEngine::InlineShadow)
     return false;
 
-  const auto plan_contexts =
-      resolve_moi_resource_plan_scalar_owner_contexts(state, result.resource_plans);
+  const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, site_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic hw_id owner SGPR placement";
     if (plan_contexts.unresolved_owner)
       warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
-    result.warnings.push_back(std::move(warning));
+    diagnostics.push_back(std::move(warning));
     return false;
   }
   const MoiScalarOwnerContextResolution scalar_contexts =
       collect_moi_scalar_owner_contexts(plan_contexts.groups, true);
   if (scalar_contexts.contexts.empty()) {
-    result.warnings.emplace_back(
+    diagnostics.emplace_back(
         "ConSan MOI could not derive an automatic hw_id owner SGPR without an owned candidate "
         "scope");
     return false;
   }
 
   for (uint32_t sgpr = scalar_contexts.tail_floor; sgpr < moi_ordinary_sgpr_limit(arch); ++sgpr) {
-    if (options.moi_exec_save_sgpr &&
-        range_overlaps(static_cast<uint16_t>(sgpr), 1u, *options.moi_exec_save_sgpr,
-                       moi_exec_save_sgpr_count(
-                           resolve_moi_exec_save_requirement(options, options, options), arch))) {
+    if (point.moi_exec_save_sgpr &&
+        range_overlaps(static_cast<uint16_t>(sgpr), 1u, *point.moi_exec_save_sgpr,
+                       moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                                    problem.request(), problem.resources(), point),
+                                                arch))) {
       continue;
     }
     if (!moi_scalar_contexts_admit_reserved_window(scalar_contexts.summaries,
                                                    static_cast<uint16_t>(sgpr), 1u, arch)) {
       continue;
     }
-    options.moi_owner_sgpr = static_cast<uint16_t>(sgpr);
-    options.automatic_moi_owner_sgpr = true;
-    result.warnings.emplace_back("ConSan MOI automatically assigned hw_id owner temporary s" +
-                                 std::to_string(sgpr));
+    point.moi_owner_sgpr = static_cast<uint16_t>(sgpr);
+    point.automatic_moi_owner_sgpr = true;
+    diagnostics.emplace_back("ConSan MOI automatically assigned hw_id owner temporary s" +
+                             std::to_string(sgpr));
     return true;
   }
 
-  result.warnings.emplace_back("ConSan MOI could not place a fresh automatic hw_id owner SGPR");
+  diagnostics.emplace_back("ConSan MOI could not place a fresh automatic hw_id owner SGPR");
   return false;
 }
 
-[[nodiscard]] bool configure_inline_moi_owner_sgpr(MoiOptions &options,
-                                                   ConSanTransformArtifacts &result) {
-  if (!moi_inline_uses_planned_owner_sgpr(options, options) || options.automatic_moi_owner_sgpr)
+[[nodiscard]] bool configure_inline_moi_owner_sgpr(const ConSanRequest &request,
+                                                   ConSanMoiOperatingPoint &point,
+                                                   std::vector<std::string> &diagnostics) {
+  if (!moi_inline_uses_planned_owner_sgpr(request, point) || point.automatic_moi_owner_sgpr)
     return false;
-  if (!options.moi_exec_save_sgpr) {
-    result.warnings.emplace_back(
+  if (!point.moi_exec_save_sgpr) {
+    diagnostics.emplace_back(
         "ConSan MOI could not place its Inline resident-wave owner in a transient scalar window");
     return false;
   }
-  options.moi_owner_sgpr = *options.moi_exec_save_sgpr;
-  options.automatic_moi_owner_sgpr = true;
-  result.warnings.emplace_back(
+  point.moi_owner_sgpr = *point.moi_exec_save_sgpr;
+  point.automatic_moi_owner_sgpr = true;
+  diagnostics.emplace_back(
       "ConSan MOI assigned its Inline resident-wave owner inside the saved scalar window");
   return true;
 }
 
-[[nodiscard]] bool
-configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformArtifacts &result,
+[[nodiscard]] ConSanMoiOperatingPointUpdate
+configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
+                                          const MoiResourceProblem &problem,
+                                          std::span<const ConSanCandidateResourcePlan> site_plans,
                                           const MoiResourcePlanningState &state) {
+  ConSanMoiOperatingPointUpdate update{
+      .attempted_operating_point = base,
+      .changed = false,
+      .rejection = std::nullopt,
+      .diagnostics = {},
+  };
+  ConSanMoiOperatingPoint &options = update.attempted_operating_point;
+  const ConSanRequest &request = problem.request();
+  const BoundRuntimeResources &resources = problem.resources();
   const rj_code_arch_t arch = state.arch;
   const bool has_inline_dispatch_consumer =
-      options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      !(consan_uses_gfx12_cdna_execution(arch) && !options.moi_track_atomics) &&
-      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+      request.moi_engine == ConSanMoiEngine::InlineShadow &&
+      !(consan_uses_gfx12_cdna_execution(arch) && !request.moi_track_atomics) &&
+      std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||
                 plan.site_kind == ConSanResourceSiteKind::Atomic);
       });
   const bool needs_dispatch_id =
-      has_inline_dispatch_consumer || options.moi_engine == ConSanMoiEngine::RecordReplay ||
-      (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
+      has_inline_dispatch_consumer || request.moi_engine == ConSanMoiEngine::RecordReplay ||
+      (request.moi_engine == ConSanMoiEngine::Sampled && request.moi_runtime_sample_stride > 1u &&
        !consan_uses_gfx12_cdna_execution(arch));
-  if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
+  if (!needs_dispatch_id || !resources.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
       options.moi_dispatch_id_vgpr) {
-    return false;
+    return update;
   }
-  const auto plan_contexts =
-      resolve_moi_resource_plan_scalar_owner_contexts(state, result.resource_plans);
+  const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, site_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic dispatch-ID SGPR placement";
     if (plan_contexts.unresolved_owner)
       warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
-    result.warnings.push_back(std::move(warning));
-    return false;
+    update.diagnostics.push_back(std::move(warning));
+    return update;
   }
   const MoiScalarOwnerContextResolution scalar_contexts =
       collect_moi_scalar_owner_contexts(plan_contexts.groups, true);
   if (scalar_contexts.contexts.empty()) {
-    result.warnings.emplace_back(
+    update.diagnostics.emplace_back(
         "ConSan MOI could not derive automatic dispatch-ID SGPRs without an owned candidate "
         "scope");
-    return false;
+    return update;
   }
 
   // gfx11 normally captures dispatch identity in descriptor-grown persistent
@@ -5546,7 +5559,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
           return safe_base + 2u > kMaxVgprs;
         });
     if (!lacks_persistent_dispatch_vgpr_pair)
-      return false;
+      return update;
   }
 
   // Sixteen initialized user SGPRs plus X/Y/Z and WORKGROUP_INFO is the
@@ -5585,17 +5598,18 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
                        *options.moi_exec_save_sgpr,
                        moi_exec_save_sgpr_count(
-                           resolve_moi_exec_save_requirement(options, options, options), arch))) {
+                           resolve_moi_exec_save_requirement(request, resources, options), arch))) {
       continue;
     }
     options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
     options.automatic_moi_dispatch_id_sgprs = true;
     qualify_owner_local_assignments(static_cast<uint16_t>(base));
-    result.warnings.emplace_back("ConSan MOI automatically assigned persistent dispatch-ID "
-                                 "state SGPRs s" +
-                                 std::to_string(base) + ":s" +
-                                 std::to_string(base + dispatch_state_count - 1u));
-    return true;
+    update.diagnostics.emplace_back("ConSan MOI automatically assigned persistent dispatch-ID "
+                                    "state SGPRs s" +
+                                    std::to_string(base) + ":s" +
+                                    std::to_string(base + dispatch_state_count - 1u));
+    update.changed = true;
+    return update;
   }
 
   // A large generated code object can contain one full-SGPR kernel alongside
@@ -5627,19 +5641,20 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         continue;
       }
       if (options.moi_exec_save_sgpr &&
-          range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
-                         *options.moi_exec_save_sgpr,
-                         moi_exec_save_sgpr_count(
-                             resolve_moi_exec_save_requirement(options, options, options), arch))) {
+          range_overlaps(
+              static_cast<uint16_t>(base), dispatch_state_count, *options.moi_exec_save_sgpr,
+              moi_exec_save_sgpr_count(
+                  resolve_moi_exec_save_requirement(request, resources, options), arch))) {
         continue;
       }
       options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
       options.automatic_moi_dispatch_id_sgprs = true;
       qualify_owner_local_assignments(static_cast<uint16_t>(base));
-      result.warnings.emplace_back(
+      update.diagnostics.emplace_back(
           "ConSan MOI reserved a high dispatch-ID SGPR pair and excluded only "
           "incompatible full-pressure owner groups");
-      return true;
+      update.changed = true;
+      return update;
     }
   }
 
@@ -5661,7 +5676,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
       }
     }
     const bool has_dynamic_stack_owner =
-        std::ranges::any_of(result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
+        std::ranges::any_of(problem.inventory().kernels(), [](const ConSanKernelInfo &kernel) {
           return kernel.uses_dynamic_stack.value_or(false);
         });
     const auto referenced = [&](uint16_t base) {
@@ -5687,7 +5702,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
              range_overlaps(
                  candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
                  moi_exec_save_sgpr_count(
-                     resolve_moi_exec_save_requirement(options, options, options), arch))) ||
+                     resolve_moi_exec_save_requirement(request, resources, options), arch))) ||
             (has_dynamic_stack_owner &&
              moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count))) {
           continue;
@@ -5695,44 +5710,44 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         options.moi_dispatch_id_sgpr = candidate;
         options.automatic_moi_dispatch_id_sgprs = true;
         qualify_owner_local_assignments(candidate);
-        result.warnings.emplace_back(
+        update.diagnostics.emplace_back(
             "ConSan MOI assigned persistent dispatch-ID state to a proven-unused " +
             std::string(rj_code_arch_name(arch)) + " SGPR pair" +
             std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
-        return true;
+        update.changed = true;
+        return update;
       }
     }
   }
 
-  if (consan_uses_gfx12_rdna_execution(arch) || options.moi_engine == ConSanMoiEngine::Sampled) {
+  if (consan_uses_gfx12_rdna_execution(arch) || request.moi_engine == ConSanMoiEngine::Sampled) {
     // Automatic banked Record/Replay can capture the preload into persistent
     // descriptor-grown VGPRs during the later owner-state placement pass.
     // Sampled instead records the stable reader identity literal when no
     // persistent hardware pair survives every owner.
-    if (record_replay_uses_automatic_banked_capture(options, options))
-      return false;
-    result.warnings.emplace_back(
+    if (record_replay_uses_automatic_banked_capture(request, resources))
+      return update;
+    update.diagnostics.emplace_back(
         "ConSan MOI is using a literal report dispatch ID because no persistent hardware "
         "dispatch-ID SGPR pair fits");
-    return false;
+    return update;
   }
   if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+      request.moi_engine == ConSanMoiEngine::InlineShadow &&
+      std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       })) {
-    const bool has_dynamic_stack_access_owner = std::ranges::any_of(
-        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+    const bool has_dynamic_stack_access_owner =
+        std::ranges::any_of(problem.inventory().kernels(), [&](const ConSanKernelInfo &kernel) {
           return kernel.uses_dynamic_stack.value_or(false) &&
-                 std::ranges::any_of(
-                     result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-                       return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-                              plan.site_kind == ConSanResourceSiteKind::Access &&
-                              std::ranges::find(plan.owner_descriptor_file_offsets,
-                                                kernel.descriptor_file_offset) !=
-                                  plan.owner_descriptor_file_offsets.end();
-                     });
+                 std::ranges::any_of(site_plans, [&](const ConSanCandidateResourcePlan &plan) {
+                   return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                          plan.site_kind == ConSanResourceSiteKind::Access &&
+                          std::ranges::find(plan.owner_descriptor_file_offsets,
+                                            kernel.descriptor_file_offset) !=
+                              plan.owner_descriptor_file_offsets.end();
+                 });
         });
     // A non-dynamic owner can capture the hardware dispatch preload directly
     // in the same address-free private entry state as owner/epoch. A dynamic
@@ -5740,22 +5755,23 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // set so persistent-state placement includes an entry-captured VGPR pair.
     options.automatic_moi_private_dispatch_id = true;
     if (!has_dynamic_stack_access_owner) {
-      options.moi_init_owner_epoch = true;
+      options.moi_initialize_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
-      result.warnings.emplace_back(
+      update.diagnostics.emplace_back(
           "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
           "SGPR pair fits");
     } else {
-      result.warnings.emplace_back(
+      update.diagnostics.emplace_back(
           "ConSan MOI deferred hardware dispatch-ID state to persistent VGPR placement because "
           "owner-private state is incompatible with a dynamic stack");
     }
-    return true;
+    update.changed = true;
+    return update;
   }
-  result.outcome = ConSanTransformOutcome::Unsupported;
-  result.warnings.emplace_back(
+  update.rejection = ConSanMoiPlacementRejection::DispatchIdSgprUnavailable;
+  update.diagnostics.emplace_back(
       "ConSan MOI could not place a persistent hardware dispatch-ID SGPR pair");
-  return false;
+  return update;
 }
 
 [[nodiscard]] ConSanMoiOperatingPointAttempt
@@ -6170,7 +6186,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // the code object has no semantically admitted synchronization site; v0 is
   // only the ABI workitem ID at kernel entry and may be clobbered later.
   const bool needs_persistent_state =
-      options.moi_init_owner_epoch || needs_record_replay_workgroup_tuple ||
+      moi_initializes_owner_epoch(options, options) || needs_record_replay_workgroup_tuple ||
       (options.moi_track_atomics && options.moi_engine != ConSanMoiEngine::RecordReplay) ||
       (options.moi_engine == ConSanMoiEngine::Sampled &&
        (options.moi_track_barriers || options.moi_runtime_sample_stride > 1u)) ||
@@ -6318,7 +6334,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.test_force_private_epoch &&
         !has_dynamic_stack_owner) {
-      options.moi_init_owner_epoch = true;
+      options.moi_initialize_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
       result.warnings.emplace_back(
           "ConSan MOI selected entry-captured private Record/Replay state below a CDNA "
@@ -6327,7 +6343,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     }
     if (options.moi_engine == ConSanMoiEngine::Sampled &&
         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !has_dynamic_stack_owner) {
-      options.moi_init_owner_epoch = true;
+      options.moi_initialize_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
       result.warnings.emplace_back(
           "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA ordinary "
@@ -6378,7 +6394,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
-        options.moi_init_owner_epoch = true;
+        options.moi_initialize_owner_epoch = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
@@ -6478,7 +6494,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
         assign_scalar_persistent_state(*persistent_hole);
-        options.moi_init_owner_epoch = true;
+        options.moi_initialize_owner_epoch = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
@@ -6575,7 +6591,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
               .y = static_cast<uint16_t>(scalar_base + 1u),
               .z = static_cast<uint16_t>(scalar_base + 2u),
           };
-          options.moi_init_owner_epoch = true;
+          options.moi_initialize_owner_epoch = true;
           options.automatic_moi_persistent_vgprs = true;
           prologue_scratch_assignments.clear();
           result.warnings.emplace_back(
@@ -6618,7 +6634,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
             "ConSan MOI found no persistent SGPR window unused by every admitted owner");
       }
       if (!has_dynamic_stack_owner) {
-        options.moi_init_owner_epoch = true;
+        options.moi_initialize_owner_epoch = true;
         options.automatic_moi_private_epoch = true;
         result.warnings.emplace_back(
             "ConSan MOI retained exact Record/Replay entry state in private storage below a "
@@ -6717,7 +6733,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         // been proven for the complete union.
         options.owner_persistent_vgprs.clear();
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
-        options.moi_init_owner_epoch = true;
+        options.moi_initialize_owner_epoch = true;
         prologue_scratch_assignments = std::move(*prologue_scratch);
         result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
                                      std::string(needs_workgroup_key ? "/workgroup-key" : "") +
@@ -6830,7 +6846,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
              (options.moi_engine == ConSanMoiEngine::Sampled &&
               options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId));
         if (supports_private_component) {
-          options.moi_init_owner_epoch = true;
+          options.moi_initialize_owner_epoch = true;
           options.automatic_moi_private_epoch = true;
           assigned_private_component = true;
           result.warnings.emplace_back(
@@ -6882,7 +6898,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         options.owner_persistent_vgprs.push_back(assignment);
       }
     }
-    options.moi_init_owner_epoch = true;
+    options.moi_initialize_owner_epoch = true;
     options.automatic_moi_persistent_vgprs = !options.owner_persistent_vgprs.empty();
     const bool assigned_persistent_dispatch_vgprs = std::ranges::any_of(
         options.owner_persistent_vgprs, [](const ConSanMoiPersistentVgprAssignment &assignment) {
@@ -7078,7 +7094,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     if (scalar_base) {
       const uint16_t base = *scalar_base;
       assign_scalar_persistent_state(base);
-      options.moi_init_owner_epoch = true;
+      options.moi_initialize_owner_epoch = true;
       prologue_scratch_assignments = std::move(*prologue_scratch);
       result.warnings.emplace_back(
           "ConSan MOI assigned persistent scalar " +
@@ -7111,7 +7127,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                                    options.test_force_private_epoch || persistent_end > kMaxVgprs ||
                                    prefer_private_epoch;
   if (needs_private_epoch && !has_dynamic_stack_owner) {
-    options.moi_init_owner_epoch = true;
+    options.moi_initialize_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
     result.warnings.emplace_back(
         std::string("ConSan MOI automatically selected derived-owner/private-"
@@ -7149,7 +7165,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     next_persistent_vgpr = static_cast<uint16_t>(next_persistent_vgpr + 2u);
     options.automatic_moi_private_dispatch_id = false;
   }
-  options.moi_init_owner_epoch = true;
+  options.moi_initialize_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent " +
