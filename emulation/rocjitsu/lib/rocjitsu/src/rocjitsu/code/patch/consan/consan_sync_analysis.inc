@@ -2256,8 +2256,9 @@ void associate_ordinary_acquire_sync_sequences(
         break;
       const ConSanSyncEvent *cache = first_sequence_event(events, cache_sequence);
       if (cache == nullptr ||
-          !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *cache, cache_sequence,
-                                                     /*require_same_block=*/false) ||
+          !consan_ordinary_acquire_metadata_compatible(
+              *load, load_sequence, *cache, cache_sequence,
+              ConSanOrdinaryAcquireMetadataPolicy::BoundedPathSingleFence) ||
           load_sequence.end_text_offset > cache_sequence.begin_text_offset ||
           cache_sequence.begin_text_offset - load_sequence.end_text_offset > 64u) {
         continue;
@@ -2268,8 +2269,11 @@ void associate_ordinary_acquire_sync_sequences(
       if (!path)
         continue;
       const bool same_block = *path == BoundedAcquirePathKind::SameBlock;
-      if (ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *cache, cache_sequence,
-                                                    /*require_same_block=*/same_block))
+      const auto metadata_policy =
+          same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence
+                     : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathSingleFence;
+      if (consan_ordinary_acquire_metadata_compatible(*load, load_sequence, *cache, cache_sequence,
+                                                      metadata_policy))
         cache_matches.push_back(cache_index);
     }
 
@@ -2289,12 +2293,12 @@ void associate_ordinary_acquire_sync_sequences(
         const ConSanSyncEvent *first_event = first_sequence_event(events, first);
         const ConSanSyncEvent *tail_event = first_sequence_event(events, tail);
         if (first_event == nullptr || tail_event == nullptr ||
-            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *first_event, first,
-                                                       /*require_same_block=*/false,
-                                                       /*allow_rdna3_cache_pair_member=*/true) ||
-            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *tail_event, tail,
-                                                       /*require_same_block=*/false,
-                                                       /*allow_rdna3_cache_pair_member=*/true) ||
+            !consan_ordinary_acquire_metadata_compatible(
+                *load, load_sequence, *first_event, first,
+                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember) ||
+            !consan_ordinary_acquire_metadata_compatible(
+                *load, load_sequence, *tail_event, tail,
+                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember) ||
             !is_rdna3_acquire_cache_pair(first, tail, events, blocks)) {
           continue;
         }
@@ -2303,12 +2307,13 @@ void associate_ordinary_acquire_sync_sequences(
         if (!path)
           continue;
         const bool same_block = *path == BoundedAcquirePathKind::SameBlock;
-        if (!ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *first_event, first,
-                                                       /*require_same_block=*/same_block,
-                                                       /*allow_rdna3_cache_pair_member=*/true) ||
-            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *tail_event, tail,
-                                                       /*require_same_block=*/same_block,
-                                                       /*allow_rdna3_cache_pair_member=*/true)) {
+        const auto metadata_policy =
+            same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockRdna3CachePairMember
+                       : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember;
+        if (!consan_ordinary_acquire_metadata_compatible(*load, load_sequence, *first_event, first,
+                                                         metadata_policy) ||
+            !consan_ordinary_acquire_metadata_compatible(*load, load_sequence, *tail_event, tail,
+                                                         metadata_policy)) {
           continue;
         }
         rdna3_pair_matches.push_back({first_index, tail_index});

@@ -28,5 +28,6 @@ target_sources(
         consan_relay_target_ops.cpp
         consan_semantic_classifiers.cpp
         consan_sync_event_index.cpp
+        consan_sync_metadata.cpp
         consan_types.cpp
 )
