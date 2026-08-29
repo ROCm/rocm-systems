@@ -44,6 +44,38 @@ gpt-oss-20b's real widths and takes hours under functional emulation),
 and `--with-vllm` adds a cross-check against vLLM's own custom ops where vLLM
 is installed.
 
+### Comparing two architectures
+
+Each case records a SHA-256 of its raw device output, and `--compare` diffs two
+reports:
+
+```bash
+python tests/ml/gpt_oss_kernels.py --compare gfx950.json gfx1250.json
+```
+
+Comparing bytes is far more sensitive than comparing per-case error magnitudes,
+which only notice a divergence that happens to move the worst element. It found
+the BF16 rounding defect fixed in `0d62681384e`.
+
+It is a lead generator, not a verdict. Two kinds of difference are legitimate
+and will show up:
+
+- **Different instruction selection.** gfx1250 has no `V_CVT_PK_BF16_F32`, so
+  LLVM fuses `fptrunc(a * b)` into `v_fma_mixlo_bf16 v, a, b, 0`. That computes
+  `a * b + 0.0`, and IEEE says `(-0.0) + (+0.0)` is `+0.0`, so a product that is
+  negative zero on gfx950 is positive zero on gfx1250. Real gfx1250 silicon
+  does the same. It shows up in `mxfp4_dequant`, whose value table contains
+  `-0.0`, as ~5% of elements differing while both arms still match the float64
+  reference exactly.
+- **Different software stacks.** The two targets need different ROCm wheels, so
+  the library GEMMs are not the same kernels and differ in the last bit. The
+  Triton attention cases differ in 2 elements out of 8192 by one ulp, in
+  opposite directions.
+
+So treat a byte difference as something to explain. A difference concentrated in
+one direction, or one that grows with the reduction length, is worth chasing; a
+scattering of one-ulp differences in both directions is not.
+
 ### Choosing a python environment
 
 The two targets need different wheels, because ROCm nightly wheels are built

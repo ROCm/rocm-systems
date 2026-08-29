@@ -34,6 +34,7 @@ Exit status is 0 when every selected case passes, 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -815,6 +816,7 @@ class Result:
     tolerance: float = float("nan")
     seconds: float = float("nan")
     detail: str = ""
+    digest: str = ""
     shapes: dict[str, Any] = field(default_factory=dict)
 
 
@@ -892,6 +894,22 @@ def compare(got: torch.Tensor, want: torch.Tensor) -> tuple[float, float]:
     if scale == 0.0:
         scale = 1.0
     return diff.max().item(), (diff.max().item() / scale)
+
+
+def digest_of(t: torch.Tensor) -> str:
+    """SHA-256 of a tensor's raw bytes, in its own dtype.
+
+    This is what makes the suite a cross-architecture differential tester.
+    Comparing per-case error magnitudes only catches a divergence that happens
+    to change the worst element; comparing the bytes catches any divergence at
+    all. Every case feeds both arms identical CPU-generated inputs, so two
+    architectures running the same kernel should produce the same bytes, and a
+    difference is a fact to explain rather than noise.
+    """
+    # Reinterpret as bytes rather than going through numpy: numpy has no
+    # bfloat16, which is the dtype most of these cases produce.
+    raw = t.detach().cpu().contiguous().flatten().view(torch.uint8)
+    return hashlib.sha256(raw.numpy().tobytes()).hexdigest()[:16]
 
 
 # ---- 1. embedding --------------------------------------------------------
@@ -1978,6 +1996,7 @@ def run_case(c: Case, s: Shape, seed: int) -> Result:
             rel_err,
             c.tolerance,
             time.time() - t0,
+            digest=digest_of(got),
             shapes={"profile": s.name},
         )
     except SkipCase as exc:
@@ -2001,6 +2020,56 @@ def run_case(c: Case, s: Shape, seed: int) -> Result:
             seconds=time.time() - t0,
             shapes={"traceback": traceback.format_exc(limit=6)},
         )
+
+
+def compare_reports(path_a: str, path_b: str) -> int:
+    """Diff two runs of this suite case by case.
+
+    A case that ran the same kernel on the same inputs should produce the same
+    bytes on both architectures. Where it does not, the divergence is named
+    rather than left to be inferred from two error columns that happen to
+    differ.
+    """
+    with open(path_a) as fh:
+        a = json.load(fh)
+    with open(path_b) as fh:
+        b = json.load(fh)
+    if a["profile"] != b["profile"] or a["seed"] != b["seed"]:
+        print(
+            "refusing to compare: the two runs used different shapes or seeds",
+            file=sys.stderr,
+        )
+        return 2
+
+    def key(r):
+        return (r["name"], r["impl"], r["dtype"])
+
+    ra = {key(r): r for r in a["results"]}
+    rb = {key(r): r for r in b["results"]}
+    label_a = a["environment"].get("gcn_arch") or a["environment"].get("device")
+    label_b = b["environment"].get("gcn_arch") or b["environment"].get("device")
+    print(
+        f"comparing {label_a} against {label_b} | profile={a['profile']['name']} seed={a['seed']}"
+    )
+
+    diverged = 0
+    for k in sorted(ra.keys() | rb.keys()):
+        x, y = ra.get(k), rb.get(k)
+        if x is None or y is None:
+            print(f"  ONLY-IN-{'B' if x is None else 'A'} {k[0]}/{k[1]}")
+            diverged += 1
+            continue
+        if x["status"] != y["status"]:
+            print(f"  STATUS   {k[0]}/{k[1]}: {x['status']} vs {y['status']}")
+            diverged += 1
+        elif x["status"] == "pass" and x["digest"] != y["digest"]:
+            print(
+                f"  BYTES    {k[0]}/{k[1]}: {x['digest']} vs {y['digest']} "
+                f"(rel {x['max_rel_err']:.3e} vs {y['max_rel_err']:.3e})"
+            )
+            diverged += 1
+    print(f"\n{len(ra)} cases compared, {diverged} diverged")
+    return 1 if diverged else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2036,6 +2105,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", metavar="PATH", help="write the full report here")
     ap.add_argument("--list", action="store_true", help="list cases and exit")
     ap.add_argument(
+        "--compare",
+        nargs=2,
+        metavar=("A.json", "B.json"),
+        help="diff two reports (typically one per architecture) and exit; "
+        "reports every case whose raw device output differs",
+    )
+    ap.add_argument(
         "--with-vllm",
         action="store_true",
         help="also cross-check vLLM's own custom ops",
@@ -2044,6 +2120,9 @@ def main(argv: list[str] | None = None) -> int:
 
     global DEV
     DEV = args.device
+
+    if args.compare:
+        return compare_reports(*args.compare)
 
     shape = SHAPES[args.size]
     cases = REGISTRY
