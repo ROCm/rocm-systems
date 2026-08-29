@@ -812,6 +812,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.reg.environ_filter("output_format", _data))
     {
+        static const strvec_t k_output_format_choices = { "pftrace", "proto", "rocpd",
+                                                          "json",    "text",  "txt" };
         _parser
             .add_argument(
                 { "--output-format" },
@@ -822,9 +824,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 "combined with --trace, --profile, --flat-profile, or "
                 "--profile-format.")
             .min_count(1)
-            .max_count(6)
+            .max_count(static_cast<int>(k_output_format_choices.size()))
             .dtype("[format...]")
-            .choices({ "pftrace", "proto", "rocpd", "json", "text", "txt" })
+            .choices(k_output_format_choices)
             .conflicts(
                 { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {
