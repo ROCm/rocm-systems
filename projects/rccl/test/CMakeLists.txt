@@ -366,6 +366,13 @@ if(BUILD_TESTS)
 
   if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
     list(APPEND TEST_FIXTURE_SOURCE_FILES
+      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
+      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
+      # header shadow). Its body is guarded by NCCL_GIN_ROCSHMEM_GDA_ENABLE, which
+      # gin_device_common.h sets when ENABLE_ROCSHMEM_GIN is defined on HIP.
+      # Built here alongside the Anvil-SDMA template test under GIN_ANVIL_UNIT_TESTS
+      # or when librccl is built with full ENABLE_ROCSHMEM.
+      device/GinRocshmemGdaTemplate_test.cpp
       device/GinAnvilSdmaTemplate_test.cpp
     )
   endif()
@@ -394,7 +401,10 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Match librccl.so ABI: ENABLE_ROCSHMEM changes ncclComm/ncclProxyState layout.
+  # GIN CI builds librccl with ENABLE_ROCSHMEM_GIN only; device templates need
+  # ENABLE_ROCSHMEM_GIN (above), not ENABLE_ROCSHMEM on this target.
+  if(ENABLE_ROCSHMEM_GIN AND ENABLE_ROCSHMEM)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
@@ -481,11 +491,12 @@ if(BUILD_TESTS)
       net_ib_header_symlinks rma_header_symlinks)
   endif()
 
-  # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the
-  # segment-math header (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) is
-  # compiled with GIN_SDMA_HOST_ONLY so it needs neither a built librccl nor device
-  # codegen. It exercises the exact ginPutSegmentCount/ginPutSegmentAt the SDMA
-  # backend Put drives on device. Runs under `ctest -L unit`.
+  # GIN Anvil-SDMA put-segmentation and AllReduce size-policy host unit tests (no
+  # GPU). Pure host C++: the segment-math header
+  # (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) and
+  # algorithms/gin/gin_all_reduce_policy.h are compiled with GIN_SDMA_HOST_ONLY
+  # so they need neither a built librccl nor device codegen. Runs under
+  # `ctest -L unit`.
   add_executable(rccl-UnitTestsGinSdmaPolicy
     gin/gin_sdma_policy_test.cpp
     gin/gin_all_reduce_policy_test.cpp)
@@ -622,6 +633,9 @@ if(BUILD_TESTS)
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # GinAllReduceEligibilityTests.cpp calls ncclAllReduceGinSdmaEligible() only
+    # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
     if(ENABLE_ROCSHMEM_GIN)
       target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE ENABLE_ROCSHMEM_GIN)
     endif()
@@ -753,6 +767,26 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # Build the GIN example plugin for host-API custom-plugin regression tests.
+  if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
+    set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
+    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/libnccl-gin-example.so")
+    find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
+    add_custom_command(
+      OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      COMMAND ${RCCL_GIN_EXAMPLE_CC}
+              -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
+              -fPIC -shared
+              -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
+              ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+      DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+      COMMENT "Building libnccl-gin-example.so for Host API regression tests"
+      VERBATIM
+    )
+    add_custom_target(nccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+  endif()
+
   # Create separate MPI test binary if MPI tests are enabled
   if(ENABLE_MPI_TESTS)
     set(MPI_TEST_SOURCE_FILES
@@ -780,6 +814,7 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      HostApiCustomGinPluginMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -815,6 +850,31 @@ if(BUILD_TESTS)
       add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
       target_compile_definitions(rccl-UnitTestsMPI PRIVATE
         RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
+
+    if(ENABLE_HOST_API_TESTS)
+      add_dependencies(rccl-UnitTestsMPI nccl-gin-example)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
+
+      # Minimal MPI binary for NCCL 2.30.7 custom-GIN-plugin regression only.
+      # Avoids compiling the full rccl-UnitTestsMPI suite, which may lag API
+      # updates on in-progress NCCL sync branches.
+      add_executable(rccl-HostApiCustomGinPluginMPI
+        common/main_mpi.cpp
+        common/MPIHelpers.cpp
+        common/MPITestCore.cpp
+        common/MPIEnvironment.cpp
+        common/TestChecks.cpp
+        common/MPIHostUtils.cc
+        HostApiCustomGinPluginMPITests.cpp
+      )
+      list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI nccl-gin-example)
+      target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
     endif()
   endif()
 
@@ -923,6 +983,35 @@ if(BUILD_TESTS)
         set(_ROCSHMEM_DEVLINK_EXTRA "SHELL:-Xoffload-linker --allow-multiple-definition")
       endif()
       target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic ${_ROCSHMEM_DEVLINK_EXTRA})
+    endif()
+
+    # librccl.so built with ENABLE_ROCSHMEM_GIN but without host librocshmem
+    # (ENABLE_ROCSHMEM=OFF, e.g. gin CI --rocshmem-gin) leaves
+    # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
+    # into the Fixtures binary so the executable satisfies those symbols when
+    # the dynamic loader brings in librccl.so.
+    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
+       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+      set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      find_library(_ROCSHMEM_FIXTURES_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_FIXTURES_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_FIXTURES_DRM)
+        set(_ROCSHMEM_FIXTURES_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_FIXTURES_DRM_AMDGPU)
+        set(_ROCSHMEM_FIXTURES_DRM_AMDGPU drm_amdgpu)
+      endif()
+      target_link_libraries(${test_executable} PRIVATE
+        ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+        ibverbs hsa-runtime64 hsakmt numa
+        ${_ROCSHMEM_FIXTURES_DRM} ${_ROCSHMEM_FIXTURES_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE
+        -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS} -rdynamic)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
