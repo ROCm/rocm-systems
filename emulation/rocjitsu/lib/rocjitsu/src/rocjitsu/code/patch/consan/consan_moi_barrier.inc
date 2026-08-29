@@ -2110,6 +2110,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const MoiOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
+                                                  std::vector<std::string> &warnings,
                                                   ConSanTransformArtifacts &result);
 
 void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
@@ -2127,38 +2128,47 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOpti
     return;
   }
 
-  const size_t warning_count = result.warnings.size();
-  try_apply_record_replay_barrier_record_patch(bytes, options, arch, access_output, result);
-  if (!result.errors.empty())
+  std::vector<std::string> record_warnings;
+  try_apply_record_replay_barrier_record_patch(bytes, options, arch, access_output, record_warnings,
+                                               result);
+  const auto publish_record_warnings = [&](bool omit_recovered_route_failures) {
+    for (std::string &warning : record_warnings) {
+      const bool recovered_route_failure =
+          warning.find("no reachable indirect entry island") != std::string::npos ||
+          warning == "ConSan MOI barrier record patch found no patchable barriers";
+      if (!omit_recovered_route_failures || !recovered_route_failure)
+        result.warnings.push_back(std::move(warning));
+    }
+  };
+  if (!result.errors.empty()) {
+    publish_record_warnings(false);
     return;
-  const bool needs_dense_fallback = std::ranges::any_of(
-      std::span<const std::string>(result.warnings).subspan(warning_count),
-      [](const std::string &warning) {
+  }
+  const bool needs_dense_fallback =
+      std::ranges::any_of(record_warnings, [](const std::string &warning) {
         return warning.find("no reachable indirect entry island") != std::string::npos;
       });
-  if (needs_dense_fallback) {
-    const size_t failed_entry_count = std::ranges::count_if(
-        std::span<const std::string>(result.warnings).subspan(warning_count),
-        [](const std::string &warning) {
-          return warning.find("no reachable indirect entry island") != std::string::npos;
-        });
-    const size_t barrier_count_before = std::ranges::count(
-        result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-    try_apply_inline_shadow_barrier_epoch_patch(bytes, options, arch, resource_state, access_output,
-                                                result);
-    const size_t barrier_count_after = std::ranges::count(
-        result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-    if (result.errors.empty() && barrier_count_after - barrier_count_before >= failed_entry_count) {
-      auto first_new_warning = result.warnings.begin() + static_cast<std::ptrdiff_t>(warning_count);
-      result.warnings.erase(
-          std::remove_if(first_new_warning, result.warnings.end(),
-                         [](const std::string &warning) {
-                           return warning.find("no reachable indirect entry island") !=
-                                      std::string::npos ||
-                                  warning ==
-                                      "ConSan MOI barrier record patch found no patchable barriers";
-                         }),
-          result.warnings.end());
+  if (!needs_dense_fallback) {
+    publish_record_warnings(false);
+    return;
+  }
+  const size_t failed_entry_count =
+      std::ranges::count_if(record_warnings, [](const std::string &warning) {
+        return warning.find("no reachable indirect entry island") != std::string::npos;
+      });
+  publish_record_warnings(true);
+  const size_t barrier_count_before = std::ranges::count(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  try_apply_inline_shadow_barrier_epoch_patch(bytes, options, arch, resource_state, access_output,
+                                              result);
+  const size_t barrier_count_after = std::ranges::count(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  if (!result.errors.empty() || barrier_count_after - barrier_count_before < failed_entry_count) {
+    for (std::string &warning : record_warnings) {
+      if (warning.find("no reachable indirect entry island") != std::string::npos ||
+          warning == "ConSan MOI barrier record patch found no patchable barriers") {
+        result.warnings.push_back(std::move(warning));
+      }
     }
   }
 }
@@ -2166,36 +2176,35 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOpti
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const MoiOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
+                                                  std::vector<std::string> &warnings,
                                                   ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   if (!consan_is_capability_arch(arch)) {
-    result.warnings.emplace_back(
-        "ConSan MOI barrier record patch does not support this architecture");
+    warnings.emplace_back("ConSan MOI barrier record patch does not support this architecture");
     return;
   }
   if (!options.moi_report_buffer_address) {
-    result.warnings.emplace_back("ConSan MOI barrier record patch requires a MOI report buffer");
+    warnings.emplace_back("ConSan MOI barrier record patch requires a MOI report buffer");
     return;
   }
   if (options.moi_report_buffer_size < consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1)) {
-    result.warnings.emplace_back(
+    warnings.emplace_back(
         "ConSan MOI barrier record patch requires room for access and barrier records");
     return;
   }
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   const uint32_t max_candidates = std::min(options.max_patches, layout.barrier_record_capacity);
   if (max_candidates == 0) {
-    result.warnings.emplace_back("ConSan MOI barrier record patch has no barrier record capacity");
+    warnings.emplace_back("ConSan MOI barrier record patch has no barrier record capacity");
     return;
   }
   if (!options.moi_exec_save_sgpr) {
-    result.warnings.emplace_back(
-        "ConSan MOI barrier record patch requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
+    warnings.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
     return;
   }
   if (*options.moi_exec_save_sgpr > 100u || *options.moi_exec_save_sgpr % 2u != 0u) {
-    result.warnings.emplace_back(
+    warnings.emplace_back(
         "ConSan MOI barrier record patch requires an even RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0..100");
     return;
   }
@@ -2205,7 +2214,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {
-    result.warnings.emplace_back("ConSan MOI barrier record patch found no barriers");
+    warnings.emplace_back("ConSan MOI barrier record patch found no barriers");
     return;
   }
 
@@ -2235,8 +2244,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       break;
     const ConSanBarrierSite &site = candidate.site;
     if (site.size != sizeof(uint32_t)) {
-      result.warnings.emplace_back("ConSan MOI barrier record patch skipped non-32-bit barrier " +
-                                   site.mnemonic + " in " + candidate.container_name);
+      warnings.emplace_back("ConSan MOI barrier record patch skipped non-32-bit barrier " +
+                            site.mnemonic + " in " + candidate.container_name);
       continue;
     }
     if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset) {
@@ -2245,7 +2254,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     if (occupied_anchors.overlaps(site.text_offset, site.size) ||
         !selected_offsets.insert(site.text_offset).second) {
-      result.warnings.emplace_back("ConSan MOI barrier record patch skipped an overlapping patch");
+      warnings.emplace_back("ConSan MOI barrier record patch skipped an overlapping patch");
       continue;
     }
     const ConSanCandidateResourcePlan *existing_plan =
@@ -2263,15 +2272,14 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const auto resources = resolve_moi_scratch_plan(plan, options, result.moi_operating_point,
                                                     /*expected_count=*/6u);
     if (!resources) {
-      result.warnings.emplace_back(
-          "ConSan MOI barrier record patch has no usable resource plan in " +
-          candidate.container_name);
+      warnings.emplace_back("ConSan MOI barrier record patch has no usable resource plan in " +
+                            candidate.container_name);
       continue;
     }
     MoiBarrierEvidenceSitePlan planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
-        result.warnings.emplace_back(
+        warnings.emplace_back(
             "ConSan MOI barrier record patch requires an owning kernel descriptor");
         continue;
       }
@@ -2286,7 +2294,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   }
 
   if (selected_candidates.empty()) {
-    result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
+    warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     return;
   }
   const std::vector<std::pair<uint64_t, uint64_t>> borrowed_barrier_protected_ranges =
@@ -2522,7 +2530,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         tentative_planner, branch_only_requests, &relay_error, barrier_relay_limits);
     if (!route_plan.complete() || route_plan.routes.size() != branch_only_requests.size() ||
         !tentative_router.commit(route_plan.routes, &relay_error)) {
-      result.warnings.emplace_back(
+      warnings.emplace_back(
           "ConSan MOI barrier record patch found no complete routed register-free batch for " +
           std::to_string(branch_only_requests.size()) + " barrier(s)" +
           (relay_error.empty() ? std::string{} : ": " + relay_error));
@@ -2580,7 +2588,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     if (!branch_only_scalar_spill && !direct_entry) {
       const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
       if (!claimed_island) {
-        result.warnings.emplace_back(
+        warnings.emplace_back(
             "ConSan MOI barrier record patch found no reachable indirect entry island in " +
             candidate.container_name);
         for (size_t word = 0u; word < staged.cave_words.size(); ++word)
