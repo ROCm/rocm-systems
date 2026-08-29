@@ -1128,6 +1128,30 @@ library protocol; stage records correspond to executed stages; policy
 assembly has one authority; and a runtime consumer cannot access
 lowerer-private artifacts through `TransformResult`.
 
+#### F3 checkpoint — complete (2026-08-28)
+
+F3 was implemented by commits `86d8e3a32c`, `9b04663415`, `a0cb39ed56`,
+`a722c3470f`, `c71985c9d5`, `ece21d3dc4`, `987a59c56d`, `cb56ff98f3`,
+`cdf4f81b7c`, `25e1b20335`, `0eb47b750c`, `4b92473a75`, `5ee6ae9243`,
+and `8d318cb616`, followed by the separate lowerer-debug projection in
+`66b9d50e4d` and `dc81afd32f`.
+
+The library now owns one authoritative transform transaction and one
+`assemble_consan_observation_product` policy-assembly authority. Automatic
+binding stops at a typed `ConSanDeferredBinding` value which binds the input
+image and mutation provenance to its inventory, observation product, evidence
+requirements, and executed-stage records. Resumption validates that identity
+and binding before it can lower. Stage execution counts are recorded at the
+point of execution, including repeated inventory or binding work, rather than
+projected from the eventual aggregate.
+
+`TransformResult` now exposes reviewed products by composition; lowerer-private
+patch, resource, and placement artifacts are available only to the transaction
+and final validator. Tests and development diagnostics use the separate
+`consan_transform_debug_report` projection instead of reopening the runtime
+result surface. The combined F3/F4 gate recorded below exercises both the
+direct and deferred transaction paths.
+
 ### F4. Make the target classifier the sole exact-admission authority
 
 Introduce normalized target lowering forms or recipes, such as
@@ -1186,6 +1210,35 @@ architecture encoding constants, emitters do not reclassify candidates, and
 no unnamed `supported_mvp` eligibility remains in semantic inventory. One
 target-operation slice has replaced duplicated mode/target lowering in at
 least two engines without broadening semantic authority.
+
+#### F4 checkpoint — complete (2026-08-28)
+
+F4 was implemented by commits `ad2f0dcdf7`, `c06bc7db1d`, `1d666146fc`,
+`e37031af25`, `b75d3aa85c`, `6db6d8cc34`, `62807d7fc5`, `897fb6212c`,
+`a4f46fe2cd`, `ff7f442eec`, `093540159e`, `8fe9cf83e6`, and `bc1727375c`.
+The access and atomic classifier authorities now publish named normalized
+forms through semantic inventory and policy into placement and emission.
+These forms own exact address shape, operand-register spans, subword value
+placement, partial destinations, tuple alignment, and descriptor headroom.
+MOI and SuperCollider consumers no longer recover those facts from mnemonics,
+raw decoded operands, origin tags, or architecture constants.
+
+The shared normalized access and atomic-address materialization slice is
+consumed by Record/Replay, Sampled, and InlineShadow across the five supported
+target profiles. It therefore replaces mode/target lowering decisions in more
+than two engines without moving semantic relevance into the target layer.
+Semantic policy has no generated ISA-builder include or raw target encoding
+constant, and semantic inventory has no `supported_mvp` field or equivalent
+unnamed eligibility bit. Classifier goldens and common policy/lowering fixtures
+cover `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`.
+
+During this gate, physical regression `DbiOverflowIsVisible` exposed that a
+runtime ring capacity is not a static semantic-evidence ceiling. Commit
+`becd961599` fixes that distinct bug and adds the regression required by the
+refactoring mandate. The final focused normalized-form slice passed 194/194
+tests. The complete nonphysical gate passed 4,694/4,694 tests at `-j16` in
+245.56 seconds, and the serialized physical `gfx1201` gate passed 635/635 tests
+at `-j1` in 105.45 seconds.
 
 ### F5. Replace broad option buses with stage contracts
 
