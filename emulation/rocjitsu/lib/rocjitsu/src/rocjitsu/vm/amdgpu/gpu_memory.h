@@ -1337,10 +1337,19 @@ private:
     // Logger::warn, not Logger::vm: the VM group is compiled out unless the
     // build sets RJ_LOG_GROUPS, and this is a fault the user needs to see in a
     // default build. It used to end the process, so silence is not an option.
-    if (count <= kInaccessiblePassthroughReports)
+    if (count < kInaccessiblePassthroughReports)
       util::Logger::warn("GPU memory passthrough page is not accessible: page=0x", std::hex,
                          page_addr, std::dec, " count=", count,
                          " (access dropped; reads return zero)");
+    else if (count == kInaccessiblePassthroughReports)
+      // Say that the count stops here. A reader who sees exactly this many
+      // reports and does not know they are capped would read the last count as
+      // a total, and it is only a floor -- a kernel that runs off the end of an
+      // allocation does it in every wave of every dispatch.
+      util::Logger::warn("GPU memory passthrough page is not accessible: page=0x", std::hex,
+                         page_addr, std::dec, " count=", count,
+                         " (access dropped; reads return zero)"
+                         " -- further occurrences are counted but not reported");
   }
 
   template <typename F> bool with_page_mapping(uint64_t addr, uint32_t vmid, F &&fn) const {
