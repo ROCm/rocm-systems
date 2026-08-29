@@ -12,7 +12,8 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     stream_geometry.hpp
     correlation_types.hpp
     doorbell_map.hpp
-    kfd_correlation.hpp)
+    kfd_correlation.hpp
+    poll_reader.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KFD_EVENT_SOURCES}
