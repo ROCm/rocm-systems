@@ -148,7 +148,7 @@ output_format_selection
 resolve_output_format(const strset_t& tokens)
 {
     output_format_selection _sel;
-    _sel.perfetto = tokens.contains("proto");
+    _sel.perfetto = tokens.contains("pftrace") || tokens.contains("proto");
     _sel.rocpd    = tokens.contains("rocpd");
     _sel.json     = tokens.contains("json");
     _sel.text     = tokens.contains("text") || tokens.contains("txt");
@@ -816,14 +816,15 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument(
                 { "--output-format" },
                 "Select output format(s); only the listed formats are produced: "
-                "proto (Perfetto trace), rocpd (RocPD database), json/text (Timemory "
-                "profile; txt aliases text). Space- or comma-separated, e.g. "
-                "--output-format proto rocpd. Cannot be combined with --trace, "
-                "--profile, --flat-profile, or --profile-format.")
+                "pftrace (Perfetto trace; proto aliases pftrace), rocpd (RocPD "
+                "database), json/text (Timemory profile; txt aliases text). Space- or "
+                "comma-separated, e.g. --output-format pftrace rocpd. Cannot be "
+                "combined with --trace, --profile, --flat-profile, or "
+                "--profile-format.")
             .min_count(1)
-            .max_count(5)
+            .max_count(6)
             .dtype("[format...]")
-            .choices({ "proto", "rocpd", "json", "text", "txt" })
+            .choices({ "pftrace", "proto", "rocpd", "json", "text", "txt" })
             .conflicts(
                 { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {
