@@ -465,7 +465,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
             (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
   EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
   ASSERT_EQ(published_diagnostics.patches.size(), 3u);
-  EXPECT_EQ(published_diagnostics.patches.front().kind, ConSanPatchKind::InlineNopRewrite);
+  EXPECT_EQ(published_diagnostics.patches.front().kind, "inline-nop-rewrite");
   EXPECT_EQ(published_diagnostics.patches[1].required_private_segment_size, 64u);
   EXPECT_EQ(published_diagnostics.patches[1].dynamic_private_segment_addend, 16u);
   EXPECT_EQ(published_diagnostics.patches[2].anchor_offset, 12u);

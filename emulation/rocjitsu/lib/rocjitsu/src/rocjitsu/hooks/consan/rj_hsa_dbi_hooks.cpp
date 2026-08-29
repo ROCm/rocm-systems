@@ -4776,8 +4776,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   "private_bytes=%u dynamic_private_addend=%u "
                   "workgroup_shadow_base=%u workgroup_shadow_bytes=%u group_bytes=%u "
                   "sampled_first_slot=%u sampled_window_banks=%u sampled_access_kind=%u",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
+                  static_cast<unsigned long long>(code_object_reader.handle), patch.kind.c_str(),
+                  static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
                   patch.trampoline_size, scratch_vgpr.c_str(), scalar_vcc_spill_sgpr.c_str(),
                   scalar_vcc_spill_vgpr.c_str(), patch.scalar_vcc_spill_vgpr_count,

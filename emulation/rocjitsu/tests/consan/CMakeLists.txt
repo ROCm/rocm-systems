@@ -50,6 +50,15 @@ rj_add_test(
     LABELS consan
 )
 
+rj_add_test(
+    NAME ConSan.ArchitectureBoundaries
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/check_architecture_boundaries.cmake"
+    LABELS consan
+)
+
 function(rj_add_consan_unit_sources target)
     target_sources(
         ${target}

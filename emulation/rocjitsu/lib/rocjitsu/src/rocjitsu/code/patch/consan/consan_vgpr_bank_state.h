@@ -24,4 +24,11 @@ consan_selectable_vgpr_bank_mode_at(rj_code_arch_t arch, std::span<const uint8_t
                                     uint64_t text_file_offset, uint64_t container_entry_text_offset,
                                     uint64_t site_file_offset);
 
+/// Return whether an exact byte range contains a selectable-bank transition.
+/// Unsupported targets and malformed ranges have no such transition.
+[[nodiscard]] bool consan_selectable_vgpr_bank_transition_in_range(rj_code_arch_t arch,
+                                                                   std::span<const uint8_t> bytes,
+                                                                   uint64_t begin_file_offset,
+                                                                   uint64_t end_file_offset);
+
 } // namespace rocjitsu

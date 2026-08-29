@@ -115,7 +115,7 @@ struct ConSanResourceAlternativeDiagnostic {
 
 /// Presentation-only snapshot of emitted patch mechanics.
 struct ConSanPatchDiagnostic {
-  ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
+  std::string kind;
   uint64_t anchor_offset = 0;
   uint64_t trampoline_offset = 0;
   uint32_t original_size = 0;

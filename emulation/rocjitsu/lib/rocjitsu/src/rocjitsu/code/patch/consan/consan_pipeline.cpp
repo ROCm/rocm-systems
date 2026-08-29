@@ -29,6 +29,110 @@ namespace {
   return static_cast<uint8_t>(issue) < static_cast<uint8_t>(ConSanContractIssue::Count);
 }
 
+[[nodiscard]] constexpr const char *patch_diagnostic_kind_name(ConSanPatchKind kind) {
+  switch (kind) {
+  case ConSanPatchKind::InlineNopRewrite:
+    return "inline-nop-rewrite";
+  case ConSanPatchKind::InlineEndpgmRewrite:
+    return "inline-endpgm-rewrite";
+  case ConSanPatchKind::InlineLdsEndpgmRewrite:
+    return "inline-lds-endpgm-rewrite";
+  case ConSanPatchKind::InlineLdsLoadCheckTrap:
+    return "inline-lds-load-check-trap";
+  case ConSanPatchKind::InlineLdsStoreCheckTrap:
+    return "inline-lds-store-check-trap";
+  case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
+    return "local-cave-lds-load-check-trap";
+  case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
+    return "local-cave-lds-store-check-trap";
+  case ConSanPatchKind::InlineFlatLoadCheckTrap:
+    return "inline-flat-load-check-trap";
+  case ConSanPatchKind::InlineFlatStoreCheckTrap:
+    return "inline-flat-store-check-trap";
+  case ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
+    return "local-cave-flat-load-check-trap";
+  case ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
+    return "local-cave-flat-store-check-trap";
+  case ConSanPatchKind::InlineFlatTrapRewrite:
+    return "inline-flat-trap-rewrite";
+  case ConSanPatchKind::InlineBarrierNopRewrite:
+    return "inline-barrier-nop-rewrite";
+  case ConSanPatchKind::InlineBarrierIdScopeRewrite:
+    return "inline-barrier-id-scope-rewrite";
+  case ConSanPatchKind::InlineBarrierParticipantCountRewrite:
+    return "inline-barrier-participant-count-rewrite";
+  case ConSanPatchKind::InlineBarrierMoveSourceRewrite:
+    return "inline-barrier-move-source-rewrite";
+  case ConSanPatchKind::InlineBarrierMoveTargetRewrite:
+    return "inline-barrier-move-target-rewrite";
+  case ConSanPatchKind::InlineAtomicAddressRewrite:
+    return "inline-atomic-address-rewrite";
+  case ConSanPatchKind::InlineAtomicOrderRewrite:
+    return "inline-atomic-order-rewrite";
+  case ConSanPatchKind::InlineAtomicScopeRewrite:
+    return "inline-atomic-scope-rewrite";
+  case ConSanPatchKind::InlineLdsAddressRewrite:
+    return "inline-lds-address-rewrite";
+  case ConSanPatchKind::InlineOrdinaryOrderRewrite:
+    return "inline-ordinary-order-rewrite";
+  case ConSanPatchKind::InlineOrdinaryAddressRewrite:
+    return "inline-ordinary-address-rewrite";
+  case ConSanPatchKind::InlineOrdinaryScopeRewrite:
+    return "inline-ordinary-scope-rewrite";
+  case ConSanPatchKind::InlineMoiAccessRecordStore:
+    return "inline-moi-access-record-store";
+  case ConSanPatchKind::TrampolineMoiAccessRecordStore:
+    return "trampoline-moi-access-record-store";
+  case ConSanPatchKind::InlineMoiExactShadowStore:
+    return "inline-moi-exact-shadow-store";
+  case ConSanPatchKind::TrampolineMoiExactShadowStore:
+    return "trampoline-moi-exact-shadow-store";
+  case ConSanPatchKind::InlineMoiSampledWatchpointStore:
+    return "inline-moi-sampled-watchpoint-store";
+  case ConSanPatchKind::TrampolineMoiSampledWatchpointStore:
+    return "trampoline-moi-sampled-watchpoint-store";
+  case ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue:
+    return "kernel-entry-moi-owner-epoch-prologue";
+  case ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue:
+    return "kernel-entry-moi-private-epoch-prologue";
+  case ConSanPatchKind::TrampolineMoiBarrierRecord:
+    return "trampoline-moi-barrier-record";
+  case ConSanPatchKind::TrampolineMoiInlineEpochBarrier:
+    return "trampoline-moi-inline-epoch-barrier";
+  case ConSanPatchKind::TrampolineMoiInlineAtomicOrdering:
+    return "trampoline-moi-inline-atomic-ordering";
+  case ConSanPatchKind::TrampolineMoiAtomicRecord:
+    return "trampoline-moi-atomic-record";
+  case ConSanPatchKind::TrampolineMoiSampledSyncMetadata:
+    return "trampoline-moi-sampled-sync-metadata";
+  case ConSanPatchKind::TrampolineMoiFenceRecord:
+    return "trampoline-moi-fence-record";
+  case ConSanPatchKind::InlineMalformedBarrierAbort:
+    return "inline-malformed-barrier-abort";
+  case ConSanPatchKind::TrampolineScPerturbation:
+    return "trampoline-sc-perturbation";
+  case ConSanPatchKind::TrampolineScIndirectBranchIsland:
+    return "trampoline-sc-indirect-branch-island";
+  case ConSanPatchKind::TrampolineScDenseCallDispatcher:
+    return "trampoline-sc-dense-call-dispatcher";
+  case ConSanPatchKind::TrampolineScDenseEntryHost:
+    return "trampoline-sc-dense-entry-host";
+  case ConSanPatchKind::TrampolineScBranchRelayDonor:
+    return "trampoline-sc-branch-relay-donor";
+  case ConSanPatchKind::TrampolineBranchRelayReservoir:
+    return "trampoline-branch-relay-reservoir";
+  case ConSanPatchKind::TrampolineNopBranchRelay:
+    return "trampoline-nop-branch-relay";
+  case ConSanPatchKind::InlineScalarClauseNopRewrite:
+    return "inline-scalar-clause-nop-rewrite";
+  case ConSanPatchKind::TrampolineMoiIndirectBranchIsland:
+    return "trampoline-moi-indirect-branch-island";
+  case ConSanPatchKind::TrampolineNop:
+    return "trampoline-nop";
+  }
+  return "unknown";
+}
+
 [[nodiscard]] ConSanPipelineStageStatus terminal_stage_status(ConSanTransformOutcome outcome) {
   switch (outcome) {
   case ConSanTransformOutcome::Unchanged:
@@ -431,7 +535,7 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
   report.patches.reserve(result.private_lowering_.patches.size());
   for (const ConSanPatchLoweringProduct &patch : result.private_lowering_.patches) {
     report.patches.push_back({
-        .kind = patch.kind,
+        .kind = patch_diagnostic_kind_name(patch.kind),
         .anchor_offset = patch.anchor_offset,
         .trampoline_offset = patch.trampoline_offset,
         .original_size = patch.original_size,

@@ -50,6 +50,12 @@ TEST(ConSan, SelectableVgprBankStateDispatchesOnlyToOwningTarget) {
       consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, 0u, bytes.size()));
   EXPECT_FALSE(consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 1u,
                                                    bytes.size(), bytes.size()));
+  EXPECT_TRUE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u,
+                                                              bytes.size()));
+  EXPECT_FALSE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u,
+                                                               bytes.size()));
+  EXPECT_FALSE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes,
+                                                               bytes.size(), 0u));
 }
 
 TEST(ConSan, SplitTwoAddressLdsRecipeDispatchesOnlyToOwningTarget) {

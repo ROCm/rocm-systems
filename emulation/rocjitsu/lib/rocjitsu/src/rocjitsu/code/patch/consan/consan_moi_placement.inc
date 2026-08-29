@@ -2047,9 +2047,8 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     }
     if (displaced_words.size() != host_word_count)
       return std::nullopt;
-    if (consan_arch_has_selectable_vgpr_bank(resource_state.arch) &&
-        std::ranges::any_of(displaced_words,
-                            [](uint32_t word) { return (word & 0xffff0000u) == 0xbf860000u; })) {
+    if (consan_selectable_vgpr_bank_transition_in_range(resource_state.arch, text, host_offset,
+                                                        host_end)) {
       // Moving the transition would also remove it from the original CFG.
       // The appended copy would then decode the displaced tail in the new
       // mode, while the original continuation would decode in the old mode.
