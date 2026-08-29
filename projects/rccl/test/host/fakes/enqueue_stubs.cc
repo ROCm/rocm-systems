@@ -35,14 +35,10 @@ namespace {
 }  // namespace
 
 // ---- HIP kernel launch ----------------------------------------------------
-// Must stay defined here: left undefined, the linker satisfies it from the
-// INTERCEPTOR in ROCm's libclang_rt.profile, whose deps do not link.
-extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t, unsigned int, unsigned int,
-                                            unsigned int, unsigned int, unsigned int,
-                                            unsigned int, unsigned int, hipStream_t,
-                                            void**, void**) {
-  Unreached("hipModuleLaunchKernel");
-}
+// hipModuleLaunchKernel and its 15 siblings live in
+// fakes/hip_profile_interceptor_fakes.cc: leaving any of them undefined makes
+// lld pull InstrProfilingPlatformROCm.cpp.o out of libclang_rt.profile, whose
+// dependencies do not link. That is not enqueue-specific, so it is not here.
 
 // ---- graph capture / stream ordering -------------------------------------
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
