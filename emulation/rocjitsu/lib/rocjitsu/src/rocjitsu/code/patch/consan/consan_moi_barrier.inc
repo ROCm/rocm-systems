@@ -1623,12 +1623,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (target->direct_call_form == ConSanDirectCallForm::SCallI64)
-          return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (target->direct_call_form == ConSanDirectCallForm::SCallB64 &&
-            target->arch == ROCJITSU_CODE_ARCH_RDNA4)
-          return build_s_call_b64(call_return_sgpr, simm16, arch);
-        return std::nullopt;
+        return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
       };
 
       ConSanPatchLoweringProduct &dispatcher = result.patches[relay->dispatcher_patch_index];

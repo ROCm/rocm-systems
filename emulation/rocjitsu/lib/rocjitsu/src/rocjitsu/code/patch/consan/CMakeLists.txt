@@ -17,6 +17,8 @@ target_sources(
         consan_composition.cpp
         consan_descriptor_growth.cpp
         consan_fault_injection.cpp
+        consan_fault_gfx12_target_ops.cpp
+        consan_fault_gfx9_target_ops.cpp
         consan_fault_selection.cpp
         consan_fault_target_ops.cpp
         consan_final_validation.cpp
