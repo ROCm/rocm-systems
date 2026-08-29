@@ -1306,6 +1306,8 @@ Decoder *moi_resource_decoder(MoiResourcePlanningState &state) { return state.de
 
 bool moi_resource_is_valid(const MoiResourcePlanningState &state) { return state.valid; }
 
+rj_code_arch_t moi_resource_arch(const MoiResourcePlanningState &state) { return state.arch; }
+
 bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
                                     uint64_t descriptor_offset) {
   const auto found = state.context_by_descriptor.find(descriptor_offset);
@@ -1581,6 +1583,15 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
   }
   result.tail_floor = resolved->tail_floor;
   return result;
+}
+
+bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
+                                             std::span<const uint64_t> owners, uint16_t base,
+                                             uint16_t count) {
+  const auto contexts = resolve_moi_scalar_owner_contexts(state, owners);
+  return contexts && consan_detail::scalar_owner_contexts_admit_reserved_window(
+                         contexts->summaries, base, count,
+                         consan_uses_gfx9_cdna_encoding(state.arch));
 }
 
 struct MoiScalarOwnerContextGroup {

@@ -32,6 +32,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
@@ -163,7 +164,7 @@ namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_pipeline.inc"
+} // namespace consan_moi_impl
 
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                               const MoiOptions &options,

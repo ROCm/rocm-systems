@@ -75,7 +75,8 @@ void append_moi_operational_resource_plans(
       const uint16_t scratch_count = request.moi_engine == ConSanMoiEngine::Sampled
                                          ? sampled_atomic_scratch_count()
                                      : request.moi_engine == ConSanMoiEngine::InlineShadow
-                                         ? inline_shadow_atomic_scratch_count(state.arch)
+                                         ? inline_shadow_atomic_scratch_count(
+                                               moi_resource_arch(state))
                                          : atomic_record_scratch_count(candidate.lowering_form);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, point, ConSanResourceSiteKind::Atomic, index,
@@ -167,19 +168,20 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
                          const ConSanTransformArtifacts &result) {
   ConSanMoiResourcePlanningResult planning;
   const ConSanMoiOperatingPoint &attempted_point = point;
+  const rj_code_arch_t arch = moi_resource_arch(state);
   planning.attempted_operating_point = attempted_point;
   append_moi_resource_plans(state, request, bound_resources, debug, point, candidates,
                             planning.plans);
   append_moi_operational_resource_plans(state, request, bound_resources, debug, point, result,
                                         planning.errors, planning.plans);
-  if (consan_arch_is_cdna(state.arch) && point.automatic_moi_dispatch_id_sgprs &&
+  if (consan_arch_is_cdna(arch) && point.automatic_moi_dispatch_id_sgprs &&
       point.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       ConSanMoiOperatingPoint owner_point = point;
       if (!attempted_point.owner_transient_sgprs.empty() &&
           !apply_moi_transient_sgpr_assignment(request, owner_point, attempted_point,
                                                plan.owner_descriptor_file_offsets)) {
-        if (state.arch == ROCJITSU_CODE_ARCH_CDNA5)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
           continue;
         owner_point.moi_dispatch_id_sgpr.reset();
       }
@@ -193,19 +195,17 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
       if (!owner_point.moi_dispatch_id_sgpr &&
           std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             const ConSanMoiTransientSgprAssignment *assignment =
-                find_moi_transient_sgpr_assignment(attempted_point, descriptor_offset);
+                moi_transient_sgpr_assignment(attempted_point, descriptor_offset);
             return assignment != nullptr && !assignment->dispatch_id_sgpr;
           })) {
         continue;
       }
-      const auto owner_contexts =
-          resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       const bool missing_dispatch = !owner_point.moi_dispatch_id_sgpr;
       const uint16_t dispatch_base = owner_point.moi_dispatch_id_sgpr.value_or(0u);
       const bool admitted =
-          !missing_dispatch && owner_contexts &&
-          moi_scalar_contexts_admit_reserved_window(owner_contexts->summaries, dispatch_base,
-                                                    kMoiDispatchStateSgprCount, state.arch);
+          !missing_dispatch &&
+          moi_resource_owner_sgpr_window_admitted(
+              state, plan.owner_descriptor_file_offsets, dispatch_base, kMoiDispatchStateSgprCount);
       if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
@@ -214,15 +214,15 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
       }
     }
   }
-  if (consan_is_capability_arch(state.arch) && point.automatic_moi_partial_exec_save_sgprs &&
+  if (consan_is_capability_arch(arch) && point.automatic_moi_partial_exec_save_sgprs &&
       point.moi_exec_save_sgpr) {
     const uint16_t exec_base = *point.moi_exec_save_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(request, bound_resources, point), state.arch);
+        resolve_moi_exec_save_requirement(request, bound_resources, point), arch);
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-            return find_moi_transient_sgpr_assignment(attempted_point, descriptor_offset) !=
+            return moi_transient_sgpr_assignment(attempted_point, descriptor_offset) !=
                    nullptr;
           });
       if (has_owner_override) {
@@ -231,11 +231,9 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
                                                 plan.owner_descriptor_file_offsets))
           continue;
       }
-      const auto owner_contexts =
-          resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       if (!plan.owner_descriptor_file_offsets.empty() &&
-          (!owner_contexts || !moi_scalar_contexts_admit_reserved_window(
-                                  owner_contexts->summaries, exec_base, exec_count, state.arch))) {
+          !moi_resource_owner_sgpr_window_admitted(
+              state, plan.owner_descriptor_file_offsets, exec_base, exec_count)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();
@@ -307,5 +305,3 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanReq
   result.errors.insert(result.errors.end(), std::make_move_iterator(planning.errors.begin()),
                        std::make_move_iterator(planning.errors.end()));
 }
-
-} // namespace consan_moi_impl

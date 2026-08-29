@@ -256,6 +256,8 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 
 [[nodiscard]] bool moi_resource_is_valid(const MoiResourcePlanningState &state);
 
+[[nodiscard]] rj_code_arch_t moi_resource_arch(const MoiResourcePlanningState &state);
+
 [[nodiscard]] bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
                                                   uint64_t descriptor_offset);
 
@@ -358,6 +360,26 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
                        const ConSanAtomicLoweringForm *atomic_form = nullptr,
                        bool require_spill = false);
+
+void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &request,
+                               const BoundRuntimeResources &resources,
+                               const ConSanDebugOverrides &debug,
+                               const ConSanMoiOperatingPoint &point,
+                               std::span<const ConSanMoiCandidate> candidates,
+                               std::vector<ConSanCandidateResourcePlan> &plans);
+
+[[nodiscard]] bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
+                                                           std::span<const uint64_t> owners,
+                                                           uint16_t base, uint16_t count);
+
+[[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(
+    ConSanMoiOperatingPoint &options, const MoiResourceProblem &problem,
+    std::span<const ConSanCandidateResourcePlan> site_plans, std::vector<std::string> &warnings,
+    const MoiResourcePlanningState &planning_state);
+
+[[nodiscard]] bool automatic_moi_scalar_spill_needs_dynamic_stack_planning(
+    const ConSanMoiOperatingPoint &point, const ProgramInventory &inventory,
+    std::span<const ConSanCandidateResourcePlan> site_plans);
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,

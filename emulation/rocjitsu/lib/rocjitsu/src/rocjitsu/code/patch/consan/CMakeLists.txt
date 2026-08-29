@@ -38,6 +38,7 @@ target_sources(
         consan_moi_memory_emission.cpp
         consan_moi_model.cpp
         consan_moi_native_abi.cpp
+        consan_moi_pipeline.cpp
         consan_moi_probe_contracts.cpp
         consan_moi_probe_planning.cpp
         consan_moi_prologue.cpp
