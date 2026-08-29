@@ -668,8 +668,9 @@ void try_apply_first_light_access_record_patch(
     uint32_t probe_guest_instruction_offset = 0;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_first_light_access_record_words(
-        bytes, candidate, candidate_options, arch, 0, 0, planned_logical_range_count, layout,
-        spill_overlaps_guest_operands, spill ? &*spill : nullptr,
+        bytes, candidate, candidate_options, candidate_options, candidate_options, resources->base,
+        arch, 0, 0, planned_logical_range_count, layout, spill_overlaps_guest_operands,
+        spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         owner_derivation, candidate_errors, &probe_guest_instruction_offset,
         &guest_instruction_word_count);
@@ -1174,9 +1175,9 @@ void try_apply_first_light_access_record_patch(
         return;
       }
       auto words = build_first_light_access_record_words(
-          bytes, candidate, candidate_options, arch, planned_patch.record_index,
-          planned_record_count, planned_patch.logical_range_index, layout,
-          planned_patch.spill_overlaps_guest_operands,
+          bytes, candidate, candidate_options, candidate_options, candidate_options,
+          planned_patch.resources.base, arch, planned_patch.record_index, planned_record_count,
+          planned_patch.logical_range_index, layout, planned_patch.spill_overlaps_guest_operands,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
           planned_patch.owner_derivation, result.errors);
       if (!words)
@@ -1549,9 +1550,10 @@ void try_apply_first_light_access_record_patch(
                     planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
-                bytes, *planned_patch.candidate, candidate_options, arch,
-                planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
-                layout, planned_patch.spill_overlaps_guest_operands,
+                bytes, *planned_patch.candidate, candidate_options, candidate_options,
+                candidate_options, planned_patch.resources.base, arch, planned_patch.record_index,
+                planned_record_count, planned_patch.logical_range_index, layout,
+                planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.owner_derivation, result.errors);
           },

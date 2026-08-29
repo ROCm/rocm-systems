@@ -731,8 +731,10 @@ private:
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
-    rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
@@ -742,15 +744,11 @@ private:
     errors.emplace_back(message);
     return std::nullopt;
   };
-  if (!options.scratch_vgpr) {
-    errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
-    return std::nullopt;
-  }
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return fail("ConSan MOI first-light probe has no target profile");
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
-      options, layout.record_replay_dispatch_token_capacity);
+      request, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   const bool materialize_direct_to_lds = candidate.is_direct_to_lds();
@@ -765,21 +763,21 @@ private:
                                 : (save_clobbered_address ? 1u : 0u)) +
       (materialize_direct_to_lds ? 1u : 0u) + (reserve_two_address_replay_scratch ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
-  if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > 256u) {
-    errors.emplace_back(options.moi_dynamic_access_records
+  if (static_cast<uint32_t>(scratch_vgpr) + scratch_count > kMaxVgprs) {
+    errors.emplace_back(request.moi_dynamic_access_records
                             ? "ConSan MOI dynamic access-record probe needs six scratch VGPRs"
                         : automatic_banked_capture
                             ? "ConSan MOI automatic first-light probe needs ten scratch VGPRs"
                             : "ConSan MOI first-light probe needs six scratch VGPRs");
     return std::nullopt;
   }
-  if (options.moi_dynamic_access_records && !options.moi_exec_save_sgpr) {
+  if (request.moi_dynamic_access_records && !point.moi_exec_save_sgpr) {
     errors.emplace_back(
         "ConSan MOI dynamic access-record probe requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
     return std::nullopt;
   }
-  if (options.moi_dynamic_access_records &&
-      (*options.moi_exec_save_sgpr > 100u || *options.moi_exec_save_sgpr % 2u != 0u)) {
+  if (request.moi_dynamic_access_records &&
+      (*point.moi_exec_save_sgpr > 100u || *point.moi_exec_save_sgpr % 2u != 0u)) {
     errors.emplace_back(
         "ConSan MOI dynamic access-record probe requires an even RJ_CONSAN_MOI_EXEC_SAVE_SGPR in "
         "0..100");
@@ -789,33 +787,32 @@ private:
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
   if (!spill_overlaps_guest_operands &&
-      reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
-                                             errors))
+      reject_candidate_scratch_range_overlap(candidate, scratch_vgpr, scratch_count, errors))
     return std::nullopt;
-  if (options.moi_dynamic_access_records && has_recent_saveexec(bytes, candidate)) {
+  if (request.moi_dynamic_access_records && has_recent_saveexec(bytes, candidate)) {
     errors.emplace_back(
         "ConSan MOI dynamic access-record probe skipped a candidate immediately after "
         "s_*_saveexec");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI epoch", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_workgroup_key_vgpr, *options.scratch_vgpr,
+  if (reject_optional_scratch_range_overlap(point.moi_owner_vgpr, scratch_vgpr, scratch_count,
+                                            "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_epoch_vgpr, scratch_vgpr, scratch_count,
+                                            "MOI epoch", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.x,
-                                            *options.scratch_vgpr, scratch_count,
-                                            "MOI Record/Replay workgroup x", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.y,
-                                            *options.scratch_vgpr, scratch_count,
-                                            "MOI Record/Replay workgroup y", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.z,
-                                            *options.scratch_vgpr, scratch_count,
-                                            "MOI Record/Replay workgroup z", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.x, scratch_vgpr,
+                                            scratch_count, "MOI Record/Replay workgroup x",
+                                            errors) ||
+      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.y, scratch_vgpr,
+                                            scratch_count, "MOI Record/Replay workgroup y",
+                                            errors) ||
+      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.z, scratch_vgpr,
+                                            scratch_count, "MOI Record/Replay workgroup z",
+                                            errors) ||
       reject_optional_scratch_range_overlap(
-          options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, *options.scratch_vgpr,
-          scratch_count, "MOI Record/Replay cluster workgroup ID", errors))
+          point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, scratch_vgpr, scratch_count,
+          "MOI Record/Replay cluster workgroup ID", errors))
     return std::nullopt;
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
@@ -833,13 +830,13 @@ private:
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
+  if (!point.moi_owner_vgpr && !point.moi_persistent_sgprs.owner) {
     if (!owner_derivation) {
       errors.emplace_back("ConSan MOI first-light probe requires a planned owner derivation");
       return std::nullopt;
     }
-    const uint16_t value_vgpr = static_cast<uint16_t>(
-        *options.scratch_vgpr + (options.moi_dynamic_access_records ? 4u : 2u));
+    const uint16_t value_vgpr =
+        static_cast<uint16_t>(scratch_vgpr + (request.moi_dynamic_access_records ? 4u : 2u));
     const auto owner = build_moi_workitem_owner_derivation(*owner_derivation, value_vgpr, arch,
                                                            "first-light probe", errors);
     if (!owner)
@@ -855,7 +852,7 @@ private:
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
   const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(options.moi_engine, options);
+      record_replay_persistent_workgroup_sources(request.moi_engine, point);
   if (!persistent_workgroup_sources) {
     errors.emplace_back(
         "ConSan MOI Record/Replay access requires one exact entry-captured workgroup tuple");
@@ -865,31 +862,31 @@ private:
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
-                (options.moi_owner_vgpr || derived_owner_vgpr ? 9u : 0u) +
-                (options.moi_epoch_vgpr ? 9u : 0u) + derived_owner_words.size());
+                (point.moi_owner_vgpr || derived_owner_vgpr ? 9u : 0u) +
+                (point.moi_epoch_vgpr ? 9u : 0u) + derived_owner_words.size());
   InstructionSequence sequence(words);
   const auto restore_exec_label = sequence.make_label();
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
   // that effective address before executing the displaced guest instruction;
   // otherwise RecordReplay publishes the loaded payload as the LDS offset.
   if (materialize_direct_to_lds) {
-    if (!options.moi_exec_save_sgpr) {
+    if (!point.moi_exec_save_sgpr) {
       errors.emplace_back(
           "ConSan MOI first-light direct-to-LDS probe requires an EXEC-save SGPR pair");
       return std::nullopt;
     }
     const uint16_t materialized_address_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+        static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
     if (!append_materialize_direct_to_lds_address(words, candidate, materialized_address_vgpr,
-                                                  *options.moi_exec_save_sgpr, arch)) {
+                                                  *point.moi_exec_save_sgpr, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not materialize a direct-to-LDS "
                           "destination");
       return std::nullopt;
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
-  } else if (materialize_flat_address && options.moi_dynamic_access_records) {
+  } else if (materialize_flat_address && request.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+        static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
     words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
                                         vector_source_vgpr(*candidate.lowering.form->address_vgpr),
                                         arch));
@@ -902,14 +899,14 @@ private:
     lds_byte_offset_vgpr = materialized_address_vgpr;
   } else if (save_clobbered_address) {
     const uint16_t saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+        static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
     if (!capture_high_bank_address) {
       words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
                                           vector_source_vgpr(*lds_byte_offset_vgpr), arch));
     }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
   }
-  if (options.moi_dynamic_access_records)
+  if (request.moi_dynamic_access_records)
     words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   const auto append_guest_access = [&] {
     if (guest_instruction_offset)
@@ -921,10 +918,10 @@ private:
          .candidate = &candidate,
          .target = target,
          .replay_address_vgpr = guest_address_vgpr,
-         .adjusted_address_vgpr = reserve_two_address_replay_scratch
-                                      ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                            *options.scratch_vgpr + scratch_count - 1u))
-                                      : std::nullopt},
+         .adjusted_address_vgpr =
+             reserve_two_address_replay_scratch
+                 ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
+                 : std::nullopt},
         errors);
     if (!guest_words)
       return false;
@@ -933,14 +930,14 @@ private:
     words.insert(words.end(), guest_words->begin(), guest_words->end());
     return true;
   };
-  if (options.moi_dynamic_access_records) {
+  if (request.moi_dynamic_access_records) {
     if (!append_guest_access())
       return std::nullopt;
     if (!append_moi_lds_wait(words, arch))
       return fail("ConSan MOI dynamic access-record probe could not encode its LDS wait");
   }
 
-  const uint64_t base = *options.moi_report_buffer_address;
+  const uint64_t base = *bound_resources.moi_report_buffer_address;
   const uint32_t access_record_capacity = layout.access_record_capacity;
   const uint32_t access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count;
   const uint32_t access_owner_bank_count = layout.record_replay_access_owner_bank_count;
@@ -956,13 +953,13 @@ private:
     return value_vgpr;
   };
 
-  if (options.moi_dynamic_access_records) {
-    const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
-    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  if (request.moi_dynamic_access_records) {
+    const uint16_t slot_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
+    const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
     for (const ConSanAccessRange &range : access_ranges) {
-      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
       }
@@ -977,7 +974,7 @@ private:
 
       if (!append_atomic_fetch_add_one_u32(
               words, base + offsetof(ConSanMoiReportHeader, access_record_count), slot_vgpr,
-              *options.scratch_vgpr, arch)) {
+              scratch_vgpr, arch)) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not reserve a record slot");
         return std::nullopt;
@@ -988,7 +985,7 @@ private:
       const auto slot_in_capacity =
           instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr, arch);
       const auto narrow_exec =
-          instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+          instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
       if (!mov_capacity || !slot_in_capacity || !narrow_exec) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not encode capacity guard");
@@ -1009,84 +1006,82 @@ private:
         }
         words.insert(words.end(), load_epoch->begin(), load_epoch->end());
         words.push_back(*wait_epoch);
-        if (!append_dynamic_record_store_u32_vgpr(
-                words, kAccessRecordLayout,
-                dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr, slot_vgpr,
-                *options.scratch_vgpr, arch)) {
+        if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                                  dynamic_record_base +
+                                                      offsetof(ConSanMoiAccessRecord, epoch),
+                                                  value_vgpr, slot_vgpr, scratch_vgpr, arch)) {
           errors.emplace_back(
               "ConSan MOI dynamic access-record probe could not store private epoch state");
           return std::nullopt;
         }
-      } else if (options.moi_persistent_sgprs.epoch) {
-        words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_persistent_sgprs.epoch, arch));
-        if (!append_dynamic_record_store_u32_vgpr(
-                words, kAccessRecordLayout,
-                dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr, slot_vgpr,
-                *options.scratch_vgpr, arch)) {
+      } else if (point.moi_persistent_sgprs.epoch) {
+        words.push_back(build_v_mov_b32_e32(value_vgpr, *point.moi_persistent_sgprs.epoch, arch));
+        if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                                  dynamic_record_base +
+                                                      offsetof(ConSanMoiAccessRecord, epoch),
+                                                  value_vgpr, slot_vgpr, scratch_vgpr, arch)) {
           errors.emplace_back(
               "ConSan MOI dynamic access-record probe could not store scalar epoch state");
           return std::nullopt;
         }
       }
 
-      if ((derived_owner_vgpr &&
-           !append_dynamic_record_store_u32_vgpr(
-               words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id), *derived_owner_vgpr,
-               slot_vgpr, *options.scratch_vgpr, arch)) ||
-          (options.moi_persistent_sgprs.owner &&
+      if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
+                                     words, kAccessRecordLayout,
+                                     dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+                                     *derived_owner_vgpr, slot_vgpr, scratch_vgpr, arch)) ||
+          (point.moi_persistent_sgprs.owner &&
            !append_dynamic_record_store_u32_scalar_src(
                words, kAccessRecordLayout,
                dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *options.moi_persistent_sgprs.owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
+               *point.moi_persistent_sgprs.owner, slot_vgpr, scratch_vgpr, arch)) ||
           !append_dynamic_record_store_moi_report_dispatch_id_pair(
               words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options, options,
-              slot_vgpr, *options.scratch_vgpr, arch,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), point,
+              bound_resources, slot_vgpr, scratch_vgpr, arch,
               ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
           !append_dynamic_record_event_index_store(
               words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
-              *options.scratch_vgpr, arch) ||
+              scratch_vgpr, arch) ||
           !append_dynamic_record_store_workgroup_source(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
-              workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
+              workgroup_sources.x, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_workgroup_source(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
-              workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
+              workgroup_sources.y, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_workgroup_source(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
-              workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
+              workgroup_sources.z, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_u32_scalar_src(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask),
-              *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+              *point.moi_exec_save_sgpr, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_u32_scalar_src(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
-              static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr,
-              *options.scratch_vgpr, arch) ||
-          (options.moi_owner_vgpr &&
+              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u), slot_vgpr, scratch_vgpr,
+              arch) ||
+          (point.moi_owner_vgpr &&
            !append_dynamic_record_store_u32_vgpr(
                words, kAccessRecordLayout,
                dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-          (options.moi_epoch_vgpr &&
-           !append_dynamic_record_store_u32_vgpr(
-               words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
-               *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+               *point.moi_owner_vgpr, slot_vgpr, scratch_vgpr, arch)) ||
+          (point.moi_epoch_vgpr && !append_dynamic_record_store_u32_vgpr(
+                                       words, kAccessRecordLayout,
+                                       dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
+                                       *point.moi_epoch_vgpr, slot_vgpr, scratch_vgpr, arch)) ||
           !append_dynamic_record_store_u32_literal(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
-              static_cast<uint32_t>(candidate.anchor()), slot_vgpr, *options.scratch_vgpr, arch) ||
+              static_cast<uint32_t>(candidate.anchor()), slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_u32_literal(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
-              static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch)) {
+              static_cast<uint32_t>(kind), slot_vgpr, scratch_vgpr, arch)) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not encode record stores");
         return std::nullopt;
@@ -1102,7 +1097,7 @@ private:
       if (!append_dynamic_record_store_u32_vgpr(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_offset),
-              *effective_lds_byte_offset_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) {
+              *effective_lds_byte_offset_vgpr, slot_vgpr, scratch_vgpr, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;
       }
@@ -1116,24 +1111,24 @@ private:
       words.push_back(*start_cell_shift);
       const ConSanMoiLdsCellRange static_range =
           consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
-      if (!append_dynamic_record_store_u32_vgpr(
-              words, kAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, start_cell), value_vgpr,
-              slot_vgpr, *options.scratch_vgpr, arch) ||
+      if (!append_dynamic_record_store_u32_vgpr(words, kAccessRecordLayout,
+                                                dynamic_record_base +
+                                                    offsetof(ConSanMoiAccessRecord, start_cell),
+                                                value_vgpr, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_u32_literal(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
-              range.byte_width, slot_vgpr, *options.scratch_vgpr, arch) ||
+              range.byte_width, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_store_u32_literal(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
-              static_range.cell_count, slot_vgpr, *options.scratch_vgpr, arch)) {
+              static_range.cell_count, slot_vgpr, scratch_vgpr, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;
       }
       const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
       const auto restore_exec =
-          instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+          instrumentation::build_s_mov_b64(kRdna4ExecLo, *point.moi_exec_save_sgpr, arch);
       if (!wait_store || !restore_exec) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC");
@@ -1144,8 +1139,7 @@ private:
       // EXEC are still intact, so wave termination cannot race those stores.
       words.push_back(*wait_store);
       words.push_back(*restore_exec);
-      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options),
-                                            arch)) {
+      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not restore VCC/SCC");
         return std::nullopt;
       }
@@ -1153,7 +1147,7 @@ private:
     return words;
   }
 
-  const uint16_t record_address_vgpr = *options.scratch_vgpr;
+  const uint16_t record_address_vgpr = scratch_vgpr;
   const uint16_t record_value_vgpr = static_cast<uint16_t>(record_address_vgpr + 2u);
   const uint16_t record_value_high_vgpr = static_cast<uint16_t>(record_address_vgpr + 3u);
   const uint16_t record_compare_vgpr = static_cast<uint16_t>(record_address_vgpr + 4u);
@@ -1162,9 +1156,9 @@ private:
   const uint16_t owner_bank_vgpr = static_cast<uint16_t>(record_address_vgpr + 7u);
   const uint16_t bank_probe_count_vgpr = static_cast<uint16_t>(record_address_vgpr + 8u);
   const uint16_t identity_claim_hash_vgpr = static_cast<uint16_t>(record_address_vgpr + 9u);
-  const uint16_t original_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u);
-  const uint16_t address_key_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
-  const uint16_t address_group_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
+  const uint16_t original_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 8u);
+  const uint16_t address_key_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 10u);
+  const uint16_t address_group_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
       !materialize_flat_address && !save_clobbered_address && spill != nullptr &&
               spill_overlaps_guest_operands && *lds_byte_offset_vgpr >= spill->vgpr_base &&
@@ -1203,7 +1197,8 @@ private:
   }
   const auto append_claim_token = [&](uint16_t low_vgpr, uint16_t high_vgpr,
                                       uint16_t temporary_vgpr) {
-    if (!append_moi_report_dispatch_id_pair(words, options, options, low_vgpr, high_vgpr, arch,
+    if (!append_moi_report_dispatch_id_pair(words, point, bound_resources, low_vgpr, high_vgpr,
+                                            arch,
                                             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture))
       return false;
     const auto low_xor_literal = instrumentation::build_v_mov_b32_literal(
@@ -1219,14 +1214,14 @@ private:
     return append.emit_all(low_xor_literal, low_xor, high_xor_literal, high_xor);
   };
   const auto append_owner_id = [&](uint16_t destination_vgpr) {
-    if (options.moi_owner_vgpr) {
+    if (point.moi_owner_vgpr) {
       words.push_back(
-          build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*options.moi_owner_vgpr), arch));
+          build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*point.moi_owner_vgpr), arch));
       return true;
     }
-    if (options.moi_persistent_sgprs.owner) {
+    if (point.moi_persistent_sgprs.owner) {
       words.push_back(
-          build_v_mov_b32_e32(destination_vgpr, *options.moi_persistent_sgprs.owner, arch));
+          build_v_mov_b32_e32(destination_vgpr, *point.moi_persistent_sgprs.owner, arch));
       return true;
     }
     if (!derived_owner_vgpr)
@@ -1283,14 +1278,14 @@ private:
                         std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
     return false;
   };
-  if (!options.moi_exec_save_sgpr ||
-      !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+  if (!point.moi_exec_save_sgpr ||
+      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
   }
   if (materialize_flat_address) {
     const uint16_t materialized_address_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+        static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
     if (!append_materialize_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
                                                 materialized_address_vgpr, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not materialize FLAT address");
@@ -1344,7 +1339,7 @@ private:
     const auto select_address =
         instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, *lds_byte_offset_vgpr, arch);
     const auto narrow_group =
-        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
     const auto save_address_group =
         instrumentation::build_s_mov_b64(address_group_exec_sgpr, kRdna4ExecLo, arch);
     const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
@@ -1374,16 +1369,16 @@ private:
     words.push_back(*narrow_representative);
   } else {
     const auto save_incoming_exec =
-        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(*point.moi_exec_save_sgpr, kRdna4ExecLo, arch);
     const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-        record_value_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
+        record_value_vgpr, *point.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
     const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-        record_value_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
+        record_value_vgpr, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u),
         vector_source_vgpr(record_value_vgpr), arch);
     const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
                                                                       record_value_vgpr, arch);
     const auto narrow_first =
-        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
     if (!save_incoming_exec || !lane_rank_lo || !lane_rank_hi || !first_active || !narrow_first) {
       errors.emplace_back("ConSan MOI first-light probe could not elect a representative lane");
       return std::nullopt;
@@ -1510,7 +1505,7 @@ private:
     if (!prior_dispatch_low_xor_literal || !decode_prior_dispatch_low ||
         !sequence.emit(*prior_dispatch_low_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_low) ||
-        !append_moi_report_dispatch_id_word(words, options, options, record_compare_vgpr,
+        !append_moi_report_dispatch_id_word(words, point, bound_resources, record_compare_vgpr,
                                             /*high_word=*/false, arch,
                                             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
@@ -1535,7 +1530,7 @@ private:
     if (!prior_dispatch_high_xor_literal || !decode_prior_dispatch_high ||
         !sequence.emit(*prior_dispatch_high_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_high) ||
-        !append_moi_report_dispatch_id_word(words, options, options, record_compare_vgpr,
+        !append_moi_report_dispatch_id_word(words, point, bound_resources, record_compare_vgpr,
                                             /*high_word=*/true, arch,
                                             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
@@ -1762,7 +1757,7 @@ private:
         automatic_banked_capture ? access_record_capacity : record_count;
     if (!append_store_u32_literal(words,
                                   base + offsetof(ConSanMoiReportHeader, access_record_count),
-                                  visible_record_count, *options.scratch_vgpr, arch) ||
+                                  visible_record_count, scratch_vgpr, arch) ||
         !append_atomic_fetch_add_one_u32(words,
                                          base + offsetof(ConSanMoiReportHeader, event_counter),
                                          record_compare_vgpr, record_address_vgpr, arch) ||
@@ -1779,7 +1774,7 @@ private:
     }
     if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, event_index), record_compare_vgpr) ||
         !append_store_moi_report_dispatch_id_pair(
-            record, options, options, offsetof(ConSanMoiAccessRecord, generation), arch,
+            record, point, bound_resources, offsetof(ConSanMoiAccessRecord, generation), arch,
             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
@@ -1789,18 +1784,18 @@ private:
                                 workgroup_sources.z) ||
         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, lane_mask),
                            automatic_banked_capture ? address_group_exec_sgpr
-                                                    : *options.moi_exec_save_sgpr) ||
+                                                    : *point.moi_exec_save_sgpr) ||
         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
                            automatic_banked_capture
                                ? static_cast<uint16_t>(address_group_exec_sgpr + 1u)
-                               : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
-        (options.moi_owner_vgpr &&
-         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *options.moi_owner_vgpr)) ||
-        (options.moi_persistent_sgprs.owner &&
+                               : static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u)) ||
+        (point.moi_owner_vgpr &&
+         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *point.moi_owner_vgpr)) ||
+        (point.moi_persistent_sgprs.owner &&
          !record.store_sgpr(offsetof(ConSanMoiAccessRecord, wave_id),
-                            *options.moi_persistent_sgprs.owner)) ||
-        (options.moi_epoch_vgpr &&
-         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
+                            *point.moi_persistent_sgprs.owner)) ||
+        (point.moi_epoch_vgpr &&
+         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *point.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
                               static_cast<uint32_t>(candidate.anchor())) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token) ||
@@ -1831,9 +1826,9 @@ private:
         errors.emplace_back("ConSan MOI first-light probe could not store private epoch state");
         return std::nullopt;
       }
-    } else if (options.moi_persistent_sgprs.epoch) {
+    } else if (point.moi_persistent_sgprs.epoch) {
       words.push_back(
-          build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_sgprs.epoch, arch));
+          build_v_mov_b32_e32(record_value_vgpr, *point.moi_persistent_sgprs.epoch, arch));
       if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), record_value_vgpr)) {
         errors.emplace_back("ConSan MOI first-light probe could not store scalar epoch state");
         return std::nullopt;
@@ -1955,7 +1950,7 @@ private:
       }
       words.insert(words.end(), low_xor_literal->begin(), low_xor_literal->end());
       words.push_back(*low_xor);
-      if (!append_moi_report_dispatch_id_word(words, options, options, record_compare_vgpr,
+      if (!append_moi_report_dispatch_id_word(words, point, bound_resources, record_compare_vgpr,
                                               /*high_word=*/false, arch,
                                               ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch low word");
@@ -1982,7 +1977,7 @@ private:
       }
       words.insert(words.end(), high_xor_literal->begin(), high_xor_literal->end());
       words.push_back(*high_xor);
-      if (!append_moi_report_dispatch_id_word(words, options, options, record_compare_vgpr,
+      if (!append_moi_report_dispatch_id_word(words, point, bound_resources, record_compare_vgpr,
                                               /*high_word=*/true, arch,
                                               ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch high word");
@@ -2057,7 +2052,7 @@ private:
       const auto reject_dispatch_mismatch = [&](uint32_t offset, bool high_word) {
         if (!record.load(offset, record_value_vgpr) ||
             !append_moi_report_dispatch_id_word(
-                words, options, options, record_compare_vgpr, high_word, arch,
+                words, point, bound_resources, record_compare_vgpr, high_word, arch,
                 ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
           return false;
         }
@@ -2260,9 +2255,9 @@ private:
       return std::nullopt;
     }
     const auto remove_group = instrumentation::build_s_xor_b64(
-        *options.moi_exec_save_sgpr, *options.moi_exec_save_sgpr, address_group_exec_sgpr, arch);
+        *point.moi_exec_save_sgpr, *point.moi_exec_save_sgpr, address_group_exec_sgpr, arch);
     const auto select_remaining =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kRdna4ExecLo, *point.moi_exec_save_sgpr, arch);
     if (!remove_group || !select_remaining) {
       errors.emplace_back("ConSan MOI first-light probe could not advance its address-group loop");
       return std::nullopt;
@@ -2292,7 +2287,7 @@ private:
   }
 
   const uint16_t restore_exec_sgpr =
-      automatic_banked_capture ? original_exec_sgpr : *options.moi_exec_save_sgpr;
+      automatic_banked_capture ? original_exec_sgpr : *point.moi_exec_save_sgpr;
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, restore_exec_sgpr, arch);
   if (!restore_exec) {
     errors.emplace_back("ConSan MOI first-light probe could not restore EXEC");
@@ -2302,7 +2297,7 @@ private:
     return fail("ConSan MOI first-light probe could not bind its EXEC restore");
   }
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -2311,7 +2306,7 @@ private:
   // before a load so that the record scratch window may overlap its destination
   // VGPRs. When the load also overwrites its address VGPR, the saved address
   // above remains outside that window until the displaced instruction executes.
-  if (!options.moi_dynamic_access_records && !append_guest_access())
+  if (!request.moi_dynamic_access_records && !append_guest_access())
     return std::nullopt;
 
   if (!sequence.resolve_branches(arch)) {
