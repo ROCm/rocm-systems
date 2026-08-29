@@ -5,27 +5,28 @@
                                                  rj_code_arch_t arch);
 
 [[nodiscard]] bool append_direct_sampled_immediate_check(
-    std::vector<uint32_t> &words, const MoiOptions &options, rj_code_arch_t arch,
+    std::vector<uint32_t> &words, const ConSanRequest &request,
+    const BoundRuntimeResources &resources, uint16_t scratch_vgpr, rj_code_arch_t arch,
     uint32_t prior_record_index, uint32_t window_bank_count, uint16_t bank_vgpr,
     size_t sampled_watchpoints_offset, uint16_t current_low_vgpr, uint16_t current_high_vgpr,
     std::vector<std::string> &errors) {
-  if (!options.moi_sampled_check)
+  if (!request.moi_sampled_check)
     return true;
-  if (!options.moi_report_buffer_address || !options.scratch_vgpr) {
+  if (!resources.moi_report_buffer_address) {
     errors.emplace_back("ConSan MOI sampled checker is missing report or vector resources");
     return false;
   }
 
-  const uint16_t address_lo_vgpr = *options.scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-  const uint16_t prior_low_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-  const uint16_t prior_high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
+  const uint16_t address_lo_vgpr = scratch_vgpr;
+  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  const uint16_t prior_low_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
+  const uint16_t prior_high_vgpr = static_cast<uint16_t>(scratch_vgpr + 6u);
   if (window_bank_count == 0) {
     errors.emplace_back("ConSan MOI sampled checker has an invalid prior bank");
     return false;
   }
-  const uint64_t prior_address = *options.moi_report_buffer_address + sampled_watchpoints_offset +
+  const uint64_t prior_address = *resources.moi_report_buffer_address + sampled_watchpoints_offset +
                                  static_cast<uint64_t>(prior_record_index) * sizeof(uint64_t);
   InstructionSequence sequence(words);
   const auto done_label = sequence.make_label();
@@ -126,9 +127,9 @@
   }
 
   const uint64_t immediate_conflict_count_address =
-      *options.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
+      *resources.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
   if (!append_atomic_fetch_add_one_u32(words, immediate_conflict_count_address, tmp_vgpr,
-                                       *options.scratch_vgpr, arch)) {
+                                       scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled checker could not increment the conflict counter");
     return false;
   }
@@ -147,7 +148,8 @@
 }
 
 [[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words, const MoiOptions &options,
+append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
+                                 const BoundRuntimeResources &resources,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
                                  uint16_t owner_vgpr, rj_code_arch_t arch) {
@@ -160,7 +162,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const MoiOptions 
     words.insert(words.end(), zero->begin(), zero->end());
     return true;
   }
-  if (!append_moi_report_dispatch_id_pair(words, options, options, bank_vgpr, temporary_vgpr, arch,
+  if (!append_moi_report_dispatch_id_pair(words, point, resources, bank_vgpr, temporary_vgpr, arch,
                                           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
   }
@@ -223,12 +225,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const MoiOptions 
   return true;
 }
 
-[[nodiscard]] bool
-append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions &options,
-                                 const ConSanMoiWorkgroupSources &workgroup_sources,
-                                 uint16_t residue_vgpr, uint16_t temporary_vgpr,
-                                 uint16_t coordinate_vgpr, rj_code_arch_t arch) {
-  if (!append_moi_report_dispatch_id_pair(words, options, options, residue_vgpr, temporary_vgpr,
+[[nodiscard]] bool append_sampled_workgroup_residue(
+    std::vector<uint32_t> &words, const ConSanRequest &request,
+    const ConSanMoiOperatingPoint &point, const BoundRuntimeResources &resources,
+    const ConSanMoiWorkgroupSources &workgroup_sources, uint16_t residue_vgpr,
+    uint16_t temporary_vgpr, uint16_t coordinate_vgpr, rj_code_arch_t arch) {
+  if (!append_moi_report_dispatch_id_pair(words, point, resources, residue_vgpr, temporary_vgpr,
                                           arch,
                                           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
@@ -274,7 +276,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   const auto multiply = instrumentation::build_v_mul_lo_u32_literal(
       residue_vgpr, temporary_vgpr, 0x85ebca6bu, residue_vgpr, arch);
   const auto mask = instrumentation::build_v_and_b32_literal(
-      residue_vgpr, options.moi_runtime_sample_stride - 1u, residue_vgpr, arch);
+      residue_vgpr, request.moi_runtime_sample_stride - 1u, residue_vgpr, arch);
   if (!multiply || !mask)
     return false;
   words.insert(words.end(), multiply->begin(), multiply->end());
@@ -593,8 +595,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   }
   if (runtime_sampled) {
     if (runtime_workgroup_gate_in_body) {
-      if (!append_sampled_workgroup_residue(words, options, *workgroup_sources, bank_vgpr,
-                                            high_vgpr, low_vgpr, arch)) {
+      if (!append_sampled_workgroup_residue(words, static_cast<const ConSanRequest &>(options),
+                                            static_cast<const ConSanMoiOperatingPoint &>(options),
+                                            static_cast<const BoundRuntimeResources &>(options),
+                                            *workgroup_sources, bank_vgpr, high_vgpr, low_vgpr,
+                                            arch)) {
         errors.emplace_back(
             "ConSan MOI runtime sampled probe could not select a private-state workgroup");
         return std::nullopt;
@@ -661,8 +666,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     words.push_back(*narrow_selected);
   }
   if (runtime_sampled || window_bank_count > 1) {
-    if (!append_sampled_window_bank_index(words, options, *workgroup_sources, window_bank_count,
-                                          bank_vgpr, high_vgpr, owner_vgpr, arch)) {
+    if (!append_sampled_window_bank_index(
+            words, static_cast<const ConSanMoiOperatingPoint &>(options),
+            static_cast<const BoundRuntimeResources &>(options), *workgroup_sources,
+            window_bank_count, bank_vgpr, high_vgpr, owner_vgpr, arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not select a window bank");
       return std::nullopt;
     }
@@ -878,8 +885,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   }
   for (uint32_t prior_record_index : prior_record_indices) {
     if (!append_direct_sampled_immediate_check(
-            words, options, arch, prior_record_index, window_bank_count, bank_vgpr,
-            sampled_watchpoints_offset, low_vgpr, high_vgpr, errors))
+            words, static_cast<const ConSanRequest &>(options),
+            static_cast<const BoundRuntimeResources &>(options), *options.scratch_vgpr, arch,
+            prior_record_index, window_bank_count, bank_vgpr, sampled_watchpoints_offset, low_vgpr,
+            high_vgpr, errors))
       return std::nullopt;
   }
   // A site is shared by all selected waves. Publish the complete packed entry

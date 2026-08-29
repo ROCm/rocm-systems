@@ -345,8 +345,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      /*defer_guest=*/false, prelude, errors,
                                      guest_instruction_offset, trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(words, options, *workgroup_sources, bank_count, bank,
-                                        expected, *options.moi_owner_vgpr, arch)) {
+  if (!append_sampled_window_bank_index(
+          words, static_cast<const ConSanMoiOperatingPoint &>(options),
+          static_cast<const BoundRuntimeResources &>(options), *workgroup_sources, bank_count, bank,
+          expected, *options.moi_owner_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled pending acquire failed at bank selection");
     return std::nullopt;
   }
@@ -676,8 +678,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      prelude, errors, guest_instruction_offset,
                                      trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(words, options, *workgroup_sources, bank_count, bank,
-                                        expected, *options.moi_owner_vgpr, arch)) {
+  if (!append_sampled_window_bank_index(
+          words, static_cast<const ConSanMoiOperatingPoint &>(options),
+          static_cast<const BoundRuntimeResources &>(options), *workgroup_sources, bank_count, bank,
+          expected, *options.moi_owner_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled atomic metadata failed at bank selection");
     return std::nullopt;
   }
