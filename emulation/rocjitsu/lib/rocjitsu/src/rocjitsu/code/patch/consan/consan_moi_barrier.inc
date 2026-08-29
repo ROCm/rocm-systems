@@ -1976,15 +1976,17 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         std::vector<uint32_t> matched_words;
         if (key_encodes_scc) {
-          const uint16_t bitcmp_opcode =
-              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
-          const auto normalize = instrumentation::build_s_cselect_b32(
-              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-          if (!normalize)
+          const ConSanTargetProfile *target = consan_target_profile(arch);
+          if (target == nullptr ||
+              !consan_detail::append_restore_moi_scc_from_route_key(
+                  matched_words,
+                  consan_detail::MoiEncodedSccRestoreRequest{
+                      .encoded_sgpr = key_sgpr,
+                      .normalize_encoded_sgpr = true,
+                  },
+                  *target)) {
             return false;
-          matched_words.push_back(
-              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
-          matched_words.push_back(*normalize);
+          }
         }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);

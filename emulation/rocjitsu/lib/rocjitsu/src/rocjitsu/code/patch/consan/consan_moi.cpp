@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
+
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/kernel_scope.h"
 #include "rocjitsu/analysis/liveness.h"
@@ -45,9 +47,6 @@
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -159,8 +158,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_emission.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_access_apply.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
 

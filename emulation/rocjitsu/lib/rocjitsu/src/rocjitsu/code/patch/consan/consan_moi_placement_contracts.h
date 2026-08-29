@@ -53,6 +53,13 @@ struct ResolvedMoiScratchPlan {
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
 };
 
+/// Entry-relay state retained after a caller reserves the appended host body.
+struct MoiDenseEntryHost {
+  uint64_t host_offset = 0;
+  std::vector<uint32_t> displaced_words;
+  uint64_t body_offset = 0;
+};
+
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);
 [[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &descriptor);

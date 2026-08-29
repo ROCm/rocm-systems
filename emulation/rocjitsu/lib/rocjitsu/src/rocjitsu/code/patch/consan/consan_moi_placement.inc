@@ -1817,13 +1817,6 @@ struct MoiDenseRelayHost {
   std::vector<uint32_t> displaced_words;
 };
 
-// Entry-relay state retained after a caller reserves the appended host body.
-struct MoiDenseEntryHost {
-  uint64_t host_offset = 0;
-  std::vector<uint32_t> displaced_words;
-  uint64_t body_offset = 0;
-};
-
 struct MoiDenseRelayHostSearch {
   uint64_t owner_begin = 0;
   uint64_t owner_end = 0;
