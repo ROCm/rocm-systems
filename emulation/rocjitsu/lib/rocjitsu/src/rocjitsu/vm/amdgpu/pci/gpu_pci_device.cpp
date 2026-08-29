@@ -17,6 +17,7 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -71,6 +72,88 @@ constexpr unsigned kIndirectHighShift = 31;
   }
   return true;
 }
+
+/// @brief Where an HDP flush is issued, as a byte offset into the register BAR.
+///
+/// @details Not a register of any IP block but a hole the bus reserves, which
+/// `nbio_v7_11_set_reg_remap` points the driver at on any non-virtualized
+/// function with pages of 4 KiB or less. A flush is a write of zero here
+/// followed by an unrelated register read to order it, so answering the write
+/// is the whole of the model: nothing reads this back.
+constexpr uint64_t kHdpFlushHoleOffset = 0x44000;
+
+/// @brief Invalidation engines each memory hub has.
+///
+/// @details The driver picks one by index and reaches it by stride, so the
+/// device answers all of them rather than guessing which. Engine 17 is the one
+/// the GART flush uses, but that is a driver convention rather than a property
+/// of the hardware.
+constexpr uint32_t kInvalidationEngines = 18;
+
+/// @brief Registers between one invalidation engine and the next.
+constexpr uint32_t kInvalidationEngineStride = 1;
+
+/// @brief Value a semaphore reads as when the acquire has been granted.
+///
+/// @details The GC 12.0 flush path acquires an engine's semaphore before
+/// writing its request and releases it by writing zero, so this has to answer
+/// reads and ignore writes: one that stored the release would grant the first
+/// acquire and stall every flush after it. That path takes the semaphore for
+/// MMHUB only; both hubs are answered anyway, because eighteen more registers
+/// cost nothing and a hub that answered half a handshake would be the harder
+/// thing to explain.
+///
+/// The GC 12.1 path this device publishes today does not take the semaphore at
+/// all -- it writes the request and polls the acknowledge -- so these registers
+/// are answered for the profile rather than for the boot, and are untouched on
+/// gfx1250. They are still worth answering: this class is deliberately not
+/// specific to one part, and every other GC 12.x takes the path that does.
+///
+/// Granting unconditionally is right only while nothing else acquires. The
+/// device does not execute rings, so the driver's own lock is all that
+/// serializes flushes; a device that ran packets would have a second acquirer
+/// and this register would stop meaning what it means on hardware.
+constexpr uint32_t kInvalidationSemaphoreHeld = 0x1;
+
+/// @brief One hub's invalidation-register layout, and the version it describes.
+///
+/// @details These offsets move between versions of the same block -- GC 12.0
+/// puts the three at 0x1635/0x1647/0x1659 where 12.1 puts them at
+/// 0x1645/0x1657/0x1669 -- so the hardware ID alone does not identify a layout.
+/// Matching on the version the published table actually declares is what stops
+/// a profile for one version being answered with another's addresses, which
+/// would leave the driver polling registers this device never defined.
+///
+/// One row per layout that has been read out of a header and checked. A block
+/// whose version matches no row is refused rather than guessed at: there is no
+/// safe default, because a wrong offset is indistinguishable from hardware that
+/// never completes a flush.
+struct HubInvalidationLayout {
+  IpHardwareId id;      ///< Block the layout belongs to.
+  uint16_t major;       ///< Block major version it was read from.
+  uint16_t minor;       ///< Block minor version it was read from.
+  uint32_t semaphore;   ///< Engine 0's semaphore, in dwords from the block's first segment.
+  uint32_t request;     ///< Engine 0's request, likewise.
+  uint32_t acknowledge; ///< Engine 0's acknowledge, likewise.
+};
+
+/// @details GC from `regGCVM_INVALIDATE_ENG0_{SEM,REQ,ACK}` of
+/// `gc_12_1_0_offset.h`, MMHUB from `regMMVM_INVALIDATE_ENG0_{SEM,REQ,ACK}` of
+/// `mmhub_4_1_0_offset.h`; all `_BASE_IDX 0`, so all relative to the block's
+/// first register segment.
+constexpr HubInvalidationLayout kHubInvalidationLayouts[] = {
+    {IpHardwareId::Gc, 12, 1, 0x1645, 0x1657, 0x1669},
+    {IpHardwareId::MmHub, 4, 1, 0x0575, 0x0587, 0x0599},
+};
+
+/// @brief Acknowledge value reporting every VMID's flush already complete.
+///
+/// @details The driver polls for `1 << vmid` and this device has no translation
+/// to invalidate, so every flush is finished before it is asked for. Answering
+/// per-VMID instead would mean modelling which VMIDs exist, to no end: the
+/// alternative to "already done" is not "done later" but the driver giving up
+/// after its timeout and continuing anyway.
+constexpr uint32_t kInvalidationComplete = 0xffffffff;
 
 } // namespace
 
@@ -171,6 +254,7 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
   const auto register_count = static_cast<uint32_t>(spec_.register_aperture_bytes / 4);
   registers_.assign(register_count, 0);
   modelled_.assign(register_count, false);
+  read_only_.assign(register_count, false);
   reset_registers();
 
   // A device that answers every pre-discovery register and then has nothing at
@@ -178,6 +262,15 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
   // construct: the driver would read a zero signature and reject it, with the
   // registers all looking correct.
   if (!publish_discovery_table()) {
+    return;
+  }
+  // A device whose flush handshakes cannot be answered looks correct right up
+  // until the driver waits on one, and then stalls with every register it read
+  // beforehand reporting success. Refusing here is what turns that into a
+  // message at construction.
+  if (!flushes_answerable_) {
+    util::Logger::warn(std::format(
+        "{}: this device cannot answer the VM flush handshakes the driver waits on", this->name()));
     return;
   }
   usable_ = true;
@@ -305,6 +398,108 @@ void GpuPciDevice::reset_registers() {
   // pre-discovery aperture and is named, so leaving it undefined would report it
   // as a register this device does not model when in fact it has an answer.
   define_register(byte_offset_of(MmioRegister::IpDiscoveryVersion), kIpDiscoveryVersion);
+
+  // Accepting the flush is the whole model; the driver orders it with a read of
+  // a different register and never reads this one back.
+  define_register(kHdpFlushHoleOffset, 0);
+
+  // Both hubs, at the segments the published table gave them, so the addresses
+  // the driver computes and the ones answered here cannot drift apart. A hub
+  // the table does not name has no registers to answer.
+  //
+  // Offsets are from gc_12_1_0_offset.h and mmhub_4_1_0_offset.h. Which driver
+  // consumes them takes two steps to answer: GC 12.1.0 adds gmc_v12_0's ip
+  // block -- which is the name the guest logs -- and that block's early_init
+  // then installs gmc_v12_1's flush functions for this version. The hub
+  // register offsets come from gfxhub_v12_1 and mmhub_v4_1_0 either way, since
+  // those are set outside that switch.
+  flushes_answerable_ = true;
+  for (const IpHardwareId id : {IpHardwareId::Gc, IpHardwareId::MmHub}) {
+    const IpBlock *hub = published_block(id);
+    if (hub == nullptr) {
+      // A hub the table does not name has no registers to answer, and the
+      // driver will not look for them either.
+      continue;
+    }
+    const HubInvalidationLayout *layout = nullptr;
+    for (const HubInvalidationLayout &candidate : kHubInvalidationLayouts) {
+      if (candidate.id == id && candidate.major == hub->major && candidate.minor == hub->minor) {
+        layout = &candidate;
+        break;
+      }
+    }
+    if (layout == nullptr) {
+      util::Logger::warn(std::format(
+          "{}: no invalidation-register layout is known for hardware id {} version {}.{}, and "
+          "answering with another version's addresses would leave the driver polling registers "
+          "this device never defined",
+          name(), static_cast<uint16_t>(id), hub->major, hub->minor));
+      flushes_answerable_ = false;
+      continue;
+    }
+    if (!define_invalidation_engines(hub->register_bases.front(),
+                                     {.semaphore = layout->semaphore,
+                                      .request = layout->request,
+                                      .acknowledge = layout->acknowledge})) {
+      flushes_answerable_ = false;
+    }
+  }
+}
+
+const IpBlock *GpuPciDevice::published_block(IpHardwareId id) const {
+  for (const IpBlock &block : spec_.discovery.blocks) {
+    if (block.hardware_id == id && !block.register_bases.empty()) {
+      return &block;
+    }
+  }
+  return nullptr;
+}
+
+bool GpuPciDevice::define_invalidation_engines(uint64_t segment,
+                                               const InvalidationEngineBlocks &blocks) {
+  // The blocks sit back to back, so a wrong engine count does not overrun the
+  // aperture -- it silently writes one block's registers over the next one's,
+  // and the flush the overwritten register served stalls again.
+  const uint32_t span = kInvalidationEngines * kInvalidationEngineStride;
+  if (blocks.semaphore + span > blocks.request || blocks.request + span > blocks.acknowledge) {
+    util::Logger::warn(
+        std::format("{}: {} invalidation engines do not fit between the semaphore, request and "
+                    "acknowledge blocks of the hub at register segment {:#x} (byte {:#x})",
+                    name(), kInvalidationEngines, segment, segment * 4));
+    return false;
+  }
+  // The segment comes from a published table, so it is checked rather than
+  // trusted: a large enough one would wrap the byte address and land the
+  // register somewhere unrelated inside the aperture.
+  if (segment > spec_.register_aperture_bytes / 4) {
+    util::Logger::warn(
+        std::format("{}: the hub at register segment {:#x} (byte {:#x}) is not within a {}-byte "
+                    "register aperture",
+                    name(), segment, segment * 4, spec_.register_aperture_bytes));
+    return false;
+  }
+
+  for (uint32_t engine = 0; engine < kInvalidationEngines; ++engine) {
+    const uint32_t offset = engine * kInvalidationEngineStride;
+    const uint64_t semaphore = (segment + blocks.semaphore + offset) * 4;
+    const uint64_t request = (segment + blocks.request + offset) * 4;
+    const uint64_t acknowledge = (segment + blocks.acknowledge + offset) * 4;
+    // A hub whose registers fall outside the aperture is reached through an
+    // indirect window this device does not model, so there is nothing to define
+    // and defining it would corrupt an unrelated register. Addresses rise with
+    // the engine, so no later engine is in range once one is not.
+    if (acknowledge + 4 > spec_.register_aperture_bytes) {
+      util::Logger::warn(std::format(
+          "{}: invalidation engine {} of the hub at register segment {:#x} acknowledges at byte "
+          "{:#x}, outside the {}-byte register aperture, so its flushes cannot be answered",
+          name(), engine, segment, acknowledge, spec_.register_aperture_bytes));
+      return false;
+    }
+    define_read_only_register(semaphore, kInvalidationSemaphoreHeld);
+    define_register(request, 0);
+    define_read_only_register(acknowledge, kInvalidationComplete);
+  }
+  return true;
 }
 
 uint64_t GpuPciDevice::indirect_address() const {
@@ -334,6 +529,12 @@ void GpuPciDevice::define_register(uint64_t byte_offset, uint32_t value) {
   const auto index = static_cast<uint32_t>(byte_offset / 4);
   registers_[index] = value;
   modelled_[index] = true;
+  read_only_[index] = false;
+}
+
+void GpuPciDevice::define_read_only_register(uint64_t byte_offset, uint32_t value) {
+  define_register(byte_offset, value);
+  read_only_[static_cast<uint32_t>(byte_offset / 4)] = true;
 }
 
 int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset, bool write) {
@@ -378,8 +579,10 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
   if (write) {
     // A write to something the device does not model is dropped rather than
     // remembered, so a later read still reports absent hardware instead of
-    // echoing back whatever the driver put there.
-    if (modelled) {
+    // echoing back whatever the driver put there. A read-only register keeps
+    // its value for the same reason: what it reports is a property of the
+    // hardware, not state the driver owns.
+    if (modelled && !read_only_[index]) {
       uint32_t value = 0;
       std::memcpy(&value, buf.data(), sizeof(value));
       registers_[index] = value;

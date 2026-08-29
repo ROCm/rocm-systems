@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -113,6 +114,55 @@ private:
 
   void reset_registers();
 
+  /// @brief One hub's invalidation engines, as three contiguous register blocks.
+  ///
+  /// @details A flush writes an engine's request register and polls its
+  /// acknowledge register for the bit of the VMID being flushed. Nothing else
+  /// reports the flush finishing, so an unanswered step is not a missing
+  /// register but a stall of the driver's whole timeout, once per flush.
+  ///
+  /// Older flush paths bracket that pair with an acquire and release of the
+  /// engine's semaphore. The one this device publishes today does not, so the
+  /// semaphore block is answered for the parts that take that path rather than
+  /// for this one.
+  ///
+  /// The three blocks are modelled together because they are laid out together
+  /// -- eighteen engines of each, back to back -- and because answering only
+  /// some of the handshake buys nothing: the driver waits just as long on
+  /// whichever step is unanswered.
+  struct InvalidationEngineBlocks {
+    uint32_t semaphore = 0;   ///< Engine 0's semaphore, in dwords from the segment.
+    uint32_t request = 0;     ///< Engine 0's request register, likewise.
+    uint32_t acknowledge = 0; ///< Engine 0's acknowledge register, likewise.
+  };
+
+  /// @brief Answer the invalidation engines of the hub based at @p segment.
+  /// @param[in] segment First register segment of the hub, from the published
+  ///                    discovery table.
+  /// @param[in] blocks Where each block starts, relative to that segment.
+  /// @returns True when every engine of the hub was defined.
+  [[nodiscard]] bool define_invalidation_engines(uint64_t segment,
+                                                 const InvalidationEngineBlocks &blocks);
+
+  /// @brief The published block with @p id, or nullptr if the table omits it.
+  /// @details Returns instance 0. The version matters as much as the segment:
+  /// register offsets within a block move between versions of it.
+  [[nodiscard]] const IpBlock *published_block(IpHardwareId id) const;
+
+  /// @brief Whether every named hub's flush handshakes can be answered.
+  bool flushes_answerable_ = false;
+
+  /// @brief Define a register that answers reads and ignores writes.
+  ///
+  /// @details For registers whose value is a property of the hardware rather
+  /// than state the driver owns. A semaphore the device always grants is the
+  /// case in point: the driver releases it by writing zero, and a register that
+  /// stored that write would grant the acquire once and then stall forever.
+  ///
+  /// @param[in] byte_offset Where the register sits in the aperture.
+  /// @param[in] value What it always reads as.
+  void define_read_only_register(uint64_t byte_offset, uint32_t value);
+
   /// @brief Address the index registers currently select.
   ///
   /// @details Recomputed from both registers on each access rather than tracked
@@ -151,6 +201,9 @@ private:
   /// value as well as what absent hardware reads as, and telling the two apart
   /// is the whole point of the unmodelled-register report.
   std::vector<bool> modelled_;
+
+  /// @brief Which of the modelled registers ignore writes.
+  std::vector<bool> read_only_;
   int vram_fd_ = -1;
   std::byte *vram_ = nullptr;
 
