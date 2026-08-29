@@ -4773,6 +4773,30 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
+// ranks' copies: everything from `rank` up to but excluding `railGinBarrier`.
+
+TEST(DevCommCopyLsaData, CopiesTheLsaSpanOnly) {
+  ncclDevComm src{}, dst{};
+  src.rank = 3;
+  src.nRanks = 8;
+  src.lsaRank = 1;
+  src.lsaSize = 4;
+  // Outside the copied span: must survive untouched.
+  src.railGinBarrier.signal0 = 111;
+  dst.railGinBarrier.signal0 = 222;
+
+  ncclDevCommCopyLsaData(&dst.rank, &src.rank);
+
+  EXPECT_EQ(dst.rank, 3);
+  EXPECT_EQ(dst.nRanks, 8);
+  EXPECT_EQ(dst.lsaRank, 1);
+  EXPECT_EQ(dst.lsaSize, 4);
+  EXPECT_EQ(dst.railGinBarrier.signal0, 222);  // past the span, not overwritten
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
