@@ -498,6 +498,142 @@ if HAVE_TRITON:
             tl.store(out_ptr + elem, val.to(out_ptr.dtype.element_ty), mask=mask)
 
     @triton.jit
+    def _dot_gemm_kernel(
+        out_ptr,
+        a_ptr,
+        b_ptr,
+        bias_ptr,
+        M,
+        N,
+        K,
+        stride_am,
+        stride_bn,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_K: tl.constexpr,
+        HAS_BIAS: tl.constexpr,
+    ):
+        """out = a @ b.T + bias, through tl.dot.
+
+        tl.dot is what lowers to the matrix cores -- MFMA on CDNA, WMMA on RDNA.
+        The elementwise Triton kernels elsewhere in this file never reach them,
+        so a wrong matrix-core result would go unseen without this.
+        """
+        pid_m = tl.program_id(0)
+        pid_n = tl.program_id(1)
+        offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+        acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        for k0 in range(0, K, BLOCK_K):
+            offs_k = k0 + tl.arange(0, BLOCK_K)
+            a = tl.load(
+                a_ptr + offs_m[:, None] * stride_am + offs_k[None, :],
+                mask=(offs_m[:, None] < M) & (offs_k[None, :] < K),
+                other=0.0,
+            )
+            b = tl.load(
+                b_ptr + offs_n[None, :] * stride_bn + offs_k[:, None],
+                mask=(offs_n[None, :] < N) & (offs_k[:, None] < K),
+                other=0.0,
+            )
+            acc += tl.dot(a, b)
+        if HAS_BIAS:
+            acc += tl.load(bias_ptr + offs_n, mask=offs_n < N, other=0.0).to(
+                tl.float32
+            )[None, :]
+        tl.store(
+            out_ptr + offs_m[:, None] * N + offs_n[None, :],
+            acc.to(out_ptr.dtype.element_ty),
+            mask=(offs_m[:, None] < M) & (offs_n[None, :] < N),
+        )
+
+    @triton.jit
+    def _attention_sinks_dot_kernel(
+        out_ptr,
+        q_ptr,
+        k_ptr,
+        v_ptr,
+        sink_ptr,
+        stride_qt,
+        stride_qh,
+        stride_kt,
+        stride_kh,
+        stride_ot,
+        stride_oh,
+        scale,
+        num_q,
+        context_len,
+        first_pos,
+        group,
+        sliding_window,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        USE_SWA: tl.constexpr,
+    ):
+        """Flash-attention tiling with sinks, both matmuls through tl.dot.
+
+        One program per (query tile, head). The sink seeds the running max and
+        the running sum starts at one, so it contributes exp(sink - m) to the
+        denominator and nothing to the numerator -- the same formulation vLLM's
+        unified attention kernel uses.
+        """
+        pid_m = tl.program_id(0)
+        h = tl.program_id(1)
+        kv_h = h // group
+
+        offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        d = tl.arange(0, HEAD_DIM)
+        qmask = offs_m < num_q
+        q = tl.load(
+            q_ptr + offs_m[:, None] * stride_qt + h * stride_qh + d[None, :],
+            mask=qmask[:, None],
+            other=0.0,
+        )
+
+        m_i = tl.where(qmask, tl.load(sink_ptr + h).to(tl.float32), float("-inf"))
+        l_i = tl.full([BLOCK_M], 1.0, dtype=tl.float32)
+        acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
+        qpos = first_pos + offs_m
+
+        for start in range(0, context_len, BLOCK_N):
+            offs_n = start + tl.arange(0, BLOCK_N)
+            kmask = offs_n < context_len
+            k = tl.load(
+                k_ptr + offs_n[None, :] * stride_kt + kv_h * stride_kh + d[:, None],
+                mask=kmask[None, :],
+                other=0.0,
+            )
+            v = tl.load(
+                v_ptr + offs_n[:, None] * stride_kt + kv_h * stride_kh + d[None, :],
+                mask=kmask[:, None],
+                other=0.0,
+            )
+            s = tl.dot(q, k) * scale
+            valid = kmask[None, :] & (offs_n[None, :] <= qpos[:, None]) & qmask[:, None]
+            if USE_SWA:
+                valid = valid & (offs_n[None, :] > qpos[:, None] - sliding_window)
+            s = tl.where(valid, s, float("-inf"))
+
+            m_new = tl.maximum(m_i, tl.max(s, axis=1))
+            # A row with no valid key yet keeps m_i; guard the exponent so an
+            # all -inf row does not produce inf - inf.
+            m_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
+            alpha = tl.exp(tl.where(m_i == float("-inf"), float("-inf"), m_i - m_safe))
+            alpha = tl.where(m_new == float("-inf"), 1.0, alpha)
+            p = tl.where(valid, tl.exp(s - m_safe[:, None]), 0.0)
+            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+            l_i = l_i * alpha + tl.sum(p, axis=1)
+            m_i = m_new
+
+        out = acc / l_i[:, None]
+        tl.store(
+            out_ptr + offs_m[:, None] * stride_ot + h * stride_oh + d[None, :],
+            out.to(out_ptr.dtype.element_ty),
+            mask=qmask[:, None],
+        )
+
+    @triton.jit
     def _moe_gemm_kernel(
         out_ptr,
         x_ptr,
@@ -775,6 +911,43 @@ def _qkv(s: Shape, gen: torch.Generator):
     got = torch.nn.functional.linear(x.to(DEV), w.to(DEV), b.to(DEV))
     ref = x.to(torch.float64) @ w.to(torch.float64).T + b.to(torch.float64)
     return got, ref
+
+
+@case(
+    "qkv_proj_gemm",
+    "gemm",
+    "triton_dot",
+    torch.bfloat16,
+    2e-2,
+    "the same projection through tl.dot, so the matrix cores are exercised",
+)
+def _qkv_dot(s: Shape, gen: torch.Generator):
+    require_triton()
+    out_dim = s.q_size + 2 * s.kv_size
+    x = randn(gen, s.num_tokens, s.hidden_size, dtype=torch.bfloat16)
+    w = randn(gen, out_dim, s.hidden_size, dtype=torch.bfloat16, scale=0.05)
+    b = randn(gen, out_dim, dtype=torch.bfloat16, scale=0.1)
+    xd, wd, bd = x.to(DEV).contiguous(), w.to(DEV).contiguous(), b.to(DEV).contiguous()
+    out = torch.empty(s.num_tokens, out_dim, dtype=torch.bfloat16, device=DEV)
+    block_m, block_n, block_k = 16, 64, 32
+    grid = (triton.cdiv(s.num_tokens, block_m), triton.cdiv(out_dim, block_n))
+    _dot_gemm_kernel[grid](
+        out,
+        xd,
+        wd,
+        bd,
+        s.num_tokens,
+        out_dim,
+        s.hidden_size,
+        xd.stride(0),
+        wd.stride(0),
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        BLOCK_K=block_k,
+        HAS_BIAS=True,
+    )
+    ref = x.to(torch.float64) @ w.to(torch.float64).T + b.to(torch.float64)
+    return out, ref
 
 
 @case("o_proj_gemm", "gemm", "torch", torch.bfloat16, 2e-2)
@@ -1071,6 +1244,57 @@ def _attn_decode(s: Shape, gen: torch.Generator):
 
 
 # ---- 7. routing ----------------------------------------------------------
+
+
+def _attn_dot(s: Shape, gen: torch.Generator, window: int | None):
+    require_triton()
+    q, k, v, sinks = _attention_inputs(s, gen)
+    qd, kd, vd = q.to(DEV).contiguous(), k.to(DEV).contiguous(), v.to(DEV).contiguous()
+    sd = sinks.to(DEV).contiguous()
+    out = torch.empty_like(qd)
+    block_m, block_n = 16, 16
+    _attention_sinks_dot_kernel[(triton.cdiv(s.num_tokens, block_m), s.num_heads)](
+        out,
+        qd,
+        kd,
+        vd,
+        sd,
+        qd.stride(0),
+        qd.stride(1),
+        kd.stride(0),
+        kd.stride(1),
+        out.stride(0),
+        out.stride(1),
+        s.head_dim**-0.5,
+        s.num_tokens,
+        s.context_len,
+        s.context_len - s.num_tokens,
+        s.num_heads // s.num_kv_heads,
+        window if window is not None else 0,
+        HEAD_DIM=s.head_dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        USE_SWA=window is not None,
+    )
+    ref = ref_attention_sinks(q, k, v, sinks, s.head_dim**-0.5, s.context_len, window)
+    return out, ref
+
+
+@case(
+    "attention_prefill_full",
+    "attention",
+    "triton_dot",
+    torch.bfloat16,
+    3e-2,
+    "flash tiling with both matmuls through tl.dot, the form vLLM's kernel uses",
+)
+def _attn_full_dot(s: Shape, gen: torch.Generator):
+    return _attn_dot(s, gen, None)
+
+
+@case("attention_prefill_swa", "attention", "triton_dot", torch.bfloat16, 3e-2)
+def _attn_swa_dot(s: Shape, gen: torch.Generator):
+    return _attn_dot(s, gen, s.sliding_window)
 
 
 @case(
@@ -1663,7 +1887,7 @@ def main(argv: list[str] | None = None) -> int:
         "--impl",
         action="append",
         default=[],
-        choices=["torch", "triton"],
+        choices=["torch", "triton", "triton_dot"],
         help="restrict to one implementation; repeatable",
     )
     ap.add_argument(
