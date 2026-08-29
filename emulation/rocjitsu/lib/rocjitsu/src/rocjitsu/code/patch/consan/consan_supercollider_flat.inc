@@ -192,7 +192,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      const ConSanTargetProfile &target,
                                      const ConSanOptions &options, ConSanTransformArtifacts &result,
-                                     std::span<const ByteRange> initial_reserved_ranges = {}) {
+                                     std::span<const ByteRange> initial_reserved_ranges) {
   const rj_code_arch_t arch = target.arch;
 
   const std::unordered_set<uint64_t> admitted_file_offsets =
@@ -210,8 +210,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  const auto delay_words = consan_sc_delay_instruction_word_count(
-      options, result.errors, "ConSan flat check/trap proof");
+  const auto delay_words = consan_sc_delay_instruction_word_count(options, result.errors,
+                                                                  "ConSan flat check/trap proof");
   if (!delay_words)
     return;
 
@@ -1988,5 +1988,3 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,
   }
   result.mark_modified();
 }
-
-} // namespace

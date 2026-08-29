@@ -61,6 +61,7 @@ target_sources(
         consan_sync_event_index.cpp
         consan_sync_analysis.cpp
         consan_sync_metadata.cpp
+        consan_supercollider.cpp
         consan_supercollider_target_ops.cpp
         consan_supercollider_support.cpp
         consan_types.cpp

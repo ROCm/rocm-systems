@@ -41,6 +41,7 @@
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
+#include "rocjitsu/code/patch/consan/consan_supercollider.h"
 #include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
 #include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
@@ -51,13 +52,6 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -87,11 +81,8 @@ RJ_DIAGNOSTIC_POP
 #include <utility>
 
 namespace rocjitsu {
-namespace {
 
 namespace kd = rocr::llvm::amdhsa;
-
-#include "rocjitsu/code/patch/consan/consan_supercollider.inc"
 
 #include "rocjitsu/code/patch/consan/consan_composition.inc"
 

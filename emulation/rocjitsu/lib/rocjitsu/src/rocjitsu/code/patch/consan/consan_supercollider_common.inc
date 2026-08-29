@@ -231,8 +231,7 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
   std::array<uint32_t, 1> words{};
   if (!read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
     return std::nullopt;
-  const auto offsets =
-      consan_sc_two_address_lds_byte_offsets(*access.lowering.form, words.front());
+  const auto offsets = consan_sc_two_address_lds_byte_offsets(*access.lowering.form, words.front());
   if (!offsets)
     return std::nullopt;
   return SplitTwoAddressLdsExpansionPlan{
@@ -256,27 +255,6 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
   if (!is_subdword_lds_store(access))
     return 0u;
   return is_high_d16_lds_store(access) ? 3u : 2u;
-}
-
-[[nodiscard]] std::optional<std::array<uint32_t, 2>>
-build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
-                            const ConSanTargetProfile &target) {
-  if ((target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
-       target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4) ||
-      dst_vgpr > 255u || src_accvgpr > 255u)
-    return std::nullopt;
-  if (target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3) {
-    return cdna3::build_vop3p(cdna3::kVAccvgprReadVop3p,
-                              {.vdst = static_cast<uint8_t>(dst_vgpr),
-                               .op_sel_hi_2 = 1u,
-                               .src0 = static_cast<uint16_t>(256u + src_accvgpr),
-                               .op_sel_hi = 3u});
-  }
-  return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
-                            {.vdst = static_cast<uint8_t>(dst_vgpr),
-                             .op_sel_hi_2 = 1u,
-                             .src0 = static_cast<uint16_t>(256u + src_accvgpr),
-                             .op_sel_hi = 3u});
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_pc_sgpr(
@@ -490,54 +468,6 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
-                                    uint16_t address_vgpr, uint16_t first_data_vgpr,
-                                    uint16_t second_data_vgpr, uint16_t adjusted_address_vgpr,
-                                    bool load, const ConSanTargetProfile &target) {
-  if (address_vgpr > 255u || adjusted_address_vgpr > 255u || first_data_vgpr > 255u ||
-      second_data_vgpr > 255u ||
-      (plan.element_dwords == 2u && (first_data_vgpr > 254u || second_data_vgpr > 254u)))
-    return std::nullopt;
-
-  const uint16_t op =
-      load ? (plan.element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
-           : (plan.element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
-  std::vector<uint32_t> words;
-  words.reserve(plan.access_word_count());
-  const auto append_access = [&](uint32_t byte_offset, uint16_t data_vgpr) -> bool {
-    uint16_t effective_address_vgpr = address_vgpr;
-    uint16_t immediate = 0;
-    if (byte_offset > UINT16_MAX) {
-      const auto adjust = instrumentation::build_v_add_u32_literal(
-          adjusted_address_vgpr, adjusted_address_vgpr, byte_offset, address_vgpr, target.arch);
-      if (!adjust)
-        return false;
-      words.insert(words.end(), adjust->begin(), adjust->end());
-      effective_address_vgpr = adjusted_address_vgpr;
-    } else {
-      immediate = static_cast<uint16_t>(byte_offset);
-    }
-    cdna5::VdsBuilderFields fields{
-        .offset0 = static_cast<uint8_t>(immediate),
-        .offset1 = static_cast<uint8_t>(immediate >> 8u),
-        .addr = static_cast<uint8_t>(effective_address_vgpr),
-    };
-    if (load)
-      fields.vdst = static_cast<uint8_t>(data_vgpr);
-    else
-      fields.data0 = static_cast<uint8_t>(data_vgpr);
-    const auto access = cdna5::build_vds(op, fields);
-    words.insert(words.end(), access.begin(), access.end());
-    return true;
-  };
-  if (!append_access(plan.offsets.first, first_data_vgpr) ||
-      !append_access(plan.offsets.second, second_data_vgpr) ||
-      words.size() != plan.access_word_count())
-    return std::nullopt;
-  return words;
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
     std::span<const uint8_t> original_bytes, const ConSanAccessInventorySite &site,
     const ConSanTargetProfile &target, const ConSanOptions &options, uint32_t delay_words,
@@ -705,9 +635,10 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
             : form.second_data_vgpr;
     const auto split =
         first_data_vgpr && second_data_vgpr
-            ? build_split_single_address_lds_pair(
-                  *split_two_address, replay_address_vgpr, *first_data_vgpr, *second_data_vgpr,
-                  compare_scratch_vgpr, site.kind == ConSanLdsAccessKind::Read, target)
+            ? consan_sc_build_split_single_address_lds_pair(
+                  split_two_address->offsets, split_two_address->element_dwords,
+                  replay_address_vgpr, *first_data_vgpr, *second_data_vgpr, compare_scratch_vgpr,
+                  site.kind == ConSanLdsAccessKind::Read, target)
             : std::nullopt;
     if (!split) {
       errors.emplace_back("ConSan LDS check/trap proof could not split gfx1250 two-address access");
@@ -723,14 +654,13 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     words.push_back(*wait_dscnt);
     words.push_back(*d16_seed_scratch);
   }
-  if (!consan_sc_append_delay_words(words, arch, options, errors,
-                                    "ConSan LDS check/trap proof"))
+  if (!consan_sc_append_delay_words(words, arch, options, errors, "ConSan LDS check/trap proof"))
     return std::nullopt;
   if (split_two_address) {
     const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *form.address_vgpr;
-    const auto split = build_split_single_address_lds_pair(
-        *split_two_address, replay_address_vgpr, scratch_vgpr,
-        static_cast<uint16_t>(scratch_vgpr + split_two_address->element_dwords),
+    const auto split = consan_sc_build_split_single_address_lds_pair(
+        split_two_address->offsets, split_two_address->element_dwords, replay_address_vgpr,
+        scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + split_two_address->element_dwords),
         compare_scratch_vgpr, true, target);
     if (!split) {
       errors.emplace_back(
@@ -749,7 +679,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
     if (form.destination_accvgpr && uses_gfx9_cdna_encoding) {
-      const auto acc_read = build_cdna_accvgpr_read_b32(
+      const auto acc_read = consan_sc_build_cdna_accvgpr_read_b32(
           compare_scratch_vgpr, static_cast<uint16_t>(*form.destination_accvgpr + i), target);
       if (!acc_read) {
         errors.emplace_back("ConSan LDS check/trap proof could not encode accumulator read");
@@ -774,9 +704,8 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
         is_subdword_lds_store(site) ? std::optional<uint16_t>(compare_scratch_vgpr) : compare_vgpr;
     auto chunk_cmp_ne =
         effective_compare_vgpr
-            ? consan_sc_build_v_cmp_ne_u32(
-                  static_cast<uint16_t>(*effective_compare_vgpr & 0xFFu),
-                  static_cast<uint16_t>(scratch_vgpr + i), arch)
+            ? consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(*effective_compare_vgpr & 0xFFu),
+                                           static_cast<uint16_t>(scratch_vgpr + i), arch)
             : std::nullopt;
     if (!chunk_cmp_ne) {
       errors.emplace_back("ConSan LDS check/trap proof could not encode chunk compare");

@@ -4,7 +4,11 @@
 #include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
 
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
@@ -243,6 +247,77 @@ consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uin
       .first = (word0 & 0xffu) * form.encoded_offset_scale_bytes,
       .second = ((word0 >> 8u) & 0xffu) * form.encoded_offset_scale_bytes,
   };
+}
+
+std::optional<std::array<uint32_t, 2>>
+consan_sc_build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
+                                      const ConSanTargetProfile &target) {
+  if ((target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
+       target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4) ||
+      dst_vgpr > 255u || src_accvgpr > 255u) {
+    return std::nullopt;
+  }
+  if (target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3) {
+    return cdna3::build_vop3p(cdna3::kVAccvgprReadVop3p,
+                              {.vdst = static_cast<uint8_t>(dst_vgpr),
+                               .op_sel_hi_2 = 1u,
+                               .src0 = static_cast<uint16_t>(256u + src_accvgpr),
+                               .op_sel_hi = 3u});
+  }
+  return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
+                            {.vdst = static_cast<uint8_t>(dst_vgpr),
+                             .op_sel_hi_2 = 1u,
+                             .src0 = static_cast<uint16_t>(256u + src_accvgpr),
+                             .op_sel_hi = 3u});
+}
+
+std::optional<std::vector<uint32_t>> consan_sc_build_split_single_address_lds_pair(
+    ConSanScTwoAddressLdsByteOffsets offsets, uint16_t element_dwords, uint16_t address_vgpr,
+    uint16_t first_data_vgpr, uint16_t second_data_vgpr, uint16_t adjusted_address_vgpr, bool load,
+    const ConSanTargetProfile &target) {
+  if (address_vgpr > 255u || adjusted_address_vgpr > 255u || first_data_vgpr > 255u ||
+      second_data_vgpr > 255u ||
+      (element_dwords == 2u && (first_data_vgpr > 254u || second_data_vgpr > 254u)) ||
+      (element_dwords != 1u && element_dwords != 2u)) {
+    return std::nullopt;
+  }
+  const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
+                           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
+  const uint32_t expected_words = 4u + 2u * (static_cast<uint32_t>(offsets.first > UINT16_MAX) +
+                                             static_cast<uint32_t>(offsets.second > UINT16_MAX));
+  std::vector<uint32_t> words;
+  words.reserve(expected_words);
+  const auto append_access = [&](uint32_t byte_offset, uint16_t data_vgpr) -> bool {
+    uint16_t effective_address_vgpr = address_vgpr;
+    uint16_t immediate = 0;
+    if (byte_offset > UINT16_MAX) {
+      const auto adjust = instrumentation::build_v_add_u32_literal(
+          adjusted_address_vgpr, adjusted_address_vgpr, byte_offset, address_vgpr, target.arch);
+      if (!adjust)
+        return false;
+      words.insert(words.end(), adjust->begin(), adjust->end());
+      effective_address_vgpr = adjusted_address_vgpr;
+    } else {
+      immediate = static_cast<uint16_t>(byte_offset);
+    }
+    cdna5::VdsBuilderFields fields{
+        .offset0 = static_cast<uint8_t>(immediate),
+        .offset1 = static_cast<uint8_t>(immediate >> 8u),
+        .addr = static_cast<uint8_t>(effective_address_vgpr),
+    };
+    if (load)
+      fields.vdst = static_cast<uint8_t>(data_vgpr);
+    else
+      fields.data0 = static_cast<uint8_t>(data_vgpr);
+    const auto access = cdna5::build_vds(op, fields);
+    words.insert(words.end(), access.begin(), access.end());
+    return true;
+  };
+  if (!append_access(offsets.first, first_data_vgpr) ||
+      !append_access(offsets.second, second_data_vgpr) || words.size() != expected_words) {
+    return std::nullopt;
+  }
+  return words;
 }
 
 std::optional<std::array<uint32_t, 3>> retarget_flat_load_vdst(std::array<uint32_t, 3> words,

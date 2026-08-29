@@ -50,6 +50,15 @@ consan_sc_build_ds_load_word0(const ConSanAccessLoweringForm &form, uint32_t ori
 consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form,
                                        uint32_t original_word0);
 
+[[nodiscard]] std::optional<std::array<uint32_t, 2>>
+consan_sc_build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
+                                      const ConSanTargetProfile &target);
+
+[[nodiscard]] std::optional<std::vector<uint32_t>> consan_sc_build_split_single_address_lds_pair(
+    ConSanScTwoAddressLdsByteOffsets offsets, uint16_t element_dwords, uint16_t address_vgpr,
+    uint16_t first_data_vgpr, uint16_t second_data_vgpr, uint16_t adjusted_address_vgpr, bool load,
+    const ConSanTargetProfile &target);
+
 [[nodiscard]] std::optional<std::array<uint32_t, 3>>
 retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch);
 
