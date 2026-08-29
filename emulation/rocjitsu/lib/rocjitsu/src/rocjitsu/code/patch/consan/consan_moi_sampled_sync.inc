@@ -2321,7 +2321,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                         overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
                         overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(group_options.moi_dispatch_id_sgpr,
-                                          moi_dispatch_state_sgpr_count(group_options));
+                                          kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
              {group_options.moi_persistent_sgprs.record_replay_workgroup.x,
               group_options.moi_persistent_sgprs.record_replay_workgroup.y,
@@ -2751,7 +2751,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                         overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
                         overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(route_options.moi_dispatch_id_sgpr,
-                                          moi_dispatch_state_sgpr_count(route_options));
+                                          kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
              {route_options.moi_persistent_sgprs.record_replay_workgroup.x,
               route_options.moi_persistent_sgprs.record_replay_workgroup.y,

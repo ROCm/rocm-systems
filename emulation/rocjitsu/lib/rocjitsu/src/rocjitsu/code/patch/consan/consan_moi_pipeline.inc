@@ -721,7 +721,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
       const bool admitted = !missing_dispatch && owner_contexts &&
                             moi_scalar_contexts_admit_reserved_window(
                                 owner_contexts->summaries, dispatch_base,
-                                moi_dispatch_state_sgpr_count(owner_options), state.arch);
+                                kMoiDispatchStateSgprCount, state.arch);
       if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;

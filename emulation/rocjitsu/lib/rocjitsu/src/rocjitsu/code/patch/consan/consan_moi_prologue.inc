@@ -2184,7 +2184,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source =
-            moi_runtime_workgroup_selection_source(kernel_options, arch),
+            moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
         .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
         .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
@@ -2357,7 +2357,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
                   overlaps(options.moi_persistent_sgprs.owner) ||
                   overlaps(options.moi_persistent_sgprs.epoch) ||
                   overlaps(options.moi_persistent_sgprs.workgroup_key) ||
-                  overlaps(options.moi_dispatch_id_sgpr, moi_dispatch_state_sgpr_count(options)) ||
+                  overlaps(options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
                   overlaps(options.moi_inline_visible_evidence_sgpr);
   for (const std::optional<uint16_t> reg :
        {options.moi_persistent_sgprs.record_replay_workgroup.x,
@@ -2807,7 +2807,7 @@ void try_apply_owner_epoch_prologue_patch(
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source =
-            moi_runtime_workgroup_selection_source(kernel_options, arch),
+            moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
         .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
         .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
@@ -2827,7 +2827,7 @@ void try_apply_owner_epoch_prologue_patch(
     if (kernel_options.moi_dispatch_id_sgpr) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) +
-                                   moi_dispatch_state_sgpr_count(kernel_options));
+                                   kMoiDispatchStateSgprCount);
     }
     if (kernel_options.moi_persistent_sgprs.owner) {
       required_sgpr_count = std::max<uint32_t>(

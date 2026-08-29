@@ -1081,7 +1081,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               consan_detail::inline_shadow_loop_counter_vgpr(
                   planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),
                   candidate_options.moi_track_atomics) +
-              inline_shadow_loop_scratch_count(candidate_options, candidate));
+              inline_shadow_loop_scratch_count(candidate));
         }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "inline-shadow probe",
                                                      result.errors, body_options);

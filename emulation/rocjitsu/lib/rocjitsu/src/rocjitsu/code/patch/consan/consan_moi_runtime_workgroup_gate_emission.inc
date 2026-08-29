@@ -89,7 +89,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
-      moi_runtime_workgroup_selection_source(options, arch);
+      moi_runtime_workgroup_selection_source();
   const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||

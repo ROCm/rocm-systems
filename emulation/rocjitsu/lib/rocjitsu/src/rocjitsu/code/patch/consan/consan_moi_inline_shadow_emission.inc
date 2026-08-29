@@ -2520,7 +2520,7 @@
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
                                   options.moi_track_atomics) +
-                              inline_shadow_loop_scratch_count(options, candidate));
+                              inline_shadow_loop_scratch_count(candidate));
   } else if (materialize_flat_address) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr + scratch_count - flat_access_address_scratch_count(candidate));
@@ -2536,7 +2536,7 @@
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
                                   options.moi_track_atomics) +
-                              inline_shadow_loop_scratch_count(options, candidate));
+                              inline_shadow_loop_scratch_count(candidate));
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -2856,7 +2856,7 @@
       cell_range.cell_count = range.byte_width;
     }
     const bool use_cell_loop =
-        cell_range.cell_count > 1u && inline_shadow_loop_scratch_count(options, candidate) != 0u;
+        cell_range.cell_count > 1u && inline_shadow_loop_scratch_count(candidate) != 0u;
     for (uint32_t cell_index = 0; cell_index < cell_range.cell_count; ++cell_index) {
       if (workgroup_shadow) {
         if (use_cell_loop) {
