@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.3
+-- RocPD schema version 3.0.4
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -282,6 +282,11 @@ CREATE TABLE IF NOT EXISTS
         "agent_id" INTEGER NOT NULL,
         "kernel_id" INTEGER NOT NULL,
         "dispatch_id" INTEGER NOT NULL,
+        -- Kernel replay pass index (0-based). NULL when the run did not use kernel replay, where
+        -- a dispatch_id identifies a single execution on its own. Under kernel replay the same
+        -- dispatch is executed once per counter group and every pass reports the same
+        -- dispatch_id, so (dispatch_id, replay_pass) is what names one execution.
+        "replay_pass" INTEGER,
         "queue_id" INTEGER NOT NULL,
         "stream_id" INTEGER NOT NULL,
         "start" BIGINT NOT NULL,
