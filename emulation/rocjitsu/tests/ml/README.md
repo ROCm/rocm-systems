@@ -38,8 +38,7 @@ python tests/ml/gpt_oss_kernels.py --device cpu
 same device arm on plain CPU torch; a case that fails there indicts the suite's
 own reference or tolerance, not the emulator.
 
-Other flags: `--size {tiny,small,model}` picks the shape profile (`model` is
-gpt-oss-20b's real widths and takes hours under functional emulation),
+Other flags: `--size {tiny,small,model}` picks the shape profile,
 `--kernel`/`--impl` filter cases, `--json` writes a machine-readable report,
 and `--with-vllm` adds a cross-check against vLLM's own custom ops where vLLM
 is installed.
@@ -62,6 +61,26 @@ reference that would otherwise have no second opinion.
 form is selected from an IR op-priority list only an engine populates -- so that
 row compares two expressions rather than exercising a kernel; the suite's own
 `rms_norm` cases cover the device.
+
+### Shape profiles and what they cost
+
+`tiny` (the default) and `small` run the whole suite in under two minutes under
+functional emulation. `model` uses gpt-oss-20b's real widths -- hidden 2880, 64
+heads, 32 experts, vocab 201088 -- and most of it is still fast: the QKV
+projection is 2.5s through torch and 1.7s through `tl.dot`, the output
+projection 1.3s, the router 0.04s.
+
+The exception is the vocabulary-sized GEMM in `lm_head_gemm`. With four tokens
+against a 201088-wide weight, hipBLASLt pads the tile height far past the four
+rows that carry data, so the emulator executes an order of magnitude more work
+than the 4.6 GFLOP the operation needs, and the case runs for tens of minutes.
+That is a property of a tall-skinny GEMM under functional emulation, not a
+defect. Skip it with `--kernel` if you only want the rest:
+
+```bash
+python tests/ml/gpt_oss_kernels.py --size model \
+    --kernel rms_norm --kernel attention --kernel moe --kernel swiglu
+```
 
 ### Comparing two architectures
 
