@@ -15,6 +15,8 @@
 // Exception: profiler entry points and benign teardown return success, because
 // happy-path helpers legitimately call them in passing.
 
+#include <hip/hip_runtime.h>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -31,6 +33,16 @@ namespace {
   ::abort();
 }
 }  // namespace
+
+// ---- HIP kernel launch ----------------------------------------------------
+// Must stay defined here: left undefined, the linker satisfies it from the
+// INTERCEPTOR in ROCm's libclang_rt.profile, whose deps do not link.
+extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t, unsigned int, unsigned int,
+                                            unsigned int, unsigned int, unsigned int,
+                                            unsigned int, unsigned int, hipStream_t,
+                                            void**, void**) {
+  Unreached("hipModuleLaunchKernel");
+}
 
 // ---- graph capture / stream ordering -------------------------------------
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
