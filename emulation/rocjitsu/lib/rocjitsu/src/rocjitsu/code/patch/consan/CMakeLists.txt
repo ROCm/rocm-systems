@@ -32,6 +32,7 @@ target_sources(
         consan_moi_report_emission.cpp
         consan_moi_record_event_emission.cpp
         consan_moi_runtime_workgroup_gate.cpp
+        consan_moi_sampled_atomic_emission.cpp
         consan_moi_support.cpp
         consan_moi_target_address.cpp
         consan_observation_policy.cpp

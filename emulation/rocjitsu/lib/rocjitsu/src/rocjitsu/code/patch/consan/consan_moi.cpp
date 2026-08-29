@@ -23,10 +23,12 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
@@ -108,6 +110,7 @@ using consan_moi_detail::append_dynamic_record_store_u32_scalar_src;
 using consan_moi_detail::append_dynamic_record_store_u32_vgpr;
 using consan_moi_detail::append_dynamic_record_store_workgroup_source;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_moi_prepare_scc_preserving_indirect_jump;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
@@ -169,8 +172,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_atomic.inc"
 

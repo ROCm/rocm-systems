@@ -807,7 +807,7 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
 moi_persistent_or_descriptor_workgroup_sources(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, ConSanMoiEngine engine,
     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, std::vector<std::string> &errors,
-    bool uses_cluster_workgroup_id = false) {
+    bool uses_cluster_workgroup_id) {
   if (const auto persistent = record_replay_persistent_workgroup_sources(engine, point))
     return persistent;
   return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
@@ -1260,31 +1260,6 @@ inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   // within the same scratch budget instead of requiring a ninth live value at
   // full-pressure eight-register Sampled sites.
   return direct_sampled_scratch_count(request, point, candidate, arch);
-}
-
-struct SampledAtomicScratchLayout {
-  static constexpr uint16_t kValue = 2u;
-  static constexpr uint16_t kExpected = 3u;
-  // Sampled atomic lowering currently admits only 32-bit CAS, so each
-  // outcome-evidence field occupies one VGPR. Wider support must also widen
-  // append_sampled_atomic_cas_snapshot(), not only this reservation.
-  static constexpr uint16_t kCasFieldWords = 1u;
-  static_assert(kCasFieldWords == 1u);
-  static constexpr uint16_t kCasCompare = 4u;
-  static constexpr uint16_t kCasResult = kCasCompare + kCasFieldWords;
-  static constexpr uint16_t kOwner = kCasResult + kCasFieldWords;
-  static constexpr uint16_t kEpoch = kOwner + 1u;
-  // Keep the materialized address at the scratch tail: the consumer-neutral
-  // atomic address planner deliberately reserves the last pair.  The bank is
-  // live across the report transaction, but it need not follow that pair.
-  static constexpr uint16_t kBank = kEpoch + 1u;
-  static constexpr uint16_t kSavedAddress = kBank + 1u;
-  static constexpr uint16_t kSavedAddressCount = 2u;
-  static constexpr uint16_t kCount = kSavedAddress + kSavedAddressCount;
-};
-
-[[nodiscard]] constexpr uint16_t sampled_atomic_scratch_count() {
-  return SampledAtomicScratchLayout::kCount;
 }
 
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,

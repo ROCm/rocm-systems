@@ -834,5 +834,3 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.mark_modified();
 }
-
-[[nodiscard]] std::optional<ConSanMoiSampledSyncRole>
