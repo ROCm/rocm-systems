@@ -44,14 +44,6 @@ struct MoiLocalNopIsland {
   bool claimed = false;
 };
 
-[[nodiscard]] constexpr bool moi_supports_dynamic_stack_spill(rj_code_arch_t arch,
-                                                              ConSanMoiEngine engine) {
-  if (engine == ConSanMoiEngine::InlineShadow)
-    return true;
-  return consan_is_capability_arch(arch) &&
-         (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled);
-}
-
 [[nodiscard]] constexpr bool moi_supports_full_pressure_component_state(rj_code_arch_t arch,
                                                                         ConSanMoiEngine engine) {
   return consan_is_capability_arch(arch) &&
@@ -2890,15 +2882,6 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     plans.push_back(std::move(plan));
   }
 }
-
-struct ResolvedMoiScratchPlan {
-  uint16_t base = 0;
-  uint16_t count = 0;
-  uint16_t required_vgpr_count = 0;
-  uint32_t original_private_segment_size = 0;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
-  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
-};
 
 /// Target-neutral placement and resource result shared by every planned MOI
 /// access patch.

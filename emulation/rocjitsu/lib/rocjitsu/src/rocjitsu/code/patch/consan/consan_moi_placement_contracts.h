@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 
 #include <unordered_map>
 
@@ -20,6 +21,14 @@ namespace rocjitsu::consan_moi_impl {
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
+
+[[nodiscard]] constexpr bool moi_supports_dynamic_stack_spill(rj_code_arch_t arch,
+                                                              ConSanMoiEngine engine) {
+  if (engine == ConSanMoiEngine::InlineShadow)
+    return true;
+  return consan_is_capability_arch(arch) &&
+         (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled);
+}
 
 [[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
                                                               bool key_encodes_scc = false) {
@@ -34,6 +43,16 @@ using MoiDescriptorPrivateRequirements = std::unordered_map<uint64_t, uint32_t>;
 using MoiDescriptorLdsRequirements = std::unordered_map<uint64_t, uint32_t>;
 using MoiSpillManagers = std::unordered_map<uint64_t, SpillManager>;
 
+/// Owner-complete scratch allocation consumed by shared MOI lowering.
+struct ResolvedMoiScratchPlan {
+  uint16_t base = 0;
+  uint16_t count = 0;
+  uint16_t required_vgpr_count = 0;
+  uint32_t original_private_segment_size = 0;
+  std::vector<uint64_t> owner_descriptor_file_offsets;
+  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
+};
+
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);
 [[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &descriptor);
@@ -46,6 +65,16 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch,
     std::vector<std::string> &errors, bool uses_cluster_workgroup_id = false,
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt);
+
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
+                                           const ConSanMoiOperatingPoint &point);
+
+[[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
+                                                    std::span<const uint8_t> image,
+                                                    const ConSanKernelInfo &kernel,
+                                                    uint32_t required_count, rj_code_arch_t arch,
+                                                    std::vector<std::string> &errors);
 
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
