@@ -1,14 +1,5 @@
 namespace {
 
-[[nodiscard]] std::unique_ptr<Instruction>
-decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
-                           uint64_t source_offset) {
-  DecodeResult decoded = decoder.decode_window(words, source_offset, DecodeErrorEmitter{});
-  if (decoded.failed())
-    return {};
-  return std::move(decoded).value();
-}
-
 inline constexpr uint16_t kRdna4ExecLo = 126;
 inline constexpr uint16_t kRdna4ExecHi = 127;
 inline constexpr uint16_t kRdna4VccLo = 106;

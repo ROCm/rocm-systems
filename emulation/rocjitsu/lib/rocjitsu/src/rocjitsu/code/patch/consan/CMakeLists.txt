@@ -13,6 +13,7 @@ target_sources(
         consan_atomic_fence_policy.cpp
         consan_barrier_policy.cpp
         consan_branch_only_relay_router.cpp
+        consan_instruction_semantics.cpp
         consan_moi.cpp
         consan_moi_model.cpp
         consan_moi_report_plan.cpp
