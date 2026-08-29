@@ -23,6 +23,7 @@ target_sources(
         consan_moi.cpp
         consan_moi_candidate_projection.cpp
         consan_moi_engine_contracts.cpp
+        consan_moi_memory_emission.cpp
         consan_moi_model.cpp
         consan_moi_report_plan.cpp
         consan_moi_relocation.cpp

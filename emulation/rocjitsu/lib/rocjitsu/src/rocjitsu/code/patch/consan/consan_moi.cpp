@@ -20,6 +20,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -91,6 +92,11 @@ using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
+using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_store_u32_literal;
+using consan_moi_detail::append_store_u32_sgpr;
+using consan_moi_detail::append_store_u32_vgpr;
+using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::count_nop_padding;
