@@ -1407,6 +1407,30 @@ rendering.
 contract and direct tests, and report lifecycle code contains no engine
 analysis policy.
 
+#### F7 checkpoint — complete (2026-08-29)
+
+F7 was implemented by commits `f9ec3ac47a`, `db941e4b40`, `62aac0a223`,
+`5f99af0bd6`, `2ef23c5c93`, and `d4b9cd120d`. The report path now has compiled
+components for snapshot capture, raw-evidence decoding, engine analysis, trust
+evaluation, and diagnostic rendering. The lifecycle registry allocates, binds,
+retires, snapshots, and aggregates report buffers; its source contains no
+replay or conflict-analysis policy. The remaining pipeline is a 68-line
+coordinator which passes immutable typed products between the components and
+is the only reporting layer that invokes the hook logger.
+
+Decoding, analysis, trust, and rendering have no HSA lifecycle dependency and
+each has a direct host test. The renderer accepts no raw report bytes and
+returns typed diagnostics whose established text is pinned independently of
+the logger. Registry churn and snapshot tests cover allocation, lifetime,
+visibility, copy failure, and reclamation. During extraction, the decoder
+exposed and fixed an existing accumulation bug in which dynamic decoding could
+overwrite malformed evidence already supplied by static lifecycle metadata;
+the decoder regression now pins preservation of both sources.
+
+The complete nonphysical gate passed 4,703/4,703 tests at `-j16` in 250.43
+seconds across all five emulated targets. The serialized physical `gfx1201`
+gate passed 635/635 tests at `-j1` in 108.14 seconds.
+
 ### F8. Shrink patch proof and type stable diagnostics
 
 With coverage and runtime mapping removed from `ConSanPatchInfo`, split or
