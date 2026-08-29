@@ -9123,7 +9123,7 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.neg & (1u << 2))
       acc = -acc;
     float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_bf16(result);
+    uint32_t result_bits = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -9182,7 +9182,7 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
     if (inst_.neg & (1u << 2))
       acc = -acc;
     float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_bf16(result);
+    uint32_t result_bits = util::f32_to_bf16_rne(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();

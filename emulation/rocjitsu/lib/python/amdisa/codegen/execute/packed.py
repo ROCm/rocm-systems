@@ -150,10 +150,11 @@ def gen_pk_binop(
         lo_expr, hi_expr = f_op_map[op]
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
-        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
-        # data conversions use the mode-aware helpers instead.
+        # Round to nearest even, without the FP16_OVFL clamp: this is packed
+        # arithmetic, whose prose does not define the clamp, but whose result
+        # still rounds under MODE.FP_ROUND like any other float destination.
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16_rne(rlo) | (static_cast<uint32_t>(util::f32_to_bf16_rne(rhi)) << 16));'
         )
     elif dtype == 'i16':
         L.append(
@@ -352,10 +353,10 @@ def gen_pk_ternary(
         else:
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
-        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
-        # data conversions use the mode-aware helpers instead.
+        # Round to nearest even, without the FP16_OVFL clamp; see the packed
+        # binary-op body above.
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16_rne(rlo) | (static_cast<uint32_t>(util::f32_to_bf16_rne(rhi)) << 16));'
         )
     elif dtype == 'i16':
         L.append(
@@ -897,7 +898,7 @@ def gen_mad_mix_bf16(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
         )
     else:
-        L.append(f'    uint16_t h = util::f32_to_bf16(result);')
+        L.append(f'    uint16_t h = util::f32_to_bf16_rne(result);')
         if result == 'lo':
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
@@ -1032,8 +1033,9 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
         narrow = 'util::f32_to_f16_mode'
     elif cls == 'dot2_bf16_bf16':
         widen = 'util::bf16_to_f32'
-        # DOT2_BF16_BF16 is a packed arithmetic op, not a data conversion.
-        narrow = 'util::f32_to_bf16'
+        # A packed arithmetic op rather than a data conversion, so RNE without
+        # the FP16_OVFL clamp the conversion helpers apply.
+        narrow = 'util::f32_to_bf16_rne'
     else:
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
 

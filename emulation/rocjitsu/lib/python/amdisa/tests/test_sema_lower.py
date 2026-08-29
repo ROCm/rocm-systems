@@ -605,8 +605,10 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert 'util::bf16_to_f32' in result
+        # A BF16 destination rounds to nearest even; truncating it biases every
+        # arithmetic and transcendental BF16 result down by up to one ulp.
         assert (
-            'uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_bf16('
+            'uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_bf16_rne('
             in result
         )
         assert (

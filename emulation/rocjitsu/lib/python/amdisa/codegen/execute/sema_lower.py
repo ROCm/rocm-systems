@@ -1008,10 +1008,14 @@ def _lower_dst_write(
                 'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod))'
             )
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
-        # Explicit data-conversion generators use the mode-aware BF16 helpers.
-        # Generic BF16 semantic writes cover arithmetic forms where current ISA
-        # prose does not define FP16_OVFL clamping.
-        rhs = f'util::f32_to_bf16({rhs})'
+        # Round to nearest even, without the FP16_OVFL clamp. Arithmetic and
+        # transcendental BF16 results round under MODE.FP_ROUND like any other
+        # float destination -- LLVM lowers an IEEE fptrunc to BF16 on gfx1250 to
+        # V_FMA_MIXLO_BF16 and sets MODE round-to-nearest-even ahead of it, which
+        # it could not do if the instruction truncated. The clamp stays off:
+        # explicit data-conversion generators use the mode-aware helper because
+        # their ISA prose defines FP16_OVFL, and this prose does not.
+        rhs = f'util::f32_to_bf16_rne({rhs})'
         if _contains_call(rhs_node, 'apply_omod'):
             rhs = (
                 f'amdgpu::fp_mode::finalize_omod_bf16({rhs}, '

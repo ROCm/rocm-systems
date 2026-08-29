@@ -414,4 +414,6 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    assert 'util::f32_to_bf16(result)' in cpp_lo
+    # RNE, not truncation: LLVM lowers an IEEE fptrunc to BF16 on gfx1250 to
+    # V_FMA_MIXLO_BF16 and sets MODE round-to-nearest-even ahead of it.
+    assert 'util::f32_to_bf16_rne(result)' in cpp_lo

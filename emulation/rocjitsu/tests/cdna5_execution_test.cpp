@@ -760,6 +760,85 @@ TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
 }
 
+// BF16 arithmetic results round to nearest even, not toward zero.
+//
+// gfx1250 has no V_CVT_PK_BF16_F32. LLVM lowers an IEEE fptrunc to BF16 with
+// V_FMA_MIXLO_BF16 -- and emits `s_setreg hwreg(HW_REG_WAVE_MODE, 2, 2), 0`,
+// round-to-nearest-even, immediately ahead of it. It could not do that if the
+// instruction truncated. The packed BF16 arithmetic ops round the same way.
+//
+// The emulator truncated instead, which biases every BF16 result down by up to
+// one ulp. It showed up as a gpt-oss activation whose worst error on gfx1250 was
+// exactly twice the same kernel's error on gfx950, where the conversion goes
+// through V_CVT_PK_BF16_F32 and has always rounded.
+//
+// The inputs are chosen so truncation and RNE differ: each exact result falls
+// above the midpoint between two BF16 values, so RNE rounds up and truncation
+// does not.
+TEST(Gfx1250ExecutionTest, Bf16ArithmeticRoundsToNearestEvenRatherThanTruncating) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+
+  // V_FMA_MIXLO_BF16 with F32 sources: 1.0 * 55.99962615966797 + 0.0. The
+  // product's low 16 bits are 0xff9e, above the 0x8000 midpoint, so RNE gives
+  // 0x4260 and truncation gives 0x425f.
+  constexpr uint32_t kOneF32 = 0x3F800000u;
+  constexpr uint32_t kValueF32 = 0x425FFF9Eu;
+  cu->write_vgpr(vgpr_base + 0, kLane, kOneF32);
+  cu->write_vgpr(vgpr_base + 2, kLane, kValueF32);
+  cu->write_vgpr(vgpr_base + 3, kLane, 0u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0u);
+
+  const std::array<uint32_t, 2> mix_words = {0xCC3E0001u, 0x040E0500u};
+  cdna5::VFmaMixloBf16Vop3p fma_mixlo(mix_words.data());
+  fma_mixlo.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane) & 0xFFFFu, 0x4260u)
+      << "V_FMA_MIXLO_BF16 truncated instead of rounding to nearest even";
+
+  // V_PK_ADD_BF16 on both halves, each an exact midpoint so the two halves
+  // pin different properties of the rounding rule.
+  //
+  // Low half: 0x3F81 + 0x3B80 = 1.01171875, whose F32 form 0x3f818000 sits
+  // exactly between two BF16 values. The lower neighbour 0x3F81 is odd, so RNE
+  // carries to 0x3F82 where truncation would keep 0x3F81. This is the half that
+  // catches truncation.
+  //
+  // High half: 0x3F82 + 0x3B80 = 1.01953125 (0x3f828000), also a midpoint, but
+  // the lower neighbour 0x3F82 is even, so RNE keeps it. This is the half that
+  // catches a rule that rounds every tie away from zero rather than to even.
+  cu->write_vgpr(vgpr_base + 0, kLane, (uint32_t{0x3F82u} << 16) | 0x3F81u);
+  cu->write_vgpr(vgpr_base + 2, kLane, (uint32_t{0x3B80u} << 16) | 0x3B80u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0u);
+
+  const std::array<uint32_t, 2> pk_add_words = {0xCC234001u, 0x18020500u};
+  cdna5::VPkAddBf16Vop3p pk_add(pk_add_words.data());
+  pk_add.execute_impl(*wf);
+
+  const uint32_t sum = cu->read_vgpr(vgpr_base + 1, kLane);
+  EXPECT_EQ(sum & 0xFFFFu, 0x3F82u)
+      << "V_PK_ADD_BF16 low half truncated a midpoint instead of rounding to even";
+  EXPECT_EQ(sum >> 16, 0x3F82u)
+      << "V_PK_ADD_BF16 high half rounded a tie away from zero instead of to even";
+
+  // The BF16 transcendentals reach the same rounding through a different
+  // generator path (the generic BF16 destination write, not the packed bodies
+  // above), so one of them is pinned here too. 1/3 is 0x3eaaaaab in F32, well
+  // above the midpoint, so RNE gives 0x3EAB and truncation gives 0x3EAA.
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x4040u); // BF16 3.0
+  cu->write_vgpr(vgpr_base + 1, kLane, 0u);
+  const std::array<uint32_t, 1> rcp_words = {0x7E02F300u}; // v_rcp_bf16_e32 v1, v0
+  cdna5::VRcpBf16Vop1 rcp(rcp_words.data());
+  rcp.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane) & 0xFFFFu, 0x3EABu)
+      << "V_RCP_BF16 truncated instead of rounding to nearest even";
+}
+
 TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

@@ -879,7 +879,7 @@ void VTanhBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::tanh_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -938,7 +938,7 @@ RJ_NOINLINE void VTanhBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::tanh_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2437,7 +2437,7 @@ void VRcpBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::rcp_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2496,7 +2496,7 @@ RJ_NOINLINE void VRcpBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::rcp_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2543,7 +2543,7 @@ void VSqrtBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::sqrt_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2602,7 +2602,7 @@ RJ_NOINLINE void VSqrtBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::sqrt_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2649,7 +2649,7 @@ void VRsqBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::rsq_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2708,7 +2708,7 @@ RJ_NOINLINE void VRsqBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::rsq_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2755,7 +2755,7 @@ void VLogBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::log_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2814,7 +2814,7 @@ RJ_NOINLINE void VLogBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::log_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2861,7 +2861,7 @@ void VExpBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::exp_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2920,7 +2920,7 @@ RJ_NOINLINE void VExpBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::exp_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -2967,7 +2967,7 @@ void VSinBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::sin_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -3026,7 +3026,7 @@ RJ_NOINLINE void VSinBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::sin_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -3073,7 +3073,7 @@ void VCosBf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::cos_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
@@ -3132,7 +3132,7 @@ RJ_NOINLINE void VCosBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_bf16(
-              util::f32_to_bf16([&]() {
+              util::f32_to_bf16_rne([&]() {
                 float v = [&]() {
                   float v = amdgpu::transcendental::cos_f32([&]() {
                     float sv = util::bf16_to_f32(static_cast<uint16_t>(
