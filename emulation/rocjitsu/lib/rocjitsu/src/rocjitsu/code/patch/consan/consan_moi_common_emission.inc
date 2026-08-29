@@ -2272,32 +2272,6 @@ private:
   return words;
 }
 
-[[nodiscard]] bool append_add_shifted_vgpr_field(std::vector<uint32_t> &words,
-                                                 uint16_t destination_vgpr, uint16_t field_vgpr,
-                                                 uint16_t shift, uint32_t mask, uint16_t tmp_vgpr,
-                                                 rj_code_arch_t arch) {
-  const auto mask_words =
-      instrumentation::build_v_and_b32_literal(tmp_vgpr, mask, field_vgpr, arch);
-  const auto shift_word = instrumentation::build_v_lshlrev_b32(
-      tmp_vgpr, scalar_positive_inline_u32(shift), tmp_vgpr, arch);
-  const auto add_word = instrumentation::build_v_add_u32(
-      destination_vgpr, vector_source_vgpr(destination_vgpr), tmp_vgpr, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(mask_words, shift_word, add_word);
-}
-
-[[nodiscard]] bool append_add_literal_field(std::vector<uint32_t> &words, uint16_t destination_vgpr,
-                                            uint32_t value, uint16_t tmp_vgpr,
-                                            rj_code_arch_t arch) {
-  if (value == 0)
-    return true;
-  const auto mov_value = instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch);
-  const auto add_word = instrumentation::build_v_add_u32(
-      destination_vgpr, vector_source_vgpr(destination_vgpr), tmp_vgpr, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(mov_value, add_word);
-}
-
 [[nodiscard]] bool append_inline_shadow_owner_field(
     std::vector<uint32_t> &words, const ConSanRequest &request,
     const ConSanMoiOperatingPoint &point, uint16_t low_vgpr, uint16_t tmp_vgpr,
@@ -2417,18 +2391,6 @@ private:
   return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                        consan_moi_exact_shadow::epoch_shift,
                                        consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
-}
-
-[[nodiscard]] bool append_extract_exact_shadow_field(std::vector<uint32_t> &words,
-                                                     uint16_t destination_vgpr,
-                                                     uint16_t packed_vgpr, uint16_t shift,
-                                                     uint32_t mask, rj_code_arch_t arch) {
-  const auto shifted = instrumentation::build_v_lshrrev_b32(
-      destination_vgpr, scalar_positive_inline_u32(shift), packed_vgpr, arch);
-  const auto masked =
-      instrumentation::build_v_and_b32_literal(destination_vgpr, mask, destination_vgpr, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(shifted, masked);
 }
 
 [[nodiscard]] bool
