@@ -28,6 +28,11 @@ struct ncclKernelPlan;
 struct ncclReg;
 struct ncclDevrWindow;
 
+// LINK FLOOR ONLY: a seam marked `// UNDRIVEN` is declared so the binary links
+// and so an accidental call is visible, NOT because its path is covered. The
+// marker travels with the declaration, so driving a seam means deleting its
+// marker rather than reasoning about which block a note applies to.
+
 // -------------------------------------------------------------------------
 // Tuning seams (enqueue.cc:2486-2841). updateCollCostTable/topoGetAlgoInfo read
 // the cost table this fills, so a test drives algorithm selection entirely
@@ -44,39 +49,39 @@ extern std::function<ncclResult_t(struct ncclComm*, int coll, int algorithm, int
 extern int g_topoGetAlgoTimeCalls;
 
 // Min/max channel clamps read by topoGetAlgoInfo. Defaults mirror production.
-extern int64_t g_paramMinNchannels;
-extern int64_t g_paramMaxNchannels;
+extern int64_t g_paramMinNchannels;  // UNDRIVEN
+extern int64_t g_paramMaxNchannels;  // UNDRIVEN
 
 // -------------------------------------------------------------------------
 // RCCL tuning-override seams (enqueue.cc:2556-2841). All default to no-ops so a
 // test sees the *unmodified* selection, then overrides exactly one.
 // -------------------------------------------------------------------------
 extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
-    g_rcclUpdateCollectiveProtocol;
+    g_rcclUpdateCollectiveProtocol;  // UNDRIVEN
 extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
-    g_rcclSetPipelining;
+    g_rcclSetPipelining;  // UNDRIVEN
 extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, size_t, int&)>
     g_rcclOverrideChannels;
 extern int g_rcclOverrideChannelsCalls;
-extern bool g_rcclIsArchSupportedForFunc;
+extern bool g_rcclIsArchSupportedForFunc;  // UNDRIVEN
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
 extern int g_rcclOptThreadBlockSizeCalls;
-extern ncclResult_t g_rcclOverrideAlgorithmResult;
-extern ncclResult_t g_rcclOverrideProtocolResult;
+extern ncclResult_t g_rcclOverrideAlgorithmResult;  // UNDRIVEN
+extern ncclResult_t g_rcclOverrideProtocolResult;  // UNDRIVEN
 extern int g_rcclOverrideAlgorithmCalls;
 extern int g_rcclOverrideProtocolCalls;
-extern int g_rcclCeAllReduceGraphLatchTickCalls;
-extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;
+extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
+extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 // Symmetric-registration query. Defaults to "neither side registered", but that
 // is a CHOICE that steers production down one arm -- make it explicit and
 // overridable rather than a fixed stub result.
-extern ncclSymRegType_t g_symRegType;
-extern ncclResult_t g_getSymRegTypeResult;
-extern int g_getSymRegTypeCalls;
+extern ncclSymRegType_t g_symRegType;  // UNDRIVEN
+extern ncclResult_t g_getSymRegTypeResult;  // UNDRIVEN
+extern int g_getSymRegTypeCalls;  // UNDRIVEN
 // The AINIC gate in rcclEffectiveP2pBatchEnable's gfx950 arm.
 extern bool g_rcclUseAinic;
 
@@ -89,28 +94,19 @@ extern bool g_rcclUseAinic;
 // the SHARED fakes (nccl_fakes.cc, nccl_stubs.cc) and deliberately not redefined
 // here -- a second definition is a link-time duplicate. Drive them by upgrading
 // the shared seam, not by shadowing.
-extern bool g_devrWindowIsMultiSegment;
-extern bool g_devrWindowHasSysmemSegment;
-
-// LINK FLOOR ONLY -- no test drives the seams in this block today. They exist so
-// the binary links and so an accidental call is visible, NOT because the paths
-// behind them are covered. Do not read a declared seam as evidence of coverage:
-// the CE gates, the devr window predicates, ncclGetSymRegType, the min/max
-// channel params, ncclProxyStart and rcclIsArchSupportedForFunc all sit on
-// task-append and launch paths this binary deliberately does not exercise.
-// Driving one is the first step in covering its path, not a formality.
+extern bool g_devrWindowIsMultiSegment;  // UNDRIVEN
+extern bool g_devrWindowHasSysmemSegment;  // UNDRIVEN
 
 // CE (copy-engine) availability gates (enqueue.cc:3498-3560, 3789+).
-extern bool g_ceImplemented;
-extern bool g_ceAvailable;
-extern bool g_ceScratchAvailable;
-extern bool g_hierCeAvailable;
-extern bool g_rcclCeAllReduceAllowed;
+extern bool g_ceImplemented;  // UNDRIVEN
+extern bool g_ceAvailable;  // UNDRIVEN
+extern bool g_ceScratchAvailable;  // UNDRIVEN
+extern bool g_hierCeAvailable;  // UNDRIVEN
+extern bool g_rcclCeAllReduceAllowed;  // UNDRIVEN
 
 // -------------------------------------------------------------------------
-// Proxy / launch seams. These sit on the paths the microtests deliberately do
-// NOT exercise (kernel launch, proxy start); they exist so the binary links and
-// so an accidental call is visible rather than silent.
+// Proxy / launch seams. addProxyOpIfNeeded reaches ncclProxySaveOp, so that one
+// is driven; the launch and proxy-start seams below it are not.
 // -------------------------------------------------------------------------
 // Scripted env for the UUT's ncclGetEnv reads. Cleared by ResetEnqueueFakes().
 // TRAP: updateCollCostTable:2527 caches NCCL_PROTO in a function-local static, so
@@ -125,7 +121,7 @@ extern bool g_rcclCeAllReduceAllowed;
 // today (gated on pivotA2ANumBiRings == 3, which the fixtures zero-init), but
 // one field assignment from making results depend on the CI machine's ambient
 // environment.
-extern std::unordered_map<std::string, std::string> g_enqEnv;
+extern std::unordered_map<std::string, std::string> g_enqEnv;  // UNDRIVEN
 
 // ncclCommEnsureReady result, and the Recorder's. Production NCCLCHECKs the
 // RedOpCreate record() call, so a failing recorder is an observable arm.
@@ -144,7 +140,7 @@ extern struct ncclProxyOp* g_proxySaveOpLastOp;
 extern int g_proxySaveOpLastChannelId;
 extern uint64_t g_proxySaveOpLastOpCount;
 extern bool g_proxySaveOpSawJustInquireIn;
-extern ncclResult_t g_proxyStartResult;
+extern ncclResult_t g_proxyStartResult;  // UNDRIVEN
 
 // waitWorkFifoAvailable escapes its spin loop via ncclCommPollEventCallbacks,
 // which is INLINE in comm.h and cannot be faked. Its only observable action on an

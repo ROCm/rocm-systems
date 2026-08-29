@@ -48,7 +48,7 @@ repos:
       - id: clang-format
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
-        files: '\.(c|cpp|cc|inc|h|hpp|m|mm)$'
+        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
 
   # gersemi: CMake formatter (replaces cmake-format and cmake-lint)
   - repo: https://github.com/BlankSpruce/gersemi

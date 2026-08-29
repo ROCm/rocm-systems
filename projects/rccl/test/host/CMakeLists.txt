@@ -773,4 +773,5 @@ endif()
 #   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
 #   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
 #   ./build/rccl-UnitTestsMicroEnqueue
-# The in-RCCL-build path registers the micro/init binaries via CTest categories.
+# The in-RCCL-build path registers the micro/init/enqueue binaries via CTest
+# categories.

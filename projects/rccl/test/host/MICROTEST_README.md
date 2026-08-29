@@ -39,10 +39,9 @@ translation-unit anonymous namespaces):
 - **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
   `FreshRegistration*`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
-  `EnqueueMicrotest.*`. Its tests are split across `tests_batch1..9.inc`, which are
-  `#include`d by `enqueue-test.cc` in order — they share one anonymous namespace
-  and later fragments use fixtures from earlier ones, so the include order is
-  load-bearing. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
+  test; several fixtures are reused by later groups, so the order within the file
+  matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
   which cannot compile host-only; the TU pre-sets that header's include guard and
   supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
   addresses are stored in a table, never launched). Three shared `nccl_stubs.cc`
@@ -116,7 +115,8 @@ build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
 1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
-   (currently `p2p.cc` or `init.cc`), skip to step 3. Otherwise add a new path
+   (currently `p2p.cc`, `init.cc`, or `enqueue.cc`), skip to step 3. Otherwise
+   add a new path
    macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
@@ -126,7 +126,8 @@ test:
    list for that target. If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
-   `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
+   the target's reset helper (`ResetP2pFakes()`, `ResetEnqueueFakes()`, ...) so
+   hooks do not leak between tests. Install per-test
    behaviour by overwriting a `std::function` hook (see the `ScopedHook`
    helper in `p2p-test.cc`) rather than editing a fake's default.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`

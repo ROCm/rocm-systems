@@ -6,13 +6,11 @@
 
 // Enqueue-only fake seams + fail-loud stub floor for `rccl-UnitTestsMicroEnqueue`.
 //
-// Two tiers, following the init.cc convention:
-//   * Controllable seams  -- a std::function or result variable a test drives.
-//   * Fail-loud stubs     -- ::abort() on call. These satisfy enqueue.cc's
-//     link-time symbol closure; the microtests never reach them. A test that
-//     needs one replaces that individual entry with a real fake.
-// Benign teardown paths return ncclSuccess instead, because a happy-path test
-// legitimately reaches them on the way out.
+// This file holds the CONTROLLABLE seams: a std::function or result variable a
+// test drives. The fail-loud ::abort() stub floor that satisfies enqueue.cc's
+// remaining link closure lives in enqueue_stubs.cc; the only ::abort()s here are
+// null-argument checks on arguments production never passes as null. Benign
+// teardown paths return ncclSuccess, because a happy-path test reaches them.
 
 #include "enqueue_fakes.h"
 
@@ -167,7 +165,7 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
 // updateCollCostTable:2527 reads NCCL_PROTO through this, behind a function-local
 // `static bool userProtoInputCached` -- so only the FIRST call in the process can
 // observe a value. Tests must not depend on the env, and cannot re-script it;
-// see the note on that latch in tests_batch4.inc.
+// see the note on that latch beside updateCollCostTable in enqueue-test.cc.
 std::unordered_map<std::string, std::string> g_enqEnv;
 const char* ncclGetEnv(const char* name) {
   if (!name) return nullptr;

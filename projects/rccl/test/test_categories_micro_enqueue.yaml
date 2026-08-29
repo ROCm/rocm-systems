@@ -2,7 +2,7 @@
 #
 # gtest's `*` does not match across the literal `.`, so a suite with no pattern
 # here builds and passes locally but never runs under CTest. Keep this in sync
-# with the TEST_F suite names in enqueue-test.cc / tests_batch*.inc.
+# with the TEST_F suite names in enqueue-test.cc.
 test_categories:
   quick: &micro_enqueue_quick
     description: "Smoke - host-only src/enqueue.cc micro-tests (tuning, chunking, plan packing), sub-second."
