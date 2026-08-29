@@ -493,7 +493,18 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
+    // Ask whether the slice is actually in the page table, not whether some
+    // host pointer can be produced for it. resolve_host_ptr() answers the
+    // latter, and under the KMD interposer's passthrough mapping it answers
+    // "yes" for every address below the user-space limit -- including the
+    // PROT_NONE hole that ROCr reserves above the scratch it has committed. The
+    // pool then looked backed, this allocator never ran, and the wave's first
+    // scratch store dereferenced the reservation and took the host process
+    // down with SIGSEGV. is_range_mapped() consults only the VMID page table,
+    // which passthrough cannot fake, and covers the whole per-wave slice rather
+    // than its first byte, so a slot that starts inside the committed pool but
+    // runs off its end is caught too.
+    if (memory_ && !memory_->is_range_mapped(wave_scratch, per_wave_size, pkt.process_id) &&
         scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
@@ -526,7 +537,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
           "backing_addr={:#x} mapped={}",
           wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
           pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+          memory_ ? memory_->is_range_mapped(wave_scratch, per_wave_size, pkt.process_id) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
