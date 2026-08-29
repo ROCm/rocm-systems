@@ -1462,6 +1462,7 @@ target_link_libraries(
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
         rocjitsu_consan_report_analyzer
+        rocjitsu_consan_report_decoder
         rocjitsu_consan_report_snapshot
         rocjitsu_consan_report_trust
         ${RJ_OBJECT_LIBS}

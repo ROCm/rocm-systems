@@ -3611,6 +3611,68 @@ TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
   EXPECT_EQ(failed.copy_status, 17);
 }
 
+TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
+  rocjitsu::ConSanMoiAutoReportInventory inventory;
+  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 1;
+  inventory.record_replay_dispatch_token_capacity = 1;
+  inventory.record_replay_access_dispatch_bank_count = 1;
+  inventory.record_replay_access_owner_bank_count = 1;
+  inventory.record_replay_address_group_headroom = 1;
+  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+
+  rocjitsu::consan_hook::AutoMoiReportSnapshot snapshot;
+  snapshot.bytes.resize(report.required_bytes);
+  auto header = rocjitsu::make_consan_moi_report_header_for_layout(7, 11, report.layout);
+  header.event_counter = 1;
+  header.access_record_count = report.layout.access_record_capacity + 2u;
+  std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
+  auto *records = reinterpret_cast<rocjitsu::ConSanMoiAccessRecord *>(
+      snapshot.bytes.data() + report.layout.access_records_offset);
+  records[0] = {
+      .generation = 7,
+      .wave_id = 3,
+      .lane_mask = 1,
+      .instruction_offset = 0x40,
+      .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
+      .lds_byte_offset = 16,
+      .lds_byte_count = 4,
+      .start_cell = 4,
+      .cell_count = 1,
+      .epoch = 2,
+      .event_index = 1,
+  };
+  rocjitsu::consan_hook::AutoMoiReportSummary initial_summary;
+  // Registry metadata already classified this loss. Decoding must accumulate
+  // dynamic evidence rather than overwriting an earlier typed reason.
+  initial_summary.inline_malformed_count = 1;
+  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  input.reader = 101;
+  input.source_address = 0x1000;
+  input.size = snapshot.bytes.size();
+  input.layout = report.layout;
+  const auto decoded = rocjitsu::consan_hook::decode_auto_moi_report(
+      input, snapshot, initial_summary, /*partition_mask_debug=*/false);
+  ASSERT_TRUE(decoded.complete());
+  EXPECT_EQ(decoded.engine, rocjitsu::ConSanMoiEngine::RecordReplay);
+  EXPECT_EQ(decoded.visible_record_slot_count, report.layout.access_record_capacity);
+  ASSERT_EQ(decoded.replay_access_records.size(), 1u);
+  EXPECT_EQ(decoded.replay_access_records.front().instruction_offset, 0x40u);
+  EXPECT_EQ(decoded.summary.visible_access_record_count, 1u);
+  EXPECT_EQ(decoded.summary.dropped_access_record_count, 2u);
+  EXPECT_EQ(decoded.summary.inline_malformed_count, 1u);
+  EXPECT_TRUE(std::ranges::any_of(decoded.losses, [](const auto &loss) {
+    return loss.reason == rocjitsu::consan_hook::AutoMoiReportLossReason::DroppedAccess &&
+           loss.count == 2u;
+  }));
+
+  snapshot.bytes[0] = 0;
+  const auto malformed = rocjitsu::consan_hook::decode_auto_moi_report(
+      input, snapshot, {}, /*partition_mask_debug=*/false);
+  EXPECT_EQ(malformed.failure, rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader);
+}
+
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
   EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(0), 0u);
   EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(3), 3u);

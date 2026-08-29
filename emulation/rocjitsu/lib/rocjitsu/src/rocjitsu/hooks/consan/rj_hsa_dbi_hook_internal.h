@@ -549,30 +549,6 @@ flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
 [[nodiscard]] inline const char *hook_policy_name(HookPolicy policy) {
   return policy == HookPolicy::Default ? "default" : "strict";
 }
-struct CompactRecordReplayAccessRecords {
-  uint32_t committed_record_count = 0;
-  std::vector<ConSanMoiAccessRecord> replay_records;
-};
-
-/// Performs the one mandatory scan of a sparse Record/Replay hash table and
-/// retains only records that replay or pressure telemetry can consume. The
-/// allocation scales with the publication hint, not with table capacity.
-[[nodiscard]] inline CompactRecordReplayAccessRecords
-compact_record_replay_access_records(std::span<const ConSanMoiAccessRecord> records,
-                                     uint32_t publication_hint) {
-  CompactRecordReplayAccessRecords result;
-  result.replay_records.reserve(std::min<size_t>(records.size(), publication_hint));
-  for (const ConSanMoiAccessRecord &record : records) {
-    if (record.access_kind != static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty))
-      ++result.committed_record_count;
-    // Retain a partially initialized Empty record so replay reports it as
-    // unsupported instead of hiding malformed publication evidence.
-    if (!consan_moi_access_record_is_unpublished(record))
-      result.replay_records.push_back(record);
-  }
-  return result;
-}
-
 void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                                  std::string_view reason);
 [[nodiscard]] bool allocate_auto_moi_report_buffer(
