@@ -280,9 +280,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       return narrow_current();
     };
     const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-      if (!record.load(offset, value) || !append_compare_moi_report_dispatch_id_word(
-                                             words, options, value, expected, high_word, arch,
-                                             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+      if (!record.load(offset, value) ||
+          !append_compare_moi_report_dispatch_id_word(
+              words, options, options, value, expected, high_word, arch,
+              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return false;
       }
       return narrow_current();

@@ -160,7 +160,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const MoiOptions 
     words.insert(words.end(), zero->begin(), zero->end());
     return true;
   }
-  if (!append_moi_report_dispatch_id_pair(words, options, bank_vgpr, temporary_vgpr, arch,
+  if (!append_moi_report_dispatch_id_pair(words, options, options, bank_vgpr, temporary_vgpr, arch,
                                           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
   }
@@ -228,7 +228,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint16_t residue_vgpr, uint16_t temporary_vgpr,
                                  uint16_t coordinate_vgpr, rj_code_arch_t arch) {
-  if (!append_moi_report_dispatch_id_pair(words, options, residue_vgpr, temporary_vgpr, arch,
+  if (!append_moi_report_dispatch_id_pair(words, options, options, residue_vgpr, temporary_vgpr,
+                                          arch,
                                           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
   }
@@ -797,7 +798,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                             static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, options, offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
+          record, options, options, offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x,
@@ -952,9 +953,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     return reject_unless_equal_vgpr(offset, high_vgpr);
   };
   const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-    if (!record.load(offset, low_vgpr) || !append_compare_moi_report_dispatch_id_word(
-                                              words, options, low_vgpr, high_vgpr, high_word, arch,
-                                              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+    if (!record.load(offset, low_vgpr) ||
+        !append_compare_moi_report_dispatch_id_word(
+            words, options, options, low_vgpr, high_vgpr, high_word, arch,
+            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }
     return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);

@@ -122,15 +122,15 @@ record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperatingPoi
 /// Record vector-persistent state on the emitted mechanism that initializes
 /// or consumes it. The resolved scalar option fields describe the selected
 /// tuple; the typed allocation states whether that tuple is owner-local.
-void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const MoiOptions &options,
+void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanMoiOperatingPoint &point,
                                     const ConSanMoiOperatingPoint &allocation) {
-  patch.persistent_owner_vgpr = options.moi_owner_vgpr;
-  patch.persistent_epoch_vgpr = options.moi_epoch_vgpr;
-  patch.persistent_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
-  patch.persistent_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
+  patch.persistent_owner_vgpr = point.moi_owner_vgpr;
+  patch.persistent_epoch_vgpr = point.moi_epoch_vgpr;
+  patch.persistent_workgroup_key_vgpr = point.moi_workgroup_key_vgpr;
+  patch.persistent_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs;
   patch.persistent_vgpr_state_owner_local = !allocation.owner_persistent_vgprs.empty();
   patch.persistent_vgpr_state_is_abi =
-      options.moi_owner_vgpr && options.moi_epoch_vgpr && !options.moi_persistent_sgprs.complete();
+      point.moi_owner_vgpr && point.moi_epoch_vgpr && !point.moi_persistent_sgprs.complete();
 }
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
@@ -460,22 +460,23 @@ struct ConSanMoiReportDispatchIdWordSource {
 enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
 
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource
-moi_report_dispatch_id_word_source(const MoiOptions &options, bool high_word) {
-  if (options.moi_dispatch_id_sgpr) {
+moi_report_dispatch_id_word_source(const ConSanMoiOperatingPoint &point,
+                                   const BoundRuntimeResources &resources, bool high_word) {
+  if (point.moi_dispatch_id_sgpr) {
     return ConSanMoiReportDispatchIdWordSource{
-        .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)),
+        .sgpr = static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)),
         .vgpr = std::nullopt};
   }
-  if (options.moi_dispatch_id_vgpr) {
+  if (point.moi_dispatch_id_vgpr) {
     return ConSanMoiReportDispatchIdWordSource{
         .sgpr = std::nullopt,
-        .vgpr = static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + (high_word ? 1u : 0u))};
+        .vgpr = static_cast<uint16_t>(*point.moi_dispatch_id_vgpr + (high_word ? 1u : 0u))};
   }
   return ConSanMoiReportDispatchIdWordSource{
       .sgpr = std::nullopt,
       .vgpr = std::nullopt,
-      .literal = high_word ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
-                           : static_cast<uint32_t>(options.moi_report_dispatch_id)};
+      .literal = high_word ? static_cast<uint32_t>(resources.moi_report_dispatch_id >> 32u)
+                           : static_cast<uint32_t>(resources.moi_report_dispatch_id)};
 }
 
 [[nodiscard]] bool
@@ -488,12 +489,13 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
-                                                      const MoiOptions &options,
+                                                      const ConSanMoiOperatingPoint &point,
+                                                      const BoundRuntimeResources &resources,
                                                       uint16_t destination_vgpr, bool high_word,
                                                       rj_code_arch_t arch,
                                                       ConSanMoiLiteralDispatchIdPolicy policy) {
   const ConSanMoiReportDispatchIdWordSource source =
-      moi_report_dispatch_id_word_source(options, high_word);
+      moi_report_dispatch_id_word_source(point, resources, high_word);
   if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
     return false;
   if (source.sgpr) {
@@ -513,21 +515,24 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_pair(std::vector<uint32_t> &words,
-                                                      const MoiOptions &options, uint16_t low_vgpr,
-                                                      uint16_t high_vgpr, rj_code_arch_t arch,
+                                                      const ConSanMoiOperatingPoint &point,
+                                                      const BoundRuntimeResources &resources,
+                                                      uint16_t low_vgpr, uint16_t high_vgpr,
+                                                      rj_code_arch_t arch,
                                                       ConSanMoiLiteralDispatchIdPolicy policy) {
-  return append_moi_report_dispatch_id_word(words, options, low_vgpr, /*high_word=*/false, arch,
-                                            policy) &&
-         append_moi_report_dispatch_id_word(words, options, high_vgpr, /*high_word=*/true, arch,
-                                            policy);
+  return append_moi_report_dispatch_id_word(words, point, resources, low_vgpr,
+                                            /*high_word=*/false, arch, policy) &&
+         append_moi_report_dispatch_id_word(words, point, resources, high_vgpr,
+                                            /*high_word=*/true, arch, policy);
 }
 
 [[nodiscard]] bool append_compare_moi_report_dispatch_id_word(
-    std::vector<uint32_t> &words, const MoiOptions &options, uint16_t value_vgpr,
+    std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
+    const BoundRuntimeResources &resources, uint16_t value_vgpr,
     uint16_t clobberable_literal_temporary_vgpr, bool high_word, rj_code_arch_t arch,
     ConSanMoiLiteralDispatchIdPolicy policy) {
   const ConSanMoiReportDispatchIdWordSource source =
-      moi_report_dispatch_id_word_source(options, high_word);
+      moi_report_dispatch_id_word_source(point, resources, high_word);
   if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
     return false;
   uint16_t expected = 0u;
@@ -540,8 +545,8 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     // VGPR whose next use either overwrites or explicitly reloads it.
     assert(clobberable_literal_temporary_vgpr != value_vgpr);
     if (clobberable_literal_temporary_vgpr == value_vgpr ||
-        !append_moi_report_dispatch_id_word(words, options, clobberable_literal_temporary_vgpr,
-                                            high_word, arch, policy)) {
+        !append_moi_report_dispatch_id_word(
+            words, point, resources, clobberable_literal_temporary_vgpr, high_word, arch, policy)) {
       return false;
     }
     expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
@@ -553,13 +558,13 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   return true;
 }
 
-[[nodiscard]] bool
-append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record, const MoiOptions &options,
-                                         uint32_t low_offset, rj_code_arch_t arch,
-                                         ConSanMoiLiteralDispatchIdPolicy policy) {
+[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(
+    ConSanMoiRecordEmitter &record, const ConSanMoiOperatingPoint &point,
+    const BoundRuntimeResources &resources, uint32_t low_offset, rj_code_arch_t arch,
+    ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource source =
-        moi_report_dispatch_id_word_source(options, high_word);
+        moi_report_dispatch_id_word_source(point, resources, high_word);
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
       return false;
     const uint32_t offset = low_offset + (high_word ? sizeof(uint32_t) : 0u);
@@ -743,10 +748,12 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
 
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const MoiOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    const ConSanMoiOperatingPoint &point, const BoundRuntimeResources &resources,
+    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
     ConSanMoiLiteralDispatchIdPolicy policy) {
-  const std::array sources{moi_report_dispatch_id_word_source(options, /*high_word=*/false),
-                           moi_report_dispatch_id_word_source(options, /*high_word=*/true)};
+  const std::array sources{
+      moi_report_dispatch_id_word_source(point, resources, /*high_word=*/false),
+      moi_report_dispatch_id_word_source(point, resources, /*high_word=*/true)};
   return append_dynamic_record_store_moi_report_dispatch_id_pair(
       words, layout, low_field_address, sources, slot_vgpr, scratch_vgpr, arch, policy);
 }

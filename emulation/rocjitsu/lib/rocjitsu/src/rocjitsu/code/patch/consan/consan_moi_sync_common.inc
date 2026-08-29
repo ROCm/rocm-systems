@@ -1248,7 +1248,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // Slot derivation is complete. `hash` is dead here and its next use
     // overwrites it with the source-version parity bit.
     if (!append_compare_moi_report_dispatch_id_word(
-            words, options, value, hash,
+            words, options, options, value, hash,
             /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
       return false;
     if (!narrow_vcc() ||
@@ -1258,7 +1258,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
             arch))
       return false;
     if (!append_compare_moi_report_dispatch_id_word(
-            words, options, value, hash,
+            words, options, options, value, hash,
             /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
       return false;
     if (!narrow_vcc() ||
@@ -1542,14 +1542,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
             value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/false, arch,
-                                            ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+    if (!append_moi_report_dispatch_id_word(words, options, options, value, /*high_word=*/false,
+                                            arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/true, arch,
-                                            ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+    if (!append_moi_report_dispatch_id_word(words, options, options, value, /*high_word=*/true,
+                                            arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base,
@@ -1740,9 +1740,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
-  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/false, arch,
-                                                  ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, options, value_vgpr, temporary_vgpr,
+          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1750,9 +1750,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                           sizeof(uint32_t),
                                       value_vgpr, arch))
     return false;
-  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/true, arch,
-                                                  ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, options, value_vgpr, temporary_vgpr,
+          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
@@ -2266,7 +2266,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // the next scan iteration reloads it before use.
     if (!append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, options, temporary, version_before, high_word, arch,
+            words, options, options, temporary, version_before, high_word, arch,
             ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
       return false;
     }
@@ -2581,7 +2581,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // overwrites it before the first use of the compare-swap operand.
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, options, temporary, cas_new, high_word, arch,
+            words, options, options, temporary, cas_new, high_word, arch,
             ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
       return false;
     }
@@ -3017,8 +3017,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                            sizeof(uint32_t),
                                        static_cast<uint16_t>(stable_guest_address + 1u), arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/false, arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+  if (!append_moi_report_dispatch_id_word(words, options, options, temporary, /*high_word=*/false,
+                                          arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
     return false;
   }
@@ -3026,8 +3026,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
                                        temporary, arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/true, arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+  if (!append_moi_report_dispatch_id_word(words, options, options, temporary, /*high_word=*/true,
+                                          arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
     return false;
   }
