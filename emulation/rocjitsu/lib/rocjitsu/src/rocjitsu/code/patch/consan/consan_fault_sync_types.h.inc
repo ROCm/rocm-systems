@@ -175,6 +175,20 @@ struct ConSanFaultMutationPlan {
   bool operator==(const ConSanFaultMutationPlan &) const = default;
 };
 
+enum class ConSanBarrierMoveDestinationIssue : uint8_t {
+  None,
+  InsideScalarClause,
+  BarrierSourceOrLifecycle,
+  FenceOperation,
+  NotMemoryOperation,
+  NotRelocatable,
+  Count,
+};
+
+[[nodiscard]] std::string
+consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
+                                              std::string_view detail = {});
+
 /// A stable real-instruction destination considered by whole-barrier movement.
 struct ConSanBarrierMoveDestination {
   std::string identity;
@@ -187,8 +201,10 @@ struct ConSanBarrierMoveDestination {
   uint32_t size = 0;
   std::string mnemonic;
   bool memory_operation = false;
-  bool suitable = false;
-  std::string rejection_reason;
+  ConSanBarrierMoveDestinationIssue issue = ConSanBarrierMoveDestinationIssue::None;
+  /// Decoder/relocator detail attached only to `NotRelocatable`. The stable
+  /// semantic decision remains the typed issue above.
+  std::string issue_detail;
   ConSanBarrierMoveCfgContract cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
   /// Present only for a narrowly proven acyclic structured CFG contract.
   std::optional<uint32_t> structured_guard_block_index;
@@ -196,6 +212,8 @@ struct ConSanBarrierMoveDestination {
   std::optional<uint64_t> structured_guard_offset;
   std::optional<uint64_t> structured_source_offset;
   std::vector<ConSanExecutionOwner> execution_owners;
+
+  [[nodiscard]] bool suitable() const { return issue == ConSanBarrierMoveDestinationIssue::None; }
 };
 
 enum class ConSanSyncEventKind : uint8_t {
@@ -458,6 +476,21 @@ struct ConSanMoiFenceCandidate {
   }
 };
 
+enum class ConSanBarrierLifecycleIssue : uint8_t {
+  None,
+  InitMissingStaticIdOrScope,
+  NonContiguousRun,
+  MemberIdOrScopeMismatch,
+  MissingJoin,
+  MissingCompletingBarrier,
+  MissingLeave,
+  InvalidLeaveEncoding,
+  Count,
+};
+
+[[nodiscard]] std::string_view
+consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue);
+
 /// A contiguous, statically associated barrier lifecycle retained in semantic
 /// inventory.
 ///
@@ -480,9 +513,13 @@ struct ConSanBarrierLifecycleGroup {
   std::vector<std::string> member_event_identities;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  bool admissible = false;
   ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  std::string rejection_reason;
+  ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::None;
+
+  [[nodiscard]] bool admissible() const {
+    return issue == ConSanBarrierLifecycleIssue::None &&
+           confidence == ConSanSemanticConfidence::Conservative;
+  }
 };
 
 /// Checks the non-instruction metadata required before an ordinary load and

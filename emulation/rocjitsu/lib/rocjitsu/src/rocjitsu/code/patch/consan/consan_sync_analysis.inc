@@ -966,7 +966,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
         (init.barrier_operand_source != ConSanBarrierSite::OperandSource::Immediate &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::StaticM0Literal32 &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::Literal32)) {
-      group.rejection_reason = "lifecycle init has no proven static ID and scope";
+      group.issue = ConSanBarrierLifecycleIssue::InitMissingStaticIdOrScope;
       groups.push_back(std::move(group));
       continue;
     }
@@ -978,13 +978,13 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
            sync_sequences[cursor].operation == ConSanSyncOperation::BarrierJoin) {
       const ConSanSyncSequence &join = sync_sequences[cursor];
       if (!is_contiguous(join)) {
-        group.rejection_reason = "lifecycle run crosses a block, container, or instruction gap";
+        group.issue = ConSanBarrierLifecycleIssue::NonContiguousRun;
         mismatch = true;
         break;
       }
       append_member(join);
       if (!has_matching_static_id(join)) {
-        group.rejection_reason = "lifecycle members do not have one matching static ID and scope";
+        group.issue = ConSanBarrierLifecycleIssue::MemberIdOrScopeMismatch;
         mismatch = true;
         break;
       }
@@ -996,28 +996,28 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
       continue;
     }
     if (join_count == 0) {
-      group.rejection_reason = "lifecycle leave has no preceding matching static join association";
+      group.issue = ConSanBarrierLifecycleIssue::MissingJoin;
       groups.push_back(std::move(group));
       continue;
     }
     if (cursor >= sync_sequences.size() ||
         sync_sequences[cursor].operation != ConSanSyncOperation::BarrierFull ||
         !is_contiguous(sync_sequences[cursor])) {
-      group.rejection_reason = "lifecycle run has no contiguous same-block completing barrier pair";
+      group.issue = ConSanBarrierLifecycleIssue::MissingCompletingBarrier;
       groups.push_back(std::move(group));
       continue;
     }
     const ConSanSyncSequence &barrier = sync_sequences[cursor++];
     append_member(barrier);
     if (!has_matching_static_id(barrier)) {
-      group.rejection_reason = "lifecycle members do not have one matching static ID and scope";
+      group.issue = ConSanBarrierLifecycleIssue::MemberIdOrScopeMismatch;
       groups.push_back(std::move(group));
       continue;
     }
     if (cursor >= sync_sequences.size() ||
         sync_sequences[cursor].operation != ConSanSyncOperation::BarrierLeave ||
         !is_contiguous(sync_sequences[cursor])) {
-      group.rejection_reason = "lifecycle run has no contiguous same-block leave operation";
+      group.issue = ConSanBarrierLifecycleIssue::MissingLeave;
       groups.push_back(std::move(group));
       continue;
     }
@@ -1030,11 +1030,10 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     // supplies the leave association for this lifecycle.
     if (leave.end_text_offset - leave.begin_text_offset != sizeof(uint32_t) ||
         leave.barrier_raw_simm16 != 0u) {
-      group.rejection_reason = "lifecycle leave is not the fixed-zero GFX12 encoding";
+      group.issue = ConSanBarrierLifecycleIssue::InvalidLeaveEncoding;
       groups.push_back(std::move(group));
       continue;
     }
-    group.admissible = true;
     group.confidence = ConSanSemanticConfidence::Conservative;
     groups.push_back(std::move(group));
   }
@@ -1129,20 +1128,19 @@ void build_barrier_move_destination_inventory(
 
         std::string relocatable_error;
         if (inside_clause) {
-          destination.rejection_reason = "inside-s-clause";
+          destination.issue = ConSanBarrierMoveDestinationIssue::InsideScalarClause;
         } else if (is_barrier_instruction(instruction)) {
-          destination.rejection_reason = "barrier-source-or-lifecycle";
+          destination.issue = ConSanBarrierMoveDestinationIssue::BarrierSourceOrLifecycle;
         } else if (is_fence_like(instruction.mnemonic())) {
-          destination.rejection_reason = "fence-operation";
+          destination.issue = ConSanBarrierMoveDestinationIssue::FenceOperation;
         } else if (!instruction.is_memory_op()) {
-          destination.rejection_reason = "not-memory-operation";
+          destination.issue = ConSanBarrierMoveDestinationIssue::NotMemoryOperation;
         } else if (!is_relocatable_consan_barrier_destination(instruction, instruction.src_loc(),
                                                               text, arch, &relocatable_error)) {
-          destination.rejection_reason = "not-relocatable:" + relocatable_error;
-        } else {
-          destination.suitable = true;
+          destination.issue = ConSanBarrierMoveDestinationIssue::NotRelocatable;
+          destination.issue_detail = std::move(relocatable_error);
         }
-        if (destination.suitable && sequence.basic_block_index &&
+        if (destination.suitable() && sequence.basic_block_index &&
             destination.basic_block_index != *sequence.basic_block_index) {
           if (const auto proof = prove_completing_structured_diamond(
                   blocks, *sequence.basic_block_index, destination.basic_block_index,

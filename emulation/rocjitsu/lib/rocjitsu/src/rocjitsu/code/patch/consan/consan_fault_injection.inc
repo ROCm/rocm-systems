@@ -335,10 +335,11 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected barrier-move destination overlapping the "
                 "selected logical barrier");
-          } else if (!destination->suitable) {
+          } else if (!destination->suitable()) {
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected unsuitable barrier-move destination: " +
-                destination->rejection_reason);
+                consan_barrier_move_destination_issue_message(destination->issue,
+                                                              destination->issue_detail));
           } else if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier &&
                      destination->text_offset + destination->size > sequence->begin_text_offset) {
             result.warnings.emplace_back(
@@ -401,10 +402,10 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
           "ConSan barrier ID/scope dry run rejected an unqualified logical barrier sequence");
     } else if (const ConSanBarrierLifecycleGroup *group =
                    find_lifecycle_group_for_sequence(result, *sequence);
-               group != nullptr && !group->admissible) {
+               group != nullptr && !group->admissible()) {
       result.warnings.emplace_back(
           "ConSan barrier ID/scope dry run rejected a partial unresolved lifecycle mutation: " +
-          group->rejection_reason);
+          std::string(consan_barrier_lifecycle_issue_message(group->issue)));
     } else if (!options.fault_barrier_target_id) {
       result.warnings.emplace_back("ConSan barrier ID/scope dry run requires a target barrier ID");
     } else if (target_scope == ConSanBarrierSite::Scope::Unknown) {
@@ -459,13 +460,13 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         selected == sync.sync_sequences.end()
             ? nullptr
             : find_lifecycle_group_for_sequence(result, *selected);
-    const ConSanBarrierSite *init = group != nullptr && group->admissible
+    const ConSanBarrierSite *init = group != nullptr && group->admissible()
                                         ? find_static_participant_init(result, *group)
                                         : nullptr;
     if (options.fault_barrier_target_participant_mask) {
       mark_participant_mutation_unsupported(
           result, "the GFX12.5 lifecycle exposes a six-bit count in M0, not a participant mask");
-    } else if (group == nullptr || !group->admissible || init == nullptr ||
+    } else if (group == nullptr || !group->admissible() || init == nullptr ||
                init->participant_encoding != ConSanBarrierSite::ParticipantEncoding::M0Literal32 ||
                !init->participant_count || !init->participant_setup_text_offset ||
                !init->participant_setup_file_offset || !init->participant_setup_literal) {
@@ -897,10 +898,10 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   }
   const ConSanBarrierLifecycleGroup *lifecycle_group =
       find_lifecycle_group_for_sequence(result, *selected);
-  if (lifecycle_group != nullptr && !lifecycle_group->admissible) {
+  if (lifecycle_group != nullptr && !lifecycle_group->admissible()) {
     result.errors.emplace_back(
         "ConSan barrier ID/scope mutation refused a partial unresolved lifecycle mutation: " +
-        lifecycle_group->rejection_reason);
+        std::string(consan_barrier_lifecycle_issue_message(lifecycle_group->issue)));
     return;
   }
   const int32_t target_id = *options.fault_barrier_target_id;
@@ -1040,7 +1041,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   const ConSanBarrierLifecycleGroup *group =
       selected == sync.sync_sequences.end() ? nullptr
                                             : find_lifecycle_group_for_sequence(result, *selected);
-  const ConSanBarrierSite *init = group != nullptr && group->admissible
+  const ConSanBarrierSite *init = group != nullptr && group->admissible()
                                       ? find_static_participant_init(result, *group)
                                       : nullptr;
   if (options.fault_barrier_target_participant_mask) {
@@ -1048,7 +1049,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
         result, "the GFX12.5 lifecycle exposes a six-bit count in M0, not a participant mask");
     return;
   }
-  if (group == nullptr || !group->admissible || init == nullptr ||
+  if (group == nullptr || !group->admissible() || init == nullptr ||
       init->participant_encoding != ConSanBarrierSite::ParticipantEncoding::M0Literal32 ||
       !init->participant_count || !init->participant_setup_text_offset ||
       !init->participant_setup_file_offset || !init->participant_setup_literal) {
@@ -1200,9 +1201,10 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
           "barrier");
       return;
     }
-    if (!destination->suitable) {
+    if (!destination->suitable()) {
       result.warnings.emplace_back("ConSan barrier move fault rejected unsuitable destination: " +
-                                   destination->rejection_reason);
+                                   consan_barrier_move_destination_issue_message(
+                                       destination->issue, destination->issue_detail));
       return;
     }
     if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier &&

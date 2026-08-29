@@ -570,7 +570,7 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const ConSanBarrierLifecycleGroup &group =
       result.program_inventory.sync().barrier_lifecycle_groups.front();
-  EXPECT_TRUE(group.admissible);
+  EXPECT_TRUE(group.admissible());
   EXPECT_EQ(group.member_semantic_ids.size(), group.member_event_identities.size());
   EXPECT_EQ(group.member_semantic_ids.size(), 5u);
   EXPECT_TRUE(std::ranges::all_of(group.member_semantic_ids, [](const SemanticSiteId &member_id) {

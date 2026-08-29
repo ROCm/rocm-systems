@@ -4298,8 +4298,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
          transform_debug.barrier_move_destinations) {
       const OwnerLogFields owners = owner_log_fields(destination.execution_owners,
                                                      transform_result.program_inventory.kernels());
-      std::string reason =
-          destination.rejection_reason.empty() ? "-" : destination.rejection_reason;
+      std::string reason = rocjitsu::consan_barrier_move_destination_issue_message(
+          destination.issue, destination.issue_detail);
+      if (reason.empty())
+        reason = "-";
       std::ranges::replace(reason, ' ', '-');
       const std::string structured_guard_block =
           destination.structured_guard_block_index
@@ -4322,7 +4324,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<unsigned long long>(destination.text_offset),
                   static_cast<unsigned long long>(destination.file_offset), destination.size,
                   destination.mnemonic.c_str(), destination.memory_operation ? "true" : "false",
-                  destination.suitable ? "true" : "false", reason.c_str(),
+                  destination.suitable() ? "true" : "false", reason.c_str(),
                   barrier_move_cfg_contract_name(destination.cfg_contract),
                   structured_guard_block.c_str(), structured_source_block.c_str(),
                   static_cast<unsigned long long>(destination.structured_guard_offset.value_or(0)),

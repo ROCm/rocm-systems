@@ -59,6 +59,53 @@ namespace {
 
 } // namespace
 
+std::string consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
+                                                          std::string_view detail) {
+  using Issue = ConSanBarrierMoveDestinationIssue;
+  switch (issue) {
+  case Issue::None:
+    return {};
+  case Issue::InsideScalarClause:
+    return "inside-s-clause";
+  case Issue::BarrierSourceOrLifecycle:
+    return "barrier-source-or-lifecycle";
+  case Issue::FenceOperation:
+    return "fence-operation";
+  case Issue::NotMemoryOperation:
+    return "not-memory-operation";
+  case Issue::NotRelocatable:
+    return "not-relocatable:" + std::string(detail);
+  case Issue::Count:
+    break;
+  }
+  return "invalid-barrier-move-destination-issue";
+}
+
+std::string_view consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue) {
+  using Issue = ConSanBarrierLifecycleIssue;
+  switch (issue) {
+  case Issue::None:
+    return {};
+  case Issue::InitMissingStaticIdOrScope:
+    return "lifecycle init has no proven static ID and scope";
+  case Issue::NonContiguousRun:
+    return "lifecycle run crosses a block, container, or instruction gap";
+  case Issue::MemberIdOrScopeMismatch:
+    return "lifecycle members do not have one matching static ID and scope";
+  case Issue::MissingJoin:
+    return "lifecycle leave has no preceding matching static join association";
+  case Issue::MissingCompletingBarrier:
+    return "lifecycle run has no contiguous same-block completing barrier pair";
+  case Issue::MissingLeave:
+    return "lifecycle run has no contiguous same-block leave operation";
+  case Issue::InvalidLeaveEncoding:
+    return "lifecycle leave is not the fixed-zero GFX12 encoding";
+  case Issue::Count:
+    break;
+  }
+  return "invalid barrier-lifecycle issue";
+}
+
 bool ConSanFaultMutationPlan::well_formed() const {
   if (!source_code_object.valid() || primary_identity.empty())
     return false;

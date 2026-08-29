@@ -6,6 +6,74 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSan, BarrierFaultInventoryIssuesAreTypedAndRenderStableDiagnostics) {
+  using MoveIssue = ConSanBarrierMoveDestinationIssue;
+  struct MoveMessage {
+    MoveIssue issue;
+    std::string_view detail;
+    std::string_view message;
+  };
+  const std::array move_messages = {
+      MoveMessage{MoveIssue::None, "", ""},
+      MoveMessage{MoveIssue::InsideScalarClause, "", "inside-s-clause"},
+      MoveMessage{MoveIssue::BarrierSourceOrLifecycle, "", "barrier-source-or-lifecycle"},
+      MoveMessage{MoveIssue::FenceOperation, "", "fence-operation"},
+      MoveMessage{MoveIssue::NotMemoryOperation, "", "not-memory-operation"},
+      MoveMessage{MoveIssue::NotRelocatable, "decoder-detail", "not-relocatable:decoder-detail"},
+  };
+  static_assert(move_messages.size() == static_cast<size_t>(MoveIssue::Count));
+  for (size_t index = 0; index < move_messages.size(); ++index) {
+    const auto &[issue, detail, expected] = move_messages[index];
+    EXPECT_EQ(static_cast<size_t>(issue), index);
+    EXPECT_EQ(consan_barrier_move_destination_issue_message(issue, detail), expected);
+  }
+  EXPECT_EQ(consan_barrier_move_destination_issue_message(MoveIssue::Count),
+            "invalid-barrier-move-destination-issue");
+  EXPECT_EQ(consan_barrier_move_destination_issue_message(static_cast<MoveIssue>(255u)),
+            "invalid-barrier-move-destination-issue");
+
+  using LifecycleIssue = ConSanBarrierLifecycleIssue;
+  const std::array lifecycle_messages = {
+      std::pair{LifecycleIssue::None, std::string_view{""}},
+      std::pair{LifecycleIssue::InitMissingStaticIdOrScope,
+                std::string_view{"lifecycle init has no proven static ID and scope"}},
+      std::pair{LifecycleIssue::NonContiguousRun,
+                std::string_view{"lifecycle run crosses a block, container, or instruction gap"}},
+      std::pair{LifecycleIssue::MemberIdOrScopeMismatch,
+                std::string_view{"lifecycle members do not have one matching static ID and scope"}},
+      std::pair{
+          LifecycleIssue::MissingJoin,
+          std::string_view{"lifecycle leave has no preceding matching static join association"}},
+      std::pair{
+          LifecycleIssue::MissingCompletingBarrier,
+          std::string_view{"lifecycle run has no contiguous same-block completing barrier pair"}},
+      std::pair{LifecycleIssue::MissingLeave,
+                std::string_view{"lifecycle run has no contiguous same-block leave operation"}},
+      std::pair{LifecycleIssue::InvalidLeaveEncoding,
+                std::string_view{"lifecycle leave is not the fixed-zero GFX12 encoding"}},
+  };
+  static_assert(lifecycle_messages.size() == static_cast<size_t>(LifecycleIssue::Count));
+  for (size_t index = 0; index < lifecycle_messages.size(); ++index) {
+    EXPECT_EQ(static_cast<size_t>(lifecycle_messages[index].first), index);
+    EXPECT_EQ(consan_barrier_lifecycle_issue_message(lifecycle_messages[index].first),
+              lifecycle_messages[index].second);
+  }
+  EXPECT_EQ(consan_barrier_lifecycle_issue_message(LifecycleIssue::Count),
+            "invalid barrier-lifecycle issue");
+  EXPECT_EQ(consan_barrier_lifecycle_issue_message(static_cast<LifecycleIssue>(255u)),
+            "invalid barrier-lifecycle issue");
+
+  ConSanBarrierMoveDestination destination;
+  EXPECT_TRUE(destination.suitable());
+  destination.issue = MoveIssue::FenceOperation;
+  EXPECT_FALSE(destination.suitable());
+  ConSanBarrierLifecycleGroup lifecycle;
+  lifecycle.confidence = ConSanSemanticConfidence::Conservative;
+  EXPECT_TRUE(lifecycle.admissible());
+  lifecycle.issue = LifecycleIssue::MissingJoin;
+  EXPECT_FALSE(lifecycle.admissible());
+}
+
 TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_barrier = true;
@@ -21,7 +89,7 @@ TEST(ConSan, BarrierMoveExactHelperIdentityCannotBypassDispatchOwnership) {
   ASSERT_TRUE(source->sync_sequence_identity);
   const auto destination =
       std::ranges::find_if(inventory.barrier_move_destinations, [](const auto &item) {
-        return item.container_name == "shared_lds_helper" && item.suitable &&
+        return item.container_name == "shared_lds_helper" && item.suitable() &&
                item.mnemonic == "ds_store_b32";
       });
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -274,7 +342,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   inventory_options.fault_dry_run = true;
   const ConSanTransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
   ASSERT_EQ(inventory.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  ASSERT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.front().admissible);
+  ASSERT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.front().admissible());
   const auto init =
       std::ranges::find(inventory.program_inventory.sync().sync_events,
                         ConSanSyncOperation::BarrierInit, &ConSanSyncEvent::operation);
@@ -1318,8 +1386,8 @@ TEST(ConSan, FaultBarrierMoveDryRunPlansStableRealEarlierAndLaterDestinations) {
                                        &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(earlier, inventory.barrier_move_destinations.end());
   ASSERT_NE(later, inventory.barrier_move_destinations.end());
-  EXPECT_TRUE(earlier->suitable);
-  EXPECT_TRUE(later->suitable);
+  EXPECT_TRUE(earlier->suitable());
+  EXPECT_TRUE(later->suitable());
   const auto repeated_earlier = std::ranges::find(repeated.barrier_move_destinations, 0u,
                                                   &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(repeated_earlier, repeated.barrier_move_destinations.end());
@@ -1433,8 +1501,11 @@ TEST(ConSan, FaultBarrierMoveDryRunRejectsDestinationInsideScalarClause) {
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 4u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  EXPECT_FALSE(destination->suitable);
-  EXPECT_EQ(destination->rejection_reason, "inside-s-clause");
+  EXPECT_FALSE(destination->suitable());
+  EXPECT_EQ(destination->issue, ConSanBarrierMoveDestinationIssue::InsideScalarClause);
+  EXPECT_EQ(
+      consan_barrier_move_destination_issue_message(destination->issue, destination->issue_detail),
+      "inside-s-clause");
 
   ConSanOptions options = inventory_options;
   options.fault_move_barrier = true;
@@ -1522,7 +1593,8 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionPreservesTwelveByteDestination) {
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+  ASSERT_TRUE(destination->suitable()) << consan_barrier_move_destination_issue_message(
+      destination->issue, destination->issue_detail);
   ASSERT_EQ(destination->size, 12u);
 
   ConSanOptions options = inventory_options;
@@ -1571,7 +1643,8 @@ TEST(ConSan, FaultBarrierConditionalMoveAdmitsProvenCompletingStructuredDiamond)
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+  ASSERT_TRUE(destination->suitable()) << consan_barrier_move_destination_issue_message(
+      destination->issue, destination->issue_detail);
   EXPECT_EQ(destination->cfg_contract, ConSanBarrierMoveCfgContract::CompletingStructuredDiamond);
   ASSERT_TRUE(destination->structured_guard_block_index);
   ASSERT_TRUE(destination->structured_source_block_index);
@@ -1655,7 +1728,8 @@ TEST(ConSan, FaultBarrierDivergentMoveAdmitsOnlyProvenStructuredExecDiamond) {
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 8u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+  ASSERT_TRUE(destination->suitable()) << consan_barrier_move_destination_issue_message(
+      destination->issue, destination->issue_detail);
   EXPECT_EQ(destination->cfg_contract,
             ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond);
   ASSERT_TRUE(destination->structured_guard_block_index);

@@ -4367,7 +4367,7 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const ConSanBarrierLifecycleGroup &group =
       result.program_inventory.sync().barrier_lifecycle_groups.front();
-  EXPECT_TRUE(group.admissible);
+  EXPECT_TRUE(group.admissible());
   EXPECT_EQ(group.confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_EQ(group.barrier_id, 1);
   EXPECT_EQ(group.barrier_scope, ConSanBarrierSite::Scope::Workgroup);
@@ -4375,7 +4375,7 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
   EXPECT_EQ(group.begin_text_offset, 0u);
   EXPECT_EQ(group.end_text_offset, 20u);
   EXPECT_EQ(group.member_event_identities.size(), 5u);
-  EXPECT_TRUE(group.rejection_reason.empty());
+  EXPECT_EQ(group.issue, ConSanBarrierLifecycleIssue::None);
 }
 
 TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
@@ -4394,9 +4394,8 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
   const ConSanTransformArtifacts dynamic =
       test_lower_consan(make_gfx1250_code_object(dynamic_words), options);
   ASSERT_EQ(dynamic.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_NE(dynamic.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
-                "no proven static ID"),
-            std::string::npos);
+  EXPECT_EQ(dynamic.program_inventory.sync().barrier_lifecycle_groups[0].issue,
+            ConSanBarrierLifecycleIssue::InitMissingStaticIdOrScope);
 
   const std::array<uint32_t, 6> mismatched_words = {
       0xBE805181u, // s_barrier_init 1
@@ -4409,9 +4408,8 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
   const ConSanTransformArtifacts mismatched =
       test_lower_consan(make_gfx1250_code_object(mismatched_words), options);
   ASSERT_EQ(mismatched.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_NE(mismatched.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
-                "do not have one matching"),
-            std::string::npos);
+  EXPECT_EQ(mismatched.program_inventory.sync().barrier_lifecycle_groups[0].issue,
+            ConSanBarrierLifecycleIssue::MemberIdOrScopeMismatch);
 
   const std::array<uint32_t, 7> cross_block_words = {
       0xBE805181u, // s_barrier_init 1
@@ -4425,9 +4423,8 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
   const ConSanTransformArtifacts cross_block =
       test_lower_consan(make_gfx1250_code_object(cross_block_words), options);
   ASSERT_EQ(cross_block.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_NE(cross_block.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
-                "crosses a block"),
-            std::string::npos);
+  EXPECT_EQ(cross_block.program_inventory.sync().barrier_lifecycle_groups[0].issue,
+            ConSanBarrierLifecycleIssue::NonContiguousRun);
 }
 
 TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
@@ -4445,10 +4442,9 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
   const ConSanTransformArtifacts no_join =
       test_lower_consan(make_gfx1250_code_object(no_join_words), options);
   ASSERT_EQ(no_join.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_FALSE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].admissible);
-  EXPECT_NE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
-                "no preceding matching"),
-            std::string::npos);
+  EXPECT_FALSE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].admissible());
+  EXPECT_EQ(no_join.program_inventory.sync().barrier_lifecycle_groups[0].issue,
+            ConSanBarrierLifecycleIssue::MissingJoin);
 
   const std::array<uint32_t, 6> nonzero_leave_words = {
       0xBE805181u, // s_barrier_init 1
@@ -4461,11 +4457,9 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
   const ConSanTransformArtifacts nonzero_leave =
       test_lower_consan(make_gfx1250_code_object(nonzero_leave_words), options);
   ASSERT_EQ(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  EXPECT_FALSE(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].admissible);
-  EXPECT_NE(
-      nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
-          "fixed-zero"),
-      std::string::npos);
+  EXPECT_FALSE(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].admissible());
+  EXPECT_EQ(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].issue,
+            ConSanBarrierLifecycleIssue::InvalidLeaveEncoding);
 }
 
 TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {

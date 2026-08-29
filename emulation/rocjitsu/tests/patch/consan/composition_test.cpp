@@ -844,7 +844,8 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
       std::ranges::find(inventory.barrier_move_destinations, destination_offset,
                         &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+  ASSERT_TRUE(destination->suitable()) << consan_barrier_move_destination_issue_message(
+      destination->issue, destination->issue_detail);
 
   for (ConSanMoiEngine engine : {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled}) {
     SCOPED_TRACE(static_cast<int>(engine));
@@ -939,7 +940,8 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 16u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+  ASSERT_TRUE(destination->suitable()) << consan_barrier_move_destination_issue_message(
+      destination->issue, destination->issue_detail);
 
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
