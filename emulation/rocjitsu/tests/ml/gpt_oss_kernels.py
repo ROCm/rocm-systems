@@ -889,6 +889,11 @@ TOL_BF16 = 3 * BF16_EPS
 TOL_BF16_COMPOSITE = 4 * BF16_EPS
 TOL_EXACT = 0.0
 
+# The largest 2D tile the Triton cases will ask for. The MoE case's untiled
+# kernel wants hidden x intermediate in one block, which fits comfortably at the
+# `tiny` and `small` profiles and not at all at `model`.
+MAX_TRITON_TILE_ELEMENTS = 1 << 22
+
 
 def compare(got: torch.Tensor, want: torch.Tensor) -> tuple[float, float]:
     """Max absolute error, and that error relative to the reference's peak.
@@ -1663,6 +1668,20 @@ def _moe_torch(s: Shape, gen: torch.Generator):
 @case("moe_gemm_swiglu", "moe_gemm", "triton", torch.bfloat16, TOL_BF16)
 def _moe_triton(s: Shape, gen: torch.Generator):
     require_triton()
+    # One program per (token, expert) materialises the whole [inter, hidden]
+    # weight tile, which is 16.7M elements at gpt-oss-20b's widths -- far past
+    # what Triton will allocate. Tiling it properly means the blocked `tl.dot`
+    # GEMM the real fused MoE kernel uses, which is a different case rather than
+    # a bigger version of this one; until that exists, say so instead of
+    # reporting a compiler error as though the emulator produced it.
+    tile = triton.next_power_of_2(s.hidden_size) * triton.next_power_of_2(
+        s.intermediate_size
+    )
+    if tile > MAX_TRITON_TILE_ELEMENTS:
+        raise SkipCase(
+            f"untiled MoE kernel needs a {tile} element weight tile; "
+            f"over the {MAX_TRITON_TILE_ELEMENTS} this file will ask Triton for"
+        )
     hidden, w1, b1, w2, b2, weights, ids = _moe_inputs(s, gen)
     hd = hidden.to(DEV).contiguous()
     w1d, b1d = w1.to(DEV).contiguous(), b1.to(DEV).contiguous()
