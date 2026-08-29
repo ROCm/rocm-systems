@@ -358,10 +358,18 @@ def write_counters_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
+    # Kernel replay executes a dispatch once per counter group, so a replayed run has several rows
+    # per dispatch_id and the pass index is the only thing separating them. Runs that did not
+    # replay leave the column NULL and keep their existing set of CSV columns.
+    has_replay_passes = importData.execute(
+        'SELECT EXISTS (SELECT 1 FROM "counters_collection" WHERE replay_pass IS NOT NULL)'
+    ).fetchone()[0]
+
     select_columns = [
         "guid",
         "stack_id AS Correlation_Id",
         "dispatch_id",
+        *(["replay_pass AS Replay_Pass"] if has_replay_passes else []),
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "pid AS Process_Id",
