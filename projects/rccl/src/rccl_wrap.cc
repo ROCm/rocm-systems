@@ -1025,10 +1025,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
 
-  // Symmetric-window lookup hoisted ahead of symEligible: winRegType is needed
+  // Symmetric-window lookup hoisted ahead of the symk signals: winRegType is needed
   // for the symMaxR2 gate below, and the lookup is unconditional regardless, so
   // pulling it up eliminates the redundant ncclDevrFindWindow inside
-  // isSymmetricKernelRequested when symEligible turns out to be true.
+  // isSymmetricKernelRequested when symk turns out to be requested.
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &sendWin);
@@ -1039,17 +1039,21 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
-  // symMaxR2 from the arch table suppresses symk when recv is registered and the
-  // message exceeds the CE/symk crossover size, letting CE 2-shot or CE-registered
-  // win instead.  0 means no suppression.
+  // symkRequested is the raw "symk would run for these operands" signal and keeps
+  // gating the CE 2-shot and DDA branches below, so registered buffers still reach
+  // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
+  // symMaxR2 from the arch table only withdraws symk as the final choice once recv is
+  // registered and the message exceeds the CE/symk crossover size, letting
+  // CE-registered win instead.  0 means no suppression.
   const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
                                 winRegType == ncclSymSendNonregRecvReg);
   const size_t symMaxR2 = (comm->archThresholds)
       ? comm->archThresholds->symMaxR2[ncclFuncAllReduce] : 0;
   const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
-  const bool symEligible =
-    (op == ncclSum) && !symSuppressedBySize &&
+  const bool symkRequested =
+    (op == ncclSum) &&
     isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+  const bool symEligible = symkRequested && !symSuppressedBySize;
 
   // (2) CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
   //  - Live dispatch (query=false): probe the real stream and tick the graph
@@ -1083,19 +1087,24 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
                                   rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
 
-  // (3) Eager CE 2-shot (staging buffer). Requires !symEligible and an
+  // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
-  if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+  // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
+  // through the user windows via CE-registered, so they must not be diverted into
+  // the staging buffer just because symMaxR2 withdrew symk.
+  if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 
-  // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
+  // (4) DDA fast paths. develop's shared gate: !symkRequested, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
-  // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  // subject to rcclDdaEnabled thresholds -- all folded into the helper. Passes the raw
+  // symk signal for the same reason as (3): symMaxR2 chooses between symk and
+  // CE-registered, it does not hand registered operands to DDA.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symkRequested, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
       const size_t arDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);

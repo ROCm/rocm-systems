@@ -278,8 +278,9 @@ struct rcclArchThresholds {
   size_t ceArRegMax;
 
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
-  // Above this size CE is faster than symk; setting this suppresses symEligible in
-  // rcclSelectAllReduce so CE 2-shot / CE-registered can win.
+  // Above this size CE is faster than symk; setting this withdraws symk as the final
+  // choice in rcclSelectAllReduce so CE-registered can win. It does not unblock the
+  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all.
   // 0 means no suppression (symk may win at any size for that collective).
   // Only AllReduce is relevant today; other collectives default to 0.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];
