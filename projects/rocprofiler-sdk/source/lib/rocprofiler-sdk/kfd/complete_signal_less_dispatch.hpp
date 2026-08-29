@@ -56,7 +56,17 @@ enum class finalize_reason
     bad_interval,    // start >= end, or the repaired interval cannot fit [enqueue, now]
     before_enqueue,  // converted start precedes this dispatch's own enqueue
     after_now,       // converted end is beyond now + the conversion slack
+    stale_interval,  // the RAW terminal tick is grossly older/newer than the run
 };
+
+// bounds on the RAW converted EOP terminal tick (before any swap or
+// shift), rejecting a grossly stale or grossly future record rather than dragging
+// it into [enqueue, now] and emitting it as fresh. Chosen from the tick-conversion
+// resync magnitude (2.0-2.7 ms observed) with generous margin -- these are seconds,
+// far above the ~100 ms kKfdFutureSlackNs the after_now clamp still absorbs. Both
+// tests are written as subtractions so nothing wraps at the UINT64_MAX boundary.
+constexpr uint64_t kMaxStaleNs  = 1'000'000'000;  // 1 s before enqueue
+constexpr uint64_t kMaxFutureNs = 1'000'000'000;  // 1 s past now
 
 // Everything the finalizer learned, for diagnostics.
 struct finalize_detail
@@ -77,6 +87,7 @@ finalize_reason_name(finalize_reason r)
         case finalize_reason::bad_interval: return "bad-interval";
         case finalize_reason::before_enqueue: return "before-enqueue";
         case finalize_reason::after_now: return "after-now";
+        case finalize_reason::stale_interval: return "stale-interval";
         case finalize_reason::ready: break;
     }
     return "ready";
@@ -106,6 +117,16 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
     // The EOP end tick is always present and is a real GPU timestamp, so convert it
     // first: it anchors the record on the timeline even when the START was lost.
     if(!convert(end_ticks, end_ns_out)) return _note(finalize_reason::convert_failed);
+
+    // raw-terminal admission, BEFORE the swap and before any shift.
+    // A stale end paired with a fresh start would be hidden by the post-swap
+    // placement, and the far-future flag alone would drag an arbitrarily old record
+    // into [enqueue, now]. Both bounds are subtractions, so nothing wraps.
+    const uint64_t raw_end_ns = *end_ns_out;
+    if(enqueue_ts > raw_end_ns && enqueue_ts - raw_end_ns > kMaxStaleNs)
+        return _note(finalize_reason::stale_interval);
+    if(raw_end_ns > now_ns && raw_end_ns - now_ns > kMaxFutureNs)
+        return _note(finalize_reason::stale_interval);
 
     // Shape (ii): the EOP proved completion but its START was lost
     // (a firmware START that lost the HWS-connect race, or one overwritten by a ring

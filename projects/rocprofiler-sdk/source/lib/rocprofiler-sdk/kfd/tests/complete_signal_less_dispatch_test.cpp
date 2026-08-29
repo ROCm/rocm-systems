@@ -340,6 +340,65 @@ TEST(complete_signal_less_dispatch, reports_the_exact_rejection_cause)
     }
 }
 
+// The RAW terminal tick is admitted before the swap/shift.
+// A grossly stale or grossly future end is REJECTED (stale_interval), not repaired
+// into [enqueue, now] and emitted as fresh; the ms-scale resync skew is untouched.
+TEST(complete_signal_less_dispatch, grossly_stale_or_future_raw_terminal_is_rejected)
+{
+    struct row
+    {
+        std::optional<uint64_t> start;
+        uint64_t                end, enqueue, now;
+        finalize_outcome        outcome;
+        finalize_reason         reason;
+        const char*             label;
+    };
+    const row rows[] = {
+        // raw_end 4 s before enqueue -> stale (subtraction, no wrap).
+        {std::nullopt,
+         1'000'000'000,
+         5'000'000'000,
+         6'000'000'000,
+         finalize_outcome::completed_no_timing,
+         finalize_reason::stale_interval,
+         "grossly stale"},
+        // raw_end 4 s past now -> stale.
+        {std::optional<uint64_t>{5'000'000'000},
+         5'000'000'000,
+         0,
+         1'000'000'000,
+         finalize_outcome::completed_no_timing,
+         finalize_reason::stale_interval,
+         "grossly future"},
+        // exactly at the future bound (raw_end - now == kMaxFutureNs) is NOT
+        // rejected (strict >), so it clamps in and emits.
+        {std::optional<uint64_t>{1},
+         2'000'000'000,
+         0,
+         1'000'000'000,
+         finalize_outcome::result_ready,
+         finalize_reason::after_now,
+         "future bound is inclusive"},
+    };
+    for(const auto& tc : rows)
+    {
+        auto obs     = observer{};
+        auto conv    = converter{true, /*epoch=*/0};  // passthrough: raw_end == end
+        auto detail  = finalize_detail{};
+        auto outcome = run_complete_signal_less_dispatch(tc.start,
+                                                         tc.end,
+                                                         tc.enqueue,
+                                                         tc.now,
+                                                         conv.fn(),
+                                                         obs.emit_fn(),
+                                                         obs.retire_fn(),
+                                                         &detail);
+        EXPECT_EQ(outcome, tc.outcome) << tc.label;
+        EXPECT_EQ(detail.reason, tc.reason) << tc.label;
+        EXPECT_EQ(obs.retires, 1) << tc.label;  // proven completion always retires once
+    }
+}
+
 // A few ms past now stays inside the slack: reported ready, NOT counted against
 // after_now, else the breakdown blames the guard for the skew it absorbs.
 TEST(complete_signal_less_dispatch, conversion_skew_is_not_counted_as_a_rejection)
