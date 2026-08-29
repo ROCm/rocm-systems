@@ -315,8 +315,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         });
     const uint16_t expected_scratch_count =
         planned_spill_backed_operand_recovery
-            ? sampled_spill_backed_scratch_count(candidate_options, candidate, arch)
-            : direct_sampled_scratch_count(candidate_options, candidate, arch);
+            ? sampled_spill_backed_scratch_count(candidate_options, candidate_options, candidate,
+                                                 arch)
+            : direct_sampled_scratch_count(candidate_options, candidate_options, candidate, arch);
     const auto resources = resolve_moi_scratch(result.resource_plans, candidate, candidate_options,
                                                expected_scratch_count);
     if (!resources) {
@@ -378,8 +379,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
-    } else if (spill &&
-               sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
+    } else if (spill && sampled_access_can_emit_spill_over_guest_operands(
+                            candidate_options, candidate_options, candidate)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);

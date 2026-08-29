@@ -2430,9 +2430,10 @@
     errors.emplace_back("ConSan MOI partition-mask debug requires wave-coalesced InlineShadow");
     return std::nullopt;
   }
-  const uint16_t normal_scratch_count = inline_shadow_scratch_count(options, candidate, arch);
+  const uint16_t normal_scratch_count =
+      inline_shadow_scratch_count(options, options, candidate, arch);
   const uint16_t spill_scratch_count =
-      inline_shadow_spill_backed_scratch_count(options, candidate, arch);
+      inline_shadow_spill_backed_scratch_count(options, options, candidate, arch);
   if (scratch_count != normal_scratch_count &&
       (spill == nullptr || scratch_count != spill_scratch_count)) {
     errors.emplace_back(
@@ -2453,7 +2454,7 @@
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
   }
-  if (!validate_inline_shadow_exec_save_sgpr(options, arch, errors))
+  if (!validate_inline_shadow_exec_save_sgpr(options, options, options, arch, errors))
     return std::nullopt;
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)

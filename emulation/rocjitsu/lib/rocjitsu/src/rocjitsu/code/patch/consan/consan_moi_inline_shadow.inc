@@ -19,7 +19,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   if (options.max_patches == 0)
     return;
-  if (!validate_inline_shadow_exec_save_sgpr(options, arch, result.warnings))
+  if (!validate_inline_shadow_exec_save_sgpr(options, options, options, arch, result.warnings))
     return;
   if (!options.moi_owner_vgpr && result.moi_operating_point.owner_persistent_vgprs.empty() &&
       !options.moi_persistent_sgprs.owner && !options.automatic_moi_private_epoch) {
@@ -264,8 +264,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     // the deferred guest load.
     const uint16_t expected_scratch_count =
         selected_reduced_spill_recovery
-            ? inline_shadow_spill_backed_scratch_count(options, candidate, arch)
-            : inline_shadow_scratch_count(options, candidate, arch);
+            ? inline_shadow_spill_backed_scratch_count(options, options, candidate, arch)
+            : inline_shadow_scratch_count(options, options, candidate, arch);
     const auto resources = resolve_moi_scratch_plan(
         *resource_plan, options, result.moi_operating_point, expected_scratch_count);
     if (!resources)

@@ -363,8 +363,9 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   const uint16_t base_scratch_count = static_cast<uint16_t>((options.moi_sampled_check ? 7u : 5u) +
                                                             (dedicated_bank_vgpr ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(
-      (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
-                                     : direct_sampled_scratch_count(options, candidate, arch)));
+      (spill_backed_operand_recovery
+           ? sampled_spill_backed_scratch_count(options, options, candidate, arch)
+           : direct_sampled_scratch_count(options, options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
@@ -1121,8 +1122,9 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       (options.moi_sampled_check ? 7u : 5u) +
       (options.moi_runtime_sample_stride > 1 || window_bank_count > 1 ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(
-      (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
-                                     : direct_sampled_scratch_count(options, candidate, arch)));
+      (spill_backed_operand_recovery
+           ? sampled_spill_backed_scratch_count(options, options, candidate, arch)
+           : direct_sampled_scratch_count(options, options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (capture_high_bank_address) {
