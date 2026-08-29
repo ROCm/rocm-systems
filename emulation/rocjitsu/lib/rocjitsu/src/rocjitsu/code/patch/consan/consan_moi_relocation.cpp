@@ -178,3 +178,29 @@ plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_o
 }
 
 } // namespace rocjitsu::consan_moi_detail
+
+namespace rocjitsu::consan_moi_impl {
+
+bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
+                                          uint64_t return_text_offset,
+                                          const std::optional<MoiIndirectJumpSgprs> &indirect_jump,
+                                          rj_code_arch_t arch) {
+  const uint64_t branch_pc =
+      cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
+  if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
+    words.push_back(build_s_branch(*direct, arch));
+    return true;
+  }
+  if (!indirect_jump || !consan_moi_detail::append_moi_scc_preserving_indirect_jump(
+                            words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
+                            indirect_jump->scc_save_sgpr, /*capture_scc=*/false, arch)) {
+    return false;
+  }
+  const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
+  if (!wait_pc)
+    return false;
+  words.insert(words.end() - 1, *wait_pc);
+  return true;
+}
+
+} // namespace rocjitsu::consan_moi_impl

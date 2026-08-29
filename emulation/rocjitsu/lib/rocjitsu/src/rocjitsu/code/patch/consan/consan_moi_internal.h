@@ -213,6 +213,11 @@ namespace consan_detail {
                                                          std::string_view value_name,
                                                          std::vector<std::string> &errors);
 
+[[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const ConSanAtomicLoweringForm &form,
+                                                           uint16_t scratch_vgpr,
+                                                           uint16_t scratch_vgpr_count,
+                                                           std::vector<std::string> &errors);
+
 /// Return whether one of the three preceding dwords is a saveexec operation.
 /// This conservative guard prevents insertion inside compiler-produced EXEC
 /// narrowing sequences.

@@ -642,31 +642,6 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
   return true;
 }
 
-[[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const ConSanAtomicLoweringForm &form,
-                                                           uint16_t scratch_vgpr,
-                                                           uint16_t scratch_vgpr_count,
-                                                           std::vector<std::string> &errors) {
-  if (range_overlaps(form.address_vgpr, form.address_vgpr_count, scratch_vgpr,
-                     scratch_vgpr_count)) {
-    errors.emplace_back(
-        "ConSan MOI atomic record patch scratch VGPRs overlap the atomic address VGPRs");
-    return true;
-  }
-  if (range_overlaps(form.data_vgpr, form.data_register_count, scratch_vgpr, scratch_vgpr_count)) {
-    errors.emplace_back(
-        "ConSan MOI atomic record patch scratch VGPRs overlap the atomic data VGPR");
-    return true;
-  }
-  if (form.destination_vgpr && form.destination_register_count != 0u &&
-      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
-                     scratch_vgpr_count)) {
-    errors.emplace_back(
-        "ConSan MOI atomic record patch scratch VGPRs overlap the atomic destination VGPR");
-    return true;
-  }
-  return false;
-}
-
 [[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const ConSanMoiOperatingPoint &point,
                                                          std::vector<std::string> &errors) {
   if (!point.moi_exec_save_sgpr) {

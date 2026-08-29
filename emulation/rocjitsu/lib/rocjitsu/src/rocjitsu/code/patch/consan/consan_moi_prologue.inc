@@ -491,42 +491,12 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
   return words;
 }
 
-[[nodiscard]] bool append_moi_direct_or_indirect_return(
-    std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
-    const std::optional<MoiIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch) {
-  const uint64_t branch_pc =
-      cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
-  if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
-    words.push_back(build_s_branch(*direct, arch));
-    return true;
-  }
-  if (!indirect_jump || !append_moi_scc_preserving_indirect_jump(
-                            words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
-                            indirect_jump->scc_save_sgpr, /*capture_scc=*/false, arch)) {
-    return false;
-  }
-  const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
-  if (!wait_pc)
-    return false;
-  words.insert(words.end() - 1, *wait_pc);
-  return true;
-}
-
 [[nodiscard]] bool
 append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
                                      uint64_t return_text_offset, const ConSanRequest &request,
                                      const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
                                               moi_indirect_jump_sgprs(request, point), arch);
-}
-
-[[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
-                                                        uint64_t cave_text_offset,
-                                                        uint64_t return_text_offset,
-                                                        const MoiRecordEventEmissionPlan &plan,
-                                                        rj_code_arch_t arch) {
-  return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              plan.indirect_jump, arch);
 }
 
 [[nodiscard]] bool

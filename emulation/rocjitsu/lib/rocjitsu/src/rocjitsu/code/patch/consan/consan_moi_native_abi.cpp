@@ -38,4 +38,36 @@ bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   return true;
 }
 
+std::optional<MoiWorkitemOwnerDerivation>
+build_moi_workitem_owner_derivation(const consan_detail::MoiWorkitemOwnerDerivationPlan &plan,
+                                    uint16_t value_vgpr, rj_code_arch_t arch,
+                                    std::string_view consumer, std::vector<std::string> &errors) {
+  MoiWorkitemOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr ||
+      !consan_detail::append_moi_workitem_owner_derivation(
+          derivation.words, {.plan = plan, .result_vgpr = value_vgpr}, *target)) {
+    errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                        " could not encode owner derivation");
+    return std::nullopt;
+  }
+  return derivation;
+}
+
+bool append_save_moi_special_state(
+    std::vector<uint32_t> &words,
+    const std::optional<consan_detail::MoiSpecialStateSgprs> &registers, rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return registers && target &&
+         consan_detail::append_save_moi_special_state(words, *registers, *target);
+}
+
+bool append_restore_moi_special_state(
+    std::vector<uint32_t> &words,
+    const std::optional<consan_detail::MoiSpecialStateSgprs> &registers, rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return registers && target &&
+         consan_detail::append_restore_moi_special_state(words, *registers, *target);
+}
+
 } // namespace rocjitsu::consan_moi_impl

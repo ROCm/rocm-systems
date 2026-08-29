@@ -43,3 +43,16 @@ plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_o
                             std::vector<std::string> &errors, std::string_view probe_name);
 
 } // namespace rocjitsu::consan_moi_detail
+
+namespace rocjitsu::consan_moi_impl {
+
+struct MoiIndirectJumpSgprs {
+  uint16_t pc_sgpr = 0;
+  uint16_t scc_save_sgpr = 0;
+};
+
+[[nodiscard]] bool append_moi_direct_or_indirect_return(
+    std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
+    const std::optional<MoiIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch);
+
+} // namespace rocjitsu::consan_moi_impl

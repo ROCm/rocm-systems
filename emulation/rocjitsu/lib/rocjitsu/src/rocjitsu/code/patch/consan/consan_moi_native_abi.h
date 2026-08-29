@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -53,5 +54,24 @@ namespace kd = rocr::llvm::amdhsa;
 [[nodiscard]] bool append_moi_flat_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+
+struct MoiWorkitemOwnerDerivation {
+  uint16_t vgpr = 0;
+  std::vector<uint32_t> words;
+};
+
+[[nodiscard]] std::optional<MoiWorkitemOwnerDerivation>
+build_moi_workitem_owner_derivation(const consan_detail::MoiWorkitemOwnerDerivationPlan &plan,
+                                    uint16_t value_vgpr, rj_code_arch_t arch,
+                                    std::string_view consumer, std::vector<std::string> &errors);
+
+[[nodiscard]] bool
+append_save_moi_special_state(std::vector<uint32_t> &words,
+                              const std::optional<consan_detail::MoiSpecialStateSgprs> &registers,
+                              rj_code_arch_t arch);
+
+[[nodiscard]] bool append_restore_moi_special_state(
+    std::vector<uint32_t> &words,
+    const std::optional<consan_detail::MoiSpecialStateSgprs> &registers, rj_code_arch_t arch);
 
 } // namespace rocjitsu::consan_moi_impl

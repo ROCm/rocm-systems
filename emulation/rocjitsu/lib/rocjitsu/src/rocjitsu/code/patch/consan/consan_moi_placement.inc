@@ -2301,11 +2301,6 @@ enum class MoiRelocatableHostScalarState : uint8_t {
   BarrierRouter,
 };
 
-struct MoiIndirectJumpSgprs {
-  uint16_t pc_sgpr = 0;
-  uint16_t scc_save_sgpr = 0;
-};
-
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
 
@@ -4169,24 +4164,6 @@ moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
       .pc_sgpr = *point.moi_exec_save_sgpr,
       .scc_save_sgpr = special_state->scc_save_sgpr,
   };
-}
-
-[[nodiscard]] bool
-append_save_moi_special_state(std::vector<uint32_t> &words,
-                              const std::optional<MoiSpecialStateSgprs> &registers,
-                              rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  return registers && target &&
-         consan_detail::append_save_moi_special_state(words, *registers, *target);
-}
-
-[[nodiscard]] bool
-append_restore_moi_special_state(std::vector<uint32_t> &words,
-                                 const std::optional<MoiSpecialStateSgprs> &registers,
-                                 rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  return registers && target &&
-         consan_detail::append_restore_moi_special_state(words, *registers, *target);
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(

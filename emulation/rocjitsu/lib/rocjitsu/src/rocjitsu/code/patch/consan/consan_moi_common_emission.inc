@@ -70,31 +70,6 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
                                         .wave_size_shift = *common_shift};
 }
 
-/// Lowered owner value together with the exact target words that materialize
-/// it. Keeping the destination beside the words lets each engine's field
-/// emission remain agnostic about whether the source was live ABI state or a
-/// private entry capture.
-struct MoiWorkitemOwnerDerivation {
-  uint16_t vgpr = 0;
-  std::vector<uint32_t> words;
-};
-
-[[nodiscard]] std::optional<MoiWorkitemOwnerDerivation>
-build_moi_workitem_owner_derivation(const MoiWorkitemOwnerDerivationPlan &plan, uint16_t value_vgpr,
-                                    rj_code_arch_t arch, std::string_view consumer,
-                                    std::vector<std::string> &errors) {
-  MoiWorkitemOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (target == nullptr ||
-      !append_moi_workitem_owner_derivation(derivation.words,
-                                            {.plan = plan, .result_vgpr = value_vgpr}, *target)) {
-    errors.emplace_back("ConSan MOI " + std::string(consumer) +
-                        " could not encode owner derivation");
-    return std::nullopt;
-  }
-  return derivation;
-}
-
 [[nodiscard]] std::optional<uint64_t>
 common_moi_record_owner_descriptor(std::span<const uint8_t> image,
                                    const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
