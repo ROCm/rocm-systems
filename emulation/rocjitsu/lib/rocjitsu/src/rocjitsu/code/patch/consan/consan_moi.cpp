@@ -22,6 +22,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
@@ -138,7 +139,7 @@ using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
 using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 using consan_moi_detail::resolve_moi_report_layout;
 
-#include "rocjitsu/code/patch/consan/consan_moi_candidates.inc"
+namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
 
@@ -181,6 +182,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                               std::span<const uint8_t> code_object_bytes,
                                               rj_code_arch_t arch,
                                               ConSanLoweringExecution *execution) {
+  using namespace consan_moi_impl;
+
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   MoiOptions effective_options = options;

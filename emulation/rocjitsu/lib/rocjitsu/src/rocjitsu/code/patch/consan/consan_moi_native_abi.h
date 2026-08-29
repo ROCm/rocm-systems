@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_resource.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <vector>
+
+namespace rocjitsu::consan_moi_impl {
+
+// Special scalar-source operand encodings shared by the supported target
+// profiles. Native emitters consume these names; mode policy must not infer
+// their numeric values.
+inline constexpr uint16_t kRdna4ExecLo = 126u;
+inline constexpr uint16_t kRdna4ExecHi = 127u;
+inline constexpr uint16_t kRdna4VccLo = 106u;
+inline constexpr uint16_t kRdna4VccHi = 107u;
+inline constexpr uint16_t kRdna4WorkitemIdX = 0u;
+inline constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
+inline constexpr uint16_t kScalarOperandTtmpBase = 108u;
+inline constexpr uint16_t kScalarOperandSharedBase = 235u;
+inline constexpr uint16_t kTtmpRdna4GridYz = 7u;
+inline constexpr uint16_t kTtmpRdna4GridX = 9u;
+inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6u;
+inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
+inline constexpr uint32_t kMaxSgprs = 106u;
+inline constexpr uint8_t kRdna4ScopeDevice = 2u;
+inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256u;
+
+[[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
+  return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
+}
+
+using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+namespace kd = rocr::llvm::amdhsa;
+
+[[nodiscard]] std::optional<uint16_t> gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
+                                                               uint64_t text_file_offset,
+                                                               uint64_t container_entry_text_offset,
+                                                               uint64_t site_file_offset);
+
+[[nodiscard]] bool append_moi_flat_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+[[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+[[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+
+} // namespace rocjitsu::consan_moi_impl

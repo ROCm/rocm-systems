@@ -835,4 +835,4 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanReq
                        std::make_move_iterator(planning.errors.end()));
 }
 
-} // namespace
+} // namespace consan_moi_impl

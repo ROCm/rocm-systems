@@ -1,4 +1,4 @@
-namespace {
+namespace consan_moi_impl {
 
 inline constexpr uint16_t kRdna4ExecLo = 126;
 inline constexpr uint16_t kRdna4ExecHi = 127;
