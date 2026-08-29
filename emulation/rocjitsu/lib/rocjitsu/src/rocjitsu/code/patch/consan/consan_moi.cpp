@@ -31,8 +31,10 @@
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
@@ -160,10 +162,6 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_emission.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_probe_planning.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_record_planning.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 

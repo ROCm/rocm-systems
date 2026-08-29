@@ -98,6 +98,19 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
                                      const ConSanMoiOperatingPoint &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets);
 
+[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
+    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets);
+
+void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
+                                const ResolvedMoiScratchPlan &plan, const ConSanRequest &request,
+                                const BoundRuntimeResources &resources,
+                                const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+
+void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requirements,
+                                        const ResolvedMoiScratchPlan &plan,
+                                        const VgprSpillSequence &spill);
+
 void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
                                      rj_code_arch_t arch);
 

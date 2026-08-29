@@ -32,11 +32,13 @@ target_sources(
         consan_moi_model.cpp
         consan_moi_native_abi.cpp
         consan_moi_probe_contracts.cpp
+        consan_moi_probe_planning.cpp
         consan_moi_prologue.cpp
         consan_moi_report_plan.cpp
         consan_moi_relocation.cpp
         consan_moi_report_emission.cpp
         consan_moi_record_event_emission.cpp
+        consan_moi_record_planning.cpp
         consan_moi_runtime_workgroup_gate.cpp
         consan_moi_sampled_access_emission.cpp
         consan_moi_sampled_atomic_emission.cpp
