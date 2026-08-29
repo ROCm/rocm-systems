@@ -134,6 +134,7 @@ jobs:
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
+          cmake
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
