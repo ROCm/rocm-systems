@@ -3621,6 +3621,13 @@ protected:
     comm->symmetricSupport = 1;
     win.userPtr = reinterpret_cast<void*>(0x123000);
     vidmem.winHost = &win;
+    // vidmem is a stack object, not a shadow-pool allocation, so resolve it
+    // explicitly rather than relying on the pool fake to recognise it.
+    g_shadowPoolToHost = [this](ncclShadowPool*, void* dev, void** host) {
+      if (dev != &vidmem) return ncclInvalidArgument;
+      *host = &vidmem;
+      return ncclSuccess;
+    };
   }
   void TearDown() override { ResetDevRuntimeFakes(); }
 };
@@ -4320,7 +4327,8 @@ protected:
     comm->localRanks = 1;
     comm->symmetricSupport = 1;
     comm->bootstrap = reinterpret_cast<void*>(0x1);
-    rankToNode.assign({0});
+    // computeLsaSize walks rankToNode[0..nRanks-1], so it must be that long.
+    rankToNode.assign(comm->nRanks, 0);
     comm->rankToNode = rankToNode.data();
     localRankToRank.assign({0});
     comm->localRankToRank = localRankToRank.data();

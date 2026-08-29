@@ -35,6 +35,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <functional>
+#include <set>
 #include <sys/mman.h>
 
 // ---------------------------------------------------------------------------
@@ -199,10 +200,19 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, hipStream_t) { retur
 // zeroed host buffer stands in for both, so ToHost is the identity: callers
 // that write through the host pointer (allocAndPopulateSegmentWindows) get real
 // storage rather than the nullptr the previous stub returned.
+// Live allocations, so a freed handle stops resolving. Without this the fake
+// hands a freed pointer back from ToHost and callers that decode a stale handle
+// read through it -- the real pool drops the mapping on free.
+static std::set<void*>& ShadowPoolLive() {
+  static std::set<void*> live;
+  return live;
+}
+
 static ncclResult_t DefaultShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj,
                                            hipStream_t) {
   void* p = calloc(1, size != 0 ? size : 1);
   if (p == nullptr) return ncclSystemError;
+  ShadowPoolLive().insert(p);
   if (outDevObj) *outDevObj = p;
   if (outHostObj) *outHostObj = p;
   return ncclSuccess;
@@ -216,6 +226,7 @@ ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool* pool, size_t size, void*
 }
 
 static ncclResult_t DefaultShadowPoolFree(struct ncclShadowPool*, void* devObj, hipStream_t) {
+  ShadowPoolLive().erase(devObj);
   free(devObj);
   return ncclSuccess;
 }
@@ -226,6 +237,7 @@ ncclResult_t ncclShadowPoolFree(struct ncclShadowPool* pool, void* devObj, hipSt
 }
 
 static ncclResult_t DefaultShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** outHostObj) {
+  if (ShadowPoolLive().count(devObj) == 0) return ncclInvalidArgument;  // freed or never ours
   if (outHostObj) *outHostObj = devObj;  // same buffer, see above
   return ncclSuccess;
 }
