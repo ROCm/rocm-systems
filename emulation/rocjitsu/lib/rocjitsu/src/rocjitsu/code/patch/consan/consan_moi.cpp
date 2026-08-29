@@ -982,9 +982,20 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     freeze_moi_operating_point(effective_options, result);
-  if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
-      !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
+  std::optional<ConSanMoiScalarValidationFailure> scalar_validation_failure;
+  if (result.outcome != ConSanTransformOutcome::Unsupported) {
+    scalar_validation_failure = validate_moi_dispatch_id_sgprs(effective_options, effective_options,
+                                                               effective_options, arch);
+    if (!scalar_validation_failure) {
+      scalar_validation_failure = validate_moi_ordinary_scalar_state(
+          effective_options, effective_options, effective_options, arch);
+    }
+  }
+  if (scalar_validation_failure) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
+  }
+  if (result.outcome == ConSanTransformOutcome::Unsupported) {
     publish_pending_moi_lowering_rejections(result);
     return result;
   }
@@ -997,8 +1008,13 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                                prologue_scratch_assignments))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   freeze_moi_operating_point(effective_options, result);
-  if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      !validate_moi_dispatch_id_vgprs(effective_options, result)) {
+  if (result.outcome != ConSanTransformOutcome::Unsupported)
+    scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_options);
+  if (scalar_validation_failure) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
+  }
+  if (result.outcome == ConSanTransformOutcome::Unsupported) {
     publish_pending_moi_lowering_rejections(result);
     return result;
   }

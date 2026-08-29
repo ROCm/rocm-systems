@@ -5830,20 +5830,20 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   return attempt;
 }
 
-[[nodiscard]] bool validate_moi_dispatch_id_sgprs(const MoiOptions &options,
-                                                  ConSanTransformArtifacts &result,
-                                                  rj_code_arch_t arch) {
-  if (!options.moi_dispatch_id_sgpr)
-    return true;
-  const uint16_t base = *options.moi_dispatch_id_sgpr;
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                               const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
+  if (!point.moi_dispatch_id_sgpr)
+    return std::nullopt;
+  const uint16_t base = *point.moi_dispatch_id_sgpr;
   const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
-  const bool overlaps_owner = options.moi_owner_sgpr && range_overlaps(base, dispatch_state_count,
-                                                                       *options.moi_owner_sgpr, 1u);
+  const bool overlaps_owner =
+      point.moi_owner_sgpr && range_overlaps(base, dispatch_state_count, *point.moi_owner_sgpr, 1u);
   const bool overlaps_exec =
-      options.moi_exec_save_sgpr &&
-      range_overlaps(base, dispatch_state_count, *options.moi_exec_save_sgpr,
+      point.moi_exec_save_sgpr &&
+      range_overlaps(base, dispatch_state_count, *point.moi_exec_save_sgpr,
                      moi_exec_save_sgpr_count(
-                         resolve_moi_exec_save_requirement(options, options, options), arch));
+                         resolve_moi_exec_save_requirement(request, resources, point), arch));
   const bool below_entry_window = base < 20u;
   const bool unaligned = base % 2u != 0u;
   const bool beyond_ordinary_file =
@@ -5852,7 +5852,6 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       persistent_sgpr_range_overlaps_reserved_ordinary_range(base, dispatch_state_count, arch);
   if (below_entry_window || unaligned || beyond_ordinary_file || overlaps_reserved ||
       overlaps_owner || overlaps_exec) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
     std::string reason;
     const auto append_reason = [&](std::string_view item) {
       if (!reason.empty())
@@ -5871,51 +5870,56 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       append_reason("owner temporary");
     if (overlaps_exec)
       append_reason("EXEC-save window");
-    result.warnings.emplace_back(
-        "ConSan MOI persistent dispatch-ID SGPR pair s" + std::to_string(base) + ":s" +
-        std::to_string(base + dispatch_state_count - 1u) + " violates " + reason);
-    return false;
+    return ConSanMoiScalarValidationFailure{
+        .reason = ConSanMoiScalarValidationReason::DispatchSgprLayout,
+        .diagnostic = "ConSan MOI persistent dispatch-ID SGPR pair s" + std::to_string(base) +
+                      ":s" + std::to_string(base + dispatch_state_count - 1u) + " violates " +
+                      reason,
+    };
   }
-  return true;
+  return std::nullopt;
 }
 
-[[nodiscard]] bool validate_moi_dispatch_id_vgprs(const MoiOptions &options,
-                                                  ConSanTransformArtifacts &result) {
-  if (options.moi_dispatch_id_sgpr && options.moi_dispatch_id_vgpr) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.emplace_back(
-        "ConSan MOI has multiple persistent hardware dispatch-ID representations");
-    return false;
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
+  if (point.moi_dispatch_id_sgpr && point.moi_dispatch_id_vgpr) {
+    return ConSanMoiScalarValidationFailure{
+        .reason = ConSanMoiScalarValidationReason::MultipleDispatchRepresentations,
+        .diagnostic = "ConSan MOI has multiple persistent hardware dispatch-ID representations",
+    };
   }
-  if (!options.moi_dispatch_id_vgpr)
-    return true;
+  if (!point.moi_dispatch_id_vgpr)
+    return std::nullopt;
 
-  const uint16_t base = *options.moi_dispatch_id_vgpr;
+  const uint16_t base = *point.moi_dispatch_id_vgpr;
   const auto overlaps = [&](std::optional<uint16_t> reg) {
     return reg && range_overlaps(base, 2u, *reg, 1u);
   };
-  bool overlaps_persistent_state = overlaps(options.moi_owner_vgpr) ||
-                                   overlaps(options.moi_epoch_vgpr) ||
-                                   overlaps(options.moi_workgroup_key_vgpr);
+  bool overlaps_persistent_state = overlaps(point.moi_owner_vgpr) ||
+                                   overlaps(point.moi_epoch_vgpr) ||
+                                   overlaps(point.moi_workgroup_key_vgpr);
   for (const std::optional<uint16_t> reg :
-       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-        options.moi_record_replay_workgroup_vgprs.z,
-        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
+        point.moi_record_replay_workgroup_vgprs.z,
+        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
     overlaps_persistent_state |= overlaps(reg);
   }
   if (static_cast<uint32_t>(base) + 2u > kMaxVgprs || overlaps_persistent_state) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.emplace_back(
-        "ConSan MOI persistent dispatch-ID VGPR pair overlaps persistent state or exceeds the "
-        "architectural VGPR file");
-    return false;
+    return ConSanMoiScalarValidationFailure{
+        .reason = ConSanMoiScalarValidationReason::DispatchVgprLayout,
+        .diagnostic =
+            "ConSan MOI persistent dispatch-ID VGPR pair overlaps persistent state or exceeds "
+            "the architectural VGPR file",
+    };
   }
-  return true;
+  return std::nullopt;
 }
 
-[[nodiscard]] bool validate_moi_ordinary_scalar_state(const MoiOptions &options,
-                                                      ConSanTransformArtifacts &result,
-                                                      rj_code_arch_t arch) {
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_ordinary_scalar_state(const ConSanRequest &request,
+                                   const BoundRuntimeResources &resources,
+                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
+  const ConSanMoiOperatingPoint &options = point;
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
   const auto overlaps_architectural_state = [&](std::optional<uint16_t> base, uint16_t width) {
     return base && persistent_sgpr_range_overlaps_reserved_ordinary_range(*base, width, arch);
@@ -5924,11 +5928,11 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       options.moi_exec_save_sgpr &&
       (static_cast<uint32_t>(*options.moi_exec_save_sgpr) +
                moi_exec_save_sgpr_count(
-                   resolve_moi_exec_save_requirement(options, options, options), arch) >
+                   resolve_moi_exec_save_requirement(request, resources, point), arch) >
            limit ||
        overlaps_architectural_state(
            options.moi_exec_save_sgpr,
-           moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options),
+           moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, point),
                                     arch)));
   const bool owner_invalid =
       options.moi_owner_sgpr && (*options.moi_owner_sgpr >= limit ||
@@ -5983,7 +5987,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
         overlaps_architectural_state(options.moi_record_replay_call_return_sgpr, 2u)));
   const bool branch_only_scalar_invalid =
       options.moi_inline_branch_only_scalar_spill &&
-      (options.moi_engine != ConSanMoiEngine::InlineShadow ||
+      (request.moi_engine != ConSanMoiEngine::InlineShadow ||
        !options.automatic_moi_inline_sgpr_spill || !consan_uses_gfx12_encoding(arch) ||
        !options.moi_exec_save_sgpr || options.moi_inline_indirect_pc_sgpr ||
        options.moi_inline_indirect_scc_sgpr || options.moi_inline_dispatch_key_sgpr ||
@@ -5993,7 +5997,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       return false;
     const uint16_t base = *options.moi_inline_dynamic_stack_borrowed_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(options, options, options), arch);
+        resolve_moi_exec_save_requirement(request, resources, point), arch);
     const bool overlaps_persistent =
         (options.moi_persistent_sgprs.owner &&
          range_overlaps(base, 2u, *options.moi_persistent_sgprs.owner, 1u)) ||
@@ -6009,7 +6013,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
           options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
-    return options.moi_engine != ConSanMoiEngine::InlineShadow ||
+    return request.moi_engine != ConSanMoiEngine::InlineShadow ||
            !options.automatic_moi_inline_sgpr_spill ||
            !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
            !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
@@ -6024,11 +6028,11 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   }();
   if (!exec_invalid && !owner_invalid && !persistent_invalid && !inline_external_invalid &&
       !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)
-    return true;
-  result.outcome = ConSanTransformOutcome::Unsupported;
-  result.warnings.emplace_back(
-      "ConSan MOI scalar instrumentation state aliases an architectural special SGPR");
-  return false;
+    return std::nullopt;
+  return ConSanMoiScalarValidationFailure{
+      .reason = ConSanMoiScalarValidationReason::ArchitecturalSpecialSgprAlias,
+      .diagnostic = "ConSan MOI scalar instrumentation state aliases an architectural special SGPR",
+  };
 }
 
 [[nodiscard]] bool configure_automatic_moi_persistent_vgprs(

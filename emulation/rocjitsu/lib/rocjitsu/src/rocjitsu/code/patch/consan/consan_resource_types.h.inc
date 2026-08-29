@@ -87,6 +87,20 @@ enum class ConSanMoiFallbackKind : uint8_t {
   RecordReplayZeroGeneration,
 };
 
+/// Stable scalar-ABI validation failures returned to orchestration.
+enum class ConSanMoiScalarValidationReason : uint8_t {
+  DispatchSgprLayout,
+  MultipleDispatchRepresentations,
+  DispatchVgprLayout,
+  ArchitecturalSpecialSgprAlias,
+};
+
+struct ConSanMoiScalarValidationFailure {
+  ConSanMoiScalarValidationReason reason =
+      ConSanMoiScalarValidationReason::ArchitecturalSpecialSgprAlias;
+  std::string diagnostic;
+};
+
 /// Accepted immutable resource solution consumed by native emission.
 ///
 /// The operating point and site plans move together so an emitter cannot pair
