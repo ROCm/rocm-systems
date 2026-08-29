@@ -2455,21 +2455,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                       uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
                                       uint16_t temporary_vgpr, rj_code_arch_t arch);
 
-/// Entry-island transaction used when a spill-backed Record/Replay probe must
-/// borrow its indirect-jump scalar tuple before the ordinary body save can
-/// protect it. The entry carrier and matching scalar restore are one plan so
-/// access and barrier routing cannot assemble incompatible halves.
-struct MoiBorrowedRecordReplayEntry {
-  uint16_t backup_vgpr = 0u;
-  std::vector<uint32_t> island_words;
-  std::vector<uint32_t> scalar_restore_words;
-};
-
-[[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry>
-build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t body_text_offset,
-                                       uint16_t backup_vgpr, const MoiIndirectJumpSgprs &jump_sgprs,
-                                       uint32_t island_word_count, rj_code_arch_t arch);
-
 /// Emit a call-return comparison whose expected PC is rebuilt from a
 /// canonical get-PC sequence. Revision translation can then relocate the
 /// expected caller independently of the dispatcher and its in-kernel entry
