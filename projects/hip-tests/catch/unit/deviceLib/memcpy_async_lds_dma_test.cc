@@ -32,6 +32,11 @@ THE SOFTWARE.
 // hardware supplies the per-lane offset, so the partitioning depends on how ranks map
 // onto lanes and those sizes are what stress it.
 //
+// Each case also checks a short guard region past the requested count. A copy that moves
+// whole dwords has to stop short of a ragged tail rather than round it up, and without a
+// guard an implementation that rounds up would still compare equal over the requested
+// range and pass silently.
+//
 // This is a correctness test, not a path test: it is expected to pass regardless of
 // which path the target selects.
 
@@ -40,6 +45,7 @@ THE SOFTWARE.
 #include <hip/hip_cooperative_groups.h>
 #include <hip/cooperative_groups/memcpy_async.h>
 
+#include <algorithm>
 #include <vector>
 
 namespace cg = cooperative_groups;
@@ -47,9 +53,12 @@ namespace cg = cooperative_groups;
 namespace {
 
 constexpr int kSharedCap = 8192;
+// Bytes checked past the requested count, so a copy that rounds the ragged tail up to a whole
+// dword is caught instead of silently passing.
+constexpr int kGuard = 8;
 
 template <typename T>
-__global__ void globalToLds(const T* in, T* out, int bytes) {
+__global__ void globalToLds(const T* in, T* out, int bytes, int readBack) {
   __shared__ __align__(16) unsigned char raw[kSharedCap];
   cg::thread_block block = cg::this_thread_block();
 
@@ -59,14 +68,22 @@ __global__ void globalToLds(const T* in, T* out, int bytes) {
   cg::memcpy_async(block, reinterpret_cast<T*>(raw), in, static_cast<size_t>(bytes));
   block.sync();  // memcpy_async is asynchronous; the barrier is what makes raw readable
 
+  // readBack extends past bytes. raw was zero filled, so anything memcpy_async wrote outside the
+  // requested range surfaces in the guard region as a non-zero byte.
   unsigned char* o = reinterpret_cast<unsigned char*>(out);
-  for (int i = block.thread_rank(); i < bytes; i += block.num_threads()) o[i] = raw[i];
+  for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[i];
 }
 
 template <typename T>
 __global__ void ldsToGlobal(const T* in, T* out, int bytes) {
   __shared__ __align__(16) unsigned char raw[kSharedCap];
   cg::thread_block block = cg::this_thread_block();
+
+  // Zero the whole buffer first so the bytes past the requested count hold a known value rather
+  // than whatever was left in LDS. A copy that reads past bytes then stores zeros into the
+  // destination guard region, which differs from the 0xAB the host put there.
+  // Each rank owns the same indices in both loops, so no barrier is needed between them.
+  for (int i = block.thread_rank(); i < kSharedCap; i += block.num_threads()) raw[i] = 0;
 
   const unsigned char* i8 = reinterpret_cast<const unsigned char*>(in);
   for (int i = block.thread_rank(); i < bytes; i += block.num_threads()) raw[i] = i8[i];
@@ -87,33 +104,45 @@ void runCase(const char* tag, int threads, int bytes, const std::vector<unsigned
              unsigned char* d_in, unsigned char* d_out, bool ldsToGlobalDir) {
   HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
 
+  const int readBack = std::min(bytes + kGuard, kSharedCap);
+  // Past `bytes` the destination must be untouched: 0xAB from the memset for the lds -> global
+  // direction, 0 from the LDS zero fill for global -> lds.
+  const unsigned guardByte = ldsToGlobalDir ? 0xABu : 0x00u;
+
   if (ldsToGlobalDir) {
     ldsToGlobal<T><<<1, threads>>>(reinterpret_cast<const T*>(d_in), reinterpret_cast<T*>(d_out),
                                    bytes);
   } else {
     globalToLds<T><<<1, threads>>>(reinterpret_cast<const T*>(d_in), reinterpret_cast<T*>(d_out),
-                                   bytes);
+                                   bytes, readBack);
   }
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
-  std::vector<unsigned char> got(bytes, 0xAB);
-  HIP_CHECK(hipMemcpy(got.data(), d_out, bytes, hipMemcpyDeviceToHost));
+  std::vector<unsigned char> got(readBack, 0);
+  HIP_CHECK(hipMemcpy(got.data(), d_out, readBack, hipMemcpyDeviceToHost));
 
   // Compare the whole buffer and assert once per case, so each case contributes an assertion
   // without emitting one per byte.
   int mismatch = -1;
-  for (int i = 0; i < bytes; i++) {
-    if (got[i] != ref[i]) {
+  unsigned expected = 0;
+  for (int i = 0; i < readBack; i++) {
+    expected = (i < bytes) ? ref[i] : guardByte;
+    if (got[i] != expected) {
       mismatch = i;
       break;
     }
   }
 
   if (mismatch >= 0) {
-    INFO(tag << " threads: " << threads << " bytes: " << bytes << " first mismatch at index: "
-             << mismatch << " got: " << static_cast<unsigned>(got[mismatch])
-             << " expected: " << static_cast<unsigned>(ref[mismatch]));
+    // INFO registers a message scoped to the enclosing block, so one created inside this `if` is
+    // destroyed before the REQUIRE below runs and never prints. UNSCOPED_INFO survives until the
+    // next assertion, which is the one that needs it.
+    UNSCOPED_INFO(tag << " threads: " << threads << " bytes: " << bytes
+                      << (mismatch >= bytes ? " wrote past the requested count at index: "
+                                            : " first mismatch at index: ")
+                      << mismatch << " got: " << static_cast<unsigned>(got[mismatch])
+                      << " expected: " << expected);
   }
   REQUIRE(mismatch == -1);
 }
