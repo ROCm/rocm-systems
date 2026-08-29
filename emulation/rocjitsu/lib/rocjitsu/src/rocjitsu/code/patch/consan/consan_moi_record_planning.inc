@@ -58,7 +58,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan>
 resolve_moi_record_event_emission_plan(const MoiOptions &event_options, uint16_t scratch_vgpr,
                                        rj_code_arch_t arch) {
-  const auto workgroup_sources = record_replay_persistent_workgroup_sources(event_options, arch);
+  const auto workgroup_sources =
+      record_replay_persistent_workgroup_sources(event_options.moi_engine, event_options);
   const auto special_state = moi_special_state_sgprs(event_options);
   if (!event_options.moi_exec_save_sgpr || !event_options.moi_report_buffer_address ||
       !workgroup_sources || !special_state) {

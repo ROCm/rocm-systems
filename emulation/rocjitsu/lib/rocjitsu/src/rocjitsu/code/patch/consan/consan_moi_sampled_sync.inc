@@ -122,8 +122,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       }))
     return std::nullopt;
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.barrier.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.uses_cluster_workgroup_id);
+      bytes, *candidate.barrier.kernel_descriptor_file_offset, options.moi_engine, options, arch,
+      errors, candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.barrier.site.file_offset > bytes.size() ||

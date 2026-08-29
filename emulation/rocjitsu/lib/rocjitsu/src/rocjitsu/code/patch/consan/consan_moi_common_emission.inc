@@ -289,12 +289,12 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
 [[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
     const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
     const MoiOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
-  return build_moi_private_epoch_layout(result, resources, arch, warnings,
-                                        /*include_owner=*/options.moi_owner_source ==
-                                            ConSanMoiOwnerSource::WorkitemId,
-                                        /*include_workgroup_key=*/false,
-                                        /*include_record_replay_workgroup=*/
-                                        record_replay_requires_entry_workgroup_capture(options));
+  return build_moi_private_epoch_layout(
+      result, resources, arch, warnings,
+      /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+      /*include_workgroup_key=*/false,
+      /*include_record_replay_workgroup=*/
+      record_replay_requires_entry_workgroup_capture(options.moi_engine));
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
@@ -855,7 +855,7 @@ private:
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
   const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(options, arch);
+      record_replay_persistent_workgroup_sources(options.moi_engine, options);
   if (!persistent_workgroup_sources) {
     errors.emplace_back(
         "ConSan MOI Record/Replay access requires one exact entry-captured workgroup tuple");

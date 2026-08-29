@@ -94,23 +94,24 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 /// the guest access, so its workgroup identity must come from entry-captured
 /// persistent state. The report layout controls banking and scratch needs,
 /// not this lifetime requirement.
-[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(const MoiOptions &options) {
-  return options.moi_engine == ConSanMoiEngine::RecordReplay ||
-         options.moi_engine == ConSanMoiEngine::Sampled;
+[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(ConSanMoiEngine engine) {
+  return engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled;
 }
 
-[[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const MoiOptions &options) {
-  return static_cast<uint8_t>(options.moi_persistent_sgprs.record_replay_workgroup.complete()) +
-         static_cast<uint8_t>(options.moi_record_replay_workgroup_vgprs.complete()) +
-         static_cast<uint8_t>(options.moi_record_replay_workgroup_private_offsets.complete());
+[[nodiscard]] uint8_t
+record_replay_entry_workgroup_capture_count(const ConSanMoiOperatingPoint &point) {
+  return static_cast<uint8_t>(point.moi_persistent_sgprs.record_replay_workgroup.complete()) +
+         static_cast<uint8_t>(point.moi_record_replay_workgroup_vgprs.complete()) +
+         static_cast<uint8_t>(point.moi_record_replay_workgroup_private_offsets.complete());
 }
 
-[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const MoiOptions &options) {
-  return record_replay_entry_workgroup_capture_count(options) != 0u;
+[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const ConSanMoiOperatingPoint &point) {
+  return record_replay_entry_workgroup_capture_count(point) != 0u;
 }
 
-[[nodiscard]] bool record_replay_entry_workgroup_capture_is_unambiguous(const MoiOptions &options) {
-  return record_replay_entry_workgroup_capture_count(options) <= 1u;
+[[nodiscard]] bool
+record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperatingPoint &point) {
+  return record_replay_entry_workgroup_capture_count(point) <= 1u;
 }
 
 /// Record vector-persistent state on the emitted mechanism that initializes

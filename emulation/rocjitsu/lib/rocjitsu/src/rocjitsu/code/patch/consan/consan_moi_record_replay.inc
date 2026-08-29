@@ -598,7 +598,7 @@ void try_apply_first_light_access_record_patch(
       };
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
-        record_replay_persistent_workgroup_sources(candidate_options, arch);
+        record_replay_persistent_workgroup_sources(candidate_options.moi_engine, candidate_options);
     const bool has_probe_entry_runtime_workgroup_gate =
         runtime_workgroup_sources &&
         moi_has_probe_entry_runtime_workgroup_gate(*runtime_workgroup_sources);

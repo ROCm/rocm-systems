@@ -413,7 +413,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     return std::nullopt;
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
+      bytes, *candidate.kernel_descriptor_file_offset, options.moi_engine, options, arch, errors,
       candidate.container.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;

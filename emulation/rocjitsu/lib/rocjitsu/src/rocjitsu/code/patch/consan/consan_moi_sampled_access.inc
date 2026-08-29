@@ -838,8 +838,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           if (planned_patch.runtime_fast_gate) {
             std::vector<std::string> workgroup_errors;
             const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-                bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
-                workgroup_errors);
+                bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options.moi_engine,
+                candidate_options, arch, workgroup_errors);
             if (workgroup_sources) {
               const auto gate_plan =
                   plan_moi_runtime_workgroup_gate(candidate_options, candidate_options,
@@ -885,8 +885,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (planned_patch.dense_runtime_fast_gate) {
           std::vector<std::string> workgroup_errors;
           const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-              bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
-              workgroup_errors);
+              bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options.moi_engine,
+              candidate_options, arch, workgroup_errors);
           if (workgroup_sources) {
             const auto gate_plan = plan_moi_runtime_workgroup_gate(
                 candidate_options, candidate_options, candidate_options, *workgroup_sources, arch);
