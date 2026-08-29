@@ -1439,6 +1439,11 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
+    // Same mutex executable_destroy_internal() holds across shutdown(), so a runtime-thread
+    // destroy cannot run the unload callbacks concurrently with finalization. is_shutdown is
+    // both tested and set under the lock, so a destroy arriving afterwards observes it.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
 
