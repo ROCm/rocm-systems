@@ -95,9 +95,9 @@ void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
   }
 }
 
-void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanOptions &options,
-                                            ConSanTransformArtifacts &result) {
+void try_apply_unmatched_barrier_wait_abort_impl(std::span<const uint8_t> original_bytes,
+                                                 const ConSanOptions &options,
+                                                 ConSanTransformArtifacts &result) {
   if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
@@ -4599,11 +4599,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 }
 
 [[nodiscard]] ConSanTransformArtifacts
-finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
-                       uint64_t expected_moi_report_dispatch_id,
-                       bool validating_carried_composite_stage,
-                       const ConSanPerturbationPlanningState *carried_perturbation,
-                       ConSanLoweringExecution *execution) {
+finalize_consan_result_impl(ConSanTransformArtifacts result,
+                            std::span<const uint8_t> original_bytes,
+                            uint64_t expected_moi_report_dispatch_id,
+                            bool validating_carried_composite_stage,
+                            const ConSanPerturbationPlanningState *carried_perturbation,
+                            ConSanLoweringExecution *execution) {
   if (execution != nullptr)
     execution->note_final_validation();
   const major_image_ownership::ScopedOwner result_owner(
@@ -4666,6 +4667,23 @@ finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t>
 }
 
 } // namespace
+
+void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
+                                            const ConSanOptions &options,
+                                            ConSanTransformArtifacts &result) {
+  try_apply_unmatched_barrier_wait_abort_impl(original_bytes, options, result);
+}
+
+ConSanTransformArtifacts
+finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
+                       uint64_t expected_moi_report_dispatch_id,
+                       bool validating_carried_composite_stage,
+                       const ConSanPerturbationPlanningState *carried_perturbation,
+                       ConSanLoweringExecution *execution) {
+  return finalize_consan_result_impl(
+      std::move(result), original_bytes, expected_moi_report_dispatch_id,
+      validating_carried_composite_stage, carried_perturbation, execution);
+}
 
 std::vector<std::string>
 validate_consan_modified_elf(std::span<const uint8_t> original_bytes,

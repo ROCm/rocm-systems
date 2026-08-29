@@ -16,12 +16,14 @@
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
+#include "rocjitsu/code/patch/consan/consan_final_validation.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -185,8 +187,6 @@ rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> origi
       try_patch_consan_impl(original_image, options, {}, std::nullopt, &inventory.planning);
   return inventory;
 }
-
-#include "rocjitsu/code/patch/consan/consan_validation.inc"
 
 ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,

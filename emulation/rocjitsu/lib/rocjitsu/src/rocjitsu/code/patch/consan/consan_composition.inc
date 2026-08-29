@@ -36,13 +36,6 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
                         amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
 }
 
-[[nodiscard]] ConSanTransformArtifacts
-finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
-                       uint64_t expected_moi_report_dispatch_id = 0,
-                       bool validating_carried_composite_stage = false,
-                       const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
-                       ConSanLoweringExecution *execution = nullptr);
-
 /// Install the transaction's immutable observation product into native
 /// lowering state. The fallback exists for focused lowerer tests and legacy
 /// mechanism entry points; it uses the same common assembly authority and is
