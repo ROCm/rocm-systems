@@ -4377,6 +4377,90 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
+// team, and ncclGetLsaMultimemDevicePointer is the public wrapper.
+//
+// Only the arm that finds an already-bound team is exercised. Reaching
+// symTeamObtain with multimem on a team that is not bound yet hits the bug in
+// ~/rccl-dev-runtime-findings.md #3: on HIP that call returns ncclSuccess
+// without writing its out-parameter, so the caller here dereferences an
+// uninitialised pointer. A test driving it would crash rather than assert.
+
+class DevrGetLsaTeamPtrMCTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevrWindow win{};
+  std::vector<unsigned char> teamStorage;
+  void* const kMcBase = reinterpret_cast<void*>(0x800000);
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nvlsSupport = 1;
+    win.bigOffset = 0x300;
+  }
+  void TearDown() override { comm->devrState.teamHead = nullptr; }  // borrowed storage
+
+  // A team already carrying a multicast mapping, which symTeamObtain returns
+  // as-is rather than trying to create one.
+  ncclTeam SeedBoundTeam(int nRanks, int rank, int stride) {
+    ncclTeam team{};
+    team.nRanks = nRanks;
+    team.rank = rank;
+    team.stride = stride;
+    teamStorage.assign(sizeof(ncclDevrTeam) + nRanks * sizeof(int), 0);
+    auto* t = reinterpret_cast<ncclDevrTeam*>(teamStorage.data());
+    t->team = team;
+    t->mcBasePtr = kMcBase;
+    comm->devrState.teamHead = t;
+    return team;
+  }
+};
+
+// The multicast address is the team's base plus the window's offset plus the
+// caller's -- all distinct, so a dropped term shows.
+TEST_F(DevrGetLsaTeamPtrMCTest, BoundTeam_OffsetsFromMulticastBase) {
+  ncclTeam team = SeedBoundTeam(2, 0, 1);
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaTeamPtrMC(comm, &win, 0x40, team, &out), ncclSuccess);
+  EXPECT_EQ(out, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(kMcBase) + win.bigOffset + 0x40));
+}
+
+// Branch: no NVLS means no multicast address to give.
+TEST_F(DevrGetLsaTeamPtrMCTest, NoNvlsSupport_ReturnsInvalidUsage) {
+  ncclTeam team = SeedBoundTeam(2, 0, 1);
+  comm->nvlsSupport = 0;
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaTeamPtrMC(comm, &win, 0, team, &out), ncclInvalidUsage);
+}
+
+// Branch: null arguments are caught before anything is read.
+TEST_F(DevrGetLsaTeamPtrMCTest, NullArguments_ReturnInternalError) {
+  ncclTeam team = SeedBoundTeam(2, 0, 1);
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaTeamPtrMC(comm, nullptr, 0, team, &out), ncclInternalError);
+  EXPECT_EQ(ncclDevrGetLsaTeamPtrMC(comm, &win, 0, team, nullptr), ncclInternalError);
+}
+
+// The public wrapper, on the arm that does not reach symTeamObtain: without
+// NVLS there is no multicast mapping, reported as null with success.
+TEST_F(DevicePointerAccessorTest, LsaMultimemWithoutNvls_ReturnsNull) {
+  comm->nvlsSupport = 0;
+  void* out = reinterpret_cast<void*>(0xdead);
+  EXPECT_EQ(ncclGetLsaMultimemDevicePointer(Handle(), 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+}
+
+// And a window the map does not know is rejected before that check.
+TEST_F(DevicePointerAccessorTest, LsaMultimemUnknownWindow_ReturnsInvalidArgument) {
+  ncclWindow_vidmem stranger{};
+  void* out = nullptr;
+  EXPECT_EQ(ncclGetLsaMultimemDevicePointer(&stranger, 0, &out), ncclInvalidArgument);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
