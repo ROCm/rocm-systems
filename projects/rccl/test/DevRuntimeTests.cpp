@@ -4703,6 +4703,76 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevrCommCreateInternal is where a queued create is actually carried out.
+// This suite covers its GIN request validation, which runs before any resource
+// is touched and rejects combinations the communicator cannot serve.
+//
+// The body past that gate builds the whole devcomm -- GIN activation, resource
+// windows, barriers -- and is not covered here.
+
+class DevrCommCreateInternalTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  ncclDevComm outDevComm{};
+  ncclDevCommCompat compat{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nRanks = 1;
+    comm->devrState.lsaSize = 1;
+  }
+
+  ncclResult_t Create() {
+    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false, &compat);
+  }
+};
+
+// Branch: asking for GIN resources without asking for GIN itself is a
+// contradiction, caught before anything is allocated.
+TEST_F(DevrCommCreateInternalTest, GinResourcesWithoutGinConnection_ReturnsInvalidArgument) {
+  reqs.ginSignalCount = 1;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: GIN requested on a communicator where some rank cannot provide it.
+TEST_F(DevrCommCreateInternalTest, GinRequestedWithoutGlobalSupport_ReturnsInvalidArgument) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: a full mesh requested where only rail connectivity exists. This is
+// the narrower of the two support checks -- the communicator does support GIN,
+// just not this topology.
+TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalidArgument) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: the deprecated ginForceEnable is equivalent to asking for a full
+// connection, so it fails the same support check rather than being ignored.
+//
+// The counterpart -- the same requirements with the flag clear, which requests
+// nothing and passes the gate -- is not tested: it continues into the devcomm
+// build, which this fixture does not set up for.
+TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
+  reqs.ginForceEnable = true;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
