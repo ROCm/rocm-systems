@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
+#include "rocjitsu/code/patch/consan/consan_transform_debug.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -4104,7 +4105,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
     }
     const rocjitsu::TransformResult &transform_result = *patch_result_storage;
-    const rocjitsu::ConSanTransformDebugReport transform_debug = transform_result.debug_report();
+    const rocjitsu::ConSanTransformDebugReport transform_debug =
+        rocjitsu::consan_transform_debug_report(transform_result);
     const rocjitsu::ConSanMutationOutcome &mutation = transform_result.mutation;
     fault_installation_evidence.record_applied_mutations(mutation.fault.applied);
     if (live_fault_auto_report_capacity_inventory) {

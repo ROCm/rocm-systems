@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/code/patch/consan/consan_transform_debug.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 
@@ -277,14 +278,14 @@ const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value
   return &stages[static_cast<size_t>(value)];
 }
 
-ConSanTransformDebugReport TransformResult::debug_report() const {
+ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &result) {
   return {
-      .fault_sites = private_lowering_.fault_sites,
-      .barrier_move_destinations = private_lowering_.barrier_move_destinations,
-      .fault_plans = private_lowering_.fault_plans,
-      .resource_plans = private_lowering_.resource_plans,
-      .committed_lowerings = private_lowering_.committed_lowerings,
-      .patches = private_lowering_.patches,
+      .fault_sites = result.private_lowering_.fault_sites,
+      .barrier_move_destinations = result.private_lowering_.barrier_move_destinations,
+      .fault_plans = result.private_lowering_.fault_plans,
+      .resource_plans = result.private_lowering_.resource_plans,
+      .committed_lowerings = result.private_lowering_.committed_lowerings,
+      .patches = result.private_lowering_.patches,
   };
 }
 

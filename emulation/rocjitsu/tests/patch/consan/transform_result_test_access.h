@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/code/patch/consan/consan_transform_debug.h"
 
 #include <utility>
 
@@ -16,6 +17,10 @@ namespace rocjitsu {
 /// adapter publishes only the same shared artifact value returned by the
 /// production boundary through exact stage-record construction and validation.
 struct TransformResultTestAccess {
+  [[nodiscard]] static ConSanTransformDebugReport debug_report(const TransformResult &result) {
+    return consan_transform_debug_report(result);
+  }
+
   [[nodiscard]] static TransformResult
   publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
           const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,

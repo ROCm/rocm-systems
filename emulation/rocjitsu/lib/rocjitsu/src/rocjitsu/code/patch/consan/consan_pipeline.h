@@ -233,23 +233,13 @@ struct ConSanDispatchRequirements {
   bool operator==(const ConSanDispatchRequirements &) const = default;
 };
 
-/// Read-only diagnostic projection of lowerer-private proof artifacts.
-///
-/// These values support verbose development logs and invariant tests. They
-/// are deliberately separated from semantic/runtime products: no install,
-/// attribution, coverage, or retry decision may depend on this projection.
-struct ConSanTransformDebugReport {
-  std::span<const ConSanFaultSite> fault_sites;
-  std::span<const ConSanBarrierMoveDestination> barrier_move_destinations;
-  std::span<const ConSanFaultMutationPlan> fault_plans;
-  std::span<const ConSanCandidateResourcePlan> resource_plans;
-  std::span<const ConSanCommittedLowering> committed_lowerings;
-  std::span<const ConSanPatchInfo> patches;
-};
-
 class TransformResult;
+struct ConSanTransformDebugReport;
 class ConSanDeferredBinding;
 class ConSanTransformTransaction;
+
+[[nodiscard]] ConSanTransformDebugReport
+consan_transform_debug_report(const TransformResult &result);
 
 /// Optional injected transform executor used by test/runtime adapters while
 /// the library retains automatic preparation and resume ownership.
@@ -320,11 +310,6 @@ public:
   /// Derive loader policy solely from the split static result.
   [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
 
-  /// Return lowerer proof artifacts solely for diagnostics and development
-  /// tooling. Production semantic consumers must use the explicit typed
-  /// products above.
-  [[nodiscard]] ConSanTransformDebugReport debug_report() const;
-
   /// Demote an otherwise installable transform after a runtime-owned resource
   /// operation fails. This keeps the outcome, stage records, replacement
   /// storage, and private proof inventory coherent without
@@ -336,6 +321,7 @@ private:
   friend struct TransformResultTestAccess;
   friend class ConSanDeferredBinding;
   friend class ConSanTransformTransaction;
+  friend ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &);
   friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
                                           const ConSanDebugOverrides &, const RuntimeCapabilities &,
