@@ -1895,7 +1895,7 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
             )
         ]
 
-    def record(name, role, fn, tol, dtype="bfloat16"):
+    def record(name, role, fn, tol, impl="vllm", dtype="bfloat16"):
         t0 = time.time()
         try:
             got, want = fn()
@@ -1915,7 +1915,7 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
                 )
             )
         except SkipCase as exc:
-            results.append(Result(name, role, "vllm", dtype, "skip", detail=str(exc)))
+            results.append(Result(name, role, impl, dtype, "skip", detail=str(exc)))
         except Exception as exc:  # noqa: BLE001
             results.append(
                 Result(
@@ -1928,6 +1928,55 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
                     seconds=time.time() - t0,
                 )
             )
+
+    def hf_attention():
+        """Cross-check the sink-attention reference against HuggingFace's.
+
+        This is the one reference in the file with no other independent
+        witness: vLLM computes attention inside an attention backend that
+        cannot be driven standalone, so `--with-vllm` reaches RMSNorm, SwiGLU
+        and rotary but not this. `transformers` implements the same operator in
+        eager PyTorch, which does give a second opinion on the formulation
+        (concatenate the sink as an extra logit, softmax, drop the sink column)
+        rather than on this file's arithmetic.
+        """
+        try:
+            from transformers.models.gpt_oss.modeling_gpt_oss import (
+                eager_attention_forward,
+            )
+        except ImportError as exc:
+            raise SkipCase(f"transformers gpt_oss unavailable: {exc}") from exc
+
+        q, k, v, sinks = _attention_inputs(s, gen)
+        group = s.num_heads // s.num_kv_heads
+
+        class Stub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_key_value_groups = group
+                self.sinks = torch.nn.Parameter(
+                    sinks.to(torch.float32), requires_grad=False
+                )
+
+        # HF lays tensors out as [batch, heads, seq, head_dim] and takes an
+        # additive mask, where this file masks with -inf inside the reference.
+        qh = q.to(torch.float32).permute(1, 0, 2).unsqueeze(0)
+        kh = k.to(torch.float32).permute(1, 0, 2).unsqueeze(0)
+        vh = v.to(torch.float32).permute(1, 0, 2).unsqueeze(0)
+        first_pos = s.context_len - s.num_tokens
+        qpos = torch.arange(s.num_tokens) + first_pos
+        kpos = torch.arange(s.context_len)
+        allowed = (kpos[None, :] <= qpos[:, None]) & (
+            kpos[None, :] > qpos[:, None] - s.sliding_window
+        )
+        mask = torch.where(allowed, 0.0, float("-inf")).to(torch.float32)[None, None]
+
+        out, _ = eager_attention_forward(Stub(), qh, kh, vh, mask, s.head_dim**-0.5)
+        got = out[0].reshape(s.num_tokens, s.num_heads, s.head_dim)
+        want = ref_attention_sinks(
+            q, k, v, sinks, s.head_dim**-0.5, s.context_len, s.sliding_window
+        )
+        return got, want
 
     def rms():
         from vllm.model_executor.layers.layernorm import RMSNorm
@@ -1985,6 +2034,7 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
         record("rms_norm", "norm", rms, 6e-3)
         record("swiglu_oai", "activation", swiglu, 6e-3)
         record("rope_yarn_neox", "rope", rope, 3e-2)
+    record("attention_sinks", "attention", hf_attention, 3e-2, impl="hf")
     return results
 
 

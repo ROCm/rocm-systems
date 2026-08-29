@@ -44,13 +44,24 @@ gpt-oss-20b's real widths and takes hours under functional emulation),
 and `--with-vllm` adds a cross-check against vLLM's own custom ops where vLLM
 is installed.
 
-`--with-vllm` is the check that validates this file's references against the
-real implementation rather than against itself. It covers `SwigluOAIAndMul`
-(the compiled `_C` kernel) and the YaRN rotary embedding. `RMSNorm` resolves to
-vLLM's torch-native path outside an engine -- its compiled form is selected from
-an IR op-priority list only an engine populates -- so that row compares two
-expressions rather than exercising a kernel; the suite's own `rms_norm` cases
-cover the device.
+`--with-vllm` is the check that validates this file's references against real
+implementations rather than against themselves:
+
+| reference | validated against |
+|---|---|
+| `ref_swiglu_oai` | vLLM's `SwigluOAIAndMul`, compiled `_C` kernel |
+| `ref_yarn_cos_sin` / `ref_rope_neox` | vLLM's `get_rope` YaRN embedding |
+| `ref_rms_norm` | vLLM's `RMSNorm` |
+| `ref_attention_sinks` | `transformers`' `eager_attention_forward` for gpt-oss |
+
+Attention goes to HuggingFace rather than vLLM because vLLM computes it inside
+an attention backend that cannot be driven standalone, and it is the one
+reference that would otherwise have no second opinion.
+
+`RMSNorm` resolves to vLLM's torch-native path outside an engine -- its compiled
+form is selected from an IR op-priority list only an engine populates -- so that
+row compares two expressions rather than exercising a kernel; the suite's own
+`rms_norm` cases cover the device.
 
 ### Comparing two architectures
 
