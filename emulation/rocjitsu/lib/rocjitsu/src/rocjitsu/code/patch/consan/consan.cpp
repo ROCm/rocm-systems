@@ -11,6 +11,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"

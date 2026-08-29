@@ -12,6 +12,7 @@ target_sources(
         consan_access_policy.cpp
         consan_atomic_fence_policy.cpp
         consan_barrier_policy.cpp
+        consan_barrier_move_proof.cpp
         consan_branch_only_relay_router.cpp
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
