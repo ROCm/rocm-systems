@@ -31,8 +31,8 @@
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
-#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
+#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
@@ -159,12 +159,6 @@ using consan_moi_detail::record_replay_has_entry_workgroup_capture;
 using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
 using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 using consan_moi_detail::resolve_moi_report_layout;
-
-namespace consan_moi_impl {
-
-#include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
-
-} // namespace consan_moi_impl
 
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                               const MoiOptions &options,
@@ -339,8 +333,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   const MoiResourceProblem resource_problem(code_object_bytes, arch, effective_options,
                                             effective_options, result.program_inventory,
                                             result.observation_plan, moi_candidates);
-  MoiResourcePlanningState resource_planning_state(resource_problem, effective_options,
-                                                   result.resource_plans);
+  MoiResourcePlanningStatePtr resource_planning_state_owner =
+      make_moi_resource_planning_state(resource_problem, effective_options, result.resource_plans);
+  MoiResourcePlanningState &resource_planning_state = *resource_planning_state_owner;
   const auto rebuild_resource_plans = [&] {
     rebuild_moi_resource_plans(resource_planning_state, effective_options, effective_options,
                                effective_options, effective_options, moi_candidates, result);
@@ -467,19 +462,12 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
-      const bool entry_already_reserved = std::ranges::any_of(
-          resource_planning_state.reserved_ranges,
-          [&](const ConSanPreappliedReservedRange &reserved) {
-            return reserved.size != 0u && kernel.entry_text_offset >= reserved.text_offset &&
-                   kernel.entry_text_offset - reserved.text_offset < reserved.size;
-          });
-      if (!entry_already_reserved) {
-        // Dynamic-stack owner/epoch setup must branch in place from the
-        // original entry. Keep every Sampled cave/relay allocator off that
-        // anchor until the prologue is emitted in the final growth pass.
-        resource_planning_state.reserved_ranges.push_back(
-            {.text_offset = kernel.entry_text_offset, .size = sizeof(uint32_t)});
-      }
+      // Dynamic-stack owner/epoch setup must branch in place from the
+      // original entry. Keep every Sampled cave/relay allocator off that
+      // anchor until the prologue is emitted in the final growth pass.
+      (void)moi_resource_reserve_range_if_uncovered(
+          resource_planning_state,
+          {.text_offset = kernel.entry_text_offset, .size = sizeof(uint32_t)});
     }
   }
   if (std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {

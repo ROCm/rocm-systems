@@ -1302,6 +1302,21 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state) {
   return state.reserved_ranges;
 }
 
+bool moi_resource_reserve_range_if_uncovered(MoiResourcePlanningState &state,
+                                             ConSanPreappliedReservedRange range) {
+  if (range.size == 0u)
+    return false;
+  const bool covered = std::ranges::any_of(
+      state.reserved_ranges, [&](const ConSanPreappliedReservedRange &reserved) {
+        return reserved.size != 0u && range.text_offset >= reserved.text_offset &&
+               range.text_offset - reserved.text_offset < reserved.size;
+      });
+  if (covered)
+    return false;
+  state.reserved_ranges.push_back(range);
+  return true;
+}
+
 Decoder *moi_resource_decoder(MoiResourcePlanningState &state) { return state.decoder.get(); }
 
 bool moi_resource_is_valid(const MoiResourcePlanningState &state) { return state.valid; }

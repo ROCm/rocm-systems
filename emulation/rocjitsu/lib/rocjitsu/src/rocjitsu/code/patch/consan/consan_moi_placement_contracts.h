@@ -240,6 +240,11 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
 [[nodiscard]] std::span<const ConSanPreappliedReservedRange>
 moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 
+/// Reserve a placement-owned text range unless an existing reservation
+/// already covers its anchor. Returns true when a new reservation is added.
+[[nodiscard]] bool moi_resource_reserve_range_if_uncovered(MoiResourcePlanningState &state,
+                                                           ConSanPreappliedReservedRange range);
+
 [[nodiscard]] Decoder *moi_resource_decoder(MoiResourcePlanningState &state);
 
 [[nodiscard]] bool moi_resource_entry_window_is_single_entry(const MoiResourcePlanningState &state,
@@ -380,6 +385,41 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
 [[nodiscard]] bool automatic_moi_scalar_spill_needs_dynamic_stack_planning(
     const ConSanMoiOperatingPoint &point, const ProgramInventory &inventory,
     std::span<const ConSanCandidateResourcePlan> site_plans);
+
+[[nodiscard]] bool configure_automatic_moi_owner_sgpr(
+    ConSanMoiOperatingPoint &point, const MoiResourceProblem &problem,
+    std::span<const ConSanCandidateResourcePlan> site_plans, std::vector<std::string> &diagnostics,
+    const MoiResourcePlanningState &state);
+
+[[nodiscard]] bool configure_inline_moi_owner_sgpr(const ConSanRequest &request,
+                                                   ConSanMoiOperatingPoint &point,
+                                                   std::vector<std::string> &diagnostics);
+
+[[nodiscard]] ConSanMoiOperatingPointUpdate configure_automatic_moi_dispatch_id_sgprs(
+    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
+    std::span<const ConSanCandidateResourcePlan> site_plans, const MoiResourcePlanningState &state);
+
+[[nodiscard]] ConSanMoiOperatingPointAttempt
+plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperatingPoint &base,
+                              const MoiResourceProblem &problem,
+                              std::span<const ConSanCandidateResourcePlan> site_plans);
+
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                               const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point);
+
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+validate_moi_ordinary_scalar_state(const ConSanRequest &request,
+                                   const BoundRuntimeResources &resources,
+                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+
+[[nodiscard]] ConSanMoiPersistentPlacementUpdate configure_automatic_moi_persistent_vgprs(
+    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
+    const ConSanDebugOverrides &debug, std::span<const ConSanCandidateResourcePlan> resource_plans,
+    const MoiResourcePlanningState &planning_state);
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
