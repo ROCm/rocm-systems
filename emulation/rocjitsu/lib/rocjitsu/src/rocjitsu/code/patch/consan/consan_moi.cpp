@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
+#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -89,6 +90,12 @@ using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
+using consan_moi_detail::note_moi_persistent_vgpr_state;
+using consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous;
+using consan_moi_detail::record_replay_has_entry_workgroup_capture;
+using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
+using consan_moi_detail::record_replay_uses_automatic_banked_capture;
+using consan_moi_detail::resolve_moi_report_layout;
 
 #include "rocjitsu/code/patch/consan/consan_moi_candidates.inc"
 
