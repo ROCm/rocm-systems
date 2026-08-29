@@ -72,14 +72,10 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
-[[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
-                                                        const ConSanTransformArtifacts &result) {
-  return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
-}
-
 using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::ConSanMoiDispatchIdCapture;
+using consan_detail::has_recent_saveexec;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
@@ -94,6 +90,8 @@ using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
+using consan_detail::range_overlaps;
+using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_load_u32;
 using consan_moi_detail::append_atomic_or_u32_literal;

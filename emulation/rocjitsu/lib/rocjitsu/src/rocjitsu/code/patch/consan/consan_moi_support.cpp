@@ -66,6 +66,56 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
+                                          const ConSanTransformArtifacts &result) {
+  return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
+}
+
+bool consan_detail::range_overlaps(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
+                                   uint16_t rhs_count) {
+  const uint32_t lhs_end = static_cast<uint32_t>(lhs_base) + lhs_count;
+  const uint32_t rhs_end = static_cast<uint32_t>(rhs_base) + rhs_count;
+  return static_cast<uint32_t>(lhs_base) < rhs_end && static_cast<uint32_t>(rhs_base) < lhs_end;
+}
+
+bool consan_detail::reject_optional_scratch_range_overlap(std::optional<uint16_t> value,
+                                                          uint16_t scratch_vgpr,
+                                                          uint16_t scratch_count,
+                                                          std::string_view value_name,
+                                                          std::vector<std::string> &errors) {
+  const bool overlaps = value && scratch_count != 0u && *value >= scratch_vgpr &&
+                        *value < static_cast<uint16_t>(scratch_vgpr + scratch_count);
+  if (!overlaps)
+    return false;
+  errors.emplace_back(std::string("ConSan MOI scratch VGPRs overlap ") + std::string(value_name) +
+                      " VGPR");
+  return true;
+}
+
+bool consan_detail::has_recent_saveexec(std::span<const uint8_t> bytes,
+                                        const ConSanMoiCandidate &candidate) {
+  constexpr uint32_t kSop1PrefixMask = 0xFF800000u;
+  constexpr uint32_t kSop1OpMask = 0x0000FF00u;
+  const auto is_saveexec = [&](uint32_t word) {
+    const uint32_t op = (word & kSop1OpMask) >> 8u;
+    return (word & kSop1PrefixMask) == (kSop1EncodingPrefix << 23u) && op >= 0x20u && op <= 0x33u;
+  };
+  constexpr uint64_t kLookbackDwords = 3u;
+  for (uint64_t dword = 1u; dword <= kLookbackDwords; ++dword) {
+    const uint64_t byte_distance = dword * sizeof(uint32_t);
+    if (candidate.file_offset < byte_distance)
+      break;
+    const uint64_t offset = candidate.file_offset - byte_distance;
+    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
+      continue;
+    uint32_t word = 0u;
+    std::memcpy(&word, bytes.data() + offset, sizeof(word));
+    if (is_saveexec(word))
+      return true;
+  }
+  return false;
+}
+
 std::optional<uint16_t> ConSanMoiWorkgroupSource::operand() const {
   if (!has_value() || private_offset)
     return std::nullopt;

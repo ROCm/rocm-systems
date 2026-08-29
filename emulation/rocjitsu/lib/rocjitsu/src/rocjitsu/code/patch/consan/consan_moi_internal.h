@@ -35,6 +35,12 @@ namespace rocjitsu {
 
 struct MoiOptions;
 
+/// Return the current code-object image after any already committed MOI
+/// mutation. Incremental lowering must inspect this image rather than the
+/// original bytes once a preceding engine component has emitted a patch.
+[[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
+                                                        const ConSanTransformArtifacts &result);
+
 /// Immutable input to one MOI resource-solving run.
 ///
 /// The problem binds the exact image and target to effective semantic request,
@@ -195,6 +201,23 @@ struct ConSanMoiWorkgroupSources {
 };
 
 namespace consan_detail {
+
+/// Return whether two half-open register ranges overlap.
+[[nodiscard]] bool range_overlaps(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
+                                  uint16_t rhs_count);
+
+/// Reject an optional persistent VGPR that aliases a transient scratch window.
+[[nodiscard]] bool reject_optional_scratch_range_overlap(std::optional<uint16_t> value,
+                                                         uint16_t scratch_vgpr,
+                                                         uint16_t scratch_count,
+                                                         std::string_view value_name,
+                                                         std::vector<std::string> &errors);
+
+/// Return whether one of the three preceding dwords is a saveexec operation.
+/// This conservative guard prevents insertion inside compiler-produced EXEC
+/// narrowing sequences.
+[[nodiscard]] bool has_recent_saveexec(std::span<const uint8_t> bytes,
+                                       const ConSanMoiCandidate &candidate);
 
 /// Selects the one persistent representation that receives a dispatch ID at
 /// kernel entry.
