@@ -279,6 +279,8 @@ TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedS
   unsupported.source = ConSanRegisterAllocationSource::Unsupported;
   unsupported.reason = ConSanRegisterPlanReason::NoLegalWindow;
   planning.plans.push_back(unsupported);
+  planning.selected_fallback = ConSanMoiFallbackKind::DynamicStackScalarSpill;
+  planning.diagnostics.emplace_back("accepted attempt diagnostic");
   EXPECT_TRUE(planning.success());
 
   ConSanMoiResourcePlanningResult accepted_attempt = planning;
@@ -287,6 +289,9 @@ TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedS
   EXPECT_EQ(accepted->operating_point.moi_exec_save_sgpr, 12u);
   ASSERT_EQ(accepted->site_plans.size(), 1u);
   EXPECT_EQ(accepted->site_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(accepted->selected_fallback, ConSanMoiFallbackKind::DynamicStackScalarSpill);
+  ASSERT_EQ(accepted->diagnostics.size(), 1u);
+  EXPECT_EQ(accepted->diagnostics.front(), "accepted attempt diagnostic");
 
   planning.errors.emplace_back("inconsistent physical alias");
   EXPECT_FALSE(planning.success());

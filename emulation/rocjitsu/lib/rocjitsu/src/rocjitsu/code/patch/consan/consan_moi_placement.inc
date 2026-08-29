@@ -1359,25 +1359,24 @@ find_moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
 /// resource pass must share a site-local frame with a dynamic-stack owner.
 /// The first pass is still useful: it avoids reserving the dynamic frame ABI
 /// for ordinary owners that can keep their transient state in registers.
-[[nodiscard]] bool
-automatic_moi_scalar_spill_needs_dynamic_stack_planning(const MoiOptions &options,
-                                                        const ConSanTransformArtifacts &result) {
+[[nodiscard]] bool automatic_moi_scalar_spill_needs_dynamic_stack_planning(
+    const ConSanMoiOperatingPoint &point, const ProgramInventory &inventory,
+    std::span<const ConSanCandidateResourcePlan> site_plans) {
   const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
-    const ConSanKernelInfo *kernel =
-        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(descriptor_offset);
     return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   };
-  if (std::ranges::any_of(options.owner_transient_sgprs,
+  if (std::ranges::any_of(point.owner_transient_sgprs,
                           [&](const ConSanMoiTransientSgprAssignment &assignment) {
                             return assignment.spill_backed &&
                                    owner_uses_dynamic_stack(assignment.descriptor_file_offset);
                           })) {
     return true;
   }
-  if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
+  if (!point.automatic_moi_inline_sgpr_spill && !point.automatic_moi_record_replay_sgpr_spill) {
     return false;
   }
-  return std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+  return std::ranges::any_of(site_plans, [&](const ConSanCandidateResourcePlan &plan) {
     return plan.source != ConSanRegisterAllocationSource::Unsupported &&
            std::ranges::any_of(plan.owner_descriptor_file_offsets, owner_uses_dynamic_stack);
   });

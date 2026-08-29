@@ -686,15 +686,16 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
                          std::span<const ConSanMoiCandidate> candidates,
                          const ConSanTransformArtifacts &result) {
   ConSanMoiResourcePlanningResult planning;
-  planning.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+  const ConSanMoiOperatingPoint &attempted_point = options;
+  planning.attempted_operating_point = attempted_point;
   append_moi_resource_plans(state, options, candidates, planning.plans);
   append_moi_operational_resource_plans(state, options, result, planning.errors, planning.plans);
   if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       MoiOptions owner_options = options;
-      if (!state.register_allocation.owner_transient_sgprs.empty() &&
-          !apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
+      if (!attempted_point.owner_transient_sgprs.empty() &&
+          !apply_moi_transient_sgpr_assignment(owner_options, attempted_point,
                                                plan.owner_descriptor_file_offsets)) {
         if (state.arch == ROCJITSU_CODE_ARCH_CDNA5)
           continue;
@@ -710,7 +711,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
       if (!owner_options.moi_dispatch_id_sgpr &&
           std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             const ConSanMoiTransientSgprAssignment *assignment =
-                find_moi_transient_sgpr_assignment(state.register_allocation, descriptor_offset);
+                find_moi_transient_sgpr_assignment(attempted_point, descriptor_offset);
             return assignment != nullptr && !assignment->dispatch_id_sgpr;
           })) {
         continue;
@@ -739,12 +740,12 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-            return find_moi_transient_sgpr_assignment(state.register_allocation,
-                                                      descriptor_offset) != nullptr;
+            return find_moi_transient_sgpr_assignment(attempted_point, descriptor_offset) !=
+                   nullptr;
           });
       if (has_owner_override) {
         MoiOptions owner_options = options;
-        if (apply_moi_transient_sgpr_assignment(owner_options, state.register_allocation,
+        if (apply_moi_transient_sgpr_assignment(owner_options, attempted_point,
                                                 plan.owner_descriptor_file_offsets))
           continue;
       }
@@ -761,6 +762,53 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
     }
   }
   return planning;
+}
+
+/// Solve automatic transient-scalar placement without publishing intermediate
+/// points, plans, or diagnostics. The ordinary attempt and its dynamic-stack
+/// retry each own a complete point/plan pair; only the selected attempt is
+/// returned to orchestration.
+[[nodiscard]] ConSanMoiResourcePlanningResult solve_automatic_moi_exec_save_resources(
+    MoiResourcePlanningState &state, const ConSanOptions &input,
+    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
+    std::span<const ConSanMoiCandidate> candidates, const ConSanTransformArtifacts &artifacts) {
+  struct ExecAttempt {
+    ConSanMoiResourcePlanningResult planning;
+    bool needs_dynamic_stack_retry = false;
+  };
+  const auto attempt = [&](ConSanMoiOperatingPoint point,
+                           std::optional<ConSanMoiFallbackKind> fallback) {
+    MoiOptions candidate(input);
+    static_cast<ConSanMoiOperatingPoint &>(candidate) = std::move(point);
+    ExecAttempt exec;
+    exec.planning = build_moi_resource_plans(state, candidate, candidates, artifacts);
+    if (!exec.planning.success())
+      return exec;
+
+    std::vector<std::string> diagnostics;
+    const bool changed = configure_automatic_moi_exec_save_sgprs(
+        candidate, problem, exec.planning.plans, diagnostics, state);
+    exec.needs_dynamic_stack_retry = !candidate.moi_dynamic_stack_spill &&
+                                     automatic_moi_scalar_spill_needs_dynamic_stack_planning(
+                                         candidate, problem.inventory(), exec.planning.plans);
+    if (changed)
+      exec.planning = build_moi_resource_plans(state, candidate, candidates, artifacts);
+    exec.planning.attempted_operating_point =
+        static_cast<const ConSanMoiOperatingPoint &>(candidate);
+    exec.planning.selected_fallback = fallback;
+    exec.planning.diagnostics = std::move(diagnostics);
+    return exec;
+  };
+
+  ExecAttempt selected = attempt(base, std::nullopt);
+  if (!selected.planning.success() || !selected.needs_dynamic_stack_retry)
+    return std::move(selected.planning);
+
+  ConSanMoiOperatingPoint dynamic_stack_point = base;
+  dynamic_stack_point.moi_dynamic_stack_spill = true;
+  return std::move(
+      attempt(std::move(dynamic_stack_point), ConSanMoiFallbackKind::DynamicStackScalarSpill)
+          .planning);
 }
 
 void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &options,

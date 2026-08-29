@@ -76,15 +76,6 @@ struct ConSanCandidateResourcePlan {
   std::vector<ConSanResourcePlanAlternative> alternatives;
 };
 
-/// Accepted immutable resource solution consumed by native emission.
-///
-/// The operating point and site plans move together so an emitter cannot pair
-/// plans from one solver iteration with register state from another.
-struct ConSanMoiAcceptedResources {
-  ConSanMoiOperatingPoint operating_point;
-  std::vector<ConSanCandidateResourcePlan> site_plans;
-};
-
 /// Correctness-preserving operating-point fallback selected by MOI placement.
 ///
 /// These values cross the solver/orchestrator boundary and therefore remain
@@ -94,6 +85,17 @@ enum class ConSanMoiFallbackKind : uint8_t {
   DynamicStackScalarSpill,
   SampledLiteralDispatchId,
   RecordReplayZeroGeneration,
+};
+
+/// Accepted immutable resource solution consumed by native emission.
+///
+/// The operating point and site plans move together so an emitter cannot pair
+/// plans from one solver iteration with register state from another.
+struct ConSanMoiAcceptedResources {
+  ConSanMoiOperatingPoint operating_point;
+  std::vector<ConSanCandidateResourcePlan> site_plans;
+  std::optional<ConSanMoiFallbackKind> selected_fallback;
+  std::vector<std::string> diagnostics;
 };
 
 /// Unpublished output of one operating-point fallback attempt.
@@ -125,6 +127,11 @@ struct ConSanMoiResourcePlanningResult {
   std::vector<ConSanCandidateResourcePlan> plans;
   /// Fatal structural diagnostics produced while deriving this plan set.
   std::vector<std::string> errors;
+  /// Typed fallback selected while deriving this exact point, if any.
+  std::optional<ConSanMoiFallbackKind> selected_fallback;
+  /// Diagnostics owned by this attempt. They are publishable only if the
+  /// complete point/plan pair is accepted.
+  std::vector<std::string> diagnostics;
 
   /// Whether planning completed without a structural diagnostic. Individual
   /// sites may still carry a typed Unsupported allocation in a successful set.
@@ -138,6 +145,8 @@ struct ConSanMoiResourcePlanningResult {
     return ConSanMoiAcceptedResources{
         .operating_point = std::move(attempted_operating_point),
         .site_plans = std::move(plans),
+        .selected_fallback = selected_fallback,
+        .diagnostics = std::move(diagnostics),
     };
   }
 };
