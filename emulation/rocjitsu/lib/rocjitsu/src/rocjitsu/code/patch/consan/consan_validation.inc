@@ -1,5 +1,15 @@
 namespace {
 
+struct ValidationByteRange {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+};
+
+[[nodiscard]] bool validation_ranges_overlap(ValidationByteRange lhs,
+                                              ValidationByteRange rhs) {
+  return lhs.begin < rhs.end && rhs.begin < lhs.end;
+}
+
 [[nodiscard]] constexpr bool validation_uses_gfx9_cdna_encoding(const ConSanTargetProfile &target) {
   return target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
          target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
@@ -191,7 +201,7 @@ text_section_identities(const AmdGpuCodeObject &code_object) {
 }
 
 struct InventoryRange {
-  ByteRange bytes;
+  ValidationByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
   ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
   bool must_be_original = false;
@@ -280,7 +290,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
       return errors;
     }
     for (const InventoryRange *existing : active) {
-      if (!ranges_overlap(existing->bytes, next.bytes))
+      if (!validation_ranges_overlap(existing->bytes, next.bytes))
         continue;
       const bool exact_alias =
           existing->bytes.begin == next.bytes.begin && existing->bytes.end == next.bytes.end;
@@ -2611,14 +2621,15 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
                 sizeof(uint32_t));
     std::memcpy(&original_barriers[1], original_text.data() + second.anchor_offset,
                 sizeof(uint32_t));
-    const ByteRange mutation_body{target.trampoline_offset,
-                                  target.trampoline_offset + target.trampoline_size};
+    const ValidationByteRange mutation_body{target.trampoline_offset,
+                                            target.trampoline_offset + target.trampoline_size};
     const bool body_reinstrumented =
         std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
           if (patch.phase != ConSanPatchPhase::Instrumentation || patch.original_size == 0)
             return false;
-          const ByteRange anchor{patch.anchor_offset, patch.anchor_offset + patch.original_size};
-          return ranges_overlap(mutation_body, anchor);
+          const ValidationByteRange anchor{patch.anchor_offset,
+                                           patch.anchor_offset + patch.original_size};
+          return validation_ranges_overlap(mutation_body, anchor);
         });
     // A staged composition validates pristine -> mutation and mutation ->
     // instrumentation independently before combining their inventories. If
