@@ -26,7 +26,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates = make_moi_candidate_pointer_view(admitted);
+  std::vector<const ConSanMoiCandidate *> candidates =
+      consan_detail::make_moi_candidate_pointer_view(admitted);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();
   });

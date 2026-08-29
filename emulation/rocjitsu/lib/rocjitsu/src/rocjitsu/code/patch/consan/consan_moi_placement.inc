@@ -26,7 +26,8 @@ collect_moi_ordering_atomic_offsets(const ConSanObservationPlan &observation_pla
 order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
                                    const ConSanObservationPlan &observation_plan,
                                    bool track_atomics) {
-  std::vector<const ConSanMoiCandidate *> candidates = make_moi_candidate_pointer_view(admitted);
+  std::vector<const ConSanMoiCandidate *> candidates =
+      consan_detail::make_moi_candidate_pointer_view(admitted);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();
   });

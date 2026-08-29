@@ -216,62 +216,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
   return words;
 }
 
-/// Construct temporary lowering state from one admitted normalized access.
-/// The exact inventory record remains the candidate's base; construction only
-/// selects its unambiguous execution-owner descriptor.
-[[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access,
-                                                    ConSanProbeIntentId intent_id) {
-  ConSanMoiCandidate candidate;
-  static_cast<ConSanAccessInventorySite &>(candidate) = access;
-  candidate.intent_ids.push_back(intent_id);
-  if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
-    candidate.kernel_descriptor_file_offset =
-        access.execution_owner_descriptor_file_offsets.front();
-  }
-  return candidate;
-}
-
-/// Project admitted access intents into the temporary operand shape consumed
-/// by current lowerers. Policy is the sole candidate selector; this adapter
-/// copies the matching normalized facts and cannot reclassify a site.
-[[nodiscard]] std::vector<ConSanMoiCandidate>
-build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
-                     std::vector<std::string> &errors) {
-  std::vector<ConSanMoiCandidate> candidates;
-  std::map<uint64_t, size_t> candidate_index_by_offset;
-  for (const ConSanProbeIntent &intent : plan.probe_intents) {
-    if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
-        intent.kind != ConSanProbeIntentKind::SampledAccess &&
-        intent.kind != ConSanProbeIntentKind::ExactShadowAccess) {
-      continue;
-    }
-    const auto access = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
-      return candidate.physical_id == intent.physical_site;
-    });
-    if (access == inventory.access_sites().end()) {
-      errors.emplace_back("ConSan MOI access intent lost its inventory site");
-      return {};
-    }
-    if (!access->lowering.normalized() || !access->lowering.replay_guest_access.available()) {
-      errors.emplace_back("ConSan MOI access intent was not backed by a replay lowering form");
-      return {};
-    }
-    const auto [position, inserted] = candidate_index_by_offset.try_emplace(
-        access->physical_id.original_text_offset, candidates.size());
-    if (inserted) {
-      candidates.push_back(make_moi_candidate(*access, intent.id));
-    } else {
-      ConSanMoiCandidate &candidate = candidates[position->second];
-      if (candidate.physical_id != access->physical_id) {
-        errors.emplace_back("ConSan MOI coalesced distinct physical access identities");
-        return {};
-      }
-      candidate.intent_ids.push_back(intent.id);
-    }
-  }
-  return candidates;
-}
-
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
                                          rj_code_arch_t arch) {
   if (offset > bytes.size())
@@ -288,21 +232,6 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
     offset += sizeof(uint32_t);
   }
   return count;
-}
-
-/// Make a non-owning traversal view over access candidates already admitted by
-/// the observation plan. This helper deliberately performs no filtering:
-/// container selection, target support, operation shape, and engine
-/// applicability have one authority in semantic policy. Current placement
-/// code uses pointers only because it reorders candidates without moving the
-/// immutable values retained by its caller.
-[[nodiscard]] std::vector<const ConSanMoiCandidate *>
-make_moi_candidate_pointer_view(std::span<const ConSanMoiCandidate> admitted) {
-  std::vector<const ConSanMoiCandidate *> selected;
-  selected.reserve(admitted.size());
-  for (const ConSanMoiCandidate &candidate : admitted)
-    selected.push_back(&candidate);
-  return selected;
 }
 
 [[nodiscard]] bool append_store_u32_literal(std::vector<uint32_t> &words, uint64_t address,

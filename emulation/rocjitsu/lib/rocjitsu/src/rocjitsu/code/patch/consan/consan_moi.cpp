@@ -17,6 +17,7 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -162,8 +163,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     return result;
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();
-  std::vector<ConSanMoiCandidate> moi_candidates =
-      build_moi_candidates(result.program_inventory, result.observation_plan, result.errors);
+  std::vector<ConSanMoiCandidate> moi_candidates = consan_detail::build_moi_candidates(
+      result.program_inventory, result.observation_plan, result.errors);
   if (!result.errors.empty())
     return result;
   if (consan_arch_has_selectable_vgpr_bank(arch)) {
