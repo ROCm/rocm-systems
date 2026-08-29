@@ -1831,18 +1831,18 @@ struct MoiResourcePlanningState {
   mutable std::unordered_map<uint64_t, RegisterSet> dynamic_frame_saves_by_site;
   bool valid = false;
 
-  MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
-                           const ConSanTransformArtifacts &result,
-                           const ConSanMoiOperatingPoint &allocation)
-      : bytes(input), arch(arch), register_allocation(allocation),
-        reserved_ranges(result.program_inventory.preapplied_mutation().reserved_ranges),
-        code_object(input.data(), input.size()), decoder(Decoder::create(arch)) {
+  MoiResourcePlanningState(const MoiResourceProblem &problem,
+                           const ConSanMoiOperatingPoint &allocation,
+                           std::span<const ConSanCandidateResourcePlan> prior_site_plans = {})
+      : bytes(problem.image()), arch(problem.arch()), register_allocation(allocation),
+        reserved_ranges(problem.inventory().preapplied_mutation().reserved_ranges),
+        code_object(bytes.data(), bytes.size()), decoder(Decoder::create(arch)) {
     if (!code_object.is_valid() || !decoder)
       return;
 
     const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-        code_object, result.program_inventory.kernels(), result.program_inventory.functions(),
-        result.program_inventory.preapplied_mutation().code_ranges);
+        code_object, problem.inventory().kernels(), problem.inventory().functions(),
+        problem.inventory().preapplied_mutation().code_ranges);
     blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_index = build_block_offset_index(blocks);
     CodeObjectPatcher patcher(code_object);
@@ -1855,22 +1855,22 @@ struct MoiResourcePlanningState {
     // assignments are the one exception: their dense relay search may inspect
     // any relocatable instruction in an owning block.
     const bool restrict_liveness_queries = register_allocation.owner_transient_sgprs.empty();
-    const SynchronizationInventoryView sync = result.program_inventory.sync();
+    const SynchronizationInventoryView sync = problem.inventory().sync();
     std::unordered_map<BasicBlock *, std::vector<const Instruction *>> liveness_queries_by_block;
     if (restrict_liveness_queries) {
       std::unordered_set<uint64_t> query_offsets;
-      query_offsets.reserve(sync.sync_events.size() + result.resource_plans.size() +
-                            result.observation_plan.probe_intents.size() +
-                            result.program_inventory.kernels().size());
+      query_offsets.reserve(sync.sync_events.size() + prior_site_plans.size() +
+                            problem.observation_plan().probe_intents.size() +
+                            problem.inventory().kernels().size());
       for (const ConSanSyncEvent &event : sync.sync_events)
         query_offsets.insert(event.text_offset);
-      for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+      for (const ConSanCandidateResourcePlan &plan : prior_site_plans)
         query_offsets.insert(plan.text_offset);
-      for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+      for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
         query_offsets.insert(intent.physical_site.original_text_offset);
       for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates)
         query_offsets.insert(fence.fence_event.physical.original_text_offset);
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+      for (const ConSanKernelInfo &kernel : problem.inventory().kernels()) {
         if (kernel.has_text_range)
           query_offsets.insert(kernel.entry_text_offset);
       }
@@ -1881,13 +1881,13 @@ struct MoiResourcePlanningState {
       }
     }
 
-    contexts.reserve(result.program_inventory.kernels().size());
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+    contexts.reserve(problem.inventory().kernels().size());
+    for (const ConSanKernelInfo &kernel : problem.inventory().kernels()) {
       if (!kernel.has_text_range)
         continue;
       std::vector<uint64_t> additional_entry_offsets;
       for (const ConSanPreappliedCodeRange &range :
-           result.program_inventory.preapplied_mutation().code_ranges) {
+           problem.inventory().preapplied_mutation().code_ranges) {
         if (range.kernel_name != kernel.name)
           continue;
         if (block_for_offset(block_index, range.text_offset) != nullptr)
@@ -1982,11 +1982,12 @@ struct MoiResourcePlanningState {
     valid = true;
   }
 
-  /// Build a post-placement planning view from the operating point already
-  /// published with a transform result.
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
-                           const ConSanTransformArtifacts &result)
-      : MoiResourcePlanningState(input, arch, result, result.moi_operating_point) {}
+                           const ConSanTransformArtifacts &result, const MoiOptions &options)
+      : MoiResourcePlanningState(MoiResourceProblem(input, arch, options, options,
+                                                    result.program_inventory,
+                                                    result.observation_plan, {}),
+                                 options, result.resource_plans) {}
 
   [[nodiscard]] MoiDenseOwnerLivenessProof
   prepare_dense_liveness_for_owners(std::span<const uint64_t> owners,

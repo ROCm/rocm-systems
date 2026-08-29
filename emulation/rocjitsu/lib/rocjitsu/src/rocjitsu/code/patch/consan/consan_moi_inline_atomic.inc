@@ -57,7 +57,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
-  MoiResourcePlanningState resource_state(bytes, arch, result);
+  MoiResourcePlanningState resource_state(bytes, arch, result, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;

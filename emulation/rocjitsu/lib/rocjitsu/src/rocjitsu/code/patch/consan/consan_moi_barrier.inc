@@ -2224,7 +2224,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  MoiResourcePlanningState standalone_resource_state(bytes, arch, result);
+  MoiResourcePlanningState standalone_resource_state(bytes, arch, result, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;

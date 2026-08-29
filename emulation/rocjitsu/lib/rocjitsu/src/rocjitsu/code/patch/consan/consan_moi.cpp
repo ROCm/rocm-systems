@@ -923,8 +923,11 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
   // of rebuilding the full instruction graph for every option refinement.
-  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, result,
-                                                   effective_options);
+  const MoiResourceProblem resource_problem(code_object_bytes, arch, effective_options,
+                                            effective_options, result.program_inventory,
+                                            result.observation_plan, moi_candidates);
+  MoiResourcePlanningState resource_planning_state(resource_problem, effective_options,
+                                                   result.resource_plans);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   effective_options.moi_dynamic_stack_spill =
       moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&

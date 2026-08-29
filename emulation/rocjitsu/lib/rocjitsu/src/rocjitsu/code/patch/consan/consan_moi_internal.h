@@ -35,6 +35,41 @@ namespace rocjitsu {
 
 struct MoiOptions;
 
+/// Immutable input to one MOI resource-solving run.
+///
+/// The problem binds the exact image and target to effective semantic request,
+/// runtime binding, published inventory/policy, and normalized access sites.
+/// It deliberately contains no selected register, site plan, diagnostic, CFG
+/// cache, or mutable reservation. Those belong to an attempted operating point,
+/// its result, or the solver's private workspace.
+class MoiResourceProblem {
+public:
+  MoiResourceProblem(std::span<const uint8_t> image, rj_code_arch_t arch,
+                     const ConSanRequest &request, const BoundRuntimeResources &resources,
+                     const ProgramInventory &inventory,
+                     const ConSanObservationPlan &observation_plan,
+                     std::span<const ConSanMoiCandidate> candidates)
+      : image_(image), arch_(arch), request_(&request), resources_(&resources),
+        inventory_(&inventory), observation_plan_(&observation_plan), candidates_(candidates) {}
+
+  [[nodiscard]] std::span<const uint8_t> image() const { return image_; }
+  [[nodiscard]] rj_code_arch_t arch() const { return arch_; }
+  [[nodiscard]] const ConSanRequest &request() const { return *request_; }
+  [[nodiscard]] const BoundRuntimeResources &resources() const { return *resources_; }
+  [[nodiscard]] const ProgramInventory &inventory() const { return *inventory_; }
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const { return *observation_plan_; }
+  [[nodiscard]] std::span<const ConSanMoiCandidate> candidates() const { return candidates_; }
+
+private:
+  std::span<const uint8_t> image_;
+  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  const ConSanRequest *request_ = nullptr;
+  const BoundRuntimeResources *resources_ = nullptr;
+  const ProgramInventory *inventory_ = nullptr;
+  const ConSanObservationPlan *observation_plan_ = nullptr;
+  std::span<const ConSanMoiCandidate> candidates_;
+};
+
 /// Immutable facts that determine the size of MOI's transient scalar-save ABI.
 ///
 /// The construction authority projects only request, runtime-binding, and

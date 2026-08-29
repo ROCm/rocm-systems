@@ -41,7 +41,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedFenceRecord> selected;
-  MoiResourcePlanningState resource_state(bytes, arch, result);
+  MoiResourcePlanningState resource_state(bytes, arch, result, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;

@@ -223,6 +223,29 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
       resolve_moi_exec_save_requirement(request, resources, point).automatic_banked_record_capture);
 }
 
+TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
+  const std::array<uint8_t, 4> image{1u, 2u, 3u, 4u};
+  ConSanRequest request;
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  BoundRuntimeResources resources;
+  resources.moi_report_buffer_address = 0x2000u;
+  ProgramInventory inventory;
+  ConSanObservationPlan observation_plan;
+  const std::array<ConSanMoiCandidate, 1> candidates{};
+
+  const MoiResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,
+                                   observation_plan, candidates);
+  EXPECT_EQ(problem.image().data(), image.data());
+  EXPECT_EQ(problem.image().size(), image.size());
+  EXPECT_EQ(problem.arch(), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(&problem.request(), &request);
+  EXPECT_EQ(&problem.resources(), &resources);
+  EXPECT_EQ(&problem.inventory(), &inventory);
+  EXPECT_EQ(&problem.observation_plan(), &observation_plan);
+  EXPECT_EQ(problem.candidates().data(), candidates.data());
+  EXPECT_EQ(problem.candidates().size(), candidates.size());
+}
+
 TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
   MoiExecSaveRequirement requirement;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 0u);
