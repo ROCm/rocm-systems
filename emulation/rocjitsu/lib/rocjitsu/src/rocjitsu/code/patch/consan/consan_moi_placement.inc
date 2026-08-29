@@ -3400,57 +3400,6 @@ private:
   std::unordered_map<MoiResourcePlanSiteKey, size_t, MoiResourcePlanSiteKeyHash> indices_;
 };
 
-class MoiPatchOwnerIndex {
-public:
-  template <typename PatchRange> explicit MoiPatchOwnerIndex(const PatchRange &patches) {
-    for (const ConSanPatchLoweringProduct &patch : patches) {
-      if (!is_persistent_access_patch(patch))
-        continue;
-      for (uint64_t owner : patch.owner_descriptor_file_offsets)
-        persistent_access_patches_by_owner_[owner].push_back(&patch);
-    }
-  }
-
-  [[nodiscard]] const ConSanPatchLoweringProduct *
-  persistent_access_patch_for(std::span<const uint64_t> owners) {
-    std::vector<uint64_t> key(owners.begin(), owners.end());
-    if (const auto cached = persistent_access_cache_.find(key);
-        cached != persistent_access_cache_.end()) {
-      return cached->second;
-    }
-
-    const ConSanPatchLoweringProduct *match = nullptr;
-    if (!owners.empty()) {
-      const auto candidates = persistent_access_patches_by_owner_.find(owners.front());
-      if (candidates != persistent_access_patches_by_owner_.end()) {
-        const auto found = std::ranges::find_if(candidates->second, [&](const auto *patch) {
-          return std::ranges::all_of(owners, [&](uint64_t owner) {
-            return std::ranges::find(patch->owner_descriptor_file_offsets, owner) !=
-                   patch->owner_descriptor_file_offsets.end();
-          });
-        });
-        if (found != candidates->second.end())
-          match = *found;
-      }
-    }
-    persistent_access_cache_.emplace(std::move(key), match);
-    return match;
-  }
-
-private:
-  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchLoweringProduct &patch) {
-    return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
-            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-            patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
-           patch.scratch_vgpr && patch.persistent_epoch_private_offset;
-  }
-
-  std::unordered_map<uint64_t, std::vector<const ConSanPatchLoweringProduct *>>
-      persistent_access_patches_by_owner_;
-  std::map<std::vector<uint64_t>, const ConSanPatchLoweringProduct *> persistent_access_cache_;
-};
-
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
