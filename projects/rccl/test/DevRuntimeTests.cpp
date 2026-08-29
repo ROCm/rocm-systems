@@ -4461,6 +4461,136 @@ TEST_F(DevicePointerAccessorTest, LsaMultimemUnknownWindow_ReturnsInvalidArgumen
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommDestroy releases what ncclDevCommCreate set up: the resource
+// window and the GIN devcomm, each only if it exists. It also handles devComms
+// from older headers, which carry no magic and are assumed to be the earliest
+// compat version.
+
+class DevCommDestroyTest : public NcclVersionCompatTest {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  ncclDevComm devComm{};
+  ncclWindow_vidmem window{};
+
+  void SetUp() override {
+    NcclVersionCompatTest::SetUp();
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
+
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->cudaDev = 2;
+
+    devComm.magic = NCCL_API_MAGIC;
+    devComm.version = NCCL_VERSION_CODE;
+  }
+};
+
+// Nothing allocated means nothing to release.
+TEST_F(DevCommDestroyTest, EmptyDevComm_ReleasesNothing) {
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 0);
+}
+
+// Branch: a resource window is deregistered, and the one carried by the
+// devcomm is what gets passed along.
+TEST_F(DevCommDestroyTest, ResourceWindow_IsDeregistered) {
+  devComm.resourceWindow = &window;
+  ncclWindow_t seen = nullptr;
+  ScopedHook winDereg(g_ncclCommWindowDeregister, [&](ncclComm_t, ncclWindow_t w) {
+    seen = w;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+  EXPECT_EQ(winDereg.calls, 1);
+  EXPECT_EQ(seen, &window);
+}
+
+// Branch: that deregistration failing is propagated rather than swallowed.
+TEST_F(DevCommDestroyTest, ResourceWindowDeregisterFails_PropagatesError) {
+  devComm.resourceWindow = &window;
+  ScopedHook winDereg(g_ncclCommWindowDeregister,
+                      [](ncclComm_t, ncclWindow_t) { return ncclSystemError; });
+
+  EXPECT_NE(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+}
+
+// Branch: the work is scoped to the comm's device and the previous one restored,
+// so a caller's current device survives the call.
+TEST_F(DevCommDestroyTest, ScopesToCommDeviceAndRestores) {
+  std::vector<int> setTo;
+  ScopedHook getDev(g_hipGetDevice, [](int* d) {
+    *d = 7;
+    return hipSuccess;
+  });
+  ScopedHook setDev(g_hipSetDevice, [&](int d) {
+    setTo.push_back(d);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+  ASSERT_EQ(setTo.size(), 2u);
+  EXPECT_EQ(setTo[0], comm->cudaDev);  // switched to the comm's device
+  EXPECT_EQ(setTo[1], 7);              // and back to the caller's
+}
+
+// Branch: a devComm from an older header carries no magic, so the earliest
+// compat record is assumed rather than the version being looked up.
+TEST_F(DevCommDestroyTest, UnversionedDevComm_UsesEarliestCompat) {
+  devComm.magic = 0;
+  devComm.version = 999999;  // would fail a lookup; must not be consulted
+
+  EXPECT_EQ(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+}
+
+// Branch: a versioned devComm the library cannot serve is refused.
+TEST_F(DevCommDestroyTest, UnsupportedVersion_ReturnsError) {
+  devComm.version = NCCL_VERSION_CODE + 1;
+
+  EXPECT_NE(ncclDevCommDestroy(comm, &devComm), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
+// The devcomm dump helpers are diagnostics: they print and return nothing, so
+// the contract is that they survive whatever they are handed. Output is
+// captured to keep it out of the test log.
+
+TEST(DevCommDumpTest, DumpsWithoutReadableHandles) {
+  ncclDevComm devComm{};
+  devComm.rank = 1;
+  devComm.nRanks = 4;
+  devComm.ginConnectionCount = 0;
+
+  testing::internal::CaptureStdout();
+  ncclDevCommDump(&devComm);
+  std::string out = testing::internal::GetCapturedStdout();
+  EXPECT_NE(out.find("Dev Comm Dump"), std::string::npos);
+}
+
+// Branch: per-connection dumps are dispatched by device type. The copy fake
+// fails by default, so each helper prints nothing rather than reading through a
+// handle that is not real device memory.
+TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
+  ncclDevComm devComm{};
+  devComm.ginConnectionCount = 2;
+  devComm.ginNetDeviceTypes[0] = NCCL_GIN_TYPE_GDAKI;
+  devComm.ginNetDeviceTypes[1] = NCCL_GIN_TYPE_PROXY;
+  devComm.ginHandles[0] = reinterpret_cast<void*>(0x1000);
+  devComm.ginHandles[1] = reinterpret_cast<void*>(0x2000);
+
+  testing::internal::CaptureStdout();
+  ncclDevCommDump(&devComm);
+  std::string out = testing::internal::GetCapturedStdout();
+  EXPECT_NE(out.find("Connections 2"), std::string::npos);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 

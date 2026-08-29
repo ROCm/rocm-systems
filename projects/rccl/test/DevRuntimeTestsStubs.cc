@@ -117,7 +117,14 @@ std::function<ncclResult_t(const ncclComm_t, void*)> g_ncclCommDeregister = Defa
 ncclResult_t ncclCommDeregister(const ncclComm_t comm, void* handle) {
   return g_ncclCommDeregister(comm, handle);
 }
-ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
+// Seam: ncclDevCommDestroy releases its resource window through the public
+// wrapper, so the branch is only observable by counting.
+static ncclResult_t DefaultCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
+std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_ncclCommWindowDeregister = DefaultCommWindowDeregister;
+
+ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
+  return g_ncclCommWindowDeregister(comm, win);
+}
 
 // ---------------------------------------------------------------------------
 // Group state machine.
@@ -568,6 +575,16 @@ static hipError_t DefaultSetDevice(int) { return hipSuccess; }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultSetDevice;
 
 HIP_FAKE hipError_t hipSetDevice(int dev) { return g_hipSetDevice(dev); }
+
+// Synchronous copy, used by the devcomm dump helpers. Unfaked it reaches the
+// real driver; the default reports failure so a dump of a fake device handle
+// prints nothing rather than reading through it.
+static hipError_t DefaultMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy = DefaultMemcpy;
+
+HIP_FAKE hipError_t hipMemcpy(void* dst, const void* src, size_t n, hipMemcpyKind kind) {
+  return g_hipMemcpy(dst, src, n, kind);
+}
 static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_hipMemRelease = DefaultMemRelease;
 
@@ -671,6 +688,8 @@ void ResetDevRuntimeFakes() {
   g_intruAddressMapFind                     = DefaultIntruAddressMapFind;
   g_hipGetDevice                            = DefaultGetDevice;
   g_hipSetDevice                            = DefaultSetDevice;
+  g_hipMemcpy                               = DefaultMemcpy;
+  g_ncclCommWindowDeregister                = DefaultCommWindowDeregister;
   g_hipMemcpyAsync                          = DefaultMemcpyAsync;
   g_hipMemsetAsync                          = DefaultMemsetAsync;
   g_hipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
