@@ -203,7 +203,7 @@ lds_check_trap_predelay_setup_words(const ConSanAccessInventorySite &access) {
 }
 
 struct SplitTwoAddressLdsExpansionPlan {
-  TwoAddressLdsByteOffsets offsets;
+  ConSanScTwoAddressLdsByteOffsets offsets;
   uint16_t element_dwords = 0;
 
   [[nodiscard]] uint16_t large_offset_count() const {
@@ -231,7 +231,8 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
   std::array<uint32_t, 1> words{};
   if (!read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
     return std::nullopt;
-  const auto offsets = two_address_lds_byte_offsets(*access.lowering.form, words.front());
+  const auto offsets =
+      consan_sc_two_address_lds_byte_offsets(*access.lowering.form, words.front());
   if (!offsets)
     return std::nullopt;
   return SplitTwoAddressLdsExpansionPlan{
@@ -582,17 +583,13 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     if (preserve_address)
       duplicate_load[1] = (duplicate_load[1] & 0xFFFFFF00u) | saved_address_vgpr;
   } else if (site.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address = site.lowering.form && site.lowering.form->kind ==
-                                                       ConSanAccessLoweringFormKind::NativeTwoRange;
-    const uint32_t element_width = site.lowering.form->element_width_bits;
-    auto word0 =
-        build_ds_load_word0_from_vds_word0(original_access[0], element_width, two_address, arch);
+    auto word0 = consan_sc_build_ds_load_word0(form, original_access[0], arch);
     if (!word0) {
       errors.emplace_back("ConSan LDS check/trap proof could not encode store readback");
       return std::nullopt;
     }
     duplicate_load[0] = *word0;
-    duplicate_load[1] = build_ds_load_word1(*form.address_vgpr, scratch_vgpr);
+    duplicate_load[1] = consan_sc_build_ds_load_word1(*form.address_vgpr, scratch_vgpr);
   } else {
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported site");
     return std::nullopt;
@@ -603,7 +600,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     return std::nullopt;
   }
 
-  auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
+  auto wait_dscnt = consan_sc_build_wait_dscnt(0, arch);
   auto first_compare_vgpr =
       form.destination_accvgpr &&
               target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned
@@ -726,7 +723,8 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     words.push_back(*wait_dscnt);
     words.push_back(*d16_seed_scratch);
   }
-  if (!append_delay_words(words, arch, options, errors, "ConSan LDS check/trap proof"))
+  if (!consan_sc_append_delay_words(words, arch, options, errors,
+                                    "ConSan LDS check/trap proof"))
     return std::nullopt;
   if (split_two_address) {
     const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *form.address_vgpr;
@@ -776,8 +774,9 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
         is_subdword_lds_store(site) ? std::optional<uint16_t>(compare_scratch_vgpr) : compare_vgpr;
     auto chunk_cmp_ne =
         effective_compare_vgpr
-            ? build_v_cmp_ne_u32_e32_word(static_cast<uint16_t>(*effective_compare_vgpr & 0xFFu),
-                                          static_cast<uint16_t>(scratch_vgpr + i), arch)
+            ? consan_sc_build_v_cmp_ne_u32(
+                  static_cast<uint16_t>(*effective_compare_vgpr & 0xFFu),
+                  static_cast<uint16_t>(scratch_vgpr + i), arch)
             : std::nullopt;
     if (!chunk_cmp_ne) {
       errors.emplace_back("ConSan LDS check/trap proof could not encode chunk compare");

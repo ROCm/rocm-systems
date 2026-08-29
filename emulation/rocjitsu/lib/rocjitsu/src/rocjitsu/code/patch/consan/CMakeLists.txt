@@ -19,6 +19,7 @@ target_sources(
         consan_final_validation.cpp
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
+        consan_inventory_diagnostics.cpp
         consan_lowerer.cpp
         consan_moi.cpp
         consan_moi_access_apply.cpp
@@ -55,5 +56,6 @@ target_sources(
         consan_semantic_classifiers.cpp
         consan_sync_event_index.cpp
         consan_sync_metadata.cpp
+        consan_supercollider_target_ops.cpp
         consan_types.cpp
 )

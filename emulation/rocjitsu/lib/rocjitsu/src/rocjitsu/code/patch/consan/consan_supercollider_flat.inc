@@ -210,8 +210,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  const auto delay_words =
-      delay_instruction_word_count(options, result.errors, "ConSan flat check/trap proof");
+  const auto delay_words = consan_sc_delay_instruction_word_count(
+      options, result.errors, "ConSan flat check/trap proof");
   if (!delay_words)
     return;
 
@@ -1134,7 +1134,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const auto wait_flat = target.wait_counter_family == ConSanWaitCounterFamily::Gfx9
                              ? instrumentation::build_s_wait_flat_load_lds0(arch)
-                             : build_s_wait_dscnt_word(0, arch);
+                             : consan_sc_build_wait_dscnt(0, arch);
   if (!wait_flat) {
     result.errors.emplace_back("ConSan flat check/trap proof could not encode sequence");
     return;
@@ -1245,8 +1245,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.words.push_back(*save_vcc);
     planned.words.insert(planned.words.end(), original_access.begin(),
                          original_access.begin() + access_words);
-    if (!append_delay_words(planned.words, arch, options, result.errors,
-                            "ConSan flat check/trap proof"))
+    if (!consan_sc_append_delay_words(planned.words, arch, options, result.errors,
+                                      "ConSan flat check/trap proof"))
       return;
     const bool needs_runtime_group_gate =
         target.requires_sc_runtime_flat_group_gate &&
@@ -1295,8 +1295,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       mismatch_branch_indices.reserve(*required_vgprs);
       for (uint16_t i = 0; i < *required_vgprs; ++i) {
         const auto chunk_cmp_ne =
-            build_v_cmp_ne_u32_e32_word(static_cast<uint16_t>(*compare_vgpr + i),
-                                        static_cast<uint16_t>(candidate.scratch_vgpr + i), arch);
+            consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(*compare_vgpr + i),
+                                         static_cast<uint16_t>(candidate.scratch_vgpr + i), arch);
         if (!chunk_cmp_ne) {
           result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
           return;
@@ -1377,8 +1377,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         return;
       }
       const auto chunk_cmp_ne =
-          subword ? build_v_cmp_ne_u16_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch)
-                  : build_v_cmp_ne_u32_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch);
+          subword ? consan_sc_build_v_cmp_ne_u16(compare_lhs_vgpr, compare_rhs_vgpr, arch)
+                  : consan_sc_build_v_cmp_ne_u32(compare_lhs_vgpr, compare_rhs_vgpr, arch);
       if (!chunk_cmp_ne) {
         result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
         return;

@@ -83,12 +83,12 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     if (barrier.file_offset <= bytes.size() &&
         sizeof(encoding) <= bytes.size() - barrier.file_offset) {
       std::memcpy(&encoding, bytes.data() + barrier.file_offset, sizeof(encoding));
-      site.decoded_operands = barrier_decoded_operands(barrier, encoding);
+      site.decoded_operands = consan_barrier_decoded_operands(barrier, encoding);
     } else {
       site.decoded_operands = "-";
     }
     site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=barrier|pc=0x" + fixed_hex(site.text_offset, 16) +
+                    "|kind=barrier|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
                     "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -110,10 +110,10 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     site.size = atomic.size;
     site.width_bits = atomic.width_bits;
     site.mnemonic = atomic.mnemonic;
-    site.semantic_role = atomic_semantic_role(atomic);
-    site.decoded_operands = atomic_decoded_operands(atomic);
+    site.semantic_role = consan_atomic_semantic_role(atomic);
+    site.decoded_operands = consan_atomic_decoded_operands(atomic);
     site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=atomic|pc=0x" + fixed_hex(site.text_offset, 16) +
+                    "|kind=atomic|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
                     "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -133,10 +133,10 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     site.mnemonic = memory.mnemonic;
     site.semantic_role = memory.operation == ConSanOrdinaryMemoryOperation::Load ? "ordinary-load"
                                                                                  : "ordinary-store";
-    site.decoded_operands = ordinary_memory_decoded_operands(memory);
+    site.decoded_operands = consan_ordinary_memory_decoded_operands(memory);
     site.ordinary_memory_support_reason = memory.support_reason;
     site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=ordinary-memory|pc=0x" + fixed_hex(site.text_offset, 16) +
+                    "|kind=ordinary-memory|pc=0x" + consan_fixed_hex(site.text_offset, 16) +
                     "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -174,10 +174,10 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     }
     site.mnemonic = access.mnemonic;
     site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
-    site.decoded_operands = lds_decoded_operands(access.operands);
+    site.decoded_operands = consan_lds_decoded_operands(access.operands);
     site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +
                     site.container_name + "|kind=lds-access|pc=0x" +
-                    fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
+                    consan_fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
                     "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -185,7 +185,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
 
 void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
                                 ConSanTransformArtifacts &result) {
-  const std::string fingerprint = code_object_fingerprint(bytes);
+  const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
@@ -267,7 +267,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.container_name = container.name;
     event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                     "|event=" + std::string(kind) + "|pc=0x" + fixed_hex(event.text_offset, 16) +
+                     "|event=" + std::string(kind) +
+                     "|pc=0x" + consan_fixed_hex(event.text_offset, 16) +
                      "|mnemonic=" + event.mnemonic +
                      "|occurrence=" + std::to_string(event.occurrence);
     events.push_back(std::move(event));
@@ -1144,7 +1145,8 @@ void build_barrier_move_destination_inventory(
         destination.identity =
             event->code_object_fingerprint + "|" +
             std::string(sequence.in_kernel ? "kernel=" : "function=") + sequence.container_name +
-            "|destination=instruction|pc=0x" + fixed_hex(destination.text_offset, 16) +
+            "|destination=instruction|pc=0x" +
+            consan_fixed_hex(destination.text_offset, 16) +
             "|mnemonic=" + destination.mnemonic + "|size=" + std::to_string(destination.size);
         if (!seen.insert(destination.identity).second)
           continue;
@@ -1793,7 +1795,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
                                      : "exact same-block gfx12 s_wait_storecnt_dscnt 0 "
                                        "immediately before atomic release";
     sequence.release_wait_text_offset = *boundary;
-    sequence.identity += "|release-wait=pc=0x" + fixed_hex(*boundary, 16);
+    sequence.identity += "|release-wait=pc=0x" + consan_fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;
   }
 
@@ -1825,7 +1827,8 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
             ? "exact same-block LDS-zero wait before workgroup group-FLAT acquire-release"
             : "exact same-block LDS-zero wait before workgroup group-FLAT release";
     sequence.release_wait_text_offset = *boundary;
-    sequence.identity += "|workgroup-release-wait=pc=0x" + fixed_hex(*boundary, 16);
+    sequence.identity +=
+        "|workgroup-release-wait=pc=0x" + consan_fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;
   }
 }
@@ -2212,7 +2215,7 @@ void associate_ordinary_release_sync_sequences(
         "exact same-block architecture-specific store-count-zero wait immediately before "
         "scoped ordinary release store";
     sequence.release_wait_text_offset = *boundary;
-    sequence.identity += "|release-waits=pc=0x" + fixed_hex(*boundary, 16);
+    sequence.identity += "|release-waits=pc=0x" + consan_fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;
   }
 }
@@ -2433,7 +2436,8 @@ void associate_ordinary_acquire_sync_sequences(
     sequence.confidence_reason =
         "exact same-block workgroup group-FLAT load/acquire-zero-wait sequence";
     sequence.raw_scope = 1u;
-    sequence.identity += "|workgroup-acquire-wait-end=pc=0x" + fixed_hex(*wait_end, 16);
+    sequence.identity +=
+        "|workgroup-acquire-wait-end=pc=0x" + consan_fixed_hex(*wait_end, 16);
     sequence.end_text_offset = *wait_end;
   }
 }

@@ -4,8 +4,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
 
-  const auto delay_words =
-      delay_instruction_word_count(options, result.errors, "ConSan LDS check/trap proof");
+  const auto delay_words = consan_sc_delay_instruction_word_count(
+      options, result.errors, "ConSan LDS check/trap proof");
   if (!delay_words)
     return;
 
