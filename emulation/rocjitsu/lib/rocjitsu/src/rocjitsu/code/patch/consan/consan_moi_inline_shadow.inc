@@ -136,7 +136,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
     local_entry_islands.emplace(original_text, result.program_inventory, result.patches, arch,
-                                kIndirectIslandWords, resource_state.reserved_ranges);
+                                kIndirectIslandWords, moi_resource_reserved_ranges(resource_state));
   BranchOnlyRelayRouter branch_router;
   std::optional<uint64_t> latest_generated_frontier_word;
   if (local_entry_islands) {
@@ -311,7 +311,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     const bool has_unspilled_component_override = std::ranges::any_of(
         resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
           const auto *assignment =
-              find_moi_transient_sgpr_assignment(result.moi_operating_point, descriptor_offset);
+              moi_transient_sgpr_assignment(result.moi_operating_point, descriptor_offset);
           return assignment != nullptr && !assignment->spill_backed;
         });
     // The spill-backed scalar window is preserved only after the access body
@@ -719,13 +719,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           use_dense_call ? dense_entry_islands.at(candidate_ptr)
                          : access_island_begin + candidate_indices.at(candidate_ptr) *
                                                      access_relay_words * sizeof(uint32_t);
-      auto entry_plan = plan_moi_access_entry_island(
+      auto entry_plan = plan_moi_access_entry_island_with_policy(
           original_text, candidate, kIndirectIslandWords, preferred_entry_island,
           kIndirectIslandWords,
           /*use_preferred_without_direct_branch=*/false,
-          !use_dense_call && local_entry_islands ? &*local_entry_islands : nullptr,
-          resource_state.block_index, relocation_decoder.get(), arch, candidate_errors,
-          [&](uint64_t begin, uint64_t end) {
+          !use_dense_call && local_entry_islands ? &*local_entry_islands : nullptr, resource_state,
+          relocation_decoder.get(), arch, candidate_errors, [&](uint64_t begin, uint64_t end) {
             if (use_dense_call)
               return false;
             const bool overlaps = relocation_overlaps_synchronization(begin, end);

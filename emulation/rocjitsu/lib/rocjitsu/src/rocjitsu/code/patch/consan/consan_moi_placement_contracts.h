@@ -225,6 +225,13 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
                                                              uint64_t text_offset,
                                                              uint64_t byte_count);
 
+[[nodiscard]] bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state,
+                                                    uint64_t first_offset, uint64_t second_offset);
+
+[[nodiscard]] bool moi_resource_owner_anchors_admit_sgpr_ranges(
+    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
+    std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
+
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
@@ -271,6 +278,14 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
     MoiResourcePlanningState &resource_state, rj_code_arch_t arch,
     std::vector<std::string> &errors);
+
+[[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island_with_policy(
+    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
+    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
+    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
+    MoiResourcePlanningState &resource_state, Decoder *decoder, rj_code_arch_t arch,
+    std::vector<std::string> &errors,
+    const std::function<bool(uint64_t, uint64_t)> &relocation_allowed);
 
 [[nodiscard]] MoiResourcePlanningStatePtr make_moi_resource_planning_state(
     const MoiResourceProblem &problem, const ConSanMoiOperatingPoint &allocation,
@@ -323,6 +338,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
 moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
                                uint64_t descriptor_offset);
 
+[[nodiscard]] const ConSanMoiTransientSgprAssignment *
+moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                              uint64_t descriptor_offset);
+
 [[nodiscard]] std::vector<MoiSgprRange>
 moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
                                    const ConSanMoiOperatingPoint &point,
@@ -335,6 +354,12 @@ moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
 
 void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
                                           const MoiPlannedAccessPatch &patch);
+
+void note_moi_access_patch_info(ConSanPatchInfo &info, const MoiPlannedAccessPatch &patch);
+
+void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
+                               const ResolvedMoiScratchPlan &plan,
+                               const ConSanMoiWorkgroupShadowLayout &layout);
 
 void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
                                        const MoiPlannedReplayAccessPatch &patch);

@@ -34,6 +34,7 @@ target_sources(
         consan_moi_engine_contracts.cpp
         consan_moi_exact_shadow_emission.cpp
         consan_moi_inline_shadow_emission.cpp
+        consan_moi_inline_shadow.cpp
         consan_moi_memory_emission.cpp
         consan_moi_model.cpp
         consan_moi_native_abi.cpp

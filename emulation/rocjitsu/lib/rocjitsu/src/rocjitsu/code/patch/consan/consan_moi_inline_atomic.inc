@@ -58,9 +58,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
-  MoiResourcePlanningState resource_state(bytes, arch, result.program_inventory,
-                                          result.observation_plan, result.resource_plans, options,
-                                          options, options);
+  MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
+      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -75,11 +75,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (!candidate.is_rmw &&
         candidate.ordered_sequence_end_text_offset > site.text_offset + site.size) {
       const uint64_t sequence_end = candidate.ordered_sequence_end_text_offset;
-      const BasicBlock *site_block = block_for_offset(resource_state.block_index, site.text_offset);
-      const BasicBlock *sequence_end_block =
-          block_for_offset(resource_state.block_index, sequence_end - sizeof(uint32_t));
       const uint64_t sequence_size = sequence_end - site.text_offset;
-      if (site_block == nullptr || sequence_end_block != site_block ||
+      if (!moi_resource_offsets_share_block(*resource_state, site.text_offset,
+                                            sequence_end - sizeof(uint32_t)) ||
           sequence_size > std::numeric_limits<uint32_t>::max() ||
           sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
         result.warnings.emplace_back(
@@ -124,7 +122,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(resource_state, options, options, options,
+            : plan_moi_resource_site(*resource_state, options, options, options,
                                      ConSanResourceSiteKind::Atomic, candidate_index,
                                      site.text_offset, candidate.kernel_descriptor_file_offset,
                                      scratch_count, nullptr, &candidate.lowering_form);
@@ -270,7 +268,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
                                                 arch, kMoiLocalIndirectIslandWords);
-  std::vector<MoiLocalNopIsland> appended_indirect_islands;
+  struct MoiInlineAtomicAppendedIsland {
+    uint64_t text_offset = 0;
+    bool claimed = false;
+  };
+  std::vector<MoiInlineAtomicAppendedIsland> appended_indirect_islands;
   const bool needs_appended_island_bank =
       planned_candidates.size() > 1u &&
       (old_text.size() > 64u * 1024u ||
@@ -296,7 +298,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
   }
   const auto claim_appended_island = [&](uint64_t anchor_offset) -> std::optional<uint64_t> {
-    for (MoiLocalNopIsland &island : appended_indirect_islands) {
+    for (MoiInlineAtomicAppendedIsland &island : appended_indirect_islands) {
       if (island.claimed || !compute_sopp_branch_simm16(anchor_offset, island.text_offset))
         continue;
       island.claimed = true;
@@ -321,8 +323,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     for (size_t index = 0; index < planned_candidates.size(); ++index) {
       const PlannedInlineAtomic &planned = planned_candidates[index];
       const uint64_t anchor = planned.candidate.site.text_offset;
-      const bool appended_reachable =
-          std::ranges::any_of(appended_indirect_islands, [&](const MoiLocalNopIsland &island) {
+      const bool appended_reachable = std::ranges::any_of(
+          appended_indirect_islands, [&](const MoiInlineAtomicAppendedIsland &island) {
             return compute_sopp_branch_simm16(anchor, island.text_offset).has_value();
           });
       const bool stranded = !compute_sopp_branch_simm16(anchor, placement_planner.appended_end()) &&
@@ -421,55 +423,25 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         }
         const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
             group_options, group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
-        MoiDenseOwnerLivenessProof owner_proof =
-            resource_state.prepare_dense_liveness_for_owners(group_owners, bootstrap_ranges);
-        if (!owner_proof.complete || owner_proof.contexts.empty()) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline atomic dense relay has incomplete owner liveness");
-          continue;
-        }
-        const auto anchor_admits_bootstrap = [&](uint64_t anchor) {
-          BasicBlock *block = block_for_offset(resource_state.block_index, anchor);
-          const Instruction *instruction = instruction_at(block, anchor);
-          if (block == nullptr || instruction == nullptr)
-            return false;
-          bool saw_owner = false;
-          for (const MoiKernelResourceContext *context : owner_proof.contexts) {
-            if (context == nullptr || !context->block_set.contains(block))
-              continue;
-            saw_owner = true;
-            if (context->liveness_is_restricted || context->has_indirect_sgpr_access)
-              return false;
-            const InstDefUse def_use(*instruction);
-            for (const MoiSgprRange &range : bootstrap_ranges) {
-              const RegisterRef registers{RegClass::SGPR, range.base,
-                                          static_cast<uint8_t>(range.width)};
-              if (static_cast<uint32_t>(range.base) + range.width > context->current_sgpr_count ||
-                  context->liveness->any_live_before(*instruction, registers) ||
-                  def_use.defs.contains(registers) || def_use.uses.contains(registers)) {
-                return false;
-              }
-            }
-          }
-          return saw_owner;
-        };
-        if (!std::ranges::all_of(anchors, anchor_admits_bootstrap)) {
+        if (!moi_resource_owner_anchors_admit_sgpr_ranges(*resource_state, group_owners, anchors,
+                                                          bootstrap_ranges)) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay scalar ABI is live at a call anchor");
           continue;
         }
 
         constexpr size_t kHostWords = kMoiLocalIndirectIslandWords + 1u;
-        auto dense_host = find_moi_dense_relay_host(
-            resource_state, old_text,
+        auto dense_host = find_moi_dense_relay_host_for_owners(
+            *resource_state, old_text,
             {
                 .owner_begin = owner_begin,
                 .owner_end = owner_end,
                 .host_word_count = kHostWords,
                 .anchors = anchors,
-                .preapplied_reserved_ranges = resource_state.reserved_ranges,
-                .owner_proof = owner_proof,
+                .preapplied_reserved_ranges = moi_resource_reserved_ranges(*resource_state),
+                .owner_descriptor_file_offsets = group_owners,
                 .bootstrap_ranges = bootstrap_ranges,
+                .claimed_host_ranges = {},
             },
             overlaps_existing);
         if (!dense_host) {

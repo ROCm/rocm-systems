@@ -25,6 +25,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
@@ -161,11 +162,7 @@ namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
-
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
 

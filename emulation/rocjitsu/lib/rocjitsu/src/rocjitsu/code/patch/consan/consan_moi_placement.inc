@@ -2904,6 +2904,19 @@ std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
       resource_state.decoder.get(), arch, errors, [](uint64_t, uint64_t) { return true; });
 }
 
+std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island_with_policy(
+    std::span<const uint8_t> original_text, const ConSanMoiCandidate &candidate,
+    uint32_t required_island_words, uint64_t preferred_offset, uint64_t preferred_island_words,
+    bool use_preferred_without_direct_branch, MoiLocalNopIslandAllocator *local_islands,
+    MoiResourcePlanningState &resource_state, Decoder *decoder, rj_code_arch_t arch,
+    std::vector<std::string> &errors,
+    const std::function<bool(uint64_t, uint64_t)> &relocation_allowed) {
+  return plan_moi_access_entry_island(
+      original_text, candidate, required_island_words, preferred_offset, preferred_island_words,
+      use_preferred_without_direct_branch, local_islands, resource_state.block_index, decoder, arch,
+      errors, relocation_allowed);
+}
+
 /// An at-anchor entry island replaces a multi-instruction owner-local window.
 /// Every original control-flow edge into that window must therefore enter at
 /// its first instruction. Staying within the anchor's original basic block is
@@ -2922,6 +2935,47 @@ std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(
 bool moi_resource_entry_window_is_single_entry(const MoiResourcePlanningState &state,
                                                uint64_t text_offset, uint64_t byte_count) {
   return moi_entry_window_is_single_entry(state.block_index, text_offset, byte_count);
+}
+
+bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state, uint64_t first_offset,
+                                      uint64_t second_offset) {
+  BasicBlock *first = block_for_offset(state.block_index, first_offset);
+  return first != nullptr && block_for_offset(state.block_index, second_offset) == first;
+}
+
+bool moi_resource_owner_anchors_admit_sgpr_ranges(MoiResourcePlanningState &state,
+                                                  std::span<const uint64_t> owners,
+                                                  std::span<const uint64_t> anchors,
+                                                  std::span<const MoiSgprRange> ranges) {
+  MoiDenseOwnerLivenessProof proof = state.prepare_dense_liveness_for_owners(owners, ranges);
+  if (!proof.complete || proof.contexts.empty() || anchors.empty() || ranges.empty())
+    return false;
+  for (uint64_t anchor : anchors) {
+    BasicBlock *block = block_for_offset(state.block_index, anchor);
+    const Instruction *instruction = instruction_at(block, anchor);
+    if (block == nullptr || instruction == nullptr)
+      return false;
+    bool saw_owner = false;
+    for (const MoiKernelResourceContext *context : proof.contexts) {
+      if (context == nullptr || !context->block_set.contains(block))
+        continue;
+      saw_owner = true;
+      if (context->liveness_is_restricted || context->has_indirect_sgpr_access)
+        return false;
+      const InstDefUse def_use(*instruction);
+      for (const MoiSgprRange &range : ranges) {
+        const RegisterRef registers{RegClass::SGPR, range.base, static_cast<uint8_t>(range.width)};
+        if (static_cast<uint32_t>(range.base) + range.width > context->current_sgpr_count ||
+            context->liveness->any_live_before(*instruction, registers) ||
+            def_use.defs.contains(registers) || def_use.uses.contains(registers)) {
+          return false;
+        }
+      }
+    }
+    if (!saw_owner)
+      return false;
+  }
+  return true;
 }
 
 /// Finds one owner-common VGPR that is dead immediately before @p text_offset
@@ -3035,6 +3089,12 @@ const ConSanMoiPersistentVgprAssignment *
 moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
                                uint64_t descriptor_offset) {
   return find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+}
+
+const ConSanMoiTransientSgprAssignment *
+moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                              uint64_t descriptor_offset) {
+  return find_moi_transient_sgpr_assignment(allocation, descriptor_offset);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
