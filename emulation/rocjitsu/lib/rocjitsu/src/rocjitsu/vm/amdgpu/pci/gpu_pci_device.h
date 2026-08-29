@@ -15,6 +15,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
+#include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
 #include "simdojo/components/pci_device.h"
 #include "simdojo/components/register_file.h"
 
@@ -35,6 +36,15 @@ struct GpuPciDeviceSpec {
   uint64_t vram_aperture_bytes = 0;
   uint64_t doorbell_aperture_bytes = 0; ///< Doorbell aperture size.
   uint64_t register_aperture_bytes = 0; ///< Register aperture size.
+  /// @brief The blocks this device publishes to a guest driver.
+  ///
+  /// @details Carried in the spec rather than chosen inside the device, because
+  /// the identity in @ref id and the hardware described here have to be the
+  /// same GPU. A device that picked its own table could present one part's PCI
+  /// IDs alongside another part's blocks, and the guest would instantiate
+  /// drivers for hardware the identity says is not there. Derive it with
+  /// @ref gpu_pci_spec_from_config, which reads both from one config.
+  IpDiscoverySpec discovery;
 };
 
 /// @brief PCI function presenting a simulated GPU to a guest driver.
@@ -64,6 +74,15 @@ public:
   /// through the indirect window, but a device that advertises an aperture too
   /// small to answer its own registers is refused rather than quietly broken.
   static constexpr uint64_t kMinRegisterApertureBytes = 512 * 1024;
+
+  /// @brief Where the discovery table sits, measured back from the top of
+  /// memory.
+  ///
+  /// @details The driver computes this itself, from the capacity the device
+  /// reports, whenever the scratch registers do not name somewhere else. So the
+  /// device does not get to choose the address: it either writes the table here
+  /// or the driver reads whatever happens to be here instead.
+  static constexpr uint64_t kDiscoveryOffsetFromTopOfVram = 64 * 1024;
 
   /// @brief Construct the function.
   /// @param[in] name Component name, used in diagnostics.
@@ -102,6 +121,10 @@ private:
   [[nodiscard]] uint64_t indirect_address() const;
   [[nodiscard]] bool read_vram(uint64_t offset, uint32_t &value) const;
   bool write_vram(uint64_t offset, uint32_t value);
+
+  /// @brief Write the discovery table where the driver will look for it.
+  /// @returns Whether the table was built, accepted and stored.
+  [[nodiscard]] bool publish_discovery_table();
 
   GpuPciDeviceSpec spec_;
   BarAccessTrace *trace_;

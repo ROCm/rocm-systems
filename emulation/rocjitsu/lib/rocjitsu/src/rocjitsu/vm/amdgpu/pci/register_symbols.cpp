@@ -41,6 +41,7 @@ void add_pre_discovery_symbols(RegisterSymbols &symbols, int bar) {
   name_register(MmioRegister::DriverScratch1, "DRIVER_SCRATCH_1");
   name_register(MmioRegister::DriverScratch2, "DRIVER_SCRATCH_2");
   name_register(MmioRegister::RccConfigMemsize, "RCC_CONFIG_MEMSIZE");
+  name_register(MmioRegister::RccIovFuncIdentifier, "RCC_IOV_FUNC_IDENTIFIER");
   name_register(MmioRegister::Mp0SmnC2pmsg33, "MP0_SMN_C2PMSG_33");
   name_register(MmioRegister::IpDiscoveryVersion, "IP_DISCOVERY_VERSION");
 }

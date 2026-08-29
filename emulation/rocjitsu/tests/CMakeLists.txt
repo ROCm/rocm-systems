@@ -550,6 +550,7 @@ add_executable(
     pci/bar_access_trace_test.cpp
     pci/gpu_pci_device_test.cpp
     pci/scratch_pci_device_test.cpp
+    pci/ip_discovery_test.cpp
 )
 if(HAS_DEVICE_KERNELS)
     target_sources(

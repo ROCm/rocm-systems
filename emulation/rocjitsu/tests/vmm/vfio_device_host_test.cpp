@@ -257,6 +257,9 @@ TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
   rocjitsu::config::KfdDeviceConfig identity;
   identity.vendor_id = 0x1002;
   identity.device_id = 0x1250;
+  // Only this target has an IP discovery profile, and a device without one
+  // refuses to become usable rather than describing itself as another part.
+  identity.gfx_target_version = 120500;
   identity.local_mem_size = 8ULL * 1024 * 1024;
   rocjitsu::GpuPciDevice gpu("gpu", rocjitsu::gpu_pci_spec_from_config(identity, {}), nullptr);
   ASSERT_TRUE(gpu.usable());
@@ -310,6 +313,7 @@ TEST(VfioDeviceHostLifecycle, BuildsTheSmallestBusShapeTheDeviceAccepts) {
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.local_mem_size = 64 * 1024 * 1024;
+  identity.gfx_target_version = 120500;
   rocjitsu::config::PciDeviceConfig pci;
   pci.vram_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
   pci.doorbell_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
