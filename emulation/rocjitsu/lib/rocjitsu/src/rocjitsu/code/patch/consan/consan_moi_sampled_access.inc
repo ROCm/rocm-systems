@@ -210,7 +210,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       (void)branch_router.offer(offset, BranchOnlyRelayProvenance::PristineNop);
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, arch, resource_state, original_text, candidates,
+      result, options, options, arch, resource_state, original_text, candidates,
       target->has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_relay_words,
       use_indirect_appended, MoiDenseAccessRouteAbi::Sampled,
       local_entry_islands ? &*local_entry_islands : nullptr);
@@ -296,7 +296,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, result.moi_operating_point,
+            candidate_options, candidate_options, result.moi_operating_point,
             candidate_resource_plan->owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
             candidate_options, result.moi_operating_point,
@@ -668,7 +668,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, result.moi_operating_point,
+            candidate_options, candidate_options, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets) ||
         !apply_moi_persistent_vgpr_assignment(
             candidate_options, result.moi_operating_point,
@@ -711,7 +711,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       MoiOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, result.moi_operating_point,
+              candidate_options, candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_moi_persistent_vgpr_assignment(
               candidate_options, result.moi_operating_point,
@@ -1087,7 +1087,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           [&](const PlannedSampledPatch &planned_patch) {
             MoiOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, result.moi_operating_point,
+                    candidate_options, candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_moi_persistent_vgpr_assignment(
                     candidate_options, result.moi_operating_point,

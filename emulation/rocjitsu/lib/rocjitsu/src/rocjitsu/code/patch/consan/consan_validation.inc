@@ -456,7 +456,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
         decoder, std::span<const uint32_t>(words).first(std::min(words.size(), remaining / 4u)),
         begin + offset);
     if (!instruction) {
-      error = "decoder rejected instruction";
+      error = "decoder rejected instruction at text byte " + std::to_string(begin + offset);
       return false;
     }
     const int instruction_size = instruction->size();

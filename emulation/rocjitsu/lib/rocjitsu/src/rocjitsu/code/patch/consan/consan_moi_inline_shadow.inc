@@ -107,7 +107,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       options.moi_exec_save_sgpr.has_value() &&
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended ? moi_reserved_access_sync_island_count(result, options) : 0u;
+      use_indirect_appended
+          ? moi_reserved_access_sync_island_count(result, options, options, options)
+          : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
       candidates.size() * access_relay_words * sizeof(uint32_t);
@@ -144,7 +146,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   };
 
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, arch, resource_state, original_text, candidates,
+      result, options, options, arch, resource_state, original_text, candidates,
       target->moi_dense_route_group_capacity, access_island_begin, access_relay_words,
       use_indirect_appended, MoiDenseAccessRouteAbi::InlineShadow,
       local_entry_islands ? &*local_entry_islands : nullptr, &branch_router);
@@ -280,7 +282,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           direct_options_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
       if (inserted) {
         MoiOptions resolved = options;
-        if (apply_moi_transient_sgpr_assignment(resolved, result.moi_operating_point,
+        if (apply_moi_transient_sgpr_assignment(resolved, resolved, result.moi_operating_point,
                                                 resources->owner_descriptor_file_offsets) &&
             apply_moi_persistent_vgpr_assignment(resolved, result.moi_operating_point,
                                                  resources->owner_descriptor_file_offsets)) {
@@ -292,7 +294,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       candidate_options = *cached->second;
     } else {
       candidate_options = options;
-      if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
+      if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+                                               result.moi_operating_point,
                                                resources->owner_descriptor_file_offsets) ||
           !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                                 resources->owner_descriptor_file_offsets)) {
@@ -881,7 +884,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+                                             result.moi_operating_point,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
@@ -924,7 +928,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       MoiOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, result.moi_operating_point,
+              candidate_options, candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow access lost its transient scalar assignment");
@@ -1345,7 +1349,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           [&](const PlannedInlineShadowPatch &planned_patch) {
             MoiOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, result.moi_operating_point,
+                    candidate_options, candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
                   "ConSan MOI inline-shadow access lost its transient scalar assignment");

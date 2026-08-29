@@ -1945,8 +1945,8 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     MoiOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_operating_point,
-                                             kernel_owner)) {
+        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_options,
+                                             result.moi_operating_point, kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue has no transient scalar assignment for kernel '" +
           kernel.name + "'");
@@ -2532,8 +2532,8 @@ void try_apply_owner_epoch_prologue_patch(
     if (kernel_options.automatic_moi_private_epoch)
       continue;
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_operating_point,
-                                             kernel_owner)) {
+        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_options,
+                                             result.moi_operating_point, kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no transient scalar assignment for kernel '" +
           kernel.name + "'");

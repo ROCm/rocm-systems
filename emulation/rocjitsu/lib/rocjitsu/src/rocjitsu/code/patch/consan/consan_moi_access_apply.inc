@@ -236,7 +236,7 @@ template <typename PlannedPatch, typename Eligible>
       continue;
     MoiOptions group_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            group_options, operating_point,
+            group_options, group_options, operating_point,
             group.front()->resources.owner_descriptor_file_offsets) ||
         !eligible(*group.front(), group_options)) {
       continue;
@@ -289,7 +289,7 @@ template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
     const PlannedPatch &representative = *group->second.front();
     MoiOptions group_options = options;
     if (!apply_moi_transient_sgpr_assignment(
-            group_options, operating_point,
+            group_options, group_options, operating_point,
             representative.resources.owner_descriptor_file_offsets) ||
         !eligible(representative, group_options)) {
       errors.emplace_back(std::string(lost_assignment_error));

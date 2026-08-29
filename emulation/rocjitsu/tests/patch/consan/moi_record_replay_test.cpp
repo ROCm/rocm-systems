@@ -5497,6 +5497,8 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_record_replay_sgpr_spill = true;
+    options.moi_inline_indirect_pc_sgpr = 70u;
+    options.moi_inline_indirect_scc_sgpr = 72u;
     options.moi_dispatch_id_sgpr = 60u;
     options.moi_persistent_sgprs.record_replay_workgroup = {.x = 50u, .y = 51u, .z = 52u};
     options.moi_runtime_sample_stride = 65'536u;
@@ -5518,6 +5520,41 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
+}
+
+TEST(ConSanMoi, IncompleteRecordReplaySpillStateFailsBeforeEncodingIndirectJump) {
+  const auto access = build_cdna3_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                               /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(access);
+  std::vector<uint32_t> words(access->begin(), access->end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  const std::vector<uint8_t> bytes =
+      make_cdna3_lds_code_object(words, "cdna3_incomplete_spill_indirect_state");
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_exec_save_sgpr = 80u;
+  options.automatic_moi_record_replay_sgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 60u;
+  options.moi_persistent_sgprs.record_replay_workgroup = {.x = 50u, .y = 51u, .z = 52u};
+  options.moi_runtime_sample_stride = 65'536u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  EXPECT_FALSE(consan_patch_succeeded(result));
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("lost its indirect-jump SGPR assignment") != std::string::npos;
+  }));
+  EXPECT_FALSE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("decoder rejected instruction") != std::string::npos;
+  }));
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {

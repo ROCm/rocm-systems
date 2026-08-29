@@ -118,7 +118,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
                       std::optional<uint32_t> active_private_segment_size = std::nullopt) {
   MoiOptions event_options = options;
   event_options.scratch_vgpr = resources.base;
-  if (!apply_moi_transient_sgpr_assignment(event_options, result.moi_operating_point,
+  if (!apply_moi_transient_sgpr_assignment(event_options, event_options, result.moi_operating_point,
                                            resources.owner_descriptor_file_offsets)) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " found no common transient SGPR assignment");
@@ -143,7 +143,8 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     event_options.moi_record_replay_workgroup_private_offsets =
         private_layout->record_replay_workgroup_offsets;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(event_options, result.moi_operating_point,
+  if (!apply_record_replay_entry_workgroup_assignment(event_options, event_options,
+                                                      result.moi_operating_point,
                                                       resources.owner_descriptor_file_offsets)) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " found no common entry workgroup assignment");

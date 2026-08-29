@@ -139,7 +139,9 @@ void try_apply_first_light_access_record_patch(
   // plus every fence candidate; otherwise the access pass can consume every
   // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
-      use_indirect_appended ? moi_reserved_access_sync_island_count(result, options) : 0u;
+      use_indirect_appended
+          ? moi_reserved_access_sync_island_count(result, options, options, options)
+          : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
           ? kMoiRecordReplayBarrierRelaySlotWords
@@ -164,7 +166,7 @@ void try_apply_first_light_access_record_patch(
                                 resource_state.reserved_ranges);
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, arch, resource_state, original_text, candidates,
+      result, options, options, arch, resource_state, original_text, candidates,
       target.has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_slot_words,
       use_indirect_appended, MoiDenseAccessRouteAbi::RecordReplay,
       local_entry_islands ? &*local_entry_islands : nullptr);
@@ -530,7 +532,8 @@ void try_apply_first_light_access_record_patch(
     }
     MoiOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+                                             result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common transient SGPR assignment");
@@ -579,7 +582,7 @@ void try_apply_first_light_access_record_patch(
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_operating_point, resources->owner_descriptor_file_offsets);
-    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
+    if (!apply_record_replay_entry_workgroup_assignment(candidate_options, candidate_options,
                                                         result.moi_operating_point,
                                                         resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -1052,7 +1055,7 @@ void try_apply_first_light_access_record_patch(
   // passes are independent downstream consumers of that frontier. Preserve
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
-  if (moi_reserved_access_sync_island_count(result, options) != 0u) {
+  if (moi_reserved_access_sync_island_count(result, options, options, options) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }
@@ -1103,11 +1106,12 @@ void try_apply_first_light_access_record_patch(
     MoiOptions candidate_options = options;
     candidate_options.moi_record_replay_workgroup_private_offsets =
         planned_patch.private_workgroup_offsets;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+                                             result.moi_operating_point,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_options, result.moi_operating_point,
+            candidate_options, candidate_options, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
@@ -1150,10 +1154,10 @@ void try_apply_first_light_access_record_patch(
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, result.moi_operating_point,
+              candidate_options, candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
-              candidate_options, result.moi_operating_point,
+              candidate_options, candidate_options, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !candidate_options.moi_exec_save_sgpr) {
         result.errors.emplace_back(
@@ -1217,6 +1221,12 @@ void try_apply_first_light_access_record_patch(
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
           const MoiSpecialStateSgprs special_state =
               *moi_special_state_sgprs(candidate_options, candidate_options);
+          const auto indirect_jump = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+          if (!indirect_jump) {
+            result.errors.emplace_back(
+                "ConSan MOI first-light probe lost its indirect-jump SGPR assignment");
+            return;
+          }
           std::vector<uint32_t> island_words;
           if (planned_patch.borrowed_entry) {
             island_words = planned_patch.borrowed_entry->island_words;
@@ -1240,8 +1250,7 @@ void try_apply_first_light_access_record_patch(
             }
           } else if (append_moi_scc_preserving_indirect_jump(
                          island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                         moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
-                         special_state.scc_save_sgpr,
+                         indirect_jump->pc_sgpr, special_state.scc_save_sgpr,
                          /*capture_scc=*/true, arch)) {
             island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
           }
@@ -1524,10 +1533,10 @@ void try_apply_first_light_access_record_patch(
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, result.moi_operating_point,
+                    candidate_options, candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
-                    candidate_options, result.moi_operating_point,
+                    candidate_options, candidate_options, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(

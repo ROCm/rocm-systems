@@ -41,7 +41,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedFenceRecord> selected;
-  MoiResourcePlanningState resource_state(bytes, arch, result, options);
+  MoiResourcePlanningState resource_state(bytes, arch, result, options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -72,8 +72,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Fence,
-                                     candidate_index, candidate.patch_text_offset,
+            : plan_moi_resource_site(resource_state, options, options, options,
+                                     ConSanResourceSiteKind::Fence, candidate_index,
+                                     candidate.patch_text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
@@ -558,17 +559,17 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       MoiOptions site_options = options;
       uint16_t scratch_count = scratch_count_for(site_options);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, site_options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset, scratch_count);
+          state, site_options, site_options, site_options, ConSanResourceSiteKind::Barrier, index,
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count);
       MoiOptions owner_options = site_options;
       if (apply_moi_persistent_vgpr_assignment(owner_options, options,
                                                plan.owner_descriptor_file_offsets)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_options);
         if (owner_scratch_count != scratch_count) {
-          plan =
-              plan_moi_resource_site(state, owner_options, ConSanResourceSiteKind::Barrier, index,
-                                     candidate.site.text_offset,
-                                     candidate.kernel_descriptor_file_offset, owner_scratch_count);
+          plan = plan_moi_resource_site(
+              state, owner_options, owner_options, owner_options, ConSanResourceSiteKind::Barrier,
+              index, candidate.site.text_offset, candidate.kernel_descriptor_file_offset,
+              owner_scratch_count);
         }
       }
       plan.intent_ids = {candidate.evidence_intent};
@@ -600,9 +601,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                          ? inline_shadow_atomic_scratch_count(state.arch)
                                          : atomic_record_scratch_count(candidate.lowering_form);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset, scratch_count, nullptr,
-          &candidate.lowering_form);
+          state, options, options, options, ConSanResourceSiteKind::Atomic, index,
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count,
+          nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
@@ -615,8 +616,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiFenceEvidenceSitePlan &candidate = candidates[index];
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Fence, index, candidate.patch_text_offset,
-          candidate.kernel_descriptor_file_offset,
+          state, options, options, options, ConSanResourceSiteKind::Fence, index,
+          candidate.patch_text_offset, candidate.kernel_descriptor_file_offset,
           fence_record_scratch_count(candidate.communication_lowering_form), nullptr,
           &candidate.communication_lowering_form);
       if (candidate.patch_text_offset != candidate.semantic_site.physical.original_text_offset)
@@ -688,14 +689,15 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
   ConSanMoiResourcePlanningResult planning;
   const ConSanMoiOperatingPoint &attempted_point = options;
   planning.attempted_operating_point = attempted_point;
-  append_moi_resource_plans(state, options, candidates, planning.plans);
+  append_moi_resource_plans(state, options, options, options, attempted_point, candidates,
+                            planning.plans);
   append_moi_operational_resource_plans(state, options, result, planning.errors, planning.plans);
   if (consan_arch_is_cdna(state.arch) && options.automatic_moi_dispatch_id_sgprs &&
       options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       MoiOptions owner_options = options;
       if (!attempted_point.owner_transient_sgprs.empty() &&
-          !apply_moi_transient_sgpr_assignment(owner_options, attempted_point,
+          !apply_moi_transient_sgpr_assignment(owner_options, owner_options, attempted_point,
                                                plan.owner_descriptor_file_offsets)) {
         if (state.arch == ROCJITSU_CODE_ARCH_CDNA5)
           continue;
@@ -745,7 +747,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
           });
       if (has_owner_override) {
         MoiOptions owner_options = options;
-        if (apply_moi_transient_sgpr_assignment(owner_options, attempted_point,
+        if (apply_moi_transient_sgpr_assignment(owner_options, owner_options, attempted_point,
                                                 plan.owner_descriptor_file_offsets))
           continue;
       }
