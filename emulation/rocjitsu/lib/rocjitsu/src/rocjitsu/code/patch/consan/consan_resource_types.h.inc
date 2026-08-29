@@ -223,4 +223,6 @@ struct ConSanResourcePlanSummary {
   size_t alternative_superseded = 0;
   size_t alternative_contributed = 0;
   size_t alternative_vetoed = 0;
+
+  bool operator==(const ConSanResourcePlanSummary &) const = default;
 };

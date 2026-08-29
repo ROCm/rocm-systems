@@ -18,7 +18,7 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
-#include "rocjitsu/code/patch/consan/consan_transform_debug.h"
+#include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -4104,8 +4104,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
     }
     const rocjitsu::TransformResult &transform_result = *patch_result_storage;
-    const rocjitsu::ConSanTransformDebugReport transform_debug =
-        rocjitsu::consan_transform_debug_report(transform_result);
+    const rocjitsu::ConSanTransformDiagnosticReport transform_diagnostics =
+        rocjitsu::consan_transform_diagnostic_report(transform_result);
     const rocjitsu::ConSanMutationOutcome &mutation = transform_result.mutation;
     fault_installation_evidence.record_applied_mutations(mutation.fault.applied);
     if (live_fault_auto_report_capacity_inventory) {
@@ -4146,7 +4146,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                                                                     : "false",
         rocjitsu::consan_transform_outcome_name(transform_result.outcome),
         transform_result.errors.size(), transform_result.warnings.size(),
-        transform_debug.patches.size(),
+        transform_diagnostics.patches.size(),
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - patch_begin)
             .count());
     for (const std::string &warning : transform_result.warnings)
@@ -4271,7 +4271,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         transform_result.program_inventory.text_sections().size(),
         transform_result.program_inventory.kernels().size(),
         transform_result.program_inventory.functions().size());
-    for (const rocjitsu::ConSanFaultSite &site : transform_debug.fault_sites) {
+    for (const rocjitsu::ConSanFaultSiteDiagnostic &site : transform_diagnostics.fault_sites) {
       const OwnerLogFields owners =
           owner_log_fields(site.execution_owners, transform_result.program_inventory.kernels());
       log_message(kLogVerbose,
@@ -4293,8 +4293,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   ordinary_memory_support_reason_name(site.ordinary_memory_support_reason),
                   site.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
-    for (const rocjitsu::ConSanBarrierMoveDestination &destination :
-         transform_debug.barrier_move_destinations) {
+    for (const rocjitsu::ConSanBarrierMoveDestinationDiagnostic &destination :
+         transform_diagnostics.barrier_move_destinations) {
       const OwnerLogFields owners = owner_log_fields(destination.execution_owners,
                                                      transform_result.program_inventory.kernels());
       std::string reason = rocjitsu::consan_barrier_move_destination_issue_message(
@@ -4330,7 +4330,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<unsigned long long>(destination.structured_source_offset.value_or(0)),
                   destination.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
-    for (const rocjitsu::ConSanFaultMutationPlan &plan : transform_debug.fault_plans) {
+    for (const rocjitsu::ConSanFaultMutationDiagnostic &plan :
+         transform_diagnostics.fault_mutations) {
       std::string members;
       for (const std::string &identity : plan.ordered_member_identities) {
         if (!members.empty())
@@ -4469,7 +4470,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       const rocjitsu::ConSanResourcePlanSummary &resource_summary =
-          transform_debug.resource_summary;
+          transform_diagnostics.resource_summary;
       log_message(kLogInfo,
                   "ConSan MOI resources reader=%llu explicit=%zu dead=%zu "
                   "descriptor_growth=%zu spill=%zu unsupported=%zu "
@@ -4486,96 +4487,37 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   resource_summary.alternative_attempts, resource_summary.alternative_selected,
                   resource_summary.alternative_rejected, resource_summary.alternative_superseded,
                   resource_summary.alternative_contributed, resource_summary.alternative_vetoed);
-      struct ResourceFailureSummary {
-        size_t count = 0;
-        uint16_t min_scratch_vgprs = std::numeric_limits<uint16_t>::max();
-        uint16_t max_scratch_vgprs = 0;
-        uint16_t min_current_vgprs = std::numeric_limits<uint16_t>::max();
-        uint16_t max_current_vgprs = 0;
-        uint16_t min_max_referenced_vgprs = std::numeric_limits<uint16_t>::max();
-        uint16_t max_max_referenced_vgprs = 0;
-        uint16_t min_ordinary_vgpr_limit = std::numeric_limits<uint16_t>::max();
-        uint16_t max_ordinary_vgpr_limit = 0;
-        uint16_t min_required_vgprs = std::numeric_limits<uint16_t>::max();
-        uint16_t max_required_vgprs = 0;
-        size_t min_owners = std::numeric_limits<size_t>::max();
-        size_t max_owners = 0;
-        bool has_indirect_vgpr_access = false;
-      };
-      constexpr size_t kResourceSiteKindCount =
-          static_cast<size_t>(rocjitsu::ConSanResourceSiteKind::Fence) + 1u;
-      constexpr size_t kRegisterPlanReasonCount =
-          static_cast<size_t>(rocjitsu::ConSanRegisterPlanReason::DynamicStack) + 1u;
-      std::array<std::array<ResourceFailureSummary, kRegisterPlanReasonCount>,
-                 kResourceSiteKindCount>
-          failure_summaries{};
-      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_debug.resource_plans) {
-        if (plan.source != rocjitsu::ConSanRegisterAllocationSource::Unsupported)
-          continue;
-        ResourceFailureSummary &summary = failure_summaries[static_cast<size_t>(plan.site_kind)]
-                                                           [static_cast<size_t>(plan.reason)];
-        ++summary.count;
-        summary.min_scratch_vgprs = std::min(summary.min_scratch_vgprs, plan.scratch_vgpr_count);
-        summary.max_scratch_vgprs = std::max(summary.max_scratch_vgprs, plan.scratch_vgpr_count);
-        summary.min_current_vgprs = std::min(summary.min_current_vgprs, plan.current_vgpr_count);
-        summary.max_current_vgprs = std::max(summary.max_current_vgprs, plan.current_vgpr_count);
-        summary.min_max_referenced_vgprs =
-            std::min(summary.min_max_referenced_vgprs, plan.max_referenced_vgpr_count);
-        summary.max_max_referenced_vgprs =
-            std::max(summary.max_max_referenced_vgprs, plan.max_referenced_vgpr_count);
-        summary.min_ordinary_vgpr_limit =
-            std::min(summary.min_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
-        summary.max_ordinary_vgpr_limit =
-            std::max(summary.max_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
-        summary.min_required_vgprs = std::min(summary.min_required_vgprs, plan.required_vgpr_count);
-        summary.max_required_vgprs = std::max(summary.max_required_vgprs, plan.required_vgpr_count);
-        summary.min_owners =
-            std::min(summary.min_owners, plan.owner_descriptor_file_offsets.size());
-        summary.max_owners =
-            std::max(summary.max_owners, plan.owner_descriptor_file_offsets.size());
-        summary.has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
+      for (const rocjitsu::ConSanResourceFailureDiagnostic &failure :
+           transform_diagnostics.resource_failures) {
+        log_message(kLogInfo,
+                    "ConSan MOI resource-failure reader=%llu site=%s reason=%s count=%zu "
+                    "scratch_vgprs=%u..%u current_vgprs=%u..%u "
+                    "max_referenced_vgprs=%u..%u ordinary_vgpr_limit=%u..%u "
+                    "required_vgprs=%u..%u owners=%zu..%zu indirect_vgprs=%s",
+                    static_cast<unsigned long long>(code_object_reader.handle),
+                    moi_resource_site_kind_name(failure.site_kind),
+                    rocjitsu::consan_register_plan_reason_name(failure.reason), failure.count,
+                    failure.min_scratch_vgprs, failure.max_scratch_vgprs, failure.min_current_vgprs,
+                    failure.max_current_vgprs, failure.min_max_referenced_vgprs,
+                    failure.max_max_referenced_vgprs, failure.min_ordinary_vgpr_limit,
+                    failure.max_ordinary_vgpr_limit, failure.min_required_vgprs,
+                    failure.max_required_vgprs, failure.min_owners, failure.max_owners,
+                    failure.has_indirect_vgpr_access ? "true" : "false");
       }
-      for (size_t site_index = 0; site_index < kResourceSiteKindCount; ++site_index) {
-        for (size_t reason_index = 0; reason_index < kRegisterPlanReasonCount; ++reason_index) {
-          const ResourceFailureSummary &summary = failure_summaries[site_index][reason_index];
-          if (summary.count == 0)
-            continue;
-          log_message(kLogInfo,
-                      "ConSan MOI resource-failure reader=%llu site=%s reason=%s count=%zu "
-                      "scratch_vgprs=%u..%u current_vgprs=%u..%u "
-                      "max_referenced_vgprs=%u..%u ordinary_vgpr_limit=%u..%u "
-                      "required_vgprs=%u..%u owners=%zu..%zu indirect_vgprs=%s",
-                      static_cast<unsigned long long>(code_object_reader.handle),
-                      moi_resource_site_kind_name(
-                          static_cast<rocjitsu::ConSanResourceSiteKind>(site_index)),
-                      rocjitsu::consan_register_plan_reason_name(
-                          static_cast<rocjitsu::ConSanRegisterPlanReason>(reason_index)),
-                      summary.count, summary.min_scratch_vgprs, summary.max_scratch_vgprs,
-                      summary.min_current_vgprs, summary.max_current_vgprs,
-                      summary.min_max_referenced_vgprs, summary.max_max_referenced_vgprs,
-                      summary.min_ordinary_vgpr_limit, summary.max_ordinary_vgpr_limit,
-                      summary.min_required_vgprs, summary.max_required_vgprs, summary.min_owners,
-                      summary.max_owners, summary.has_indirect_vgpr_access ? "true" : "false");
-        }
-      }
-      for (const rocjitsu::ConSanCandidateResourcePlan &plan : transform_debug.resource_plans) {
-        for (size_t alternative_index = 0; alternative_index < plan.alternatives.size();
-             ++alternative_index) {
-          const rocjitsu::ConSanResourcePlanAlternative &alternative =
-              plan.alternatives[alternative_index];
-          log_message(kLogInfo,
-                      "ConSan MOI resource-alternative reader=%llu site=%s candidate=%zu "
-                      "text_offset=0x%llx attempt=%zu kind=%s scratch_count=%u "
-                      "source=%s reason=%s outcome=%s",
-                      static_cast<unsigned long long>(code_object_reader.handle),
-                      moi_resource_site_kind_name(plan.site_kind), plan.candidate_index,
-                      static_cast<unsigned long long>(plan.text_offset), alternative_index,
-                      rocjitsu::consan_resource_plan_alternative_kind_name(alternative.kind),
-                      alternative.scratch_vgpr_count, moi_resource_source_name(alternative.source),
-                      rocjitsu::consan_register_plan_reason_name(alternative.reason),
-                      rocjitsu::consan_resource_plan_alternative_outcome_name(
-                          rocjitsu::consan_resource_plan_alternative_outcome(plan, alternative)));
-        }
+      for (const rocjitsu::ConSanResourceAlternativeDiagnostic &alternative :
+           transform_diagnostics.resource_alternatives) {
+        log_message(kLogInfo,
+                    "ConSan MOI resource-alternative reader=%llu site=%s candidate=%zu "
+                    "text_offset=0x%llx attempt=%zu kind=%s scratch_count=%u "
+                    "source=%s reason=%s outcome=%s",
+                    static_cast<unsigned long long>(code_object_reader.handle),
+                    moi_resource_site_kind_name(alternative.site_kind), alternative.candidate_index,
+                    static_cast<unsigned long long>(alternative.text_offset),
+                    alternative.attempt_index,
+                    rocjitsu::consan_resource_plan_alternative_kind_name(alternative.kind),
+                    alternative.scratch_vgpr_count, moi_resource_source_name(alternative.source),
+                    rocjitsu::consan_register_plan_reason_name(alternative.reason),
+                    rocjitsu::consan_resource_plan_alternative_outcome_name(alternative.outcome));
       }
     }
     size_t candidate_kernel_count = 0;
@@ -4661,7 +4603,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         function_supported_lds_site_count, function_flat_site_count, function_flat_group_hint_count,
         function_flat_private_hint_count, function_flat_maybe_group_hint_count,
         function_flat_maybe_private_hint_count, function_flat_global_hint_count,
-        function_flat_unknown_hint_count, transform_debug.patches.size(),
+        function_flat_unknown_hint_count, transform_diagnostics.patches.size(),
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false");
     static_coverage_storage =
@@ -4814,7 +4756,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                              [](rocjitsu::ConSanFencePolicyReason reason) {
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
-    for (const rocjitsu::ConSanPatchDebugRecord &patch : transform_debug.patches) {
+    for (const rocjitsu::ConSanPatchDiagnostic &patch : transform_diagnostics.patches) {
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
       const std::string private_epoch_offset =

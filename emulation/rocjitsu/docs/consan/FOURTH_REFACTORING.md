@@ -1147,10 +1147,11 @@ projected from the eventual aggregate.
 
 `TransformResult` now exposes reviewed products by composition; lowerer-private
 patch, resource, and placement artifacts are available only to the transaction
-and final validator. Tests and development diagnostics use the separate
-`consan_transform_debug_report` projection instead of reopening the runtime
-result surface. The combined F3/F4 gate recorded below exercises both the
-direct and deferred transaction paths.
+and final validator. Tests and development diagnostics use the separate owned
+`consan_transform_diagnostic_report` presentation product instead of reopening
+the runtime result surface or aliasing lowerer-private storage. The combined
+F3/F4 gate recorded below exercises both the direct and deferred transaction
+paths.
 
 ### F4. Make the target classifier the sole exact-admission authority
 

@@ -234,12 +234,12 @@ struct ConSanDispatchRequirements {
 };
 
 class TransformResult;
-struct ConSanTransformDebugReport;
+struct ConSanTransformDiagnosticReport;
 class ConSanDeferredBinding;
 class ConSanTransformTransaction;
 
-[[nodiscard]] ConSanTransformDebugReport
-consan_transform_debug_report(const TransformResult &result);
+[[nodiscard]] ConSanTransformDiagnosticReport
+consan_transform_diagnostic_report(const TransformResult &result);
 
 /// Optional injected transform executor used by test/runtime adapters while
 /// the library retains automatic preparation and resume ownership.
@@ -321,7 +321,8 @@ private:
   friend struct TransformResultTestAccess;
   friend class ConSanDeferredBinding;
   friend class ConSanTransformTransaction;
-  friend ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &);
+  friend ConSanTransformDiagnosticReport
+  consan_transform_diagnostic_report(const TransformResult &);
   friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
                                           const ConSanDebugOverrides &, const RuntimeCapabilities &,

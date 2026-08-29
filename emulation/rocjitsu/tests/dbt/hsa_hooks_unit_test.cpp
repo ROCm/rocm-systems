@@ -4201,7 +4201,7 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
       << "errors=" << testing::PrintToString(direct.errors)
       << " warnings=" << testing::PrintToString(direct.warnings)
       << " intents=" << direct.observation_plan.probe_intents.size()
-      << " patches=" << rocjitsu::consan_transform_debug_report(direct).patches.size();
+      << " patches=" << rocjitsu::consan_transform_diagnostic_report(direct).patches.size();
   ASSERT_EQ(direct.replacement.size(), bytes.size());
 
   const auto estimate = rocjitsu::consan_hook::consan_transform_major_image_reservation(

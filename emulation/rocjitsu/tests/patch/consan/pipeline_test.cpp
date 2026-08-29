@@ -21,9 +21,10 @@ namespace {
 static_assert(!std::derived_from<TransformResult, ConSanTransformArtifacts>);
 
 template <typename T>
-concept HasPublicTransformDebugReport = requires(const T &result) { result.debug_report(); };
+concept HasPublicTransformDiagnosticReport =
+    requires(const T &result) { result.diagnostic_report(); };
 
-static_assert(!HasPublicTransformDebugReport<TransformResult>);
+static_assert(!HasPublicTransformDiagnosticReport<TransformResult>);
 
 template <typename T>
 concept HasPatchValidationProof = requires(const T &patch) {
@@ -33,7 +34,7 @@ concept HasPatchValidationProof = requires(const T &patch) {
 };
 
 static_assert(HasPatchValidationProof<ConSanPatchInfo>);
-static_assert(!HasPatchValidationProof<ConSanPatchDebugRecord>);
+static_assert(!HasPatchValidationProof<ConSanPatchDiagnostic>);
 
 template <typename T>
 concept HasCommittedPatchGeometry = requires(const T &patch) {
@@ -444,31 +445,31 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
 
   ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.errors);
   EXPECT_EQ(published.replacement, (std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
-  const ConSanTransformDebugReport published_debug =
-      TransformResultTestAccess::debug_report(published);
-  ASSERT_EQ(published_debug.fault_sites.size(), 1u);
-  EXPECT_EQ(published_debug.fault_sites.front().identity, "published-fault-site");
-  ASSERT_EQ(published_debug.barrier_move_destinations.size(), 1u);
-  EXPECT_EQ(published_debug.barrier_move_destinations.front().identity, "published-destination");
-  ASSERT_EQ(published_debug.fault_plans.size(), 1u);
-  EXPECT_EQ(published_debug.fault_plans.front().primary_identity, "published-fault-plan");
+  const ConSanTransformDiagnosticReport published_diagnostics =
+      TransformResultTestAccess::diagnostic_report(published);
+  ASSERT_EQ(published_diagnostics.fault_sites.size(), 1u);
+  EXPECT_EQ(published_diagnostics.fault_sites.front().identity, "published-fault-site");
+  ASSERT_EQ(published_diagnostics.barrier_move_destinations.size(), 1u);
+  EXPECT_EQ(published_diagnostics.barrier_move_destinations.front().identity,
+            "published-destination");
+  ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);
+  EXPECT_EQ(published_diagnostics.fault_mutations.front().primary_identity, "published-fault-plan");
   TransformResult malformed_fault_plan = published;
   TransformResultTestAccess::corrupt_first_fault_plan_code_object(malformed_fault_plan);
   EXPECT_FALSE(malformed_fault_plan.well_formed());
   malformed_fault_plan = published;
   malformed_fault_plan.mutation.fault.planned = 0u;
   EXPECT_FALSE(malformed_fault_plan.well_formed());
-  ASSERT_EQ(published_debug.resource_plans.size(), 1u);
-  EXPECT_EQ(published_debug.resource_plans.front().candidate_index, 7u);
+  EXPECT_EQ(published_diagnostics.resource_summary.unsupported_plans, 1u);
   EXPECT_EQ(published.mutation.fault,
             (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
   EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
-  ASSERT_EQ(published_debug.patches.size(), 3u);
-  EXPECT_EQ(published_debug.patches.front().kind, ConSanPatchKind::InlineNopRewrite);
-  EXPECT_EQ(published_debug.patches[1].required_private_segment_size, 64u);
-  EXPECT_EQ(published_debug.patches[1].dynamic_private_segment_addend, 16u);
-  EXPECT_EQ(published_debug.patches[2].anchor_offset, 12u);
-  EXPECT_EQ(published_debug.resource_summary.emitted_spill_patches, 0u);
+  ASSERT_EQ(published_diagnostics.patches.size(), 3u);
+  EXPECT_EQ(published_diagnostics.patches.front().kind, ConSanPatchKind::InlineNopRewrite);
+  EXPECT_EQ(published_diagnostics.patches[1].required_private_segment_size, 64u);
+  EXPECT_EQ(published_diagnostics.patches[1].dynamic_private_segment_addend, 16u);
+  EXPECT_EQ(published_diagnostics.patches[2].anchor_offset, 12u);
+  EXPECT_EQ(published_diagnostics.resource_summary.emitted_spill_patches, 0u);
   ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
   EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
                                                             .kernel_name = "kernel_a",
@@ -919,8 +920,9 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
             split.observation_plan.probe_intents.size());
   EXPECT_FALSE(split.replacement.empty());
-  EXPECT_FALSE(TransformResultTestAccess::debug_report(split).patches.empty());
-  EXPECT_FALSE(TransformResultTestAccess::debug_report(split).resource_plans.empty());
+  EXPECT_FALSE(TransformResultTestAccess::diagnostic_report(split).patches.empty());
+  EXPECT_NE(TransformResultTestAccess::diagnostic_report(split).resource_summary,
+            ConSanResourcePlanSummary{});
   EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
                                              ? ConSanInstallAction::LoadReplacement
                                              : ConSanInstallAction::LoadOriginal);
@@ -1020,14 +1022,16 @@ TEST(ConSanPipeline, AutomaticMoiResumeRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.observation_plan, direct.observation_plan);
   EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(retried.replacement, direct.replacement);
-  const ConSanTransformDebugReport retried_debug = TransformResultTestAccess::debug_report(retried);
-  const ConSanTransformDebugReport direct_debug = TransformResultTestAccess::debug_report(direct);
-  EXPECT_EQ(retried_debug.patches.size(), direct_debug.patches.size());
-  EXPECT_EQ(retried_debug.resource_plans.size(), direct_debug.resource_plans.size());
-  EXPECT_EQ(retried_debug.fault_sites.size(), direct_debug.fault_sites.size());
-  EXPECT_EQ(retried_debug.barrier_move_destinations.size(),
-            direct_debug.barrier_move_destinations.size());
-  EXPECT_EQ(retried_debug.fault_plans.size(), direct_debug.fault_plans.size());
+  const ConSanTransformDiagnosticReport retried_diagnostics =
+      TransformResultTestAccess::diagnostic_report(retried);
+  const ConSanTransformDiagnosticReport direct_diagnostics =
+      TransformResultTestAccess::diagnostic_report(direct);
+  EXPECT_EQ(retried_diagnostics.patches.size(), direct_diagnostics.patches.size());
+  EXPECT_EQ(retried_diagnostics.resource_summary, direct_diagnostics.resource_summary);
+  EXPECT_EQ(retried_diagnostics.fault_sites.size(), direct_diagnostics.fault_sites.size());
+  EXPECT_EQ(retried_diagnostics.barrier_move_destinations.size(),
+            direct_diagnostics.barrier_move_destinations.size());
+  EXPECT_EQ(retried_diagnostics.fault_mutations.size(), direct_diagnostics.fault_mutations.size());
 }
 
 TEST(ConSanPipeline, AutomaticDynamicReplayTreatsExplicitCapAsRuntimeRingCapacity) {
@@ -1300,10 +1304,11 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.errors);
   EXPECT_GT(mutated.mutation.fault.requested, 0u);
   EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
-  const ConSanTransformDebugReport mutated_debug = TransformResultTestAccess::debug_report(mutated);
-  EXPECT_FALSE(mutated_debug.fault_sites.empty());
-  EXPECT_FALSE(mutated_debug.fault_plans.empty());
-  EXPECT_EQ(mutated_debug.fault_plans.front().target_address_vgpr, 4u);
+  const ConSanTransformDiagnosticReport mutated_diagnostics =
+      TransformResultTestAccess::diagnostic_report(mutated);
+  EXPECT_FALSE(mutated_diagnostics.fault_sites.empty());
+  EXPECT_FALSE(mutated_diagnostics.fault_mutations.empty());
+  EXPECT_EQ(mutated_diagnostics.fault_mutations.front().target_address_vgpr, 4u);
   EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
 }
 
@@ -1326,7 +1331,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), resources);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_FALSE(result.replacement.empty());
-  ASSERT_FALSE(TransformResultTestAccess::debug_report(result).patches.empty());
+  ASSERT_FALSE(TransformResultTestAccess::diagnostic_report(result).patches.empty());
   ASSERT_FALSE(result.dispatch_requirements.kernels.empty());
 
   result.discard_replacement("runtime report allocation failed");
@@ -1337,20 +1342,9 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
-  const ConSanTransformDebugReport discarded_debug =
-      TransformResultTestAccess::debug_report(result);
-  EXPECT_TRUE(discarded_debug.patches.empty());
-  EXPECT_FALSE(discarded_debug.committed_lowerings.empty());
-  EXPECT_TRUE(std::ranges::any_of(
-      discarded_debug.committed_lowerings, [](const ConSanCommittedLowering &commit) {
-        return commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected;
-      }));
-  EXPECT_TRUE(std::ranges::all_of(
-      discarded_debug.committed_lowerings, [](const ConSanCommittedLowering &commit) {
-        return (commit.outcome == ConSanLoweringOutcomeKind::ResourceRejected ||
-                commit.outcome == ConSanLoweringOutcomeKind::PlacementRejected) &&
-               commit.locations.empty();
-      }));
+  const ConSanTransformDiagnosticReport discarded_diagnostics =
+      TransformResultTestAccess::diagnostic_report(result);
+  EXPECT_TRUE(discarded_diagnostics.patches.empty());
   EXPECT_TRUE(std::ranges::all_of(
       result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
         return entry.lowering == ConSanLoweringOutcomeKind::ResourceRejected ||

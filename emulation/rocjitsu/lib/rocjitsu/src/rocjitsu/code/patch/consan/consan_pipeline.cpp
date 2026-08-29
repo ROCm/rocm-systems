@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
-#include "rocjitsu/code/patch/consan/consan_transform_debug.h"
+#include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -281,20 +281,153 @@ const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value
   return &stages[static_cast<size_t>(value)];
 }
 
-ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &result) {
+ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const TransformResult &result) {
   ConSanResourcePlanSummary resource_summary =
       summarize_consan_resource_plans(result.private_lowering_.resource_plans);
   for (const ConSanPatchAbiEffects &patch : result.private_lowering_.patches)
     accumulate_consan_emitted_spill(resource_summary, patch);
-  ConSanTransformDebugReport report{
-      .fault_sites = result.private_lowering_.fault_sites,
-      .barrier_move_destinations = result.private_lowering_.barrier_move_destinations,
-      .fault_plans = result.private_lowering_.fault_plans,
-      .resource_plans = result.private_lowering_.resource_plans,
-      .committed_lowerings = result.private_lowering_.committed_lowerings,
-      .resource_summary = resource_summary,
-      .patches = {},
-  };
+  ConSanTransformDiagnosticReport report;
+  report.resource_summary = resource_summary;
+
+  report.fault_sites.reserve(result.private_lowering_.fault_sites.size());
+  for (const ConSanFaultSite &site : result.private_lowering_.fault_sites) {
+    report.fault_sites.push_back({
+        .kind = site.kind,
+        .identity = site.identity,
+        .container_name = site.container_name,
+        .in_kernel = site.in_kernel,
+        .occurrence = site.occurrence,
+        .text_offset = site.text_offset,
+        .file_offset = site.file_offset,
+        .size = site.size,
+        .width_bits = site.width_bits,
+        .mnemonic = site.mnemonic,
+        .semantic_role = site.semantic_role,
+        .decoded_operands = site.decoded_operands,
+        .ordinary_memory_support_reason = site.ordinary_memory_support_reason,
+        .sync_event_identity = site.sync_event_identity,
+        .sync_sequence_identity = site.sync_sequence_identity,
+        .sync_confidence = site.sync_confidence,
+        .sync_memory_role = site.sync_memory_role,
+        .execution_owners = site.execution_owners,
+    });
+  }
+
+  report.barrier_move_destinations.reserve(
+      result.private_lowering_.barrier_move_destinations.size());
+  for (const ConSanBarrierMoveDestination &destination :
+       result.private_lowering_.barrier_move_destinations) {
+    report.barrier_move_destinations.push_back({
+        .identity = destination.identity,
+        .container_name = destination.container_name,
+        .in_kernel = destination.in_kernel,
+        .basic_block_index = destination.basic_block_index,
+        .text_offset = destination.text_offset,
+        .file_offset = destination.file_offset,
+        .size = destination.size,
+        .mnemonic = destination.mnemonic,
+        .memory_operation = destination.memory_operation,
+        .issue = destination.issue,
+        .issue_detail = destination.issue_detail,
+        .cfg_contract = destination.cfg_contract,
+        .structured_guard_block_index = destination.structured_guard_block_index,
+        .structured_source_block_index = destination.structured_source_block_index,
+        .structured_guard_offset = destination.structured_guard_offset,
+        .structured_source_offset = destination.structured_source_offset,
+        .execution_owners = destination.execution_owners,
+    });
+  }
+
+  report.fault_mutations.reserve(result.private_lowering_.fault_plans.size());
+  for (const ConSanFaultMutationPlan &plan : result.private_lowering_.fault_plans) {
+    report.fault_mutations.push_back({
+        .kind = plan.kind,
+        .primary_identity = plan.primary_identity,
+        .companion_identity = plan.companion_identity,
+        .logical_sequence_identity = plan.logical_sequence_identity,
+        .ordered_member_identities = plan.ordered_member_identities,
+        .destination_identity = plan.destination_identity,
+        .barrier_move_direction = plan.barrier_move_direction,
+        .barrier_move_cfg_contract = plan.barrier_move_cfg_contract,
+        .original_barrier_id = plan.original_barrier_id,
+        .target_barrier_id = plan.target_barrier_id,
+        .original_barrier_scope = plan.original_barrier_scope,
+        .target_barrier_scope = plan.target_barrier_scope,
+        .target_address_vgpr = plan.target_address_vgpr,
+    });
+  }
+
+  for (const ConSanCandidateResourcePlan &plan : result.private_lowering_.resource_plans) {
+    if (plan.source == ConSanRegisterAllocationSource::Unsupported) {
+      const auto matching_failure = [&](const ConSanResourceFailureDiagnostic &failure) {
+        return failure.site_kind == plan.site_kind && failure.reason == plan.reason;
+      };
+      auto failure = std::ranges::find_if(report.resource_failures, matching_failure);
+      if (failure == report.resource_failures.end()) {
+        report.resource_failures.push_back({
+            .site_kind = plan.site_kind,
+            .reason = plan.reason,
+            .count = 1u,
+            .min_scratch_vgprs = plan.scratch_vgpr_count,
+            .max_scratch_vgprs = plan.scratch_vgpr_count,
+            .min_current_vgprs = plan.current_vgpr_count,
+            .max_current_vgprs = plan.current_vgpr_count,
+            .min_max_referenced_vgprs = plan.max_referenced_vgpr_count,
+            .max_max_referenced_vgprs = plan.max_referenced_vgpr_count,
+            .min_ordinary_vgpr_limit = plan.ordinary_vgpr_limit,
+            .max_ordinary_vgpr_limit = plan.ordinary_vgpr_limit,
+            .min_required_vgprs = plan.required_vgpr_count,
+            .max_required_vgprs = plan.required_vgpr_count,
+            .min_owners = plan.owner_descriptor_file_offsets.size(),
+            .max_owners = plan.owner_descriptor_file_offsets.size(),
+            .has_indirect_vgpr_access = plan.has_indirect_vgpr_access,
+        });
+      } else {
+        ++failure->count;
+        failure->min_scratch_vgprs = std::min(failure->min_scratch_vgprs, plan.scratch_vgpr_count);
+        failure->max_scratch_vgprs = std::max(failure->max_scratch_vgprs, plan.scratch_vgpr_count);
+        failure->min_current_vgprs = std::min(failure->min_current_vgprs, plan.current_vgpr_count);
+        failure->max_current_vgprs = std::max(failure->max_current_vgprs, plan.current_vgpr_count);
+        failure->min_max_referenced_vgprs =
+            std::min(failure->min_max_referenced_vgprs, plan.max_referenced_vgpr_count);
+        failure->max_max_referenced_vgprs =
+            std::max(failure->max_max_referenced_vgprs, plan.max_referenced_vgpr_count);
+        failure->min_ordinary_vgpr_limit =
+            std::min(failure->min_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
+        failure->max_ordinary_vgpr_limit =
+            std::max(failure->max_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
+        failure->min_required_vgprs =
+            std::min(failure->min_required_vgprs, plan.required_vgpr_count);
+        failure->max_required_vgprs =
+            std::max(failure->max_required_vgprs, plan.required_vgpr_count);
+        failure->min_owners =
+            std::min(failure->min_owners, plan.owner_descriptor_file_offsets.size());
+        failure->max_owners =
+            std::max(failure->max_owners, plan.owner_descriptor_file_offsets.size());
+        failure->has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
+      }
+    }
+    for (size_t alternative_index = 0; alternative_index < plan.alternatives.size();
+         ++alternative_index) {
+      const ConSanResourcePlanAlternative &alternative = plan.alternatives[alternative_index];
+      report.resource_alternatives.push_back({
+          .site_kind = plan.site_kind,
+          .candidate_index = plan.candidate_index,
+          .text_offset = plan.text_offset,
+          .attempt_index = alternative_index,
+          .kind = alternative.kind,
+          .scratch_vgpr_count = alternative.scratch_vgpr_count,
+          .source = alternative.source,
+          .reason = alternative.reason,
+          .outcome = consan_resource_plan_alternative_outcome(plan, alternative),
+      });
+    }
+  }
+  std::ranges::sort(report.resource_failures, [](const ConSanResourceFailureDiagnostic &lhs,
+                                                 const ConSanResourceFailureDiagnostic &rhs) {
+    return std::pair(lhs.site_kind, lhs.reason) < std::pair(rhs.site_kind, rhs.reason);
+  });
+
   report.patches.reserve(result.private_lowering_.patches.size());
   for (const ConSanPatchLoweringProduct &patch : result.private_lowering_.patches) {
     report.patches.push_back({
