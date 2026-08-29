@@ -1766,17 +1766,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     return errors;
   }
   const uint32_t nop = build_s_nop(0, arch);
-  ConSanOptions pristine_options;
-  pristine_options.flavor = ConSanFlavor::SuperCollider;
-  pristine_options.fault_drop_barrier = true;
-  // This pass only re-derives pristine barrier identities. Applying the fault
-  // here would enter staged mutation and recursively final-validate another
-  // mutation while already inside final validation.
-  pristine_options.fault_dry_run = true;
   const auto original_image = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(original.image_data()), original.image_size());
   const ConSanTransformArtifacts pristine_inventory =
-      try_patch_consan_impl(original_image, pristine_options);
+      rederive_consan_mutation_validation_inventory(original_image);
   std::vector<const ConSanPatchInfo *> markerless_sources;
   const ConSanPatchInfo *markerless_target = nullptr;
   std::vector<ConSanBarrierSite> barrier_id_scope_originals;
@@ -2728,12 +2721,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     return errors;
   }
 
-  ConSanOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::SuperCollider;
-  inventory_options.fault_dry_run = true;
-  ConSanPerturbationPlanningState pristine_perturbation;
-  const ConSanTransformArtifacts pristine = try_patch_consan_impl(
-      original_image, inventory_options, {}, std::nullopt, &pristine_perturbation);
+  const ConSanPerturbationValidationInventory pristine_inventory =
+      rederive_consan_perturbation_validation_inventory(original_image);
+  const ConSanTransformArtifacts &pristine = pristine_inventory.artifacts;
+  const ConSanPerturbationPlanningState &pristine_perturbation = pristine_inventory.planning;
   if (!validating_carried_composite_stage && !pristine.errors.empty()) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");

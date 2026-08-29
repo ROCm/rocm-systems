@@ -865,10 +865,6 @@ void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) 
   return count;
 }
 
-[[nodiscard]] bool is_rocclr_runtime_kernel_name(std::string_view name) {
-  return name.starts_with("__amd_rocclr_");
-}
-
 [[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanTransformArtifacts &result) {
   if (result.program_inventory.kernels().empty())
     return false;

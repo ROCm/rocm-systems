@@ -25,7 +25,9 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
+#include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
+#include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -163,6 +165,26 @@ bool consan_ordinary_release_metadata_compatible(const ConSanSyncEvent &cache,
 #include "rocjitsu/code/patch/consan/consan_supercollider.inc"
 
 #include "rocjitsu/code/patch/consan/consan_composition.inc"
+
+ConSanTransformArtifacts
+rederive_consan_mutation_validation_inventory(std::span<const uint8_t> original_image) {
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_drop_barrier = true;
+  options.fault_dry_run = true;
+  return try_patch_consan_impl(original_image, options);
+}
+
+ConSanPerturbationValidationInventory
+rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> original_image) {
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_dry_run = true;
+  ConSanPerturbationValidationInventory inventory;
+  inventory.artifacts =
+      try_patch_consan_impl(original_image, options, {}, std::nullopt, &inventory.planning);
+  return inventory;
+}
 
 #include "rocjitsu/code/patch/consan/consan_validation.inc"
 

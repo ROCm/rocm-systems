@@ -1,7 +1,3 @@
-[[nodiscard]] bool is_rocclr_runtime_kernel_name(std::string_view name) {
-  return name.starts_with("__amd_rocclr_");
-}
-
 /// Prepare the semantic half of one synchronization byte-mutation
 /// transaction. Intent identity comes from the immutable lowering plan, while
 /// emitted geometry comes from the patch product being committed in the same
