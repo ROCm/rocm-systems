@@ -932,7 +932,11 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                             result.observation_plan, moi_candidates);
   MoiResourcePlanningState resource_planning_state(resource_problem, effective_options,
                                                    result.resource_plans);
-  rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  const auto rebuild_resource_plans = [&] {
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, effective_options,
+                               effective_options, effective_options, moi_candidates, result);
+  };
+  rebuild_resource_plans();
   effective_options.moi_dynamic_stack_spill =
       moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -946,7 +950,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       });
   if (configure_automatic_moi_owner_sgpr(effective_options, resource_problem, result.resource_plans,
                                          result.warnings, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+    rebuild_resource_plans();
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
@@ -964,8 +968,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     static_cast<ConSanMoiOperatingPoint &>(effective_options) =
         std::move(dispatch_placement.attempted_operating_point);
     if (dispatch_placement_changed)
-      rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates,
-                                 result);
+      rebuild_resource_plans();
   }
   ConSanMoiResourcePlanningResult exec_planning = solve_automatic_moi_exec_save_resources(
       resource_planning_state, effective_options, effective_options, resource_problem,
@@ -982,7 +985,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                            std::make_move_iterator(accepted->diagnostics.end()));
   }
   if (configure_inline_moi_owner_sgpr(effective_options, effective_options, result.warnings))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+    rebuild_resource_plans();
   // Preserve the last complete scalar-placement proof even if a subsequent
   // dispatch override rejects the transform. Unsupported results use this
   // typed partial plan to explain which safe registers had already been
@@ -996,7 +999,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.warnings.insert(result.warnings.end(),
                            std::make_move_iterator(dispatch_fallback.diagnostics.begin()),
                            std::make_move_iterator(dispatch_fallback.diagnostics.end()));
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+    rebuild_resource_plans();
   }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     result.moi_operating_point = effective_options;
@@ -1037,8 +1040,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
         std::move(persistent_placement.attempted_operating_point);
     prologue_scratch_assignments = std::move(persistent_placement.prologue_scratch_assignments);
     if (persistent_placement_changed)
-      rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates,
-                                 result);
+      rebuild_resource_plans();
   }
   result.moi_operating_point = effective_options;
   if (result.outcome != ConSanTransformOutcome::Unsupported)
