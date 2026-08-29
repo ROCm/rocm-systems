@@ -308,8 +308,10 @@ class MetricCommands:
 
         # Detect APU system
         show_apu = bool(gpu_metric.get("is_apu", False))
-        if show_apu:
-            # APUs lack these discrete-GPU sensors, so their sections are omitted.
+        # APUs lack these discrete-GPU sensors. Drop them from the default dump only; a
+        # section the user named explicitly still reports N/A rather than nothing.
+        apu_suppressed = show_apu and not any(current_platform_values)
+        if apu_suppressed:
             logging.debug(
                 "APU detected for gpu %s; omitting pcie, ecc_blocks, "
                 "voltage_curve, overdrive, xgmi_err, and energy sections",
@@ -341,7 +343,7 @@ class MetricCommands:
             values_dict["gpu"] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
         if "pcie" in current_platform_args:
-            if args.pcie and not show_apu:
+            if args.pcie and not apu_suppressed:
                 pcie_dict = {
                     "width": "N/A",
                     "speed": "N/A",
@@ -1641,7 +1643,7 @@ class MetricCommands:
 
         # Since pcie bw may increase based on frequent metrics calls, we add it to the output here, but the populate the values first
         if "pcie" in current_platform_args:
-            if args.pcie and not show_apu:
+            if args.pcie and not apu_suppressed:
                 values_dict["pcie"] = pcie_dict
 
         if "gpu_board" in current_platform_args:
@@ -1713,7 +1715,7 @@ class MetricCommands:
 
                 values_dict["ecc"] = ecc_count
         if "ecc_blocks" in current_platform_args:
-            if args.ecc_blocks and not show_apu:
+            if args.ecc_blocks and not apu_suppressed:
                 ecc_dict = {}
                 sysfs_blocks = ["UMC", "SDMA", "GFX", "MMHUB", "PCIE_BIF", "HDP", "XGMI_WAFL"]
                 try:
@@ -1801,8 +1803,10 @@ class MetricCommands:
                     values_dict["fan"] = {
                         "apu_fan_pwm": self.helpers.unit_format(self.logger, apu_fan_pwm, "%")
                     }
+                elif not apu_suppressed:
+                    values_dict["fan"] = {"apu_fan_pwm": "N/A"}
         if "voltage_curve" in current_platform_args:
-            if args.voltage_curve and not show_apu:
+            if args.voltage_curve and not apu_suppressed:
                 # Populate N/A values per voltage point
                 voltage_point_dict = {}
                 for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
@@ -1850,7 +1854,7 @@ class MetricCommands:
 
                 values_dict["voltage_curve"] = voltage_point_dict
         if "overdrive" in current_platform_args:
-            if args.overdrive and not show_apu:
+            if args.overdrive and not apu_suppressed:
                 try:
                     overdrive_level = amdsmi_interface.amdsmi_get_gpu_overdrive_level(args.gpu)
                     od_unit = "%"
@@ -1891,7 +1895,7 @@ class MetricCommands:
                         "Failed to get perf level for gpu %s | %s", gpu_id, e.get_error_info()
                     )
         if "xgmi_err" in current_platform_args:
-            if args.xgmi_err and not show_apu:
+            if args.xgmi_err and not apu_suppressed:
                 try:
                     xgmi_err_status = amdsmi_interface.amdsmi_gpu_xgmi_error_status(args.gpu)
                     values_dict["xgmi_err"] = (
@@ -1961,7 +1965,7 @@ class MetricCommands:
 
                 values_dict["voltage"] = voltage_dict
         if "energy" in current_platform_args:
-            if args.energy and not show_apu:
+            if args.energy and not apu_suppressed:
                 try:
                     energy_dict = amdsmi_interface.amdsmi_get_energy_count(args.gpu)
 
@@ -2332,9 +2336,14 @@ class MetricCommands:
                         ]
                         for k in non_apu_keys:
                             del section_val[k]
+                    # An emptied section is dropped from the default dump, but reports
+                    # N/A when the user named it explicitly.
                     if not section_val:
-                        del values_dict[section_key]
-                elif section_val == "N/A":
+                        if apu_suppressed:
+                            del values_dict[section_key]
+                        else:
+                            values_dict[section_key] = "N/A"
+                elif section_val == "N/A" and apu_suppressed:
                     del values_dict[section_key]
 
         # Store timestamp first if watching_output is enabled

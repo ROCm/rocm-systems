@@ -67,6 +67,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed an uninitialized processor index that let the CPU and Core APIs read an unrelated CPU socket**.  
   - Passing a GPU, NIC, or switch handle to a CPU or Core API could return another socket's telemetry with `AMDSMI_STATUS_SUCCESS`. Such handles are now rejected. Calls that pass a CPU or Core handle are unaffected.
 
+- **Fixed `amd-smi metric` printing nothing for a section requested by name on APUs**.  
+  - APUs do not expose the discrete-GPU sensors, so those sections are dropped from the default dump. The same suppression applied to an explicitly named section, leaving `amd-smi metric --energy` printing only the GPU header and exiting 0, with no key at all in `--json` and `--csv` output.
+  - `--energy`, `--ecc-blocks`, `--overdrive`, `--xgmi-err`, `--pcie`, `--voltage-curve` and `--fan` now report `N/A` when named explicitly. The default `amd-smi metric` dump is unchanged.
+
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
 
