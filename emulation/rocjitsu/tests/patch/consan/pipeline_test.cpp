@@ -630,8 +630,8 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
             ConSanPipelineStageStatus::Completed);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::EvidenceRequirements)->execution_count, 2u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::EvidenceRequirements)->execution_count, 1u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 1u);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,

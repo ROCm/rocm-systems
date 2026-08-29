@@ -258,54 +258,6 @@ private:
     std::optional<ConSanLoweringExecution> supplied_execution = std::nullopt,
     ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
     std::optional<ConSanLoweringObservation> supplied_observation = std::nullopt) {
-  if (!supplied_lowering && !supplied_observation && extent == ConSanLoweringExtent::Complete &&
-      !mutation.has_mutation()) {
-    TransformResult prepared =
-        ConSanTransformTransaction(code_object_bytes, request, transform_policy, runtime_policy,
-                                   debug, mutation, capabilities, resources)
-            .execute(std::nullopt, std::nullopt, ConSanLoweringExtent::ThroughProgramInventory);
-    const ConSanPipelineStageState *observation_stage =
-        prepared.stage(ConSanPipelineStage::ObservationPlan);
-    const ConSanPipelineStageState *evidence_stage =
-        prepared.stage(ConSanPipelineStage::EvidenceRequirements);
-    const ConSanPipelineStageState *binding_stage =
-        prepared.stage(ConSanPipelineStage::RuntimeBinding);
-    const ConSanPipelineStageState *lowering_stage =
-        prepared.stage(ConSanPipelineStage::ResourceSolvingAndLowering);
-    const bool ready_to_lower =
-        prepared.outcome != ConSanTransformOutcome::Invalid &&
-        prepared.outcome != ConSanTransformOutcome::Unsupported && observation_stage != nullptr &&
-        observation_stage->status == ConSanPipelineStageStatus::Completed &&
-        evidence_stage != nullptr &&
-        evidence_stage->status == ConSanPipelineStageStatus::Completed &&
-        binding_stage != nullptr &&
-        (binding_stage->status == ConSanPipelineStageStatus::Completed ||
-         binding_stage->status == ConSanPipelineStageStatus::NotApplicable) &&
-        lowering_stage != nullptr && lowering_stage->status == ConSanPipelineStageStatus::Blocked;
-    if (!ready_to_lower)
-      return prepared;
-
-    const ConSanLoweringExecution execution = lowering_execution_prefix(prepared);
-    ConSanLoweringObservation observation = {
-        .plan = prepared.observation_plan,
-        .initial_coverage = prepared.coverage_ledger,
-    };
-    TransformResult completed =
-        ConSanTransformTransaction(code_object_bytes, request, transform_policy, runtime_policy,
-                                   debug, mutation, capabilities, resources)
-            .execute(std::nullopt, execution, ConSanLoweringExtent::Complete,
-                     std::move(observation));
-    for (const ConSanPipelineStage stage : {
-             ConSanPipelineStage::Configuration,
-             ConSanPipelineStage::TargetAndRuntimeCapabilities,
-             ConSanPipelineStage::EvidenceRequirements,
-             ConSanPipelineStage::RuntimeBinding,
-         }) {
-      completed.stages[static_cast<size_t>(stage)].execution_count +=
-          prepared.stages[static_cast<size_t>(stage)].execution_count;
-    }
-    return completed;
-  }
   return ConSanTransformTransaction(code_object_bytes, request, transform_policy, runtime_policy,
                                     debug, mutation, capabilities, resources)
       .execute(std::move(supplied_lowering), std::move(supplied_execution), extent,
@@ -754,18 +706,23 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
 
   ConSanLoweringExecution execution = supplied_execution.value_or(ConSanLoweringExecution{});
   ConSanTransformArtifacts lowering;
+  const bool staged_native_lowering =
+      !supplied_artifacts && !supplied_observation && extent == ConSanLoweringExtent::Complete &&
+      !mutation.has_mutation();
+  const ConSanLoweringExtent initial_extent =
+      staged_native_lowering ? ConSanLoweringExtent::ThroughProgramInventory : extent;
   if (supplied_artifacts) {
     lowering = std::move(*supplied_artifacts);
   } else {
     const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
                                          resources);
     ConSanLoweringExecution native_execution;
-    lowering = lower_consan(code_object_bytes, lowering_options, &native_execution, extent,
+    lowering = lower_consan(code_object_bytes, lowering_options, &native_execution, initial_extent,
                             supplied_observation ? &*supplied_observation : nullptr);
     execution.append(native_execution);
   }
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
-  if (extent == ConSanLoweringExtent::ThroughProgramInventory &&
+  if (initial_extent == ConSanLoweringExtent::ThroughProgramInventory &&
       execution.program_inventory_passes != 0u && execution.observation_plan_passes == 0u &&
       flavor != ConSanFlavor::None && lowering.errors.empty() &&
       lowering.program_inventory.code_object_parsed() &&
@@ -782,11 +739,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     execution.note_observation_plan();
   }
   result.publish_lowering_artifacts(std::move(lowering));
-  const ConSanTransformOutcome lowerer_outcome = result.outcome;
-  if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
-    result.dispatch_requirements = build_dispatch_requirements(
-        result.program_inventory, result.coverage_ledger, result.private_lowering_.patches);
-  }
+  ConSanTransformOutcome lowerer_outcome = result.outcome;
   if (flavor == ConSanFlavor::None) {
     capability_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (result.program_inventory.code_object_parsed()) {
@@ -941,6 +894,32 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
         (void)result.coverage_ledger.publish_lowering_commit(commit);
       result.dispatch_requirements = {};
     }
+  }
+
+  const bool binding_ready = binding_stage.status == ConSanPipelineStageStatus::Completed ||
+                             binding_stage.status == ConSanPipelineStageStatus::NotApplicable;
+  if (staged_native_lowering && binding_ready &&
+      result.outcome != ConSanTransformOutcome::Invalid &&
+      result.outcome != ConSanTransformOutcome::Unsupported) {
+    ConSanLoweringObservation observation = {
+        .plan = result.observation_plan,
+        .initial_coverage = result.coverage_ledger,
+    };
+    const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
+                                         resources);
+    ConSanLoweringExecution native_execution;
+    ConSanTransformArtifacts completed =
+        lower_consan(code_object_bytes, lowering_options, &native_execution,
+                     ConSanLoweringExtent::Complete, &observation);
+    execution.append(native_execution);
+    result.publish_lowering_artifacts(std::move(completed));
+    lowerer_outcome = result.outcome;
+    inventory_stage.execution_count = execution.program_inventory_passes;
+  }
+
+  if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
+    result.dispatch_requirements = build_dispatch_requirements(
+        result.program_inventory, result.coverage_ledger, result.private_lowering_.patches);
   }
 
   ConSanPipelineStageState &lowering_stage =
