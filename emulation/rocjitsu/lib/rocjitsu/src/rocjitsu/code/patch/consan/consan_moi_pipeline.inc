@@ -133,7 +133,8 @@ void publish_pending_moi_lowering_rejections(ConSanTransformArtifacts &result) {
         result.observation_plan, pending, std::span<const ConSanCommittedLoweringLocation>{},
         ConSanLoweringOutcomeKind::ResourceRejected,
         "MOI resource plan rejected intents: " +
-            std::string(consan_register_plan_reason_name(plan.reason)));
+            std::string(consan_register_plan_reason_name(plan.reason)),
+        ConSanRuntimeStaticMapping{}, plan.reason);
     if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
       result.errors.emplace_back("ConSan MOI could not publish a resource rejection");
       return;

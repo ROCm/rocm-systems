@@ -1128,6 +1128,9 @@ struct ConSanCommittedLowering {
   ConSanRuntimeStaticMapping runtime_mapping;
   /// Explicit final mechanism outcome shared by every bound intent.
   ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::Pending;
+  /// Typed resource-planner rejection, when that component rejected the
+  /// transaction. Other rejection domains leave this absent.
+  std::optional<ConSanRegisterPlanReason> resource_rejection_reason;
   /// Optional mechanism detail with no semantic-policy meaning.
   std::string detail;
 
@@ -1140,7 +1143,8 @@ struct ConSanCommittedLowering {
 [[nodiscard]] std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
     const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
     std::span<const ConSanCommittedLoweringLocation> locations, ConSanLoweringOutcomeKind outcome,
-    std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {});
+    std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {},
+    std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
 
 /// Verify that every runtime mapping member is owned by the intents and
 /// original sites of the same committed-lowering transaction.
@@ -1158,6 +1162,8 @@ struct ConSanIntentCoverageEntry {
   ConSanProbeIntent intent;
   /// Current finalization state for that intent.
   ConSanLoweringOutcomeKind lowering = ConSanLoweringOutcomeKind::Pending;
+  /// Resource-planner reason published by the same lowering transaction.
+  std::optional<ConSanRegisterPlanReason> resource_rejection_reason;
   /// Optional human-readable mechanism detail with no policy meaning.
   std::string detail;
 
@@ -1206,8 +1212,9 @@ public:
 
   /// Publish a final or pending mechanism outcome for one known intent.
   /// Returns false for an invalid/stale identifier or invalid enum value.
-  [[nodiscard]] bool set_lowering_outcome(ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome,
-                                          std::string detail = {});
+  [[nodiscard]] bool set_lowering_outcome(
+      ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome, std::string detail = {},
+      std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
 
   /// Publish one prepared lowering transaction directly against its intents.
   /// The operation validates every bound identity before changing any entry

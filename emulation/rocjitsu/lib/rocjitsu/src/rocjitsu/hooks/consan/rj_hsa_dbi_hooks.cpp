@@ -4759,16 +4759,15 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             outcome = "resource_failed";
             lowering_reason = "unsupported_resource_plan";
             resource_reason = "invalid_request";
-            const auto plan = std::ranges::find_if(
-                transform_debug.resource_plans,
-                [&](const rocjitsu::ConSanCandidateResourcePlan &candidate) {
-                  return candidate.site_kind == kind &&
-                         candidate.semantic_text_offset.value_or(candidate.text_offset) ==
-                             decision.semantic_site.physical.original_text_offset &&
-                         candidate.source == rocjitsu::ConSanRegisterAllocationSource::Unsupported;
-                });
-            if (plan != transform_debug.resource_plans.end())
-              resource_reason = rocjitsu::consan_register_plan_reason_name(plan->reason);
+            for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+              const rocjitsu::ConSanIntentCoverageEntry *entry =
+                  transform_result.coverage_ledger.intent_entry(id);
+              if (entry != nullptr && entry->resource_rejection_reason) {
+                resource_reason =
+                    rocjitsu::consan_register_plan_reason_name(*entry->resource_rejection_reason);
+                break;
+              }
+            }
           } else if (placement_rejected) {
             outcome = "placement_or_lowering_failed";
             lowering_reason = "instrumentation_patch_missing";

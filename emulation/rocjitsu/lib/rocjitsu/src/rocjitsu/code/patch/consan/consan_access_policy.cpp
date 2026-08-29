@@ -82,6 +82,11 @@ namespace {
   return static_cast<uint8_t>(outcome) < static_cast<uint8_t>(ConSanLoweringOutcomeKind::Count);
 }
 
+[[nodiscard]] bool valid_resource_rejection_reason(std::optional<ConSanRegisterPlanReason> reason) {
+  return !reason || (*reason > ConSanRegisterPlanReason::None &&
+                     *reason <= ConSanRegisterPlanReason::DynamicStack);
+}
+
 [[nodiscard]] bool contains_physical_site(std::span<const PhysicalSiteId> sites,
                                           const PhysicalSiteId &site) {
   return std::ranges::find(sites, site) != sites.end();
@@ -384,6 +389,7 @@ ConSanCoverageLedger::ConSanCoverageLedger(const ConSanObservationPlan &plan)
     intent_entries_.push_back({
         .intent = intent,
         .lowering = ConSanLoweringOutcomeKind::Pending,
+        .resource_rejection_reason = std::nullopt,
         .detail = {},
     });
 }
@@ -398,9 +404,12 @@ const ConSanIntentCoverageEntry *ConSanCoverageLedger::intent_entry(ConSanProbeI
 std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
     const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
     std::span<const ConSanCommittedLoweringLocation> locations, ConSanLoweringOutcomeKind outcome,
-    std::string detail, ConSanRuntimeStaticMapping runtime_mapping) {
+    std::string detail, ConSanRuntimeStaticMapping runtime_mapping,
+    std::optional<ConSanRegisterPlanReason> resource_rejection_reason) {
   if (intent_ids.empty() || outcome == ConSanLoweringOutcomeKind::Pending ||
-      !valid_lowering_outcome(outcome)) {
+      !valid_lowering_outcome(outcome) ||
+      !valid_resource_rejection_reason(resource_rejection_reason) ||
+      (resource_rejection_reason && outcome != ConSanLoweringOutcomeKind::ResourceRejected)) {
     return std::nullopt;
   }
   const bool instrumented = outcome == ConSanLoweringOutcomeKind::Instrumented;
@@ -414,6 +423,7 @@ std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
       .locations = std::vector(locations.begin(), locations.end()),
       .runtime_mapping = std::move(runtime_mapping),
       .outcome = outcome,
+      .resource_rejection_reason = resource_rejection_reason,
       .detail = std::move(detail),
   };
   commit.intent_ids.reserve(intent_ids.size());
@@ -535,21 +545,27 @@ bool consan_runtime_static_mapping_matches_commit(const ConSanObservationPlan &p
   return true;
 }
 
-bool ConSanCoverageLedger::set_lowering_outcome(ConSanProbeIntentId id,
-                                                ConSanLoweringOutcomeKind outcome,
-                                                std::string detail) {
+bool ConSanCoverageLedger::set_lowering_outcome(
+    ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome, std::string detail,
+    std::optional<ConSanRegisterPlanReason> resource_rejection_reason) {
   if (!valid_lowering_outcome(outcome) || !id.valid() || id.value >= intent_entries_.size() ||
-      intent_entries_[id.value].intent.id != id) {
+      intent_entries_[id.value].intent.id != id ||
+      !valid_resource_rejection_reason(resource_rejection_reason) ||
+      (resource_rejection_reason && outcome != ConSanLoweringOutcomeKind::ResourceRejected)) {
     return false;
   }
   intent_entries_[id.value].lowering = outcome;
+  intent_entries_[id.value].resource_rejection_reason = resource_rejection_reason;
   intent_entries_[id.value].detail = std::move(detail);
   return true;
 }
 
 bool ConSanCoverageLedger::publish_lowering_commit(const ConSanCommittedLowering &commit) {
   if (commit.intent_ids.empty() || commit.outcome == ConSanLoweringOutcomeKind::Pending ||
-      !valid_lowering_outcome(commit.outcome)) {
+      !valid_lowering_outcome(commit.outcome) ||
+      !valid_resource_rejection_reason(commit.resource_rejection_reason) ||
+      (commit.resource_rejection_reason &&
+       commit.outcome != ConSanLoweringOutcomeKind::ResourceRejected)) {
     return false;
   }
   const bool instrumented = commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
@@ -585,7 +601,7 @@ bool ConSanCoverageLedger::publish_lowering_commit(const ConSanCommittedLowering
     }
   }
   for (ConSanProbeIntentId id : commit.intent_ids) {
-    (void)set_lowering_outcome(id, commit.outcome, commit.detail);
+    (void)set_lowering_outcome(id, commit.outcome, commit.detail, commit.resource_rejection_reason);
   }
   return true;
 }
