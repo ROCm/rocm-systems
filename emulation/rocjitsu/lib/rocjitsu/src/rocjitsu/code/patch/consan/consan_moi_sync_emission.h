@@ -31,10 +31,31 @@ namespace rocjitsu::consan_moi_impl {
                                                      std::vector<ConSanCommittedLowering> commits,
                                                      std::string_view probe_name);
 
-[[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
+enum class SampledAtomicSemanticsReason : uint8_t {
+  None,
+  UnqualifiedSharedSyncSequence,
+  UnsupportedQualifiedMemoryRole,
+  MissingQualifiedScope,
+  UnsupportedQualifiedScope,
+  UnsupportedQualifiedByteRange,
+  CompareExchangeDynamicOutcomeUnavailable,
+  UnsupportedQualifiedRmwOutcome,
+  SampledSyncAbiRejectedQualifiedSequence,
+  SampledSyncAbiRejectedCasFailure,
+  Count,
+};
+
+struct SampledAtomicSemanticsResult {
+  std::optional<consan_detail::SampledAtomicSemantics> semantics;
+  SampledAtomicSemanticsReason reason = SampledAtomicSemanticsReason::None;
+};
+
+[[nodiscard]] SampledAtomicSemanticsResult
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
-                                  const consan_detail::MoiAtomicEvidenceSitePlan &plan,
-                                  std::string &unsupported_reason);
+                                  const consan_detail::MoiAtomicEvidenceSitePlan &plan);
+
+[[nodiscard]] std::string_view
+sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 
 [[nodiscard]] std::vector<consan_detail::MoiFenceEvidenceSitePlan>
 build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,

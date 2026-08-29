@@ -1532,16 +1532,17 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     return;
   for (MoiAtomicEvidenceSitePlan &atomic : admitted) {
     if (atomic.is_rmw) {
-      std::string reason;
-      const auto semantics = sampled_atomic_semantics_for_plan(graph, atomic, reason);
-      if (!semantics) {
-        result.errors.emplace_back("ConSan MOI admitted sampled atomic evidence is invalid: " +
-                                   reason);
+      const SampledAtomicSemanticsResult semantics =
+          sampled_atomic_semantics_for_plan(graph, atomic);
+      if (!semantics.semantics) {
+        result.errors.emplace_back(
+            "ConSan MOI admitted sampled atomic evidence is invalid: " +
+            std::string(sampled_atomic_semantics_reason_name(semantics.reason)));
         return;
       }
       const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
       candidates.push_back(
-          {std::move(atomic), *semantics, sequence_end, 0, 1, false, std::nullopt});
+          {std::move(atomic), *semantics.semantics, sequence_end, 0, 1, false, std::nullopt});
       continue;
     }
     const auto role = sampled_atomic_role(atomic.event_kind, /*is_rmw=*/false);

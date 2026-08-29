@@ -166,8 +166,7 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
 }
 
 ConSanResourcePlanSummary
-summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans,
-                                std::span<const ConSanPatchInfo> patches) {
+summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans) {
   ConSanResourcePlanSummary summary;
   const std::array alternative_counts = {
       &summary.alternative_selected,   &summary.alternative_rejected,
@@ -192,14 +191,16 @@ summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> pla
           static_cast<size_t>(plan.scratch_vgpr_count) * SpillManager::kSlotBytes;
     }
   }
-  for (const ConSanPatchInfo &patch : patches) {
-    if (patch.spilled_vgpr_count == 0)
-      continue;
-    ++summary.emitted_spill_patches;
-    summary.emitted_spill_slot_bytes +=
-        static_cast<size_t>(patch.spilled_vgpr_count) * SpillManager::kSlotBytes;
-  }
   return summary;
+}
+
+void accumulate_consan_emitted_spill(ConSanResourcePlanSummary &summary,
+                                     const ConSanPatchAbiEffects &effects) {
+  if (effects.spilled_vgpr_count == 0)
+    return;
+  ++summary.emitted_spill_patches;
+  summary.emitted_spill_slot_bytes +=
+      static_cast<size_t>(effects.spilled_vgpr_count) * SpillManager::kSlotBytes;
 }
 
 } // namespace rocjitsu

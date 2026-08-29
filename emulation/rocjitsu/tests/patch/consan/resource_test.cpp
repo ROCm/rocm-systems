@@ -275,11 +275,13 @@ TEST(ConSanResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
   plans[4].alternatives = {
       {.outcome = ConSanResourcePlanAlternativeOutcome::Selected},
   };
-  std::array<ConSanPatchInfo, 3> patches;
-  patches[0].spilled_vgpr_count = 2;
-  patches[2].spilled_vgpr_count = 5;
+  std::array<ConSanPatchAbiEffects, 3> effects;
+  effects[0].spilled_vgpr_count = 2;
+  effects[2].spilled_vgpr_count = 5;
 
-  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans(plans, patches);
+  ConSanResourcePlanSummary summary = summarize_consan_resource_plans(plans);
+  for (const ConSanPatchAbiEffects &effect : effects)
+    accumulate_consan_emitted_spill(summary, effect);
 
   EXPECT_EQ(summary.explicit_plans, 1u);
   EXPECT_EQ(summary.dead_plans, 1u);
@@ -298,7 +300,7 @@ TEST(ConSanResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
 }
 
 TEST(ConSanResourcePlanSummary, EmptyInputProducesEmptySummary) {
-  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans({}, {});
+  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans({});
 
   EXPECT_EQ(summary.explicit_plans, 0u);
   EXPECT_EQ(summary.dead_plans, 0u);

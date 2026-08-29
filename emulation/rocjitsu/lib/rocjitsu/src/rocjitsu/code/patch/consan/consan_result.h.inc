@@ -69,6 +69,27 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   std::optional<uint64_t> kernel_descriptor_file_offset;
 };
 
+/// Stable policy reason crossing from perturbation admission into planning
+/// and final proof rederivation. Rendering remains a separate concern.
+enum class ConSanPerturbationRejectionReason : uint8_t {
+  None,
+  MissingExactBasicBlock,
+  CyclicCfgComponent,
+  InsideScalarClause,
+  RuntimeHelper,
+  NonExactSequenceMembers,
+  AmbiguousOrUnsupportedSequence,
+  NotQualifiedFullBarrier,
+  DynamicOrUnknownBarrierParticipants,
+  NotAtomicSequence,
+  UnknownOrInapplicableMemoryRole,
+  UnsupportedAtomicScope,
+  AmbiguousAddressProvenance,
+  NoPerturbationKind,
+  MissingAnchorEvent,
+  Count,
+};
+
 /// One synchronization-sequence edge considered for scheduling perturbation.
 ///
 /// Analysis derives these records from the immutable synchronization
@@ -88,7 +109,7 @@ struct ConSanPerturbationCandidate {
   uint32_t anchor_size = 0;
   std::vector<std::string> ordered_member_identities;
   bool eligible = false;
-  std::string rejection_reason;
+  ConSanPerturbationRejectionReason rejection_reason = ConSanPerturbationRejectionReason::None;
 };
 
 /// One admitted scheduling perturbation ready for byte-level lowering.

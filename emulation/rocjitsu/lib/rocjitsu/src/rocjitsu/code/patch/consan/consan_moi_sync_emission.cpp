@@ -158,17 +158,19 @@ make_moi_sync_lowering_commit(const ConSanTransformArtifacts &result,
   return false;
 }
 
-[[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
+[[nodiscard]] SampledAtomicSemanticsResult
 sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
-                                  const MoiAtomicEvidenceSitePlan &plan,
-                                  std::string &unsupported_reason) {
+                                  const MoiAtomicEvidenceSitePlan &plan) {
+  using Reason = SampledAtomicSemanticsReason;
+  const auto reject = [](Reason reason) {
+    return SampledAtomicSemanticsResult{.semantics = std::nullopt, .reason = reason};
+  };
   const ConSanSyncSequence *sequence = graph.find_unique_sequence(plan.association.value);
   if (sequence == nullptr ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                     ConSanSemanticConfidence::Conservative)) {
-    unsupported_reason = "unqualified-shared-sync-sequence";
-    return std::nullopt;
+    return reject(Reason::UnqualifiedSharedSyncSequence);
   }
 
   consan_detail::SampledAtomicSemantics semantics;
@@ -185,13 +187,11 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   case ConSanSyncMemoryRole::Unknown:
   case ConSanSyncMemoryRole::None:
   case ConSanSyncMemoryRole::SequentiallyConsistent:
-    unsupported_reason = "unsupported-qualified-memory-role";
-    return std::nullopt;
+    return reject(Reason::UnsupportedQualifiedMemoryRole);
   }
   const std::optional<uint32_t> semantic_scope = sequence->raw_scope;
   if (!semantic_scope) {
-    unsupported_reason = "missing-qualified-scope";
-    return std::nullopt;
+    return reject(Reason::MissingQualifiedScope);
   }
   switch (*semantic_scope) {
   case 0:
@@ -207,13 +207,11 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     semantics.scope = ConSanMoiSampledSyncScope::System;
     break;
   default:
-    unsupported_reason = "unsupported-qualified-scope";
-    return std::nullopt;
+    return reject(Reason::UnsupportedQualifiedScope);
   }
   if (sequence->width_bits == 0 || sequence->width_bits % 8u != 0 ||
       sequence->width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
-    unsupported_reason = "unsupported-qualified-byte-range";
-    return std::nullopt;
+    return reject(Reason::UnsupportedQualifiedByteRange);
   }
   semantics.byte_count = sequence->width_bits / 8u;
   switch (sequence->rmw_outcome) {
@@ -226,15 +224,13 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   case ConSanSyncRmwOutcome::CompareExchange:
     if (!plan.site.returns_old_value.value_or(false) || !plan.site.data_vgpr ||
         !plan.site.dst_vgpr) {
-      unsupported_reason = "compare-exchange-dynamic-outcome-unavailable";
-      return std::nullopt;
+      return reject(Reason::CompareExchangeDynamicOutcomeUnavailable);
     }
     semantics.outcome = ConSanMoiSampledSyncOutcome::CasSuccess;
     break;
   case ConSanSyncRmwOutcome::NotApplicable:
   case ConSanSyncRmwOutcome::Unknown:
-    unsupported_reason = "unsupported-qualified-rmw-outcome";
-    return std::nullopt;
+    return reject(Reason::UnsupportedQualifiedRmwOutcome);
   }
   const ConSanMoiSampledSyncEncodeResult encoded = encode_consan_moi_sampled_sync_metadata({
       .address = 1,
@@ -245,8 +241,7 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
       .outcome = semantics.outcome,
   });
   if (encoded.classification != ConSanMoiSampledSyncClassification::Valid) {
-    unsupported_reason = "sampled-sync-abi-rejected-qualified-sequence";
-    return std::nullopt;
+    return reject(Reason::SampledSyncAbiRejectedQualifiedSequence);
   }
   semantics.descriptor = encoded.packed.descriptor;
   if (sequence->rmw_outcome == ConSanSyncRmwOutcome::CompareExchange) {
@@ -261,12 +256,40 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
     const ConSanMoiSampledSyncEncodeResult failure =
         encode_consan_moi_sampled_sync_metadata(failure_metadata);
     if (failure.classification != ConSanMoiSampledSyncClassification::Valid) {
-      unsupported_reason = "sampled-sync-abi-rejected-cas-failure";
-      return std::nullopt;
+      return reject(Reason::SampledSyncAbiRejectedCasFailure);
     }
     semantics.cas_failure_descriptor = failure.packed.descriptor;
   }
-  return semantics;
+  return {.semantics = semantics, .reason = Reason::None};
+}
+
+std::string_view sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason) {
+  using Reason = SampledAtomicSemanticsReason;
+  switch (reason) {
+  case Reason::None:
+    return "";
+  case Reason::UnqualifiedSharedSyncSequence:
+    return "unqualified-shared-sync-sequence";
+  case Reason::UnsupportedQualifiedMemoryRole:
+    return "unsupported-qualified-memory-role";
+  case Reason::MissingQualifiedScope:
+    return "missing-qualified-scope";
+  case Reason::UnsupportedQualifiedScope:
+    return "unsupported-qualified-scope";
+  case Reason::UnsupportedQualifiedByteRange:
+    return "unsupported-qualified-byte-range";
+  case Reason::CompareExchangeDynamicOutcomeUnavailable:
+    return "compare-exchange-dynamic-outcome-unavailable";
+  case Reason::UnsupportedQualifiedRmwOutcome:
+    return "unsupported-qualified-rmw-outcome";
+  case Reason::SampledSyncAbiRejectedQualifiedSequence:
+    return "sampled-sync-abi-rejected-qualified-sequence";
+  case Reason::SampledSyncAbiRejectedCasFailure:
+    return "sampled-sync-abi-rejected-cas-failure";
+  case Reason::Count:
+    return "invalid-sampled-atomic-semantics-reason";
+  }
+  return "invalid-sampled-atomic-semantics-reason";
 }
 
 [[nodiscard]] ConSanAtomicSite

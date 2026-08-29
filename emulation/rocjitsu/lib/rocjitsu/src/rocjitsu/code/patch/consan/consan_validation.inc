@@ -2853,9 +2853,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           !sequence->basic_block_index ||
           !consan_sync_confidence_meets(sequence->confidence,
                                         ConSanSemanticConfidence::Conservative) ||
-          !perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
-                                         *patch.perturbation_edge)
-               .empty() ||
+          perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
+                                        *patch.perturbation_edge) !=
+              ConSanPerturbationRejectionReason::None ||
           candidate->container_name != sequence->container_name ||
           candidate->in_kernel != sequence->in_kernel ||
           candidate->basic_block_index != *sequence->basic_block_index ||
@@ -4656,8 +4656,7 @@ finalize_consan_result_impl(ConSanTransformArtifacts result,
     return result;
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      summarize_consan_resource_plans(result.resource_plans, result.patches).unsupported_plans !=
-          0) {
+      summarize_consan_resource_plans(result.resource_plans).unsupported_plans != 0) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.mutation.applied_fault_logical_identity.reset();
   } else {

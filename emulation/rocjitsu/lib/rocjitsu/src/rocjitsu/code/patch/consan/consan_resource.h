@@ -44,11 +44,13 @@ struct ConSanRegisterPlan {
 [[nodiscard]] ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
                                                        const RegisterSet &live_before);
 
-/// Summarizes resource decisions and emitted spill mechanics. This derived
-/// reporting view is not transform state: callers calculate it when needed
-/// instead of storing mutable data that can become stale as inputs change.
+/// Summarize planner decisions without depending on emitted patch proof.
 [[nodiscard]] ConSanResourcePlanSummary
-summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans,
-                                std::span<const ConSanPatchInfo> patches);
+summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans);
+
+/// Add the spill telemetry from one emitted patch's ABI effect. Keeping this
+/// separate prevents resource reporting from receiving validation proof.
+void accumulate_consan_emitted_spill(ConSanResourcePlanSummary &summary,
+                                     const ConSanPatchAbiEffects &effects);
 
 } // namespace rocjitsu

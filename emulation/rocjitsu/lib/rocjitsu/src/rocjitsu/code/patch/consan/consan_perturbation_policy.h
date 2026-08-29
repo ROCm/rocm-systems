@@ -8,16 +8,19 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 
-#include <string>
+#include <string_view>
 
 namespace rocjitsu {
 
-/// Return an empty string when one exact synchronization sequence is eligible
-/// for the requested perturbation edge, otherwise a stable typed-in-practice
-/// reason token consumed by planning and proof rederivation.
-[[nodiscard]] std::string perturbation_rejection_reason(const SyncEventSemanticIndex &events,
-                                                        const ConSanSyncSequence &sequence,
-                                                        ConSanPerturbationKind kind,
-                                                        ConSanPerturbationEdge edge);
+/// Classify whether one exact synchronization sequence is eligible for the
+/// requested perturbation edge. Planning and validation branch on this typed
+/// reason; diagnostic code renders it separately.
+[[nodiscard]] ConSanPerturbationRejectionReason
+perturbation_rejection_reason(const SyncEventSemanticIndex &events,
+                              const ConSanSyncSequence &sequence, ConSanPerturbationKind kind,
+                              ConSanPerturbationEdge edge);
+
+[[nodiscard]] std::string_view
+consan_perturbation_rejection_reason_name(ConSanPerturbationRejectionReason reason);
 
 } // namespace rocjitsu

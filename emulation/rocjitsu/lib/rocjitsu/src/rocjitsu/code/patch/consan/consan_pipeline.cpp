@@ -280,14 +280,17 @@ const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value
 }
 
 ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &result) {
+  ConSanResourcePlanSummary resource_summary =
+      summarize_consan_resource_plans(result.private_lowering_.resource_plans);
+  for (const ConSanPatchInfo &patch : result.private_lowering_.patches)
+    accumulate_consan_emitted_spill(resource_summary, patch);
   ConSanTransformDebugReport report{
       .fault_sites = result.private_lowering_.fault_sites,
       .barrier_move_destinations = result.private_lowering_.barrier_move_destinations,
       .fault_plans = result.private_lowering_.fault_plans,
       .resource_plans = result.private_lowering_.resource_plans,
       .committed_lowerings = result.private_lowering_.committed_lowerings,
-      .resource_summary = summarize_consan_resource_plans(result.private_lowering_.resource_plans,
-                                                          result.private_lowering_.patches),
+      .resource_summary = resource_summary,
       .patches = {},
   };
   report.patches.reserve(result.private_lowering_.patches.size());

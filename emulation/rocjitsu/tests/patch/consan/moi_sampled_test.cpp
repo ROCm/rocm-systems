@@ -3,10 +3,44 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSan, SampledAtomicSemanticReasonsAreTypedAndRenderStableTokens) {
+  using Reason = consan_moi_impl::SampledAtomicSemanticsReason;
+  const std::array expected = {
+      std::pair{Reason::None, std::string_view{""}},
+      std::pair{Reason::UnqualifiedSharedSyncSequence,
+                std::string_view{"unqualified-shared-sync-sequence"}},
+      std::pair{Reason::UnsupportedQualifiedMemoryRole,
+                std::string_view{"unsupported-qualified-memory-role"}},
+      std::pair{Reason::MissingQualifiedScope, std::string_view{"missing-qualified-scope"}},
+      std::pair{Reason::UnsupportedQualifiedScope, std::string_view{"unsupported-qualified-scope"}},
+      std::pair{Reason::UnsupportedQualifiedByteRange,
+                std::string_view{"unsupported-qualified-byte-range"}},
+      std::pair{Reason::CompareExchangeDynamicOutcomeUnavailable,
+                std::string_view{"compare-exchange-dynamic-outcome-unavailable"}},
+      std::pair{Reason::UnsupportedQualifiedRmwOutcome,
+                std::string_view{"unsupported-qualified-rmw-outcome"}},
+      std::pair{Reason::SampledSyncAbiRejectedQualifiedSequence,
+                std::string_view{"sampled-sync-abi-rejected-qualified-sequence"}},
+      std::pair{Reason::SampledSyncAbiRejectedCasFailure,
+                std::string_view{"sampled-sync-abi-rejected-cas-failure"}},
+  };
+  static_assert(expected.size() == static_cast<size_t>(Reason::Count));
+  for (size_t index = 0; index < expected.size(); ++index) {
+    EXPECT_EQ(static_cast<size_t>(expected[index].first), index);
+    EXPECT_EQ(consan_moi_impl::sampled_atomic_semantics_reason_name(expected[index].first),
+              expected[index].second);
+  }
+  EXPECT_EQ(consan_moi_impl::sampled_atomic_semantics_reason_name(Reason::Count),
+            "invalid-sampled-atomic-semantics-reason");
+  EXPECT_EQ(consan_moi_impl::sampled_atomic_semantics_reason_name(static_cast<Reason>(255)),
+            "invalid-sampled-atomic-semantics-reason");
+}
 
 struct SampledTarget {
   rj_code_arch_t arch;

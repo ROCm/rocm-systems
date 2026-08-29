@@ -40,7 +40,8 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       continue;
     for (const ConSanPerturbationEdge edge :
          {ConSanPerturbationEdge::Release, ConSanPerturbationEdge::Acquire}) {
-      const std::string rejection = perturbation_rejection_reason(events, sequence, kind, edge);
+      const ConSanPerturbationRejectionReason rejection =
+          perturbation_rejection_reason(events, sequence, kind, edge);
       const SemanticSiteId &anchor_member = edge == ConSanPerturbationEdge::Release
                                                 ? sequence.member_semantic_ids.front()
                                                 : sequence.member_semantic_ids.back();
@@ -59,8 +60,10 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
       candidate.anchor_text_offset = anchor == nullptr ? 0 : anchor->text_offset;
       candidate.anchor_size = anchor == nullptr ? 0 : anchor->size;
       candidate.ordered_member_identities = sequence.member_event_identities;
-      candidate.eligible = rejection.empty() && anchor != nullptr;
-      candidate.rejection_reason = anchor == nullptr ? "missing-anchor-event" : rejection;
+      candidate.eligible =
+          rejection == ConSanPerturbationRejectionReason::None && anchor != nullptr;
+      candidate.rejection_reason =
+          anchor == nullptr ? ConSanPerturbationRejectionReason::MissingAnchorEvent : rejection;
       planning.candidates.push_back(std::move(candidate));
     }
   }

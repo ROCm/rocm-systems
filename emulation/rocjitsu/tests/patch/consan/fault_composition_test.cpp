@@ -3,8 +3,45 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
+
 namespace rocjitsu {
 namespace {
+
+TEST(ConSan, PerturbationRejectionReasonsAreTypedAndRenderStableTokens) {
+  using Reason = ConSanPerturbationRejectionReason;
+  const std::array expected = {
+      std::pair{Reason::None, std::string_view{""}},
+      std::pair{Reason::MissingExactBasicBlock, std::string_view{"missing-exact-basic-block"}},
+      std::pair{Reason::CyclicCfgComponent, std::string_view{"cyclic-cfg-component"}},
+      std::pair{Reason::InsideScalarClause, std::string_view{"inside-s-clause"}},
+      std::pair{Reason::RuntimeHelper, std::string_view{"runtime-helper"}},
+      std::pair{Reason::NonExactSequenceMembers, std::string_view{"non-exact-sequence-members"}},
+      std::pair{Reason::AmbiguousOrUnsupportedSequence,
+                std::string_view{"ambiguous-or-unsupported-sequence"}},
+      std::pair{Reason::NotQualifiedFullBarrier, std::string_view{"not-qualified-full-barrier"}},
+      std::pair{Reason::DynamicOrUnknownBarrierParticipants,
+                std::string_view{"dynamic-or-unknown-barrier-participants"}},
+      std::pair{Reason::NotAtomicSequence, std::string_view{"not-atomic-sequence"}},
+      std::pair{Reason::UnknownOrInapplicableMemoryRole,
+                std::string_view{"unknown-or-inapplicable-memory-role"}},
+      std::pair{Reason::UnsupportedAtomicScope, std::string_view{"unsupported-atomic-scope"}},
+      std::pair{Reason::AmbiguousAddressProvenance,
+                std::string_view{"ambiguous-address-provenance"}},
+      std::pair{Reason::NoPerturbationKind, std::string_view{"no-perturbation-kind"}},
+      std::pair{Reason::MissingAnchorEvent, std::string_view{"missing-anchor-event"}},
+  };
+  static_assert(expected.size() == static_cast<size_t>(Reason::Count));
+  for (size_t index = 0; index < expected.size(); ++index) {
+    EXPECT_EQ(static_cast<size_t>(expected[index].first), index);
+    EXPECT_EQ(consan_perturbation_rejection_reason_name(expected[index].first),
+              expected[index].second);
+  }
+  EXPECT_EQ(consan_perturbation_rejection_reason_name(Reason::Count),
+            "invalid-perturbation-rejection-reason");
+  EXPECT_EQ(consan_perturbation_rejection_reason_name(static_cast<Reason>(255)),
+            "invalid-perturbation-rejection-reason");
+}
 
 TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
   const std::array<uint32_t, 3> text_words = {
@@ -1042,7 +1079,8 @@ TEST(ConSan, PerturbationRejectsUnpairedDynamicAmbiguousAndCyclicSequences) {
   ASSERT_FALSE(cyclic_perturbation.candidates.empty());
   EXPECT_TRUE(
       std::ranges::none_of(cyclic_perturbation.candidates, &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(cyclic_perturbation.candidates.front().rejection_reason, "cyclic-cfg-component");
+  EXPECT_EQ(cyclic_perturbation.candidates.front().rejection_reason,
+            ConSanPerturbationRejectionReason::CyclicCfgComponent);
   EXPECT_TRUE(cyclic_perturbation.plans.empty());
   EXPECT_FALSE(cyclic.errors.empty());
 
@@ -1077,7 +1115,8 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
   ASSERT_FALSE(clause_perturbation.candidates.empty());
   EXPECT_TRUE(
       std::ranges::none_of(clause_perturbation.candidates, &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(clause_perturbation.candidates.front().rejection_reason, "inside-s-clause");
+  EXPECT_EQ(clause_perturbation.candidates.front().rejection_reason,
+            ConSanPerturbationRejectionReason::InsideScalarClause);
   EXPECT_FALSE(clause.errors.empty());
 
   ConSanPerturbationPlanningState unknown_role_perturbation;
@@ -1087,7 +1126,7 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
   EXPECT_TRUE(std::ranges::none_of(unknown_role_perturbation.candidates,
                                    &ConSanPerturbationCandidate::eligible));
   EXPECT_EQ(unknown_role_perturbation.candidates.front().rejection_reason,
-            "unknown-or-inapplicable-memory-role");
+            ConSanPerturbationRejectionReason::UnknownOrInapplicableMemoryRole);
 
   const std::array<uint32_t, 7> wave_scope_words = {
       0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
@@ -1111,7 +1150,7 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
   EXPECT_TRUE(std::ranges::none_of(wave_scope_perturbation.candidates,
                                    &ConSanPerturbationCandidate::eligible));
   EXPECT_EQ(wave_scope_perturbation.candidates.front().rejection_reason,
-            "unsupported-atomic-scope");
+            ConSanPerturbationRejectionReason::UnsupportedAtomicScope);
 }
 
 TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {

@@ -536,7 +536,10 @@ const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanTransformArtifa
 /// not cache this view in `ConSanTransformArtifacts`, so tests cannot accidentally assert
 /// against stale duplicated state either.
 ConSanResourcePlanSummary test_resource_plan_summary(const ConSanTransformArtifacts &result) {
-  return summarize_consan_resource_plans(result.resource_plans, result.patches);
+  ConSanResourcePlanSummary summary = summarize_consan_resource_plans(result.resource_plans);
+  for (const ConSanPatchInfo &patch : result.patches)
+    accumulate_consan_emitted_spill(summary, patch);
+  return summary;
 }
 
 ConSanRegisterRequest vgpr_request(uint16_t count, uint16_t current_allocation_count,
