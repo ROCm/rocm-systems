@@ -2407,7 +2407,9 @@
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, bool partition_mask_debug,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
     const ConSanMoiWorkgroupSources &workgroup_sources,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
@@ -2418,27 +2420,22 @@
     uint16_t scratch_count, bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
     std::vector<std::string> &errors, uint32_t *guest_instruction_word_count = nullptr) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (!options.scratch_vgpr) {
-    errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
-    return std::nullopt;
-  }
-  if (!options.moi_exec_save_sgpr ||
-      (!moi_has_runtime_hardware_dispatch_id(options) &&
+  if (!point.moi_exec_save_sgpr ||
+      (!moi_has_runtime_hardware_dispatch_id(point) &&
        (target == nullptr ||
         target->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
   }
-  if (options.moi_partition_mask_debug &&
-      (!options.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)) {
+  if (partition_mask_debug && (!point.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)) {
     errors.emplace_back("ConSan MOI partition-mask debug requires wave-coalesced InlineShadow");
     return std::nullopt;
   }
   const uint16_t normal_scratch_count =
-      inline_shadow_scratch_count(options, options, candidate, arch);
+      inline_shadow_scratch_count(request, point, candidate, arch);
   const uint16_t spill_scratch_count =
-      inline_shadow_spill_backed_scratch_count(options, options, candidate, arch);
+      inline_shadow_spill_backed_scratch_count(request, point, candidate, arch);
   if (scratch_count != normal_scratch_count &&
       (spill == nullptr || scratch_count != spill_scratch_count)) {
     errors.emplace_back(
@@ -2447,41 +2444,40 @@
   }
   const uint16_t expected_spill_count = static_cast<uint16_t>(
       scratch_count + static_cast<uint16_t>(spill != nullptr && !spill->uses_dynamic_stack_frame &&
-                                            (options.automatic_moi_inline_sgpr_spill ||
-                                             options.automatic_moi_record_replay_sgpr_spill)));
+                                            (point.automatic_moi_inline_sgpr_spill ||
+                                             point.automatic_moi_record_replay_sgpr_spill)));
   if (spill != nullptr &&
-      (spill->vgpr_base != *options.scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
+      (spill->vgpr_base != scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe spill window disagrees with its resource plan");
     return std::nullopt;
   }
-  if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
+  if (static_cast<uint32_t>(scratch_vgpr) + scratch_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
   }
-  if (!validate_inline_shadow_exec_save_sgpr(options, options, options, arch, errors))
+  if (!validate_inline_shadow_exec_save_sgpr(request, bound_resources, point, arch, errors))
     return std::nullopt;
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
   if (!spill_overlaps_guest_operands &&
-      reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
-                                             errors))
+      reject_candidate_scratch_range_overlap(candidate, scratch_vgpr, scratch_count, errors))
     return std::nullopt;
-  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner &&
-      !options.automatic_moi_private_epoch) {
+  if (!point.moi_owner_vgpr && !point.moi_persistent_sgprs.owner &&
+      !point.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI epoch", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_workgroup_key_vgpr, *options.scratch_vgpr,
+  if (reject_optional_scratch_range_overlap(point.moi_owner_vgpr, scratch_vgpr, scratch_count,
+                                            "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_epoch_vgpr, scratch_vgpr, scratch_count,
+                                            "MOI epoch", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
-  if (options.moi_dispatch_id_vgpr &&
-      range_overlaps(*options.moi_dispatch_id_vgpr, 2u, *options.scratch_vgpr, scratch_count)) {
+  if (point.moi_dispatch_id_vgpr &&
+      range_overlaps(*point.moi_dispatch_id_vgpr, 2u, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI scratch VGPRs overlap the dispatch-ID VGPR pair");
     return std::nullopt;
   }
@@ -2492,14 +2488,14 @@
     return std::nullopt;
   }
 
-  const uint16_t address_lo_vgpr = *options.scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
-  const uint16_t low_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
-  const uint16_t high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-  const uint16_t old_value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  const uint16_t address_lo_vgpr = scratch_vgpr;
+  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
+  const uint16_t low_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
+  const uint16_t high_vgpr = static_cast<uint16_t>(scratch_vgpr + 3u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  const uint16_t old_value_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
   const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
-  if (cas_expected_vgpr >= static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count) {
+  if (cas_expected_vgpr >= static_cast<uint32_t>(scratch_vgpr) + scratch_count) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe has no scratch VGPR for the expected CAS value");
     return std::nullopt;
@@ -2522,14 +2518,13 @@
       !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (candidate.is_direct_to_lds()) {
-    saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
-                                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-                                  options.moi_track_atomics) +
-                              inline_shadow_loop_scratch_count(candidate));
+    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
+        consan_detail::inline_shadow_loop_counter_vgpr(
+            scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics) +
+        inline_shadow_loop_scratch_count(candidate));
   } else if (materialize_flat_address) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
-        *options.scratch_vgpr + scratch_count - flat_access_address_scratch_count(candidate));
+        scratch_vgpr + scratch_count - flat_access_address_scratch_count(candidate));
   } else if (spill_backed_lds_byte_offset_source) {
     // Address construction and local exchange consume the guest offset before
     // the transaction initializes its expected CAS value. The authoritative
@@ -2538,11 +2533,10 @@
     saved_lds_byte_offset_vgpr = cas_expected_vgpr;
   } else if ((moi_load_clobbers_address(candidate) || capture_high_bank_address) &&
              !compact_spill_keeps_disjoint_clobbered_address) {
-    saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
-                                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-                                  options.moi_track_atomics) +
-                              inline_shadow_loop_scratch_count(candidate));
+    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
+        consan_detail::inline_shadow_loop_counter_vgpr(
+            scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics) +
+        inline_shadow_loop_scratch_count(candidate));
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -2564,15 +2558,15 @@
                 (candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
                 << (consan_moi_exact_shadow::instruction_offset_shift - 32u));
   const uint64_t exact_shadow_base =
-      *options.moi_report_buffer_address + layout.exact_shadow_entries_offset;
+      *bound_resources.moi_report_buffer_address + layout.exact_shadow_entries_offset;
   const uint32_t external_shadow_granule_bytes =
       byte_granular_external_shadow ? 1u : consan_moi_exact_shadow::granule_bytes;
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size() / sizeof(uint32_t) + 64u +
-                (options.moi_exec_save_sgpr ? 120u : 0u) + (options.moi_epoch_vgpr ? 2u : 0u));
+  words.reserve(candidate.size() / sizeof(uint32_t) + 64u + (point.moi_exec_save_sgpr ? 120u : 0u) +
+                (point.moi_epoch_vgpr ? 2u : 0u));
   if (private_dispatch_id_offset) {
-    if (!options.moi_dispatch_id_sgpr) {
+    if (!point.moi_dispatch_id_sgpr) {
       errors.emplace_back(
           "ConSan MOI private dispatch reload requires a transient scalar destination");
       return std::nullopt;
@@ -2582,10 +2576,10 @@
     const auto load_high = instrumentation::build_private_load_b32(
         address_hi_vgpr, *private_dispatch_id_offset + SpillManager::kSlotBytes, arch);
     const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
-    const auto read_low = instrumentation::build_v_readfirstlane_b32(*options.moi_dispatch_id_sgpr,
+    const auto read_low = instrumentation::build_v_readfirstlane_b32(*point.moi_dispatch_id_sgpr,
                                                                      address_lo_vgpr, arch);
     const auto read_high = instrumentation::build_v_readfirstlane_b32(
-        static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), address_hi_vgpr, arch);
+        static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u), address_hi_vgpr, arch);
     const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
     if (!load_low || !load_high || !wait_load || !read_low || !read_high || !wait_scalar) {
       errors.emplace_back(
@@ -2621,13 +2615,13 @@
   if (saved_lds_byte_offset_vgpr) {
     if (!spill_backed_lds_byte_offset_source) {
       if (candidate.is_direct_to_lds()) {
-        if (!options.moi_exec_save_sgpr) {
+        if (!point.moi_exec_save_sgpr) {
           errors.emplace_back(
               "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
           return std::nullopt;
         }
         if (!append_materialize_direct_to_lds_address(words, candidate, *saved_lds_byte_offset_vgpr,
-                                                      *options.moi_exec_save_sgpr, arch)) {
+                                                      *point.moi_exec_save_sgpr, arch)) {
           errors.emplace_back("ConSan MOI inline-shadow probe could not materialize a "
                               "direct-to-LDS destination");
           return std::nullopt;
@@ -2650,9 +2644,9 @@
   // epoch, address, and partition setup all use VCC/SCC-producing
   // instructions; snapshotting inside the exchange loop would retain those
   // generated values rather than the state at the displaced LDS access.
-  const bool preserve_special_state = options.moi_exec_save_sgpr.has_value();
+  const bool preserve_special_state = point.moi_exec_save_sgpr.has_value();
   if (preserve_special_state &&
-      !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not preserve application VCC/SCC");
     return std::nullopt;
   }
@@ -2671,16 +2665,15 @@
   const bool generation_tagged_local_shadow =
       workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
-  MoiWorkgroupKeyRegisterPlan key_registers =
-      moi_workgroup_key_register_plan(static_cast<const ConSanMoiOperatingPoint &>(options));
+  MoiWorkgroupKeyRegisterPlan key_registers = moi_workgroup_key_register_plan(point);
   // Eagerly initialized and bitmap-backed workgroup-local mirrors are
   // physically unreachable from every other live workgroup and omit the
   // generation field. A generation-tagged local mirror deliberately retains
   // that field so reused, uncleared LDS is distinguishable from current state.
   if (workgroup_shadow) {
     const auto save_original_exec = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + original_exec_save_offset),
-        kRdna4ExecLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset), kRdna4ExecLo,
+        arch);
     if (!save_original_exec) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not retain its original workgroup lanes");
@@ -2702,27 +2695,27 @@
     key_registers.cached_key_vgpr = workgroup_key_vgpr;
     key_registers.cached_key_sgpr = std::nullopt;
   }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr &&
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr &&
       !append_inline_workgroup_key(words, workgroup_sources, key_registers, workgroup_key_vgpr,
                                    tmp_vgpr, address_lo_vgpr, original_exec_save_offset, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
   if (generation_tagged_local_shadow) {
-    if (!moi_has_runtime_hardware_dispatch_id(options)) {
+    if (!moi_has_runtime_hardware_dispatch_id(point)) {
       errors.emplace_back("ConSan MOI generation-tagged local shadow requires dispatch identity");
       return std::nullopt;
     }
     // Workgroup coordinates alone repeat across dispatches. Fold the native
     // dispatch identity into the bounded generation and reserve zero for an
     // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
-    const uint16_t dispatch_low_source = options.moi_dispatch_id_sgpr
-                                             ? *options.moi_dispatch_id_sgpr
-                                             : vector_source_vgpr(*options.moi_dispatch_id_vgpr);
+    const uint16_t dispatch_low_source = point.moi_dispatch_id_sgpr
+                                             ? *point.moi_dispatch_id_sgpr
+                                             : vector_source_vgpr(*point.moi_dispatch_id_vgpr);
     const uint16_t dispatch_high_source =
-        options.moi_dispatch_id_sgpr
-            ? static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)
-            : vector_source_vgpr(static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + 1u));
+        point.moi_dispatch_id_sgpr
+            ? static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u)
+            : vector_source_vgpr(static_cast<uint16_t>(*point.moi_dispatch_id_vgpr + 1u));
     const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
         workgroup_key_vgpr, dispatch_low_source, workgroup_key_vgpr, arch);
     const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
@@ -2740,12 +2733,12 @@
     words.insert(words.end(), bound_generation->begin(), bound_generation->end());
     words.insert(words.end(), make_nonzero_generation->begin(), make_nonzero_generation->end());
   }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr) {
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr) {
     // The packed key is injective only inside its documented dimensional
     // bounds. Keep the guest running, but make every excluded lane-site
     // encounter observable in the Inline-only header flags/count field so a
     // clean acceptance run cannot silently pass with detector undercoverage.
-    const uint16_t exec_base = *options.moi_exec_save_sgpr;
+    const uint16_t exec_base = *point.moi_exec_save_sgpr;
     const auto save_valid_exec = instrumentation::build_s_mov_b64(exec_base, kRdna4ExecLo, arch);
     const auto select_invalid_exec = instrumentation::build_s_andn2_b64(
         kRdna4ExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), exec_base,
@@ -2755,7 +2748,7 @@
     if (!save_valid_exec || !select_invalid_exec || !restore_valid_exec ||
         !append_atomic_fetch_add_one_u32(
             accounting_words,
-            *options.moi_report_buffer_address +
+            *bound_resources.moi_report_buffer_address +
                 offsetof(ConSanMoiReportHeader, inline_unsupported_count),
             tmp_vgpr, address_lo_vgpr, arch)) {
       errors.emplace_back(
@@ -2779,7 +2772,7 @@
             ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
             : static_cast<uint16_t>(*candidate.lowering.form->address_vgpr + 1u);
     if (!materialize_flat_address && source_is_spilled(address_hi_source)) {
-      const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
+      const uint16_t recovered_address_hi = static_cast<uint16_t>(scratch_vgpr + 1u);
       const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
           words, *spill, recovered_address_hi, address_hi_source, arch);
       if (reload != consan_detail::MoiSpilledVgprReloadResult::Appended) {
@@ -2794,7 +2787,7 @@
     const auto in_shared_aperture =
         instrumentation::build_v_cmp_eq_u32_vcc(kScalarOperandSharedBase, address_hi_source, arch);
     const auto retain_shared_lanes = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
     if (!in_shared_aperture || !retain_shared_lanes) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not resolve a maybe-group flat aperture");
@@ -2805,7 +2798,7 @@
   }
   if (workgroup_shadow) {
     const auto retain_valid_workgroup = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 22u), kRdna4ExecLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u), kRdna4ExecLo, arch);
     if (!retain_valid_workgroup) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not retain validated workgroup lanes");
@@ -2821,21 +2814,18 @@
     return std::nullopt;
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if (!append_inline_shadow_owner_field(words, static_cast<const ConSanRequest &>(options),
-                                        static_cast<const ConSanMoiOperatingPoint &>(options),
-                                        low_vgpr, tmp_vgpr, high_vgpr, arch, owner_derivation,
-                                        errors)) {
+  if (!append_inline_shadow_owner_field(words, request, point, low_vgpr, tmp_vgpr, high_vgpr, arch,
+                                        owner_derivation, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }
-  if (!append_inline_shadow_epoch_field(words,
-                                        static_cast<const ConSanMoiOperatingPoint &>(options),
-                                        private_epoch_offset, low_vgpr, tmp_vgpr, arch, errors)) {
+  if (!append_inline_shadow_epoch_field(words, point, private_epoch_offset, low_vgpr, tmp_vgpr,
+                                        arch, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode epoch field");
     return std::nullopt;
   }
   words.insert(words.end(), mov_high->begin(), mov_high->end());
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr &&
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr &&
       !append_add_exact_shadow_generation(words, low_vgpr, high_vgpr, workgroup_key_vgpr, tmp_vgpr,
                                           arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode workgroup identity");
@@ -2873,11 +2863,10 @@
           if (cell_index != 0u)
             continue;
           const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-              *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-              options.moi_track_atomics);
+              scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
           if (static_cast<uint32_t>(loop_offset_vgpr) >=
-              static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count) {
+              static_cast<uint32_t>(scratch_vgpr) + scratch_count) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow local cell loop exceeds its scratch plan");
             return std::nullopt;
@@ -2901,7 +2890,7 @@
               build_v_mov_b32_e32(loop_counter_vgpr, scalar_positive_inline_u32(0), arch));
           const size_t loop_begin = words.size();
           if (!append_workgroup_local_exact_shadow_swap(
-                  words, candidate, options, options, options, *options.scratch_vgpr, arch, layout,
+                  words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
                   *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr, local_old_value_vgpr,
                   loop_offset_vgpr,
                   /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_width,
@@ -2919,9 +2908,9 @@
           const auto more_cells = instrumentation::build_v_cmp_gt_u32_vcc(
               scalar_positive_inline_u32(cell_range.cell_count), loop_counter_vgpr, arch);
           const uint16_t loop_exec_save_sgpr =
-              static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u);
+              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
           const uint16_t valid_workgroup_exec_sgpr =
-              static_cast<uint16_t>(*options.moi_exec_save_sgpr + 22u);
+              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u);
           const auto narrow_more_cells =
               instrumentation::build_s_and_saveexec_b64(loop_exec_save_sgpr, kRdna4VccLo, arch);
           const auto restore_valid_workgroup =
@@ -2961,7 +2950,7 @@
           words.push_back(*restore_valid_workgroup);
         } else if (!reload_spill_backed_lds_byte_offset() ||
                    !append_workgroup_local_exact_shadow_swap(
-                       words, candidate, options, options, options, *options.scratch_vgpr, arch,
+                       words, candidate, request, bound_resources, point, scratch_vgpr, arch,
                        layout, *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr,
                        local_old_value_vgpr, *lds_byte_offset_vgpr,
                        candidate.lowering_offset(range), cell_index, range.byte_width,
@@ -2975,11 +2964,11 @@
       }
       const bool loop_external_cells = use_cell_loop;
       const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-          *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics);
+          scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics);
       const uint16_t saved_workgroup_key_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
       if (loop_external_cells) {
         if (static_cast<uint32_t>(saved_workgroup_key_vgpr) >=
-            static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count) {
+            static_cast<uint32_t>(scratch_vgpr) + scratch_count) {
           errors.emplace_back(
               "ConSan MOI inline-shadow external cell loop exceeds its scratch plan");
           return std::nullopt;
@@ -3027,7 +3016,7 @@
         }
       }
       std::vector<uint32_t> copy_dispatch_id;
-      if (!append_moi_report_dispatch_id_word(copy_dispatch_id, options, options, tmp_vgpr,
+      if (!append_moi_report_dispatch_id_word(copy_dispatch_id, point, bound_resources, tmp_vgpr,
                                               /*high_word=*/false, arch,
                                               ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
@@ -3120,19 +3109,19 @@
         words.insert(words.end(), add_cell->begin(), add_cell->end());
       }
       if (!append_wave_coalesced_exact_shadow_swap(
-              words, candidate, options, options, options, *options.scratch_vgpr,
-              options.moi_partition_mask_debug, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
-              old_value_vgpr, *lds_byte_offset_vgpr, candidate.lowering_offset(range),
-              range.byte_width, external_shadow_granule_bytes, cell_index,
+              words, candidate, request, bound_resources, point, scratch_vgpr, partition_mask_debug,
+              arch, layout, address_lo_vgpr, low_vgpr, high_vgpr, old_value_vgpr,
+              *lds_byte_offset_vgpr, candidate.lowering_offset(range), range.byte_width,
+              external_shadow_granule_bytes, cell_index,
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish with "
             "EXEC base s" +
-            std::to_string(*options.moi_exec_save_sgpr) + " and dispatch base " +
-            (options.moi_dispatch_id_sgpr   ? "s" + std::to_string(*options.moi_dispatch_id_sgpr)
-             : options.moi_dispatch_id_vgpr ? "v" + std::to_string(*options.moi_dispatch_id_vgpr)
-                                            : std::string("literal")));
+            std::to_string(*point.moi_exec_save_sgpr) + " and dispatch base " +
+            (point.moi_dispatch_id_sgpr   ? "s" + std::to_string(*point.moi_dispatch_id_sgpr)
+             : point.moi_dispatch_id_vgpr ? "v" + std::to_string(*point.moi_dispatch_id_vgpr)
+                                          : std::string("literal")));
         return std::nullopt;
       }
       if (loop_external_cells) {
@@ -3140,10 +3129,8 @@
             loop_counter_vgpr, scalar_positive_inline_u32(1), loop_counter_vgpr, arch);
         const auto more_cells = instrumentation::build_v_cmp_gt_u32_vcc(
             scalar_positive_inline_u32(cell_range.cell_count), loop_counter_vgpr, arch);
-        const uint16_t temporary_exec_sgpr =
-            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u);
-        const uint16_t incoming_exec_sgpr =
-            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
+        const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
+        const uint16_t incoming_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
         const auto narrow_more_cells =
             instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
         const auto restore_incoming_exec =
@@ -3179,7 +3166,7 @@
   }
   if (workgroup_shadow) {
     const std::optional<uint16_t> visible_evidence_sgpr =
-        inline_shadow_visible_evidence_sgpr(options, options);
+        inline_shadow_visible_evidence_sgpr(request, point);
     std::optional<size_t> skip_visible_evidence_index;
     if (visible_evidence_sgpr) {
       const auto already_published = instrumentation::build_s_cmp_lg_u32(
@@ -3193,7 +3180,7 @@
       skip_visible_evidence_index = words.size();
       words.push_back(*skip_visible_evidence);
     }
-    const uint16_t exec_base = *options.moi_exec_save_sgpr;
+    const uint16_t exec_base = *point.moi_exec_save_sgpr;
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
     const auto save_active_exec =
@@ -3218,10 +3205,11 @@
     words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
     words.push_back(*first_active);
     words.push_back(*narrow_first);
-    if (!append_publish_visible_evidence_if_zero(
-            words,
-            *options.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
-            tmp_vgpr, address_lo_vgpr, temporary_exec_sgpr, arch)) {
+    if (!append_publish_visible_evidence_if_zero(words,
+                                                 *bound_resources.moi_report_buffer_address +
+                                                     offsetof(ConSanMoiReportHeader, event_counter),
+                                                 tmp_vgpr, address_lo_vgpr, temporary_exec_sgpr,
+                                                 arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not publish visible evidence");
       return std::nullopt;
     }
@@ -3238,10 +3226,10 @@
           *instrumentation::build_s_cbranch_scc1(static_cast<int16_t>(skip_delta), arch);
     }
   }
-  if (options.moi_exec_save_sgpr) {
+  if (point.moi_exec_save_sgpr) {
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo,
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + original_exec_save_offset), arch);
+        kRdna4ExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset),
+        arch);
     if (!restore_original_exec) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not restore workgroup-filtered state");
@@ -3249,7 +3237,7 @@
     }
     words.push_back(*restore_original_exec);
     if (preserve_special_state &&
-        !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+        !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not restore workgroup-filtered state");
       return std::nullopt;
@@ -3268,10 +3256,10 @@
        .candidate = &candidate,
        .target = target,
        .replay_address_vgpr = guest_address_vgpr,
-       .adjusted_address_vgpr = reserve_two_address_replay_scratch
-                                    ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                          *options.scratch_vgpr + scratch_count - 1u))
-                                    : std::nullopt},
+       .adjusted_address_vgpr =
+           reserve_two_address_replay_scratch
+               ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
+               : std::nullopt},
       errors);
   if (!guest_words)
     return std::nullopt;
