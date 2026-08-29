@@ -3690,14 +3690,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                         return patch.use_appended_cave;
                                                       }) ||
                                   !selected_relay_reservoirs.empty();
-  std::vector<DescriptorRegisterGrowth> descriptor_growths;
+  std::vector<ConSanDescriptorRegisterGrowth> descriptor_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.required_vgpr_allocation_count) {
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
         descriptor_growths.push_back({owner, *planned.required_vgpr_allocation_count});
     }
   }
-  std::vector<DescriptorRegisterGrowth> descriptor_sgpr_growths;
+  std::vector<ConSanDescriptorRegisterGrowth> descriptor_sgpr_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     const uint16_t required =
         std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count);
@@ -3743,13 +3743,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   };
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
-    if (!apply_descriptor_vgpr_growths_to_patcher(patcher, original_bytes, descriptor_growths, arch,
-                                                  result.errors)) {
+    if (!apply_consan_descriptor_vgpr_growths_to_patcher(patcher, original_bytes,
+                                                         descriptor_growths, arch, result.errors)) {
       result.patches.clear();
       return;
     }
-    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
-                                                  result.errors)) {
+    if (!apply_consan_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
+                                                         result.errors)) {
       result.patches.clear();
       return;
     }
@@ -4289,13 +4289,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   if (result.replacement.empty())
     result.replacement.assign(original_bytes.begin(), original_bytes.end());
-  if (!apply_descriptor_vgpr_growths_to_bytes(result.replacement, descriptor_growths, arch,
-                                              result.errors)) {
+  if (!apply_consan_descriptor_vgpr_growths_to_bytes(result.replacement, descriptor_growths, arch,
+                                                     result.errors)) {
     result.patches.clear();
     return;
   }
-  if (!apply_descriptor_sgpr_growths_to_bytes(result.replacement, descriptor_sgpr_growths, arch,
-                                              result.errors)) {
+  if (!apply_consan_descriptor_sgpr_growths_to_bytes(result.replacement, descriptor_sgpr_growths,
+                                                     arch, result.errors)) {
     result.patches.clear();
     return;
   }

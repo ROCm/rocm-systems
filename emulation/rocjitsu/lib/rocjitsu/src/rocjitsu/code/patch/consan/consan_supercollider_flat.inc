@@ -1740,7 +1740,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   const bool has_appended_patch =
       std::ranges::any_of(planned_patches, &PlannedFlatCheckTrapPatch::use_appended_cave);
-  std::vector<DescriptorRegisterGrowth> descriptor_sgpr_growths;
+  std::vector<ConSanDescriptorRegisterGrowth> descriptor_sgpr_growths;
   std::unordered_map<uint64_t, uint32_t> descriptor_private_requirements;
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
     for (uint64_t owner : planned.info.owner_descriptor_file_offsets) {
@@ -1755,8 +1755,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   if (has_appended_patch) {
     CodeObjectPatcher patcher(code_object);
-    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
-                                                  result.errors))
+    if (!apply_consan_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
+                                                         result.errors))
       return;
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
@@ -1858,7 +1858,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return current_kernel->descriptor_file_offset;
     };
     for (const auto &[descriptor_offset, required_count] :
-         merge_descriptor_register_growths(descriptor_sgpr_growths)) {
+         merge_consan_descriptor_register_growths(descriptor_sgpr_growths)) {
       const auto active_descriptor_offset = current_descriptor_offset(descriptor_offset);
       if (!active_descriptor_offset) {
         result.errors.emplace_back(

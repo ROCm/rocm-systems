@@ -15,6 +15,7 @@
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
+#include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"

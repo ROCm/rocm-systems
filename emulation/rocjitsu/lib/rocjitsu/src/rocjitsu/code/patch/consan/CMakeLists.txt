@@ -14,6 +14,7 @@ target_sources(
         consan_barrier_policy.cpp
         consan_barrier_move_proof.cpp
         consan_branch_only_relay_router.cpp
+        consan_descriptor_growth.cpp
         consan_fault_selection.cpp
         consan_final_validation.cpp
         consan_input_layout.cpp
