@@ -114,6 +114,23 @@ So treat a byte difference as something to explain. A difference concentrated in
 one direction, or one that grows with the reduction length, is worth chasing; a
 scattering of one-ulp differences in both directions is not.
 
+### What the suite does not cover
+
+The MoE case models the **dequantise-then-bf16-GEMM** form, which is what vLLM
+runs on gfx1250: that target has no native MXFP4 path, so the oracle selects
+`OCP_MXQuantizationEmulationTritonExperts` and unpacks every expert's weights on
+every forward pass.
+
+gfx950 does have a native path, and vLLM selects a genuinely different kernel
+there -- `OAITritonMxfp4ExpertsMonolithic`, built on `triton_kernels`'
+`matmul_ogs`, which consumes the packed MXFP4 weights and their E8M0 scales
+directly. The suite covers the dequantisation and the GEMM separately but not
+that fused kernel, so the one MoE implementation gfx950 actually uses in an
+end-to-end run is exercised only by that run, not by this suite.
+
+`kv_cache_store` is likewise a plain scatter rather than vLLM's
+`reshape_and_cache_flash`, and sampling is covered at greedy only.
+
 ### Choosing a python environment
 
 The two targets need different wheels, because ROCm nightly wheels are built
