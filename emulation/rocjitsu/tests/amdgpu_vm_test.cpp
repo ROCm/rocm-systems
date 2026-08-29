@@ -1726,6 +1726,40 @@ TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
   EXPECT_EQ(invalid_reads.load(std::memory_order_relaxed), 0u);
 }
 
+// A page the host has really mapped, and one it has really reserved without
+// backing -- the two cases passthrough has to tell apart.
+//
+// PROT_NONE is not a contrived shape here: ROCr reserves a ~64 GiB PROT_NONE
+// aperture for scratch and commits a prefix of it, so a reservation is exactly
+// what sits past the end of the memory a guest may touch, and exactly what an
+// overrun lands in. Passthrough used to hand back a pointer to it, and the
+// first memcpy through that pointer took the host process down with SIGSEGV.
+class PassthroughPages {
+public:
+  PassthroughPages() {
+    backed_ = static_cast<uint8_t *>(::mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    reserved_ = static_cast<uint8_t *>(
+        ::mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  }
+  ~PassthroughPages() {
+    if (backed_ != MAP_FAILED)
+      ::munmap(backed_, KfdProcess::kPageSize);
+    if (reserved_ != MAP_FAILED)
+      ::munmap(reserved_, KfdProcess::kPageSize);
+  }
+  PassthroughPages(const PassthroughPages &) = delete;
+  PassthroughPages &operator=(const PassthroughPages &) = delete;
+
+  bool valid() const { return backed_ != MAP_FAILED && reserved_ != MAP_FAILED; }
+  uint8_t *backed() const { return backed_; }
+  uint8_t *reserved() const { return reserved_; }
+
+private:
+  uint8_t *backed_ = nullptr;
+  uint8_t *reserved_ = nullptr;
+};
+
 TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   amdgpu::GpuMemory memory("memory");
   memory.set_passthrough(true);
@@ -1736,10 +1770,16 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
+  PassthroughPages pages;
+  ASSERT_TRUE(pages.valid());
+
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
             nullptr);
-  EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+  EXPECT_EQ(memory.resolve_host_ptr(reinterpret_cast<uint64_t>(pages.backed()), kPid),
+            pages.backed());
+  EXPECT_EQ(memory.resolve_host_ptr(reinterpret_cast<uint64_t>(pages.reserved()), kPid), nullptr)
+      << "passthrough resolved a PROT_NONE reservation; dereferencing it kills the host";
 }
 
 TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
@@ -1747,9 +1787,50 @@ TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
   memory.set_passthrough(true);
   constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
+  PassthroughPages pages;
+  ASSERT_TRUE(pages.valid());
+
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123), nullptr);
-  EXPECT_EQ(memory.resolve_host_ptr(0x4000), reinterpret_cast<uint8_t *>(0x4000));
+  EXPECT_EQ(memory.resolve_host_ptr(reinterpret_cast<uint64_t>(pages.backed())), pages.backed());
+  EXPECT_EQ(memory.resolve_host_ptr(reinterpret_cast<uint64_t>(pages.reserved())), nullptr)
+      << "passthrough resolved a PROT_NONE reservation at vmid 0";
+}
+
+// The access path, not just the pointer query: a read of an unbacked passthrough
+// page has to come back as zeroes rather than as a fault, and a write to one has
+// to be dropped rather than kill the process. This is the shape the emulator
+// meets in practice -- L2 fills a cache line through read_block().
+TEST(GpuMemoryTest, PassthroughAccessToReservedPageIsDroppedNotFatal) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 11;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  PassthroughPages pages;
+  ASSERT_TRUE(pages.valid());
+  const auto reserved = reinterpret_cast<uint64_t>(pages.reserved());
+
+  std::array<uint8_t, 128> out{};
+  out.fill(0xAB);
+  memory.read_block(reserved, std::span<uint8_t>(out), kPid);
+  EXPECT_TRUE(std::ranges::all_of(out, [](uint8_t b) { return b == 0; }))
+      << "a read of an unbacked passthrough page should return zeroes";
+
+  std::array<uint8_t, 128> in{};
+  in.fill(0xCD);
+  memory.write_block(reserved, std::span<const uint8_t>(in), kPid);
+
+  // The backed page still round-trips, so the gate rejects the reservation
+  // rather than disabling passthrough wholesale.
+  const auto backed = reinterpret_cast<uint64_t>(pages.backed());
+  memory.write_block(backed, std::span<const uint8_t>(in), kPid);
+  std::array<uint8_t, 128> back{};
+  memory.read_block(backed, std::span<uint8_t>(back), kPid);
+  EXPECT_EQ(back, in);
 }
 
 TEST(GpuMemoryTest, ZeroPassthroughAddressUsesFallbackStorage) {

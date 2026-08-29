@@ -29,6 +29,7 @@
 #include <string>
 #include <sys/uio.h>
 #include <type_traits>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 
@@ -1283,10 +1284,61 @@ private:
   }
 #endif
 
+  /// @brief Whether a passthrough page is one this process may actually touch.
+  /// @details Passthrough reinterprets a guest VA as a host pointer, which is
+  /// only safe for pages the host has mapped. ROCr reserves a ~64 GiB PROT_NONE
+  /// aperture and commits a prefix of it, so a guest access just past the commit
+  /// -- an overrun, or an address the emulator got wrong -- lands in the hole,
+  /// and the bare memcpy in read_mapped() takes the entire host process down
+  /// with SIGSEGV before anything can report which access it was.
+  ///
+  /// process_vm_readv() against our own pid performs the kernel's access check
+  /// and returns EFAULT instead of raising a signal, so it answers the question
+  /// without the side effect a probing load would have. It is a syscall, so the
+  /// answer is cached per page: this sits on the L2 line-fill path.
+  ///
+  /// Caching a positive answer means a page the host later unmaps still looks
+  /// accessible. That case already crashed before this existed, so the cache
+  /// makes nothing worse while fixing the case that actually occurs, which is a
+  /// page that was never mapped at all.
+  bool passthrough_page_accessible(const uint8_t *page) const {
+    const auto key = reinterpret_cast<uint64_t>(page);
+    {
+      std::shared_lock lk(passthrough_probe_mutex_);
+      auto it = passthrough_probe_cache_.find(key);
+      if (it != passthrough_probe_cache_.end())
+        return it->second;
+    }
+    unsigned char scratch = 0;
+    iovec local{&scratch, sizeof(scratch)};
+    iovec remote{const_cast<uint8_t *>(page), sizeof(scratch)};
+    const bool ok = ::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0) == sizeof(scratch);
+    {
+      std::unique_lock lk(passthrough_probe_mutex_);
+      passthrough_probe_cache_.emplace(key, ok);
+    }
+    if (!ok)
+      note_inaccessible_passthrough_page(key);
+    return ok;
+  }
+
+  void note_inaccessible_passthrough_page(uint64_t page_addr) const {
+    const uint64_t count =
+        inaccessible_passthrough_pages_.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Loud for the first few, then counted: a workload that runs off the end of
+    // an allocation can do it in every wave of every dispatch.
+    if (count <= kInaccessiblePassthroughReports)
+      util::Logger::vm("GPU memory passthrough page is not accessible: page=0x", std::hex,
+                       page_addr, std::dec, " count=", count,
+                       " (access dropped; reads return zero)");
+    return;
+  }
+
   template <typename F> bool with_page_mapping(uint64_t addr, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
       auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-      if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr)
+      if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr ||
+          !passthrough_page_accessible(page))
         return false;
       fn(nullptr, page);
       return true;
@@ -1302,7 +1354,7 @@ private:
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
         auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-        if (page == nullptr)
+        if (page == nullptr || !passthrough_page_accessible(page))
           return false;
         fn(nullptr, page);
         return true;
@@ -1515,6 +1567,10 @@ private:
   mutable std::atomic<AsanPageTableUnlockedHook *> asan_page_table_unlocked_hook_{nullptr};
 #endif
   mutable std::atomic<uint64_t> clipped_mapped_accesses_{0};
+  static constexpr uint64_t kInaccessiblePassthroughReports = 8;
+  mutable std::atomic<uint64_t> inaccessible_passthrough_pages_{0};
+  mutable std::shared_mutex passthrough_probe_mutex_;
+  mutable std::unordered_map<uint64_t, bool> passthrough_probe_cache_;
   bool passthrough_ = false;
 };
 
