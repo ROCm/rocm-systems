@@ -628,7 +628,7 @@ private:
     result.provenance = ConSanAccessProvenance::NativeLdsOpcode;
     result.confidence = ConSanSemanticConfidence::Exact;
     append_common_exclusions(result, site.origin == ConSanAccessOrigin::DirectToLds);
-    if (const auto form = consan_detail::native_lds_two_address_form(site.mnemonic)) {
+    if (const auto form = consan_detail::decode_native_lds_two_range_shape(site.mnemonic)) {
       const auto word0 = read_little_endian_u32(bytes, site.file_offset);
       if (word0) {
         result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),

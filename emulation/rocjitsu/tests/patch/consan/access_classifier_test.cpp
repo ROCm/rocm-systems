@@ -132,6 +132,47 @@ TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabula
   }
 }
 
+TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
+  struct Case {
+    std::string_view mnemonic;
+    ConSanLdsAccessKind kind;
+    uint32_t width_bits;
+    bool supported;
+  };
+  constexpr std::array cases = {
+      Case{"flat_load_b128", ConSanLdsAccessKind::Read, 128u, true},
+      Case{"flat_store_short", ConSanLdsAccessKind::Write, 16u, true},
+      Case{"flat_load_dwordx3", ConSanLdsAccessKind::Read, 96u, false},
+      Case{"global_load_dword", ConSanLdsAccessKind::Read, 32u, false},
+  };
+  for (const TargetCase &target : kTargets) {
+    for (const Case &test : cases) {
+      SCOPED_TRACE(rj_code_target_name(target.target));
+      SCOPED_TRACE(test.mnemonic);
+      const bool gfx12 = consan_uses_gfx12_encoding(target.arch);
+      ConSanAccessInventorySite input = flat_store_site(gfx12 ? 12u : 8u);
+      input.mnemonic = test.mnemonic;
+      input.kind = test.kind;
+      input.decoded_width_bits = test.width_bits;
+      if (test.kind == ConSanLdsAccessKind::Read) {
+        input.operands.data_vgpr.reset();
+        input.operands.destination_vgpr = 7;
+      }
+      if (gfx12) {
+        input.operands.raw_saddr = 124;
+        input.operands.raw_scale_offset = true;
+      }
+      const ConSanAccessInventorySite site =
+          complete_site(std::move(input), target.arch, target.target);
+      EXPECT_EQ(site.lowering.replay_guest_access.available(), test.supported);
+      if (!test.supported) {
+        EXPECT_EQ(site.lowering.replay_guest_access.reason,
+                  ConSanAccessClassifierReason::UnsupportedMnemonic);
+      }
+    }
+  }
+}
+
 TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependent) {
   ConSanAccessInventorySite cdna4_flat = flat_store_site(8);
   cdna4_flat.operands.raw_ioffset = 4;

@@ -3108,9 +3108,8 @@ TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
   EXPECT_EQ(plan_test_moi_evidence_inventory(result, options).access_range_count, 1u);
 }
 
-TEST(ConSanMoi, SharedAccessShapeContractOwnsTwoRangeAndFlatVocabulary) {
-  using consan_detail::is_supported_moi_flat_access_mnemonic;
-  using consan_detail::native_lds_two_address_form;
+TEST(ConSanMoi, SharedAccessDecoderOwnsTwoRangeGeometryWithoutAdmission) {
+  using consan_detail::decode_native_lds_two_range_shape;
 
   struct ExpectedForm {
     std::string_view mnemonic;
@@ -3138,18 +3137,13 @@ TEST(ConSanMoi, SharedAccessShapeContractOwnsTwoRangeAndFlatVocabulary) {
   };
   for (const auto &expected : expected_forms) {
     SCOPED_TRACE(expected.mnemonic);
-    const auto actual = native_lds_two_address_form(expected.mnemonic);
+    const auto actual = decode_native_lds_two_range_shape(expected.mnemonic);
     ASSERT_TRUE(actual);
     EXPECT_EQ(actual->kind, expected.kind);
     EXPECT_EQ(actual->element_width_bits, expected.width_bits);
     EXPECT_EQ(actual->offset_scale_bytes, expected.scale_bytes);
   }
-  EXPECT_FALSE(native_lds_two_address_form("ds_load_b32"));
-
-  EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_load_b128"));
-  EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_store_short"));
-  EXPECT_FALSE(is_supported_moi_flat_access_mnemonic("flat_load_dwordx3"));
-  EXPECT_FALSE(is_supported_moi_flat_access_mnemonic("global_load_dword"));
+  EXPECT_FALSE(decode_native_lds_two_range_shape("ds_load_b32"));
 }
 
 TEST(ConSanMoi, CdnaMoiEnginesAdmitNativeB96Accesses) {

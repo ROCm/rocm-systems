@@ -14,6 +14,7 @@ namespace rocjitsu {
 namespace {
 
 using Reason = ConSanAccessClassifierReason;
+using TwoRangeShape = consan_detail::DecodedNativeLdsTwoRangeShape;
 
 [[nodiscard]] ConSanAccessLoweringClassification reject(Reason reason) {
   return {
@@ -58,6 +59,51 @@ template <typename Range>
   return named(mnemonic, forms);
 }
 
+[[nodiscard]] bool is_replayable_single_range_native_lds(std::string_view mnemonic,
+                                                         rj_code_arch_t arch) {
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+       consan_uses_gfx12_encoding(arch)) &&
+      (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
+    return true;
+  }
+  if (consan_uses_gfx9_cdna_encoding(arch) &&
+      (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
+    return true;
+  }
+  constexpr std::array always = {
+      "ds_load_i8",         "ds_load_u8",          "ds_load_i16",       "ds_load_u16",
+      "ds_load_u8_d16",     "ds_load_u8_d16_hi",   "ds_load_i8_d16",    "ds_load_i8_d16_hi",
+      "ds_load_u16_d16",    "ds_load_u16_d16_hi",  "ds_store_b8",       "ds_store_b16",
+      "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_u8",        "ds_read_u16",
+      "ds_write_b8",        "ds_write_b16",        "ds_load_b32",       "ds_load_b64",
+      "ds_load_b128",       "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",
+      "ds_read_b64",        "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32",
+      "ds_store_b64",       "ds_store_b128",       "ds_write_b32",      "ds_write_b64",
+      "ds_write_b128",      "ds_add_f32",          "ds_add_f64",        "ds_add_u32",
+      "ds_add_u64",         "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32",
+  };
+  if (named(mnemonic, always))
+    return true;
+  constexpr std::array gfx9 = {
+      "ds_read_i8",         "ds_read_u8_d16",     "ds_read_u8_d16_hi",
+      "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
+      "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
+  };
+  return consan_uses_gfx9_cdna_encoding(arch) && named(mnemonic, gfx9);
+}
+
+[[nodiscard]] bool is_replayable_flat_access(std::string_view mnemonic) {
+  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
+    return true;
+  constexpr std::array forms = {
+      "flat_load_b32",     "flat_load_b64",    "flat_load_b128",     "flat_store_b32",
+      "flat_store_b64",    "flat_store_b128",  "flat_load_dword",    "flat_load_dwordx2",
+      "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx4",
+      "flat_load_ushort",  "flat_store_short", "flat_load_u16",      "flat_store_b16",
+  };
+  return named(mnemonic, forms);
+}
+
 [[nodiscard]] uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch))
     return 0u;
@@ -66,9 +112,9 @@ template <typename Range>
   return static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
 }
 
-[[nodiscard]] std::optional<uint16_t> native_data_register_count(
-    const ConSanAccessInventorySite &access,
-    const std::optional<consan_detail::NativeLdsTwoAddressForm> &two_address) {
+[[nodiscard]] std::optional<uint16_t>
+native_data_register_count(const ConSanAccessInventorySite &access,
+                           const std::optional<TwoRangeShape> &two_address) {
   if (access.decoded_width_bits == 8u || access.decoded_width_bits == 16u)
     return 1u;
   if (two_address)
@@ -79,10 +125,10 @@ template <typename Range>
   return std::nullopt;
 }
 
-[[nodiscard]] Reason
-native_compare_support(const ConSanAccessInventorySite &access, rj_code_arch_t arch,
-                       const std::optional<consan_detail::NativeLdsTwoAddressForm> &two_address,
-                       uint16_t data_register_count) {
+[[nodiscard]] Reason native_compare_support(const ConSanAccessInventorySite &access,
+                                            rj_code_arch_t arch,
+                                            const std::optional<TwoRangeShape> &two_address,
+                                            uint16_t data_register_count) {
   if (access.instruction_size != 2u * sizeof(uint32_t))
     return Reason::UnsupportedEncoding;
   if (!access.operands.address_vgpr)
@@ -264,7 +310,7 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     form.data_register_count = static_cast<uint16_t>((access.decoded_width_bits + 31u) / 32u);
     replay = Reason::None;
   } else if (access.origin == ConSanAccessOrigin::NativeLds) {
-    const auto two_address = consan_detail::native_lds_two_address_form(access.mnemonic);
+    const auto two_address = consan_detail::decode_native_lds_two_range_shape(access.mnemonic);
     form.kind = two_address ? ConSanAccessLoweringFormKind::NativeTwoRange
                             : ConSanAccessLoweringFormKind::NativeSingleRange;
     form.element_width_bits =
@@ -274,8 +320,8 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     if (!register_count)
       return reject(Reason::UnsupportedMnemonic);
     form.data_register_count = *register_count;
-    replay = consan_detail::is_single_range_native_lds_mnemonic(access.mnemonic, arch) ||
-                     two_address || is_relaxed_lds_atomic(access.mnemonic)
+    replay = is_replayable_single_range_native_lds(access.mnemonic, arch) || two_address ||
+                     is_relaxed_lds_atomic(access.mnemonic)
                  ? Reason::None
                  : Reason::UnsupportedMnemonic;
     compare = native_compare_support(access, arch, two_address, *register_count);
@@ -311,9 +357,8 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     } else if (*access.operands.address_vgpr >= 255u && !scalar_vector_address) {
       replay = Reason::ReservedAddressRegister;
     } else {
-      replay = consan_detail::is_supported_moi_flat_access_mnemonic(access.mnemonic)
-                   ? Reason::None
-                   : Reason::UnsupportedMnemonic;
+      replay =
+          is_replayable_flat_access(access.mnemonic) ? Reason::None : Reason::UnsupportedMnemonic;
     }
     compare = flat_compare_support(access, *register_count);
   } else {

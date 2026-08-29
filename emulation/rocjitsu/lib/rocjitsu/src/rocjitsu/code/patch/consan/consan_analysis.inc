@@ -190,7 +190,7 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   // In two-address stride-64 forms, the "64" token describes address
   // spacing, not transfer width. Consume the authoritative form rather than
   // inferring the first numeric token in the spelling.
-  if (const auto form = consan_detail::native_lds_two_address_form(mnemonic))
+  if (const auto form = consan_detail::decode_native_lds_two_range_shape(mnemonic))
     return form->element_width_bits;
   if (mnemonic.find("128") != std::string_view::npos ||
       mnemonic.find("x4") != std::string_view::npos)
