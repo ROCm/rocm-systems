@@ -1315,6 +1315,13 @@ private:
     const bool ok = ::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0) == sizeof(scratch);
     {
       std::unique_lock lk(passthrough_probe_mutex_);
+      // One entry per distinct passthrough page is unbounded in principle. Drop
+      // the whole cache rather than grow without limit: the cost of rebuilding
+      // it is one syscall per page still in use, and passthrough pages are the
+      // exception rather than the rule -- anything the runtime allocated has a
+      // PTE and never reaches here.
+      if (passthrough_probe_cache_.size() >= kPassthroughProbeCacheEntries)
+        passthrough_probe_cache_.clear();
       passthrough_probe_cache_.emplace(key, ok);
     }
     if (!ok)
@@ -1570,6 +1577,7 @@ private:
 #endif
   mutable std::atomic<uint64_t> clipped_mapped_accesses_{0};
   static constexpr uint64_t kInaccessiblePassthroughReports = 8;
+  static constexpr size_t kPassthroughProbeCacheEntries = 1u << 20;
   mutable std::atomic<uint64_t> inaccessible_passthrough_pages_{0};
   mutable std::shared_mutex passthrough_probe_mutex_;
   mutable std::unordered_map<uint64_t, bool> passthrough_probe_cache_;
