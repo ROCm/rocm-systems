@@ -3238,15 +3238,6 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
 }
 
-[[nodiscard]] const ConSanFaultSite *
-find_fault_site_by_identity(const ConSanTransformArtifacts &result, std::string_view identity,
-                            ConSanFaultSiteKind kind) {
-  const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
-    return candidate.kind == kind && candidate.identity == identity;
-  });
-  return site == result.fault_sites.end() ? nullptr : &*site;
-}
-
 [[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site) {
   return {.text_offset = site.text_offset,
           .file_offset = site.file_offset,
@@ -3255,53 +3246,25 @@ find_fault_site_by_identity(const ConSanTransformArtifacts &result, std::string_
           .mnemonic = site.mnemonic};
 }
 
-[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ConSanTransformArtifacts &result,
-                                                             std::string_view filter) {
-  if (filter.empty())
-    return nullptr;
-  if (const ConSanKernelInfo *exact = result.program_inventory.find_kernel_by_name(filter))
-    return exact;
-  const ConSanKernelInfo *match = nullptr;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (kernel.name.find(filter) == std::string::npos)
-      continue;
-    if (match != nullptr)
-      return nullptr;
-    match = &kernel;
-  }
-  return match;
-}
-
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
                                              const ConSanTransformArtifacts &result,
                                              const ConSanOptions &options) {
-  if (options.test_kernel_name_filter.empty())
-    return true;
-  const ConSanKernelInfo *kernel = requested_kernel_owner(result, options.test_kernel_name_filter);
-  return kernel != nullptr &&
-         std::ranges::find(owners, kernel->descriptor_file_offset,
-                           &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
+  return consan_execution_owners_include_requested_kernel(owners, result,
+                                                          options.test_kernel_name_filter);
 }
 
 [[nodiscard]] const ConSanFaultSite *
 select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
                            ConSanFaultSiteKind kind, uint32_t legacy_index) {
-  if (!options.fault_site_identity.empty()) {
-    const ConSanFaultSite *site =
-        find_fault_site_by_identity(result, options.fault_site_identity, kind);
-    const bool patchable = site != nullptr;
-    return patchable && owned_by_requested_kernel(site->execution_owners, result, options)
-               ? site
-               : nullptr;
-  }
-  uint32_t index = 0;
-  for (const ConSanFaultSite &site : result.fault_sites) {
-    if (site.kind != kind)
-      continue;
-    if (!owned_by_requested_kernel(site.execution_owners, result, options))
-      continue;
-    if (index++ == legacy_index)
-      return &site;
-  }
-  return nullptr;
+  return select_fault_site_for_plan(
+      result,
+      ConSanFaultSelection{
+          .primary_site_identity = options.fault_site_identity,
+          .primary_sequence_identity = {},
+          .companion_site_identity = {},
+          .companion_sequence_identity = {},
+          .kernel_name_filter = options.test_kernel_name_filter,
+          .ordinal = legacy_index,
+      },
+      kind);
 }

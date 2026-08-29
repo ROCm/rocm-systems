@@ -1936,8 +1936,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     if (patch.kind == ConSanPatchKind::InlineOrdinaryAddressRewrite ||
         patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite ||
         patch.kind == ConSanPatchKind::InlineOrdinaryScopeRewrite) {
-      ConSanOptions selection;
-      selection.fault_site_identity = patch.fault_primary_identity;
+      const ConSanFaultSelection selection{
+          .primary_site_identity = patch.fault_primary_identity,
+          .primary_sequence_identity = {},
+          .companion_site_identity = {},
+          .companion_sequence_identity = {},
+          .kernel_name_filter = {},
+          .ordinal = 0,
+      };
       const auto target = select_ordinary_acquire_mutation_target(pristine_inventory, selection);
       const bool identities_match =
           target && !patch.fault_primary_identity.empty() &&
@@ -2017,10 +2023,16 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       continue;
     }
     if (patch.kind == ConSanPatchKind::InlineLdsAddressRewrite) {
-      ConSanOptions selection;
-      selection.fault_site_identity = patch.fault_primary_identity;
+      const ConSanFaultSelection selection{
+          .primary_site_identity = patch.fault_primary_identity,
+          .primary_sequence_identity = {},
+          .companion_site_identity = {},
+          .companion_sequence_identity = {},
+          .kernel_name_filter = {},
+          .ordinal = 0,
+      };
       const ConSanFaultSite *target = select_fault_site_for_plan(
-          pristine_inventory, selection, ConSanFaultSiteKind::LdsAccess, 0u);
+          pristine_inventory, selection, ConSanFaultSiteKind::LdsAccess);
       const bool identities_match =
           target != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_primary_identity == target->identity &&
@@ -2436,9 +2448,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const auto member = std::ranges::find_if(exact_barrier_drop_patches, [&](const auto *patch) {
         return patch->fault_sequence_identity == sequence_identity;
       });
-      ConSanOptions selection;
-      selection.fault_site_identity = (*member)->fault_primary_identity;
-      selection.fault_barrier_sequence_identity = sequence_identity;
+      const ConSanFaultSelection selection{
+          .primary_site_identity = (*member)->fault_primary_identity,
+          .primary_sequence_identity = sequence_identity,
+          .companion_site_identity = {},
+          .companion_sequence_identity = {},
+          .kernel_name_filter = {},
+          .ordinal = 0,
+      };
       const auto pair = resolve_exact_barrier_drop_pair(pristine_inventory, selection, &reason);
       const size_t member_count = static_cast<size_t>(
           std::ranges::count_if(exact_barrier_drop_patches, [&](const auto *patch) {
@@ -2447,20 +2464,18 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       metadata_matches &= pair.has_value() && member_count == 2u;
       if (!pair)
         continue;
-      metadata_matches &= std::ranges::all_of(exact_barrier_drop_patches, [&](const auto *patch) {
-        return patch->fault_sequence_identity != sequence_identity ||
-               (patch->fault_primary_identity == pair->primary->identity &&
-                patch->fault_companion_identity == pair->companion->identity &&
-                patch->original_size == sizeof(uint32_t));
-      });
-      metadata_matches &= std::ranges::any_of(exact_barrier_drop_patches, [&](const auto *patch) {
-        return patch->fault_sequence_identity == sequence_identity &&
-               patch->anchor_offset == pair->primary->text_offset;
-      });
-      metadata_matches &= std::ranges::any_of(exact_barrier_drop_patches, [&](const auto *patch) {
-        return patch->fault_sequence_identity == sequence_identity &&
-               patch->anchor_offset == pair->companion->text_offset;
-      });
+      bool found_primary = false;
+      bool found_companion = false;
+      for (const ConSanPatchInfo *patch : exact_barrier_drop_patches) {
+        if (patch->fault_sequence_identity != sequence_identity)
+          continue;
+        metadata_matches &= patch->fault_primary_identity == pair->primary->identity &&
+                            patch->fault_companion_identity == pair->companion->identity &&
+                            patch->original_size == sizeof(uint32_t);
+        found_primary |= patch->anchor_offset == pair->primary->text_offset;
+        found_companion |= patch->anchor_offset == pair->companion->text_offset;
+      }
+      metadata_matches &= found_primary && found_companion;
       pairs.push_back(*pair);
     }
     if (pairs.size() == 1u) {
@@ -2468,11 +2483,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           exact_barrier_drop_patches.size() == 2u &&
           result.mutation.applied_fault_logical_identity == pairs.front().sequence->identity;
     } else if (pairs.size() == 2u) {
-      ConSanOptions selection;
-      selection.fault_site_identity = pairs[0].primary->identity;
-      selection.fault_barrier_sequence_identity = pairs[0].sequence->identity;
-      selection.fault_barrier_companion_site_identity = pairs[1].primary->identity;
-      selection.fault_barrier_companion_sequence_identity = pairs[1].sequence->identity;
+      const ConSanFaultSelection selection{
+          .primary_site_identity = pairs[0].primary->identity,
+          .primary_sequence_identity = pairs[0].sequence->identity,
+          .companion_site_identity = pairs[1].primary->identity,
+          .companion_sequence_identity = pairs[1].sequence->identity,
+          .kernel_name_filter = {},
+          .ordinal = 0,
+      };
       const auto group = resolve_exact_barrier_drop_group(pristine_inventory, selection, &reason);
       metadata_matches &= exact_barrier_drop_patches.size() == 4u && group &&
                           result.mutation.applied_fault_logical_identity ==
