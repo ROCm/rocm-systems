@@ -95,6 +95,38 @@ public:
 
   [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override;
 
+  /// @brief Advertise a single legacy interrupt pin.
+  ///
+  /// @details The driver asks the bus for one vector of any kind at all and
+  /// refuses the device outright when it cannot have one, so a function with no
+  /// interrupt capability whatsoever does not merely lose interrupts: its
+  /// interrupt-handling block fails to initialize and the probe ends there. A
+  /// pin is the smallest capability that satisfies that, and the only one this
+  /// transport can currently advertise.
+  ///
+  /// Nothing built against it is wasted when this becomes MSI-X, because the
+  /// driver decides how to program the interrupt ring from a module parameter
+  /// rather than from what the bus actually gave it, and so programs the ring
+  /// identically either way.
+  ///
+  /// **A pin must not be what finally raises an interrupt, though.** A client
+  /// disables every mmap of every BAR while a legacy interrupt is pending, and
+  /// restores them only after a quiet period; this device's largest BAR is the
+  /// memory aperture the guest maps to avoid trapping. Raising pins at the rate
+  /// an interrupt ring produces them would therefore cost the guest its direct
+  /// view of memory for as long as they keep arriving, and would present as a
+  /// collapse of the memory path rather than as anything to do with interrupts.
+  ///
+  /// @returns A single legacy pin. The vectors field is NOT APPLICABLE here
+  ///          rather than meaningful: it counts message-signalled vectors, so
+  ///          the zero reported alongside IntxPin is not a count of anything
+  ///          this device declines to raise. What is advertised is a capability
+  ///          the guest driver checks for before it will keep the device; this
+  ///          device raises nothing through it yet.
+  [[nodiscard]] simdojo::InterruptSpec interrupts() const override {
+    return {.kind = simdojo::InterruptKind::IntxPin, .vectors = 0};
+  }
+
   [[nodiscard]] int64_t bar_access(int bar, std::span<std::byte> buf, uint64_t offset,
                                    bool write) override;
   void dma_map(const simdojo::DmaRegion &region) override;
