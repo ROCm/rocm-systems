@@ -1716,13 +1716,15 @@
 // at least one lane on every iteration, so runtime work is bounded by the
 // hardware wave size while generated code size remains constant.
 [[nodiscard]] bool append_wave_coalesced_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const MoiOptions &options,
-    rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr,
-    uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
-    uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
-    uint32_t shadow_granule_bytes, uint32_t relative_cell_index,
-    std::optional<uint16_t> relative_cell_index_vgpr, const VgprSpillSequence *spill,
-    std::optional<uint16_t> spill_backed_lds_byte_offset_source, std::vector<std::string> &errors) {
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
+    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
+    uint16_t scratch_vgpr, bool partition_mask_debug, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr, uint16_t current_low_vgpr,
+    uint16_t current_high_vgpr, uint16_t old_value_vgpr, uint16_t lds_byte_offset_vgpr,
+    uint32_t static_byte_offset, uint32_t byte_count, uint32_t shadow_granule_bytes,
+    uint32_t relative_cell_index, std::optional<uint16_t> relative_cell_index_vgpr,
+    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
+    std::vector<std::string> &errors) {
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -1733,10 +1735,10 @@
                             std::string(stage));
     }
   } failure{errors};
-  if (!options.moi_exec_save_sgpr)
+  if (!point.moi_exec_save_sgpr)
     return false;
 
-  const uint16_t base = *options.moi_exec_save_sgpr;
+  const uint16_t base = *point.moi_exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(base + 2u);
   const uint16_t publisher_exec_sgpr = static_cast<uint16_t>(base + 4u);
   const uint16_t committed_exec_sgpr = static_cast<uint16_t>(base + 6u);
@@ -1806,12 +1808,12 @@
   words.push_back(save_address_hi);
   words.push_back(save_current_low);
   words.push_back(save_current_high);
-  if (options.moi_partition_mask_debug) {
+  if (partition_mask_debug) {
     // Capture the first incoming lane's address before loop temporaries can
     // reuse these SGPRs. InlineShadow leaves all three record counts at zero,
     // so the debug reader can use count fields without corrupting the layout
     // capacities that locate the exact-shadow array.
-    const uint64_t report_base = *options.moi_report_buffer_address;
+    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
     words.push_back(*read_address);
     words.push_back(*read_address_high);
     if (!append_store_u32_sgpr(words,
@@ -1832,7 +1834,7 @@
   words.push_back(*read_value);
   words.push_back(*address_equal);
   words.push_back(*narrow_address);
-  if (options.moi_partition_mask_debug) {
+  if (partition_mask_debug) {
     // Capture the current group's exchange address before diagnostics can
     // reuse working VGPRs. Each group overwrites this pair, matching the
     // retained final_group mask. The old-value pair has not been populated by
@@ -1840,7 +1842,7 @@
     // In particular, do not use saved_address_lo_vgpr: doing so corrupts the
     // per-lane loop invariant before the first exchange and makes the debug
     // path observe different behavior from the production path.
-    const uint64_t report_base = *options.moi_report_buffer_address;
+    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
     if (!append_store_u32_vgpr(words,
                                report_base + offsetof(ConSanMoiReportHeader, atomic_record_count),
                                address_lo_vgpr, old_value_vgpr, arch) ||
@@ -1854,7 +1856,7 @@
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
           relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
-          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
+          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(scratch_vgpr + 4u))) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
     return false;
@@ -1903,10 +1905,10 @@
     return false;
   }
   failure.stage = "composite-key transaction";
-  if (!append_versioned_exact_shadow_transaction(
-          words, options, options, *options.scratch_vgpr, arch, address_lo_vgpr, current_low_vgpr,
-          old_value_vgpr, publisher_exec_sgpr, committed_exec_sgpr,
-          /*retry_contention=*/true, errors)) {
+  if (!append_versioned_exact_shadow_transaction(words, bound_resources, point, scratch_vgpr, arch,
+                                                 address_lo_vgpr, current_low_vgpr, old_value_vgpr,
+                                                 publisher_exec_sgpr, committed_exec_sgpr,
+                                                 /*retry_contention=*/true, errors)) {
     return false;
   }
   // The representative stands for the complete metadata-identical subgroup.
@@ -1940,11 +1942,11 @@
   // the existing diagnostic helper can snapshot and restore the true program
   // state while evaluating every lane in this address group.
   failure.stage = "pre-diagnostic state restoration";
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return false;
   failure.stage = "diagnostic encoding";
   if (!append_inline_shadow_diagnostic_words(
-          words, candidate, options, options, options, *options.scratch_vgpr, arch, layout,
+          words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
           old_value_vgpr, static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr,
           current_high_vgpr, lds_byte_offset_vgpr, static_byte_offset, byte_count,
           shadow_granule_bytes,
@@ -1961,12 +1963,12 @@
           relative_cell_index))
     return false;
 
-  if (options.moi_partition_mask_debug) {
+  if (partition_mask_debug) {
     // Debug-only side channel for gfx1201 qualification. The report fields are
     // otherwise unused by InlineShadow. Capture before the subtraction while
     // group EXEC is still active; the matching hook log labels the run as
     // non-acceptance telemetry.
-    const uint64_t report_base = *options.moi_report_buffer_address;
+    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
     if (!append_store_u32_sgpr(words, report_base + offsetof(ConSanMoiReportHeader, dispatch_id),
                                group_exec_sgpr, current_low_vgpr, address_lo_vgpr, arch) ||
         !append_store_u32_sgpr(
@@ -2004,7 +2006,7 @@
   // access starts from the original owner/epoch/workgroup metadata.
   words.push_back(restore_current_low);
   words.push_back(restore_current_high);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return false;
 
   const auto branch_offset = [](size_t from, size_t to) -> std::optional<int16_t> {
@@ -2189,15 +2191,16 @@
 // the complete prior 64-bit entry, so it needs neither dispatch qualification
 // nor a multi-instruction reservation protocol.
 [[nodiscard]] bool append_workgroup_local_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const MoiOptions &options,
-    rj_code_arch_t arch, const ConSanMoiReportBufferLayout &report_layout,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
+    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
+    uint16_t scratch_vgpr, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &report_layout,
     const ConSanMoiWorkgroupShadowLayout &workgroup_shadow, uint16_t address_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t cell_index,
     uint32_t byte_count, uint16_t diagnostic_lds_byte_offset_vgpr,
     uint32_t diagnostic_static_byte_offset, std::optional<uint16_t> relative_cell_index_vgpr,
     std::vector<std::string> &errors) {
-  if (!options.scratch_vgpr || !options.moi_exec_save_sgpr)
+  if (!point.moi_exec_save_sgpr)
     return false;
   if (workgroup_shadow.compact || consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
     errors.emplace_back(
@@ -2205,11 +2208,11 @@
     return false;
   }
 
-  const uint16_t temporary_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+  const uint16_t temporary_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
   const uint16_t saved_current_low_vgpr = static_cast<uint16_t>(old_value_vgpr + 4u);
   const uint16_t saved_current_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 5u);
   const uint16_t saved_cell_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
-  const uint16_t exec_base = *options.moi_exec_save_sgpr;
+  const uint16_t exec_base = *point.moi_exec_save_sgpr;
   const uint16_t incoming_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(exec_base + 16u);
@@ -2305,7 +2308,7 @@
   words.push_back(0);
   if (!append_atomic_fetch_add_one_u32(
           words,
-          *options.moi_report_buffer_address +
+          *bound_resources.moi_report_buffer_address +
               offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
           temporary_vgpr, address_vgpr, arch)) {
     errors.emplace_back(
@@ -2330,8 +2333,8 @@
     return false;
   }
   words[skip_empty_undercoverage_index] = *skip_empty_undercoverage;
-  if (!append_workgroup_local_lazy_shadow_ready(words, options, *options.scratch_vgpr, arch,
-                                                workgroup_shadow, saved_cell_vgpr, errors)) {
+  if (!append_workgroup_local_lazy_shadow_ready(words, point, scratch_vgpr, arch, workgroup_shadow,
+                                                saved_cell_vgpr, errors)) {
     return false;
   }
   words.push_back(
@@ -2363,7 +2366,7 @@
   // Address formation and conflict filtering use condition state. Reinstall
   // the displaced program's state before the diagnostic helper, whose final
   // restoration makes the local path observationally transparent.
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not restore special scalar state");
     return false;
@@ -2379,7 +2382,7 @@
     return false;
   }
   if (!append_inline_shadow_diagnostic_words(
-          words, candidate, options, options, options, *options.scratch_vgpr, arch, report_layout,
+          words, candidate, request, bound_resources, point, scratch_vgpr, arch, report_layout,
           old_value_vgpr, static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr,
           current_high_vgpr, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
           byte_count, consan_moi_exact_shadow::granule_bytes,
@@ -2898,8 +2901,9 @@
               build_v_mov_b32_e32(loop_counter_vgpr, scalar_positive_inline_u32(0), arch));
           const size_t loop_begin = words.size();
           if (!append_workgroup_local_exact_shadow_swap(
-                  words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
-                  low_vgpr, high_vgpr, local_old_value_vgpr, loop_offset_vgpr,
+                  words, candidate, options, options, options, *options.scratch_vgpr, arch, layout,
+                  *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr, local_old_value_vgpr,
+                  loop_offset_vgpr,
                   /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_width,
                   *lds_byte_offset_vgpr, candidate.lowering_offset(range), loop_counter_vgpr,
                   errors)) {
@@ -2957,8 +2961,9 @@
           words.push_back(*restore_valid_workgroup);
         } else if (!reload_spill_backed_lds_byte_offset() ||
                    !append_workgroup_local_exact_shadow_swap(
-                       words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
-                       low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
+                       words, candidate, options, options, options, *options.scratch_vgpr, arch,
+                       layout, *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr,
+                       local_old_value_vgpr, *lds_byte_offset_vgpr,
                        candidate.lowering_offset(range), cell_index, range.byte_width,
                        *lds_byte_offset_vgpr, candidate.lowering_offset(range),
                        /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
@@ -3115,7 +3120,8 @@
         words.insert(words.end(), add_cell->begin(), add_cell->end());
       }
       if (!append_wave_coalesced_exact_shadow_swap(
-              words, candidate, options, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
+              words, candidate, options, options, options, *options.scratch_vgpr,
+              options.moi_partition_mask_debug, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
               old_value_vgpr, *lds_byte_offset_vgpr, candidate.lowering_offset(range),
               range.byte_width, external_shadow_granule_bytes, cell_index,
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
