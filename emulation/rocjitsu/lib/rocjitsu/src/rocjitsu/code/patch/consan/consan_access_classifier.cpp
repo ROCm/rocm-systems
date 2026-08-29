@@ -104,6 +104,50 @@ template <typename Range>
   return named(mnemonic, forms);
 }
 
+[[nodiscard]] bool is_partial_destination_native_load(std::string_view mnemonic) {
+  constexpr std::array forms = {
+      "ds_load_u8_d16",  "ds_load_u8_d16_hi",  "ds_load_i8_d16",  "ds_load_i8_d16_hi",
+      "ds_load_u16_d16", "ds_load_u16_d16_hi", "ds_read_u8_d16",  "ds_read_u8_d16_hi",
+      "ds_read_i8_d16",  "ds_read_i8_d16_hi",  "ds_read_u16_d16", "ds_read_u16_d16_hi",
+  };
+  return named(mnemonic, forms);
+}
+
+[[nodiscard]] bool uses_high_register_subword(std::string_view mnemonic) {
+  constexpr std::array native_forms = {
+      "ds_load_u8_d16_hi",  "ds_load_i8_d16_hi",   "ds_load_u16_d16_hi", "ds_read_u8_d16_hi",
+      "ds_read_i8_d16_hi",  "ds_read_u16_d16_hi",  "ds_store_b8_d16_hi", "ds_store_b16_d16_hi",
+      "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
+  };
+  if (named(mnemonic, native_forms))
+    return true;
+  if (const auto load = consan_flat_load_subword_semantics(mnemonic))
+    return load->placement == ConSanFlatSubwordPlacement::High16;
+  if (const auto store = consan_flat_store_subword_semantics(mnemonic))
+    return store->placement == ConSanFlatSubwordPlacement::High16;
+  return false;
+}
+
+[[nodiscard]] bool uses_low_register_subword(std::string_view mnemonic) {
+  constexpr std::array native_forms = {
+      "ds_load_u8_d16",  "ds_load_i8_d16", "ds_load_u16_d16", "ds_read_u8_d16", "ds_read_i8_d16",
+      "ds_read_u16_d16", "ds_store_b8",    "ds_store_b16",    "ds_write_b8",    "ds_write_b16",
+  };
+  if (named(mnemonic, native_forms))
+    return true;
+  if (const auto load = consan_flat_load_subword_semantics(mnemonic))
+    return load->placement == ConSanFlatSubwordPlacement::Low16;
+  if (const auto store = consan_flat_store_subword_semantics(mnemonic))
+    return store->placement == ConSanFlatSubwordPlacement::Low16;
+  return false;
+}
+
+[[nodiscard]] bool needs_destination_allocation_headroom(std::string_view mnemonic) {
+  constexpr std::array forms = {"ds_load_b64", "ds_load_2addr_b64", "ds_load_2addr_stride64_b64",
+                                "ds_read2_b64", "ds_read2st64_b64"};
+  return named(mnemonic, forms);
+}
+
 [[nodiscard]] uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch))
     return 0u;
@@ -373,6 +417,17 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
 
   form.element_register_count = static_cast<uint16_t>((form.element_width_bits + 31u) / 32u);
   form.destination_register_count = form.destination_vgpr ? form.data_register_count : 0u;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  form.data_register_alignment =
+      target && target->requires_even_vgpr_tuples && form.data_register_count > 1u ? 2u : 1u;
+  form.destination_allocation_headroom = needs_destination_allocation_headroom(access.mnemonic);
+  if (uses_high_register_subword(access.mnemonic)) {
+    form.register_value_placement = ConSanAccessRegisterValuePlacement::High16;
+  } else if (uses_low_register_subword(access.mnemonic)) {
+    form.register_value_placement = ConSanAccessRegisterValuePlacement::Low16;
+  }
+  form.destination_preserves_unwritten_bits = access.kind == ConSanLdsAccessKind::Read &&
+                                              is_partial_destination_native_load(access.mnemonic);
 
   return {
       .form = form,

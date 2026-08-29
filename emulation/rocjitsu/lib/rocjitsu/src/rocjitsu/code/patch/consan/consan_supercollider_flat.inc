@@ -1,22 +1,24 @@
 [[nodiscard]] uint16_t
 flat_check_trap_comparison_scratch_vgprs(const ConSanAccessInventorySite &access) {
-  if (const auto load = consan_flat_load_subword_semantics(access.mnemonic))
-    return load->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u;
-  if (const auto store = consan_flat_store_subword_semantics(access.mnemonic))
-    return store->placement == ConSanFlatSubwordPlacement::High16 || store->memory_width_bits == 8u
-               ? 1u
-               : 0u;
-  return 0u;
+  if (!access.lowering.form)
+    return 0u;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  return form.register_value_placement == ConSanAccessRegisterValuePlacement::High16 ||
+                 (form.access_kind == ConSanLdsAccessKind::Write && form.element_width_bits == 8u)
+             ? 1u
+             : 0u;
 }
 
 [[nodiscard]] uint32_t
 flat_check_trap_comparison_setup_words(const ConSanAccessInventorySite &access) {
-  if (const auto load = consan_flat_load_subword_semantics(access.mnemonic))
-    return load->placement == ConSanFlatSubwordPlacement::High16 ? 2u : 0u;
-  if (const auto store = consan_flat_store_subword_semantics(access.mnemonic)) {
-    return (store->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u) +
-           (store->memory_width_bits == 8u ? 2u : 0u);
-  }
+  if (!access.lowering.form)
+    return 0u;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  const bool high = form.register_value_placement == ConSanAccessRegisterValuePlacement::High16;
+  if (form.access_kind == ConSanLdsAccessKind::Read)
+    return high ? 2u : 0u;
+  if (form.access_kind == ConSanLdsAccessKind::Write)
+    return (high ? 1u : 0u) + (form.element_width_bits == 8u ? 2u : 0u);
   return 0u;
 }
 
@@ -140,10 +142,10 @@ choose_flat_check_trap_indirect_scalar_scratch(
     const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
     std::span<const LivenessAnalysis *const> owner_liveness,
     std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
-    uint16_t required_vgprs, const ConSanTargetProfile &target) {
+    uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
     return choose_flat_scratch_vgpr(access, options, inst, nullptr, min_auto_scratch_vgpr,
-                                    max_auto_scratch_vgpr, required_vgprs, target.arch);
+                                    max_auto_scratch_vgpr, required_vgprs);
   }
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness,
@@ -158,8 +160,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
   ConSanRegisterRequest request;
   request.reg_class = RegClass::VGPR;
   request.count = required_vgprs;
-  request.alignment =
-      flat_dword_count(access).value_or(0u) > 1u && target.requires_even_vgpr_tuples ? 2u : 1u;
+  request.alignment = access.lowering.form ? access.lowering.form->data_register_alignment : 1u;
   request.search_start =
       std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
   // RegisterSet can represent target-specific VGPR banks above 255, but the
@@ -171,15 +172,18 @@ choose_flat_check_trap_indirect_scalar_scratch(
   request.max_referenced_count = min_auto_scratch_vgpr.value_or(0u);
   request.architecture_limit = request.current_allocation_count;
   request.allow_spill = false;
-  const uint16_t data_vgprs = flat_dword_count(access).value_or(1u);
-  if (access.operands.address_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *access.operands.address_vgpr, 2u});
-  if (access.operands.destination_vgpr)
+  if (!access.lowering.form)
+    return std::nullopt;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  if (form.address_vgpr)
     request.forbidden.expand(
-        {RegClass::VGPR, *access.operands.destination_vgpr, static_cast<uint8_t>(data_vgprs)});
-  if (access.operands.data_vgpr)
+        {RegClass::VGPR, *form.address_vgpr, static_cast<uint8_t>(form.address_vgpr_count)});
+  if (form.destination_vgpr)
+    request.forbidden.expand({RegClass::VGPR, *form.destination_vgpr,
+                              static_cast<uint8_t>(form.destination_register_count)});
+  if (form.data_vgpr)
     request.forbidden.expand(
-        {RegClass::VGPR, *access.operands.data_vgpr, static_cast<uint8_t>(data_vgprs)});
+        {RegClass::VGPR, *form.data_vgpr, static_cast<uint8_t>(form.data_register_count)});
 
   const ConSanRegisterPlan plan = plan_consan_registers(request, live_before_all_owners);
   return plan.source == ConSanRegisterAllocationSource::LivenessDead ? plan.base : std::nullopt;
@@ -416,7 +420,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
     auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
                                                        min_auto_scratch_vgpr, max_auto_scratch_vgpr,
-                                                       scratch_vgprs, target);
+                                                       scratch_vgprs);
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
@@ -434,7 +438,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
             uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
-        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
+        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
         if (scratch && uses_dynamic_stack) {
           dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
               *scratch, scratch_vgprs, *vcc_save,
@@ -1167,7 +1171,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool use_trampoline = candidate.use_local_cave || candidate.use_appended_cave;
     ConSanPatchKind patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatLoadCheckTrap
                                                 : ConSanPatchKind::InlineFlatLoadCheckTrap;
-    if (!flat_scratch_tuple_base_is_valid(site, arch, candidate.scratch_vgpr)) {
+    if (!flat_scratch_tuple_base_is_valid(site, candidate.scratch_vgpr)) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof selected a misaligned tuple scratch base");
       return;
@@ -1175,8 +1179,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (site.kind == ConSanLdsAccessKind::Read) {
       duplicate_load = retarget_flat_load_vdst(original_access, candidate.scratch_vgpr, arch);
     } else if (site.kind == ConSanLdsAccessKind::Write) {
-      duplicate_load = build_flat_load_from_flat_store(original_access, site.decoded_width_bits,
-                                                       candidate.scratch_vgpr, arch);
+      duplicate_load = build_flat_load_from_flat_store(
+          original_access, site.lowering.form->element_width_bits, candidate.scratch_vgpr, arch);
       patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatStoreCheckTrap
                                   : ConSanPatchKind::InlineFlatStoreCheckTrap;
     }
@@ -1251,7 +1255,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (needs_runtime_group_gate) {
       constexpr uint16_t kScalarInlineMinusOne = 0xC1;
       const auto group_aperture_high = instrumentation::build_v_cmp_eq_u32_vcc(
-          kScalarInlineMinusOne, static_cast<uint16_t>(*site.operands.address_vgpr + 1u), arch);
+          kScalarInlineMinusOne, static_cast<uint16_t>(*site.lowering.form->address_vgpr + 1u),
+          arch);
       if (!group_aperture_high) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof could not encode runtime group gate");
@@ -1264,10 +1269,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.words.insert(planned.words.end(), duplicate_load->begin(),
                          duplicate_load->begin() + access_words);
     planned.words.push_back(*wait_flat);
-    const auto load_subword = consan_flat_load_subword_semantics(site.mnemonic);
-    const auto store_subword = consan_flat_store_subword_semantics(site.mnemonic);
+    const ConSanAccessLoweringForm &form = *site.lowering.form;
+    const bool subword = form.element_width_bits < 32u;
     const bool compare_high_load =
-        load_subword && load_subword->placement == ConSanFlatSubwordPlacement::High16;
+        form.access_kind == ConSanLdsAccessKind::Read &&
+        form.register_value_placement == ConSanAccessRegisterValuePlacement::High16;
+    const bool compare_subword_store = form.access_kind == ConSanLdsAccessKind::Write && subword;
     const uint16_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
@@ -1337,8 +1344,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         planned.words.push_back(*select_original_high);
         planned.words.push_back(*select_duplicate_high);
         compare_lhs_vgpr = original_high_vgpr;
-      } else if (store_subword) {
-        if (store_subword->placement == ConSanFlatSubwordPlacement::High16) {
+      } else if (compare_subword_store) {
+        if (form.register_value_placement == ConSanAccessRegisterValuePlacement::High16) {
           const auto select_store_high = instrumentation::build_v_lshrrev_b32(
               comparison_scratch_vgpr, scalar_positive_inline_u32(16u), *compare_vgpr, arch);
           if (!select_store_high) {
@@ -1349,7 +1356,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           planned.words.push_back(*select_store_high);
           compare_lhs_vgpr = comparison_scratch_vgpr;
         }
-        if (store_subword->memory_width_bits == 8u) {
+        if (form.element_width_bits == 8u) {
           const auto mask_store_byte = instrumentation::build_v_and_b32_literal(
               comparison_scratch_vgpr, 0xffu, compare_lhs_vgpr, arch);
           if (!mask_store_byte) {
@@ -1370,9 +1377,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         return;
       }
       const auto chunk_cmp_ne =
-          load_subword || store_subword || site.decoded_width_bits == 16
-              ? build_v_cmp_ne_u16_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch)
-              : build_v_cmp_ne_u32_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch);
+          subword ? build_v_cmp_ne_u16_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch)
+                  : build_v_cmp_ne_u32_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch);
       if (!chunk_cmp_ne) {
         result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
         return;

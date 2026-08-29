@@ -2148,45 +2148,41 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
           hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
-[[nodiscard]] std::optional<uint16_t> flat_dword_count(std::string_view mnemonic,
-                                                       uint32_t width_bits) {
-  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
-    return 1u;
-  if (width_bits == 16)
-    return 1u;
-  if (width_bits == 32 || width_bits == 64 || width_bits == 128)
-    return static_cast<uint16_t>(width_bits / 32u);
-  return std::nullopt;
-}
-
 [[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanAccessInventorySite &access) {
-  return flat_dword_count(access.mnemonic, access.decoded_width_bits);
+  if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
+    return std::nullopt;
+  return access.lowering.form->data_register_count;
 }
 
 [[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
-                                                    rj_code_arch_t arch, uint16_t candidate) {
-  const auto dword_count = flat_dword_count(access);
-  return !dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch) ||
-         candidate % 2u == 0u;
+                                                    uint16_t candidate) {
+  return !access.lowering.form || access.lowering.form->data_register_alignment <= 1u ||
+         candidate % access.lowering.form->data_register_alignment == 0u;
 }
 
 [[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanAccessInventorySite &access,
                                                       uint16_t candidate, uint16_t required_vgprs) {
-  if (access.operands.address_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.address_vgpr, 2))
+  if (!access.lowering.form)
+    return true;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  if (form.address_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
     return true;
 
-  const uint16_t data_vgprs = flat_dword_count(access).value_or(1);
-  if (access.operands.destination_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.destination_vgpr, data_vgprs))
+  if (form.destination_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.destination_vgpr,
+                          form.destination_register_count))
     return true;
-  if (access.operands.data_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.data_vgpr, data_vgprs))
+  if (form.data_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.data_vgpr, form.data_register_count))
     return true;
   return false;
 }
 
 [[nodiscard]] uint16_t flat_scratch_search_start(const ConSanAccessInventorySite &access) {
+  if (!access.lowering.form)
+    return 0u;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
   std::optional<uint32_t> first_after_operands;
   auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
     if (!base)
@@ -2196,22 +2192,22 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
       first_after_operands = end;
   };
 
-  const uint16_t data_vgprs = flat_dword_count(access).value_or(1);
-  note_range(access.operands.address_vgpr, 2);
-  note_range(access.operands.destination_vgpr, data_vgprs);
-  note_range(access.operands.data_vgpr, data_vgprs);
+  note_range(form.address_vgpr, form.address_vgpr_count);
+  note_range(form.destination_vgpr, form.destination_register_count);
+  note_range(form.data_vgpr, form.data_register_count);
   if (!first_after_operands)
     return 0;
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_flat_scratch_vgpr(
-    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
-    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
-    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t>
+choose_flat_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOptions &options,
+                         const Instruction *inst, const LivenessAnalysis *liveness,
+                         std::optional<uint16_t> min_auto_scratch_vgpr,
+                         std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        flat_scratch_tuple_base_is_valid(access, arch, *options.scratch_vgpr) &&
+        flat_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
         !is_forbidden_flat_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
@@ -2230,7 +2226,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
       return std::nullopt;
     if (candidate_end <= REGISTER_SET_MAX_VGPRS &&
-        flat_scratch_tuple_base_is_valid(access, arch, *candidate) &&
+        flat_scratch_tuple_base_is_valid(access, *candidate) &&
         !is_forbidden_flat_scratch_vgpr_run(access, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
@@ -2246,11 +2242,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 /// memory before using it.
 [[nodiscard]] std::optional<uint16_t>
 choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
-                               uint16_t required_vgprs, rj_code_arch_t arch) {
+                               uint16_t required_vgprs) {
   for (uint32_t candidate = 0; candidate + required_vgprs <= allocation_count &&
                                candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
        ++candidate) {
-    if (flat_scratch_tuple_base_is_valid(access, arch, static_cast<uint16_t>(candidate)) &&
+    if (flat_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
         !is_forbidden_flat_scratch_vgpr_run(access, static_cast<uint16_t>(candidate),
                                             required_vgprs)) {
       return static_cast<uint16_t>(candidate);

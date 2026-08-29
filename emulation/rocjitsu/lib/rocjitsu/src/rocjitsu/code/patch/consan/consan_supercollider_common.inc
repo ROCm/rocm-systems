@@ -184,12 +184,7 @@ void publish_unplaced_sc_access_rejections(ConSanTransformArtifacts &result) {
 }
 
 [[nodiscard]] bool is_d16_lds_load(const ConSanAccessInventorySite &access) {
-  return access.mnemonic == "ds_load_u8_d16" || access.mnemonic == "ds_load_u8_d16_hi" ||
-         access.mnemonic == "ds_load_i8_d16" || access.mnemonic == "ds_load_i8_d16_hi" ||
-         access.mnemonic == "ds_load_u16_d16" || access.mnemonic == "ds_load_u16_d16_hi" ||
-         access.mnemonic == "ds_read_u8_d16" || access.mnemonic == "ds_read_u8_d16_hi" ||
-         access.mnemonic == "ds_read_i8_d16" || access.mnemonic == "ds_read_i8_d16_hi" ||
-         access.mnemonic == "ds_read_u16_d16" || access.mnemonic == "ds_read_u16_d16_hi";
+  return access.lowering.form && access.lowering.form->destination_preserves_unwritten_bits;
 }
 
 [[nodiscard]] uint32_t
@@ -198,11 +193,13 @@ lds_check_trap_predelay_setup_words(const ConSanAccessInventorySite &access) {
 }
 
 [[nodiscard]] bool is_subdword_lds_store(const ConSanAccessInventorySite &access) {
-  return access.kind == ConSanLdsAccessKind::Write && access.decoded_width_bits < 32u;
+  return access.lowering.form && access.lowering.form->access_kind == ConSanLdsAccessKind::Write &&
+         access.lowering.form->element_width_bits < 32u;
 }
 
 [[nodiscard]] bool is_high_d16_lds_store(const ConSanAccessInventorySite &access) {
-  return access.mnemonic == "ds_store_b8_d16_hi" || access.mnemonic == "ds_store_b16_d16_hi";
+  return access.lowering.form && access.lowering.form->register_value_placement ==
+                                     ConSanAccessRegisterValuePlacement::High16;
 }
 
 struct SplitTwoAddressLdsExpansionPlan {
@@ -247,7 +244,10 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
     const ConSanAccessInventorySite &site,
     const std::optional<SplitTwoAddressLdsExpansionPlan> &expansion) {
   return static_cast<uint16_t>(
-      (is_subdword_lds_store(site) || site.operands.destination_accvgpr ? 1u : 0u) +
+      (is_subdword_lds_store(site) ||
+               (site.lowering.form && site.lowering.form->destination_accvgpr)
+           ? 1u
+           : 0u) +
       (expansion && expansion->large_offset_count() != 0u ? 1u : 0u));
 }
 
@@ -661,6 +661,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported width");
     return std::nullopt;
   }
+  const ConSanAccessLoweringForm &form = *site.lowering.form;
 
   std::array<uint32_t, 2> original_access{};
   if (!read_words_at(original_bytes, site.file_offset, std::span<uint32_t>(original_access))) {
@@ -685,7 +686,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
   const uint16_t saved_address_vgpr = std::max(core_scratch_end, report_scratch_end);
   if (site.kind == ConSanLdsAccessKind::Read) {
-    if (site.operands.destination_accvgpr &&
+    if (form.destination_accvgpr &&
         target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned)
       duplicate_load[0] &= ~(uint32_t{1} << 25u);
     duplicate_load[1] =
@@ -703,20 +704,20 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
       return std::nullopt;
     }
     duplicate_load[0] = *word0;
-    duplicate_load[1] = build_ds_load_word1(*site.operands.address_vgpr, scratch_vgpr);
+    duplicate_load[1] = build_ds_load_word1(*form.address_vgpr, scratch_vgpr);
   } else {
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported site");
     return std::nullopt;
   }
 
-  if (!lds_scratch_tuple_base_is_valid(site, arch, scratch_vgpr)) {
+  if (!lds_scratch_tuple_base_is_valid(site, scratch_vgpr)) {
     errors.emplace_back("ConSan LDS check/trap proof selected a misaligned tuple scratch base");
     return std::nullopt;
   }
 
   auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
   auto first_compare_vgpr =
-      site.operands.destination_accvgpr &&
+      form.destination_accvgpr &&
               target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned
           ? std::optional<uint16_t>(compare_scratch_vgpr)
           : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
@@ -765,7 +766,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
       narrow_source = compare_scratch_vgpr;
     }
     const auto mask = instrumentation::build_v_and_b32_literal(
-        compare_scratch_vgpr, (uint32_t{1} << site.decoded_width_bits) - 1u, narrow_source, arch);
+        compare_scratch_vgpr, (uint32_t{1} << form.element_width_bits) - 1u, narrow_source, arch);
     if (!mask) {
       errors.emplace_back("ConSan LDS check/trap proof could not mask sub-dword store value");
       return std::nullopt;
@@ -796,13 +797,12 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
       (preserve_address ? 1u : 0u) + 2u + lds_check_trap_predelay_setup_words(site) + delay_words +
       2u + 1u + lds_check_trap_precompare_words(site) + 1u +
       (2u + mismatch_action->size()) * *required_vgprs + 1u + compare_mode_switch_words +
-      (site.operands.destination_accvgpr ? 2u * *required_vgprs : 0u) +
+      (form.destination_accvgpr ? 2u * *required_vgprs : 0u) +
       (split_two_address ? split_two_address->total_additional_word_count() : 0u));
   std::vector<uint32_t> words;
   words.reserve(total_words);
   if (preserve_address) {
-    auto save_address =
-        build_v_mov_b32_e32_vgpr_word(saved_address_vgpr, *site.operands.address_vgpr, arch);
+    auto save_address = build_v_mov_b32_e32_vgpr_word(saved_address_vgpr, *form.address_vgpr, arch);
     if (!save_address) {
       errors.emplace_back("ConSan LDS check/trap proof could not preserve a clobbered address");
       return std::nullopt;
@@ -810,16 +810,14 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     words.push_back(*save_address);
   }
   if (split_two_address) {
-    const uint16_t replay_address_vgpr =
-        preserve_address ? saved_address_vgpr : *site.operands.address_vgpr;
-    const std::optional<uint16_t> first_data_vgpr = site.kind == ConSanLdsAccessKind::Read
-                                                        ? site.operands.destination_vgpr
-                                                        : site.operands.data_vgpr;
+    const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *form.address_vgpr;
+    const std::optional<uint16_t> first_data_vgpr =
+        site.kind == ConSanLdsAccessKind::Read ? form.destination_vgpr : form.data_vgpr;
     const std::optional<uint16_t> second_data_vgpr =
         site.kind == ConSanLdsAccessKind::Read && first_data_vgpr
             ? std::optional<uint16_t>(
                   static_cast<uint16_t>(*first_data_vgpr + split_two_address->element_dwords))
-            : site.operands.second_data_vgpr;
+            : form.second_data_vgpr;
     const auto split =
         first_data_vgpr && second_data_vgpr
             ? build_split_single_address_lds_pair(
@@ -843,8 +841,7 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
   if (!append_delay_words(words, arch, options, errors, "ConSan LDS check/trap proof"))
     return std::nullopt;
   if (split_two_address) {
-    const uint16_t replay_address_vgpr =
-        preserve_address ? saved_address_vgpr : *site.operands.address_vgpr;
+    const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *form.address_vgpr;
     const auto split = build_split_single_address_lds_pair(
         *split_two_address, replay_address_vgpr, scratch_vgpr,
         static_cast<uint16_t>(scratch_vgpr + split_two_address->element_dwords),
@@ -865,10 +862,9 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
-    if (site.operands.destination_accvgpr && uses_gfx9_cdna_encoding) {
+    if (form.destination_accvgpr && uses_gfx9_cdna_encoding) {
       const auto acc_read = build_cdna_accvgpr_read_b32(
-          compare_scratch_vgpr, static_cast<uint16_t>(*site.operands.destination_accvgpr + i),
-          target);
+          compare_scratch_vgpr, static_cast<uint16_t>(*form.destination_accvgpr + i), target);
       if (!acc_read) {
         errors.emplace_back("ConSan LDS check/trap proof could not encode accumulator read");
         return std::nullopt;

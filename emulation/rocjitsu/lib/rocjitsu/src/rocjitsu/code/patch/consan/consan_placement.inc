@@ -597,61 +597,52 @@ two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uint32_t word
   return static_cast<uint32_t>(lhs_base) < rhs_end && static_cast<uint32_t>(rhs_base) < lhs_end;
 }
 
-/// CDNA3, CDNA4, and gfx1250 require every multi-VGPR tuple operand to start
-/// at an even register. RDNA4 permits unaligned tuples. ConSan only admits
-/// these four architecture families, so this captures the complete target
-/// distinction used by its scratch planners.
-[[nodiscard]] constexpr bool consan_arch_requires_even_vgpr_tuples(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->requires_even_vgpr_tuples;
-}
-
+/// Apply the classifier-owned alignment of the duplicated data tuple.
+/// Architecture and exact instruction spelling have already been normalized
+/// into the form, so scratch planning cannot rediscover a target exception.
 [[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
-                                                   rj_code_arch_t arch, uint16_t candidate) {
-  const auto dword_count = lds_dword_count(access);
-  if (!dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch))
-    return true;
-
-  // gfx1250's transposed 96-bit six-lane load is the sole admitted exception
-  // to the target's even-tuple rule.
-  return (arch == ROCJITSU_CODE_ARCH_CDNA5 && access.mnemonic == "ds_load_tr6_b96") ||
-         candidate % 2u == 0u;
+                                                   uint16_t candidate) {
+  return !access.lowering.form || access.lowering.form->data_register_alignment <= 1u ||
+         candidate % access.lowering.form->data_register_alignment == 0u;
 }
 
 [[nodiscard]] bool lds_load_clobbers_address(const ConSanAccessInventorySite &access) {
-  const auto dword_count = lds_dword_count(access);
-  if (access.kind != ConSanLdsAccessKind::Read || !access.operands.address_vgpr ||
-      !access.operands.destination_vgpr || !dword_count)
+  if (!access.lowering.form)
     return false;
-  return vgpr_ranges_overlap(*access.operands.address_vgpr, 1u, *access.operands.destination_vgpr,
-                             *dword_count);
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  if (form.access_kind != ConSanLdsAccessKind::Read || !form.address_vgpr || !form.destination_vgpr)
+    return false;
+  return vgpr_ranges_overlap(*form.address_vgpr, form.address_vgpr_count, *form.destination_vgpr,
+                             form.destination_register_count);
 }
 
 [[nodiscard]] bool is_forbidden_scratch_vgpr_run(const ConSanAccessInventorySite &access,
                                                  uint16_t candidate, uint16_t required_vgprs) {
-  if (access.operands.address_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.address_vgpr, 1))
+  if (!access.lowering.form)
+    return true;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  if (form.address_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
     return true;
 
-  const uint16_t data_vgprs = lds_dword_count(access).value_or(1);
-  if (access.operands.destination_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.destination_vgpr, data_vgprs))
+  if (form.destination_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.destination_vgpr,
+                          form.destination_register_count))
     return true;
-  if (access.operands.data_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.data_vgpr, data_vgprs))
+  const uint16_t data_vgprs =
+      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
+  if (form.data_vgpr && vgpr_ranges_overlap(candidate, required_vgprs, *form.data_vgpr, data_vgprs))
     return true;
-  const uint16_t data_vgprs_per_address =
-      access.operands.second_data_vgpr
-          ? static_cast<uint16_t>(access.lowering.form->element_width_bits / 32u)
-          : data_vgprs;
-  if (access.operands.second_data_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.second_data_vgpr,
-                          data_vgprs_per_address))
+  if (form.second_data_vgpr &&
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.second_data_vgpr, data_vgprs))
     return true;
   return false;
 }
 
 [[nodiscard]] uint16_t lds_scratch_search_start(const ConSanAccessInventorySite &access) {
+  if (!access.lowering.form)
+    return 0u;
+  const ConSanAccessLoweringForm &form = *access.lowering.form;
   std::optional<uint32_t> first_after_operands;
   auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
     if (!base)
@@ -661,14 +652,12 @@ two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uint32_t word
       first_after_operands = end;
   };
 
-  const uint16_t data_vgprs = lds_dword_count(access).value_or(1);
-  note_range(access.operands.address_vgpr, 1);
-  note_range(access.operands.destination_vgpr, data_vgprs);
-  note_range(access.operands.data_vgpr, data_vgprs);
-  note_range(access.operands.second_data_vgpr,
-             access.operands.second_data_vgpr
-                 ? static_cast<uint16_t>(access.lowering.form->element_width_bits / 32u)
-                 : data_vgprs);
+  note_range(form.address_vgpr, form.address_vgpr_count);
+  note_range(form.destination_vgpr, form.destination_register_count);
+  const uint16_t data_vgprs =
+      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
+  note_range(form.data_vgpr, data_vgprs);
+  note_range(form.second_data_vgpr, data_vgprs);
   if (!first_after_operands)
     return 0;
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
@@ -676,9 +665,7 @@ two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uint32_t word
 
 [[nodiscard]] bool
 needs_scratch_headroom_at_descriptor_edge(const ConSanAccessInventorySite &access) {
-  return access.mnemonic == "ds_load_b64" || access.mnemonic == "ds_load_2addr_b64" ||
-         access.mnemonic == "ds_load_2addr_stride64_b64" || access.mnemonic == "ds_read2_b64" ||
-         access.mnemonic == "ds_read2st64_b64";
+  return access.lowering.form && access.lowering.form->destination_allocation_headroom != 0u;
 }
 
 [[nodiscard]] std::optional<uint16_t>
@@ -692,10 +679,11 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite 
   return static_cast<uint16_t>(required_count);
 }
 
-[[nodiscard]] std::optional<uint16_t> find_liveness_scratch_vgpr(
-    const ConSanAccessInventorySite &access, const Instruction *inst,
-    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
-    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t>
+find_liveness_scratch_vgpr(const ConSanAccessInventorySite &access, const Instruction *inst,
+                           const LivenessAnalysis *liveness,
+                           std::optional<uint16_t> min_auto_scratch_vgpr,
+                           std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
 
@@ -713,7 +701,7 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite 
     if (max_auto_scratch_vgpr && candidate_end == *max_auto_scratch_vgpr &&
         needs_scratch_headroom_at_descriptor_edge(access))
       return std::nullopt;
-    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(access, arch, *candidate) &&
+    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(access, *candidate) &&
         !is_forbidden_scratch_vgpr_run(access, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
@@ -723,20 +711,21 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite 
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_scratch_vgpr(
-    const ConSanAccessInventorySite &access, const ConSanOptions &options, const Instruction *inst,
-    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
-    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t>
+choose_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOptions &options,
+                    const Instruction *inst, const LivenessAnalysis *liveness,
+                    std::optional<uint16_t> min_auto_scratch_vgpr,
+                    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        lds_scratch_tuple_base_is_valid(access, arch, *options.scratch_vgpr) &&
+        lds_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
         !is_forbidden_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
   }
 
   if (auto scratch = find_liveness_scratch_vgpr(access, inst, liveness, min_auto_scratch_vgpr,
-                                                max_auto_scratch_vgpr, required_vgprs, arch))
+                                                max_auto_scratch_vgpr, required_vgprs))
     return scratch;
 
   return std::nullopt;
@@ -744,11 +733,11 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite 
 
 [[nodiscard]] std::optional<uint16_t>
 choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
-                          uint16_t required_vgprs, rj_code_arch_t arch) {
+                          uint16_t required_vgprs) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
        ++candidate) {
-    if (lds_scratch_tuple_base_is_valid(access, arch, static_cast<uint16_t>(candidate)) &&
+    if (lds_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
         !is_forbidden_scratch_vgpr_run(access, static_cast<uint16_t>(candidate), required_vgprs))
       return static_cast<uint16_t>(candidate);
   }

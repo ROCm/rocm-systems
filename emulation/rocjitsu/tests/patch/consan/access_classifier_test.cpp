@@ -40,6 +40,18 @@ ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
   return site;
 }
 
+ConSanAccessInventorySite native_access_site(std::string_view mnemonic, ConSanLdsAccessKind kind,
+                                             uint32_t width_bits) {
+  ConSanAccessInventorySite site = native_store_site(mnemonic);
+  site.kind = kind;
+  site.decoded_width_bits = width_bits;
+  if (kind == ConSanLdsAccessKind::Read) {
+    site.operands.data_vgpr.reset();
+    site.operands.destination_vgpr = 7;
+  }
+  return site;
+}
+
 ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_arch_t arch,
                                         rj_code_target_id_t target);
 
@@ -234,6 +246,36 @@ TEST(ConSanAccessClassifier, CommonNormalizationFailuresRejectEveryMechanism) {
             ConSanAccessClassifierReason::MissingAddressOperand);
   EXPECT_EQ(missing_address.lowering.compare_observed_value.reason,
             ConSanAccessClassifierReason::MissingAddressOperand);
+}
+
+TEST(ConSanAccessClassifier, ComparisonOperandDetailsAreClassifierOwned) {
+  for (const TargetCase &target : kTargets) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+
+    ConSanAccessInventorySite high_store =
+        complete_site(native_access_site("ds_store_b8_d16_hi", ConSanLdsAccessKind::Write, 8u),
+                      target.arch, target.target);
+    ASSERT_TRUE(high_store.lowering.form);
+    EXPECT_EQ(high_store.lowering.form->register_value_placement,
+              ConSanAccessRegisterValuePlacement::High16);
+    EXPECT_FALSE(high_store.lowering.form->destination_preserves_unwritten_bits);
+
+    ConSanAccessInventorySite partial_load =
+        complete_site(native_access_site("ds_load_u16_d16", ConSanLdsAccessKind::Read, 16u),
+                      target.arch, target.target);
+    ASSERT_TRUE(partial_load.lowering.form);
+    EXPECT_EQ(partial_load.lowering.form->register_value_placement,
+              ConSanAccessRegisterValuePlacement::Low16);
+    EXPECT_TRUE(partial_load.lowering.form->destination_preserves_unwritten_bits);
+
+    ConSanAccessInventorySite wide_load =
+        complete_site(native_access_site("ds_load_b64", ConSanLdsAccessKind::Read, 64u),
+                      target.arch, target.target);
+    ASSERT_TRUE(wide_load.lowering.form);
+    EXPECT_EQ(wide_load.lowering.form->destination_allocation_headroom, 1u);
+    EXPECT_EQ(wide_load.lowering.form->data_register_alignment,
+              consan_target_profile(target.arch)->requires_even_vgpr_tuples ? 2u : 1u);
+  }
 }
 
 } // namespace

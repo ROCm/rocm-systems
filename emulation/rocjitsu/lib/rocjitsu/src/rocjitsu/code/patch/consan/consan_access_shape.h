@@ -54,6 +54,18 @@ enum class ConSanAccessLoweringFormKind : uint8_t {
   Count,
 };
 
+/// Placement of a sub-dword memory value in its source or destination VGPR.
+///
+/// The classifier owns the instruction spelling that selects this placement.
+/// Emitters use the normalized value when they must isolate a compared byte or
+/// halfword; `WholeRegister` also covers instructions that extend a narrow
+/// memory value to a complete register result.
+enum class ConSanAccessRegisterValuePlacement : uint8_t {
+  WholeRegister,
+  Low16,
+  High16,
+};
+
 /// Typed reason why the target classifier could not provide an operation.
 ///
 /// Semantic relevance, provenance policy, resource pressure, and placement do
@@ -94,6 +106,11 @@ struct ConSanAccessLoweringForm {
   uint16_t data_register_count = 0;
   uint16_t destination_register_count = 0;
   uint16_t address_vgpr_count = 0;
+  uint16_t data_register_alignment = 1;
+  uint16_t destination_allocation_headroom = 0;
+  ConSanAccessRegisterValuePlacement register_value_placement =
+      ConSanAccessRegisterValuePlacement::WholeRegister;
+  bool destination_preserves_unwritten_bits = false;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> destination_accvgpr;

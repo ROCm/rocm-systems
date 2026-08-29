@@ -867,6 +867,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         site_context.owner_descriptor_file_offsets.front();
     {
       const ConSanAccessInventorySite &site = *site_context.site;
+      const ConSanAccessLoweringForm &form = *site.lowering.form;
       ++supported_candidate_count;
       const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
           target.has_selectable_vgpr_bank &&
@@ -939,7 +940,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                  (2u + *action_words) * *required_vgprs + 1u;
       if (split_two_address)
         requested_words += split_two_address->total_additional_word_count();
-      if (site.operands.destination_accvgpr &&
+      if (form.destination_accvgpr &&
           target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned)
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
@@ -947,11 +948,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
         requested_words += 2u;
       if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read &&
-          site.operands.destination_vgpr) {
+          form.destination_vgpr) {
         const uint32_t dst_bank =
             static_cast<uint32_t>((gfx1250_vgpr_msb_mode.value_or(0u) >> 6u) & 0x3u);
         for (uint16_t i = 0; i < *required_vgprs; ++i) {
-          if (dst_bank * 256u + *site.operands.destination_vgpr + i >= 256u)
+          if (dst_bank * 256u + *form.destination_vgpr + i >= 256u)
             requested_words += 2u;
         }
       }
@@ -963,7 +964,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           [&](std::optional<uint16_t> allocation_limit) -> std::optional<uint16_t> {
         if (options.scratch_vgpr) {
           return choose_scratch_vgpr(site, options, site_inst, owner_liveness.front(),
-                                     min_auto_scratch_vgpr, allocation_limit, scratch_vgprs, arch);
+                                     min_auto_scratch_vgpr, allocation_limit, scratch_vgprs);
         }
         // A shared helper can reuse any run proved dead in every owner. An
         // owner-wide maximum-reference floor would discard those common holes
@@ -975,7 +976,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         ConSanRegisterRequest request;
         request.reg_class = RegClass::VGPR;
         request.count = scratch_vgprs;
-        request.alignment = lds_scratch_tuple_base_is_valid(site, arch, 1u) ? 1u : 2u;
+        request.alignment = lds_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
         request.search_start = site_context.owner_descriptor_file_offsets.size() > 1u
                                    ? 0u
                                    : min_auto_scratch_vgpr.value_or(0u);
@@ -985,20 +986,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             std::min(allocation_limit.value_or(kConSanOrdinaryVgprLimit), kConSanOrdinaryVgprLimit);
         request.architecture_limit = request.current_allocation_count;
         request.allow_spill = false;
-        const uint16_t data_vgprs = lds_dword_count(site).value_or(1u);
-        if (site.operands.address_vgpr)
-          request.forbidden.expand({RegClass::VGPR, *site.operands.address_vgpr, 1u});
-        if (site.operands.destination_vgpr)
+        if (form.address_vgpr)
           request.forbidden.expand(
-              {RegClass::VGPR, *site.operands.destination_vgpr, static_cast<uint8_t>(data_vgprs)});
-        if (site.operands.data_vgpr)
-          request.forbidden.expand(
-              {RegClass::VGPR, *site.operands.data_vgpr, static_cast<uint8_t>(data_vgprs)});
-        if (site.operands.second_data_vgpr) {
-          const uint16_t per_address =
-              static_cast<uint16_t>(site.lowering.form->element_width_bits / 32u);
-          request.forbidden.expand(
-              {RegClass::VGPR, *site.operands.second_data_vgpr, static_cast<uint8_t>(per_address)});
+              {RegClass::VGPR, *form.address_vgpr, static_cast<uint8_t>(form.address_vgpr_count)});
+        if (form.destination_vgpr)
+          request.forbidden.expand({RegClass::VGPR, *form.destination_vgpr,
+                                    static_cast<uint8_t>(form.destination_register_count)});
+        const uint8_t data_vgprs = static_cast<uint8_t>(
+            form.second_data_vgpr ? form.element_register_count : form.data_register_count);
+        if (form.data_vgpr)
+          request.forbidden.expand({RegClass::VGPR, *form.data_vgpr, data_vgprs});
+        if (form.second_data_vgpr) {
+          request.forbidden.expand({RegClass::VGPR, *form.second_data_vgpr, data_vgprs});
         }
 
         const ConSanRegisterPlan plan = plan_consan_registers(request, live_before_all_owners);
@@ -1044,7 +1043,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             }
           }
           const auto spill_scratch =
-              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
+              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
           const auto private_limit = consan_address_free_private_limit(arch);
           if (spill_scratch && private_limit && saved_frame_base_sgpr && saved_scc_sgpr) {
             scratch_vgpr = *spill_scratch;
@@ -1084,7 +1083,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           }
         } else {
           const auto spill_scratch =
-              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
+              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
           const auto private_limit = consan_address_free_private_limit(arch);
           if (spill_scratch && private_limit) {
             scratch_vgpr = *spill_scratch;
