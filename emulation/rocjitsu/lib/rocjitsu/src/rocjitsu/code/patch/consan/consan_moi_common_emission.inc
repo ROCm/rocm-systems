@@ -604,7 +604,8 @@ private:
 [[nodiscard]] bool apply_lds_descriptor_requirements(
     CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
     const AmdGpuCodeObject &code_object, const MoiDescriptorLdsRequirements &requirements,
-    const MoiOptions &options, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    const RuntimeCapabilities &capabilities, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
@@ -621,7 +622,7 @@ private:
       errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes");
       return false;
     }
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(capabilities, arch) ||
         descriptor->group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -693,7 +694,7 @@ private:
 
 [[nodiscard]] bool apply_lds_descriptor_requirements(
     std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorLdsRequirements &requirements, const MoiOptions &options,
+    const MoiDescriptorLdsRequirements &requirements, const RuntimeCapabilities &capabilities,
     rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     auto descriptor = read_kernel_descriptor(image, descriptor_offset);
@@ -702,7 +703,7 @@ private:
       errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes or has no owner");
       return false;
     }
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(capabilities, arch) ||
         descriptor->group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;

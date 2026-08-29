@@ -1130,8 +1130,9 @@ void try_apply_first_light_access_record_patch(
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, bytes, options, descriptor_requirements, scalar_requirements,
-            private_requirements, nullptr, arch, result))
+            patcher, code_object, bytes, static_cast<const RuntimeCapabilities &>(options),
+            descriptor_requirements, scalar_requirements, private_requirements, nullptr, arch,
+            result))
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;

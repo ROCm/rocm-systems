@@ -156,7 +156,8 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
 /// workgroup-local shadow; replay-style engines pass no LDS requirement.
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> bytes,
-    const MoiOptions &options, const MoiDescriptorVgprRequirements &descriptor_requirements,
+    const RuntimeCapabilities &capabilities,
+    const MoiDescriptorVgprRequirements &descriptor_requirements,
     const MoiDescriptorSgprRequirements &scalar_requirements,
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
@@ -169,7 +170,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
                                             result.errors) &&
          (lds_requirements == nullptr ||
           apply_lds_descriptor_requirements(patcher, result, code_object, *lds_requirements,
-                                            options, arch, result.errors));
+                                            capabilities, arch, result.errors));
 }
 
 /// Initialize one appended MOI access image and materialize its shared direct
