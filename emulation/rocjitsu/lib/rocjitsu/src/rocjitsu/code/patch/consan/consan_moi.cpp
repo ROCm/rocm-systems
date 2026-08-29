@@ -20,6 +20,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
@@ -90,7 +91,12 @@ using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
+using consan_moi_detail::append_word_bytes;
+using consan_moi_detail::append_words_bytes;
+using consan_moi_detail::count_nop_padding;
+using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::note_moi_persistent_vgpr_state;
+using consan_moi_detail::plan_prebuilt_appended_cave;
 using consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous;
 using consan_moi_detail::record_replay_has_entry_workgroup_capture;
 using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
