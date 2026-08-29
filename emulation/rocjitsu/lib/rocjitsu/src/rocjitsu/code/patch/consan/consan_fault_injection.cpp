@@ -28,11 +28,6 @@
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 

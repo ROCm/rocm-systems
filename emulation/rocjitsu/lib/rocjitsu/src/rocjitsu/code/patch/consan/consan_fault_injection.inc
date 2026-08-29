@@ -1813,12 +1813,18 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
       result.replacement.empty()
           ? std::vector<uint8_t>(original_bytes.begin(), original_bytes.end())
           : result.replacement;
-  if (target->site->size != sizeof(rdna4::VglobalMachineInst) ||
-      target->site->file_offset > candidate.size() ||
+  if (target->site->file_offset > candidate.size() ||
       target->site->size > candidate.size() - target->site->file_offset ||
       target->cache->file_offset > candidate.size() ||
       target->cache->size > candidate.size() - target->cache->file_offset) {
     result.errors.emplace_back("ConSan ordinary fault found an invalid exact mutation range");
+    return;
+  }
+  std::span<uint8_t> target_instruction(candidate.data() + target->site->file_offset,
+                                        target->site->size);
+  const auto original_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
+  if (!original_encoding) {
+    result.errors.emplace_back("ConSan ordinary fault found an unsupported target encoding");
     return;
   }
 
@@ -1847,9 +1853,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
           "ConSan ordinary address delta must be a positive aligned signed-24-bit offset");
       return;
     }
-    rdna4::VglobalMachineInst raw{};
-    std::memcpy(&raw, candidate.data() + target->site->file_offset, sizeof(raw));
-    const int32_t original_offset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
+    const int32_t original_offset = original_encoding->byte_offset;
     if (!target->load->static_byte_offset || *target->load->static_byte_offset != original_offset ||
         target->load->address_source != ConSanSyncAddressSource::GlobalScalarVector ||
         target->site->mnemonic != "global_load_b32" || target->site->width_bits != 32u) {
@@ -1865,8 +1869,11 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
           "ConSan ordinary address delta produces an invalid signed-24-bit aligned ioffset");
       return;
     }
-    raw.ioffset = static_cast<uint32_t>(replacement_offset) & 0xffffffu;
-    std::memcpy(candidate.data() + target->site->file_offset, &raw, sizeof(raw));
+    if (!rewrite_consan_ordinary_global_fault_offset(target_instruction,
+                                                     static_cast<int32_t>(replacement_offset))) {
+      result.errors.emplace_back("ConSan ordinary address fault could not encode replacement");
+      return;
+    }
     patches.push_back(make_info(ConSanPatchKind::InlineOrdinaryAddressRewrite,
                                 target->site->text_offset, target->site->size, {}));
   }
@@ -1880,16 +1887,18 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->cache->identity));
   }
   if (options.fault_ordinary_weaken_scope) {
-    rdna4::VglobalMachineInst raw{};
-    std::memcpy(&raw, candidate.data() + target->site->file_offset, sizeof(raw));
-    if (!target->load->raw_scope || raw.scope != *target->load->raw_scope ||
-        (raw.scope != 2u && raw.scope != 3u)) {
+    const auto current_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
+    if (!current_encoding || !target->load->raw_scope ||
+        current_encoding->scope != *target->load->raw_scope ||
+        (current_encoding->scope != 2u && current_encoding->scope != 3u)) {
       result.errors.emplace_back(
           "ConSan ordinary scope fault found stale or already-wave decoded scope bits");
       return;
     }
-    raw.scope = 0u;
-    std::memcpy(candidate.data() + target->site->file_offset, &raw, sizeof(raw));
+    if (!rewrite_consan_ordinary_global_fault_scope(target_instruction, 0u)) {
+      result.errors.emplace_back("ConSan ordinary scope fault could not encode replacement");
+      return;
+    }
     patches.push_back(make_info(ConSanPatchKind::InlineOrdinaryScopeRewrite,
                                 target->site->text_offset, target->site->size, {}));
   }
@@ -1972,301 +1981,6 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   result.patches.push_back(info);
 }
 
-[[nodiscard]] bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
-                                                     ConSanFlatProvenanceMode mode) {
-  return hint == ConSanFlatAddressSpaceHint::Group ||
-         (mode == ConSanFlatProvenanceMode::Likely &&
-          hint == ConSanFlatAddressSpaceHint::MaybeGroup);
-}
-
-[[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanAccessInventorySite &access) {
-  if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
-    return std::nullopt;
-  return access.lowering.form->data_register_count;
-}
-
-[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
-                                                    uint16_t candidate) {
-  return !access.lowering.form || access.lowering.form->data_register_alignment <= 1u ||
-         candidate % access.lowering.form->data_register_alignment == 0u;
-}
-
-[[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanAccessInventorySite &access,
-                                                      uint16_t candidate, uint16_t required_vgprs) {
-  if (!access.lowering.form)
-    return true;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
-  if (form.address_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
-    return true;
-
-  if (form.destination_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *form.destination_vgpr,
-                          form.destination_register_count))
-    return true;
-  if (form.data_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *form.data_vgpr, form.data_register_count))
-    return true;
-  return false;
-}
-
-[[nodiscard]] uint16_t flat_scratch_search_start(const ConSanAccessInventorySite &access) {
-  if (!access.lowering.form)
-    return 0u;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
-  std::optional<uint32_t> first_after_operands;
-  auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
-    if (!base)
-      return;
-    const uint32_t end = static_cast<uint32_t>(*base) + count;
-    if (!first_after_operands || end > *first_after_operands)
-      first_after_operands = end;
-  };
-
-  note_range(form.address_vgpr, form.address_vgpr_count);
-  note_range(form.destination_vgpr, form.destination_register_count);
-  note_range(form.data_vgpr, form.data_register_count);
-  if (!first_after_operands)
-    return 0;
-  return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
-}
-
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOptions &options,
-                         const Instruction *inst, const LivenessAnalysis *liveness,
-                         std::optional<uint16_t> min_auto_scratch_vgpr,
-                         std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
-  if (options.scratch_vgpr) {
-    if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        flat_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
-        !is_forbidden_flat_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
-      return *options.scratch_vgpr;
-    return std::nullopt;
-  }
-
-  if (inst == nullptr || liveness == nullptr)
-    return std::nullopt;
-
-  uint16_t search_start =
-      std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
-  while (search_start < REGISTER_SET_MAX_VGPRS) {
-    auto candidate = liveness->find_free_run(inst, required_vgprs, search_start);
-    if (!candidate)
-      return std::nullopt;
-    const uint32_t candidate_end = static_cast<uint32_t>(*candidate) + required_vgprs;
-    if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
-      return std::nullopt;
-    if (candidate_end <= REGISTER_SET_MAX_VGPRS &&
-        flat_scratch_tuple_base_is_valid(access, *candidate) &&
-        !is_forbidden_flat_scratch_vgpr_run(access, *candidate, required_vgprs))
-      return candidate;
-    if (*candidate == UINT16_MAX)
-      return std::nullopt;
-    search_start = static_cast<uint16_t>(*candidate + 1u);
-  }
-  return std::nullopt;
-}
-
-/// Select the lowest allocated flat scratch window that does not overlap the
-/// guest access operands. Liveness is intentionally irrelevant here: the
-/// caller saves and restores the complete selected window through private
-/// memory before using it.
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
-                               uint16_t required_vgprs) {
-  for (uint32_t candidate = 0; candidate + required_vgprs <= allocation_count &&
-                               candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
-       ++candidate) {
-    if (flat_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
-        !is_forbidden_flat_scratch_vgpr_run(access, static_cast<uint16_t>(candidate),
-                                            required_vgprs)) {
-      return static_cast<uint16_t>(candidate);
-    }
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<std::array<uint32_t, 3>>
-retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx11_encoding(arch)) {
-    words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
-    return words;
-  }
-  if (!consan_uses_gfx12_encoding(arch))
-    return std::nullopt;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    words[1] = (words[1] & ~0xffu) | vdst;
-    return words;
-  }
-  rdna4::VflatMachineInst inst{};
-  std::memcpy(&inst, words.data(), sizeof(inst));
-  inst.vdst = vdst;
-  std::memcpy(words.data(), &inst, sizeof(inst));
-  return words;
-}
-
-[[nodiscard]] std::optional<uint8_t> flat_load_op_for_width(uint32_t width_bits) {
-  switch (width_bits) {
-  case 8:
-    return rdna4::kFlatLoadU8Vflat;
-  case 16:
-    return rdna4::kFlatLoadU16Vflat;
-  case 32:
-    return rdna4::kFlatLoadB32Vflat;
-  case 64:
-    return rdna4::kFlatLoadB64Vflat;
-  case 128:
-    return rdna4::kFlatLoadB128Vflat;
-  default:
-    return std::nullopt;
-  }
-}
-
-[[nodiscard]] std::optional<std::array<uint32_t, 3>>
-build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bits, uint16_t vdst) {
-  auto load_op = flat_load_op_for_width(width_bits);
-  if (!load_op)
-    return std::nullopt;
-  rdna4::VflatMachineInst inst{};
-  std::memcpy(&inst, words.data(), sizeof(inst));
-  inst.op = *load_op;
-  inst.vdst = vdst;
-  inst.vsrc = 0;
-  std::memcpy(words.data(), &inst, sizeof(inst));
-  return words;
-}
-
-[[nodiscard]] std::optional<std::array<uint32_t, 3>>
-build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bits, uint16_t vdst,
-                                rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return build_flat_load_from_flat_store(words, width_bits, vdst);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-    uint16_t load_op = 0;
-    switch (width_bits) {
-    case 8:
-      load_op = rdna3::kFlatLoadU8Flat;
-      break;
-    case 16:
-      load_op = rdna3::kFlatLoadU16Flat;
-      break;
-    case 32:
-      load_op = rdna3::kFlatLoadB32Flat;
-      break;
-    case 64:
-      load_op = rdna3::kFlatLoadB64Flat;
-      break;
-    case 128:
-      load_op = rdna3::kFlatLoadB128Flat;
-      break;
-    default:
-      return std::nullopt;
-    }
-    constexpr uint32_t kRdna3FlatOpMask = 0x7fu << 18u;
-    constexpr uint32_t kRdna3FlatDataMask = 0xffu << 8u;
-    words[0] = (words[0] & ~kRdna3FlatOpMask) | (static_cast<uint32_t>(load_op) << 18u);
-    words[1] =
-        (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) | (static_cast<uint32_t>(vdst) << 24u);
-    return words;
-  }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    uint16_t load_op = 0;
-    switch (width_bits) {
-    case 8:
-      load_op = cdna5::kFlatLoadU8Vflat;
-      break;
-    case 16:
-      load_op = cdna5::kFlatLoadU16Vflat;
-      break;
-    case 32:
-      load_op = cdna5::kFlatLoadB32Vflat;
-      break;
-    case 64:
-      load_op = cdna5::kFlatLoadB64Vflat;
-      break;
-    case 128:
-      load_op = cdna5::kFlatLoadB128Vflat;
-      break;
-    default:
-      return std::nullopt;
-    }
-    constexpr uint32_t kGfx1250FlatOpMask = 0xffu << 14u;
-    constexpr uint32_t kGfx1250FlatVsrcMask = 0xffu << 23u;
-    words[0] = (words[0] & ~kGfx1250FlatOpMask) | (static_cast<uint32_t>(load_op) << 14u);
-    words[1] = (words[1] & ~0xffu & ~kGfx1250FlatVsrcMask) | vdst;
-    return words;
-  }
-  if (!consan_uses_gfx9_cdna_encoding(arch))
-    return std::nullopt;
-  uint32_t load_op = 0;
-  switch (width_bits) {
-  case 8:
-    load_op = cdna4::kFlatLoadUbyteFlat;
-    break;
-  case 16:
-    load_op = cdna4::kFlatLoadUshortFlat;
-    break;
-  case 32:
-    load_op = cdna4::kFlatLoadDwordFlat;
-    break;
-  case 64:
-    load_op = cdna4::kFlatLoadDwordx2Flat;
-    break;
-  case 128:
-    load_op = cdna4::kFlatLoadDwordx4Flat;
-    break;
-  default:
-    return std::nullopt;
-  }
-  constexpr uint32_t kCdnaFlatOpMask = 0x7fu << 18u;
-  words[0] = (words[0] & ~kCdnaFlatOpMask) | (load_op << 18u);
-  constexpr uint32_t kCdnaFlatDataMask = 0xffu << 8u;
-  words[1] = (words[1] & ~kCdnaFlatDataMask & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
-  return words;
-}
-
-[[nodiscard]] std::optional<uint16_t>
-flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access) {
-  if (access.kind == ConSanLdsAccessKind::Read)
-    return access.operands.destination_vgpr;
-  if (access.kind == ConSanLdsAccessKind::Write)
-    return access.operands.data_vgpr;
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint16_t>
-check_trap_compare_vgpr(const ConSanAccessInventorySite &access, uint16_t chunk_index,
-                        rj_code_arch_t arch, uint16_t gfx1250_vgpr_msb_mode) {
-  if (access.kind == ConSanLdsAccessKind::Read) {
-    const uint32_t dst_bank = consan_arch_has_selectable_vgpr_bank(arch)
-                                  ? static_cast<uint32_t>((gfx1250_vgpr_msb_mode >> 6u) & 0x3u)
-                                  : 0u;
-    const uint32_t physical_vgpr =
-        dst_bank * 256u + access.operands.destination_vgpr.value_or(0u) + chunk_index;
-    const uint32_t register_limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
-    return access.operands.destination_vgpr && physical_vgpr < register_limit
-               ? std::optional<uint16_t>(static_cast<uint16_t>(physical_vgpr))
-               : std::nullopt;
-  }
-  if (access.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address =
-        access.lowering.form &&
-        access.lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
-    const uint16_t dwords_per_address =
-        static_cast<uint16_t>(two_address ? access.lowering.form->element_width_bits / 32u
-                                          : access.decoded_width_bits / 32u);
-    const std::optional<uint16_t> base = two_address && chunk_index >= dwords_per_address
-                                             ? access.operands.second_data_vgpr
-                                             : access.operands.data_vgpr;
-    const uint16_t relative_index = two_address && chunk_index >= dwords_per_address
-                                        ? static_cast<uint16_t>(chunk_index - dwords_per_address)
-                                        : chunk_index;
-    return base && static_cast<uint32_t>(*base) + relative_index < 256
-               ? std::optional<uint16_t>(static_cast<uint16_t>(*base + relative_index))
-               : std::nullopt;
-  }
-  return std::nullopt;
-}
 [[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site) {
   return {.text_offset = site.text_offset,
           .file_offset = site.file_offset,

@@ -4,10 +4,50 @@
 #include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
 
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
 #include <climits>
+#include <cstring>
 
 namespace rocjitsu {
+namespace {
+
+[[nodiscard]] std::optional<uint8_t> flat_load_op_for_width(uint32_t width_bits) {
+  switch (width_bits) {
+  case 8:
+    return rdna4::kFlatLoadU8Vflat;
+  case 16:
+    return rdna4::kFlatLoadU16Vflat;
+  case 32:
+    return rdna4::kFlatLoadB32Vflat;
+  case 64:
+    return rdna4::kFlatLoadB64Vflat;
+  case 128:
+    return rdna4::kFlatLoadB128Vflat;
+  default:
+    return std::nullopt;
+  }
+}
+
+[[nodiscard]] std::optional<std::array<uint32_t, 3>>
+build_rdna4_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
+                                 uint16_t vdst) {
+  const auto load_op = flat_load_op_for_width(width_bits);
+  if (!load_op)
+    return std::nullopt;
+  rdna4::VflatMachineInst inst{};
+  std::memcpy(&inst, words.data(), sizeof(inst));
+  inst.op = *load_op;
+  inst.vdst = vdst;
+  inst.vsrc = 0;
+  std::memcpy(words.data(), &inst, sizeof(inst));
+  return words;
+}
+
+} // namespace
 
 std::optional<uint32_t> consan_sc_build_wait_dscnt(uint16_t count, rj_code_arch_t arch) {
   // Every current SuperCollider consumer requests the completed state. Keep
@@ -203,6 +243,114 @@ consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uin
       .first = (word0 & 0xffu) * form.encoded_offset_scale_bytes,
       .second = ((word0 >> 8u) & 0xffu) * form.encoded_offset_scale_bytes,
   };
+}
+
+std::optional<std::array<uint32_t, 3>> retarget_flat_load_vdst(std::array<uint32_t, 3> words,
+                                                               uint16_t vdst, rj_code_arch_t arch) {
+  if (consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx11_encoding(arch)) {
+    words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
+    return words;
+  }
+  if (!consan_uses_gfx12_encoding(arch))
+    return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    words[1] = (words[1] & ~0xffu) | vdst;
+    return words;
+  }
+  rdna4::VflatMachineInst inst{};
+  std::memcpy(&inst, words.data(), sizeof(inst));
+  inst.vdst = vdst;
+  std::memcpy(words.data(), &inst, sizeof(inst));
+  return words;
+}
+
+std::optional<std::array<uint32_t, 3>>
+build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bits, uint16_t vdst,
+                                rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return build_rdna4_flat_load_from_store(words, width_bits, vdst);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    uint16_t load_op = 0;
+    switch (width_bits) {
+    case 8:
+      load_op = rdna3::kFlatLoadU8Flat;
+      break;
+    case 16:
+      load_op = rdna3::kFlatLoadU16Flat;
+      break;
+    case 32:
+      load_op = rdna3::kFlatLoadB32Flat;
+      break;
+    case 64:
+      load_op = rdna3::kFlatLoadB64Flat;
+      break;
+    case 128:
+      load_op = rdna3::kFlatLoadB128Flat;
+      break;
+    default:
+      return std::nullopt;
+    }
+    constexpr uint32_t kRdna3FlatOpMask = 0x7fu << 18u;
+    constexpr uint32_t kRdna3FlatDataMask = 0xffu << 8u;
+    words[0] = (words[0] & ~kRdna3FlatOpMask) | (static_cast<uint32_t>(load_op) << 18u);
+    words[1] =
+        (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) | (static_cast<uint32_t>(vdst) << 24u);
+    return words;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    uint16_t load_op = 0;
+    switch (width_bits) {
+    case 8:
+      load_op = cdna5::kFlatLoadU8Vflat;
+      break;
+    case 16:
+      load_op = cdna5::kFlatLoadU16Vflat;
+      break;
+    case 32:
+      load_op = cdna5::kFlatLoadB32Vflat;
+      break;
+    case 64:
+      load_op = cdna5::kFlatLoadB64Vflat;
+      break;
+    case 128:
+      load_op = cdna5::kFlatLoadB128Vflat;
+      break;
+    default:
+      return std::nullopt;
+    }
+    constexpr uint32_t kGfx1250FlatOpMask = 0xffu << 14u;
+    constexpr uint32_t kGfx1250FlatVsrcMask = 0xffu << 23u;
+    words[0] = (words[0] & ~kGfx1250FlatOpMask) | (static_cast<uint32_t>(load_op) << 14u);
+    words[1] = (words[1] & ~0xffu & ~kGfx1250FlatVsrcMask) | vdst;
+    return words;
+  }
+  if (!consan_uses_gfx9_cdna_encoding(arch))
+    return std::nullopt;
+  uint32_t load_op = 0;
+  switch (width_bits) {
+  case 8:
+    load_op = cdna4::kFlatLoadUbyteFlat;
+    break;
+  case 16:
+    load_op = cdna4::kFlatLoadUshortFlat;
+    break;
+  case 32:
+    load_op = cdna4::kFlatLoadDwordFlat;
+    break;
+  case 64:
+    load_op = cdna4::kFlatLoadDwordx2Flat;
+    break;
+  case 128:
+    load_op = cdna4::kFlatLoadDwordx4Flat;
+    break;
+  default:
+    return std::nullopt;
+  }
+  constexpr uint32_t kCdnaFlatOpMask = 0x7fu << 18u;
+  words[0] = (words[0] & ~kCdnaFlatOpMask) | (load_op << 18u);
+  constexpr uint32_t kCdnaFlatDataMask = 0xffu << 8u;
+  words[1] = (words[1] & ~kCdnaFlatDataMask & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
+  return words;
 }
 
 } // namespace rocjitsu

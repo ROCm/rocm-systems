@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -48,5 +49,12 @@ consan_sc_build_ds_load_word0(const ConSanAccessLoweringForm &form, uint32_t ori
 [[nodiscard]] std::optional<ConSanScTwoAddressLdsByteOffsets>
 consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form,
                                        uint32_t original_word0);
+
+[[nodiscard]] std::optional<std::array<uint32_t, 3>>
+retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch);
+
+[[nodiscard]] std::optional<std::array<uint32_t, 3>>
+build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bits, uint16_t vdst,
+                                rj_code_arch_t arch);
 
 } // namespace rocjitsu

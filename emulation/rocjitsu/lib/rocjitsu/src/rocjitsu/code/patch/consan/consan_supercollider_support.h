@@ -8,7 +8,6 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
-#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -31,11 +30,6 @@ choose_flat_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOp
 [[nodiscard]] std::optional<uint16_t>
 choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allocation_count,
                                uint16_t required_vgprs);
-[[nodiscard]] std::optional<std::array<uint32_t, 3>>
-retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch);
-[[nodiscard]] std::optional<std::array<uint32_t, 3>>
-build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bits, uint16_t vdst,
-                                rj_code_arch_t arch);
 [[nodiscard]] std::optional<uint16_t>
 flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access);
 [[nodiscard]] std::optional<uint16_t>
