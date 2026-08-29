@@ -143,7 +143,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       candidate.kernel_descriptor_file_offset = resources->owner_descriptor_file_offsets.front();
     }
     auto record_event =
-        plan_moi_record_event(bytes, result, *resources, options, spill_managers, arch,
+        plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
+                              options, options, result.moi_operating_point, spill_managers, arch,
                               "ConSan MOI fence record patch", active_private_size);
     if (!record_event)
       continue;

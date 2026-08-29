@@ -109,64 +109,63 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
 /// the current event and appends the same contextual warning used by its
 /// event-specific planner.
 [[nodiscard]] std::optional<MoiPlannedRecordEvent>
-plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &result,
-                      const ResolvedMoiScratchPlan &resources, const MoiOptions &options,
-                      MoiSpillManagers &spill_managers, rj_code_arch_t arch,
-                      std::string_view warning_context,
+plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
+                      std::vector<std::string> &warnings, const ResolvedMoiScratchPlan &resources,
+                      const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+                      const ConSanMoiOperatingPoint &base_point,
+                      const ConSanMoiOperatingPoint &allocation, MoiSpillManagers &spill_managers,
+                      rj_code_arch_t arch, std::string_view warning_context,
                       std::optional<uint32_t> active_private_segment_size = std::nullopt) {
-  MoiOptions event_options = options;
-  event_options.scratch_vgpr = resources.base;
-  if (!apply_moi_transient_sgpr_assignment(event_options, event_options, result.moi_operating_point,
+  ConSanMoiOperatingPoint event_point = base_point;
+  if (!apply_moi_transient_sgpr_assignment(request, event_point, allocation,
                                            resources.owner_descriptor_file_offsets)) {
-    result.warnings.emplace_back(std::string(warning_context) +
-                                 " found no common transient SGPR assignment");
+    warnings.emplace_back(std::string(warning_context) +
+                          " found no common transient SGPR assignment");
     return std::nullopt;
   }
-  if (!apply_moi_persistent_vgpr_assignment(event_options, result.moi_operating_point,
+  if (!apply_moi_persistent_vgpr_assignment(event_point, allocation,
                                             resources.owner_descriptor_file_offsets)) {
-    result.warnings.emplace_back(std::string(warning_context) +
-                                 " found no common persistent assignment");
+    warnings.emplace_back(std::string(warning_context) + " found no common persistent assignment");
     return std::nullopt;
   }
 
   std::optional<MoiPrivateEpochLayout> private_layout;
-  if (event_options.automatic_moi_private_epoch) {
-    private_layout = build_moi_private_epoch_layout(
-        result.program_inventory, resources, arch, result.warnings,
-        /*include_owner=*/event_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-        /*include_workgroup_key=*/false,
-        /*include_record_replay_workgroup=*/true);
+  if (event_point.automatic_moi_private_epoch) {
+    private_layout = build_moi_private_epoch_layout(inventory, resources, arch, warnings,
+                                                    /*include_owner=*/request.moi_owner_source ==
+                                                        ConSanMoiOwnerSource::WorkitemId,
+                                                    /*include_workgroup_key=*/false,
+                                                    /*include_record_replay_workgroup=*/true);
     if (!private_layout)
       return std::nullopt;
-    event_options.moi_record_replay_workgroup_private_offsets =
+    event_point.moi_record_replay_workgroup_private_offsets =
         private_layout->record_replay_workgroup_offsets;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(event_options, event_options,
-                                                      result.moi_operating_point,
+  if (!apply_record_replay_entry_workgroup_assignment(request, event_point, allocation,
                                                       resources.owner_descriptor_file_offsets)) {
-    result.warnings.emplace_back(std::string(warning_context) +
-                                 " found no common entry workgroup assignment");
+    warnings.emplace_back(std::string(warning_context) +
+                          " found no common entry workgroup assignment");
     return std::nullopt;
   }
 
-  auto emission = resolve_moi_record_event_emission_plan(event_options, event_options,
-                                                         event_options, resources.base, arch);
+  auto emission = resolve_moi_record_event_emission_plan(request, bound_resources, event_point,
+                                                         resources.base, arch);
   if (!emission) {
-    result.warnings.emplace_back(std::string(warning_context) +
-                                 " has an incomplete Record/Replay emission plan");
+    warnings.emplace_back(std::string(warning_context) +
+                          " has an incomplete Record/Replay emission plan");
     return std::nullopt;
   }
 
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-  if (!event_options.moi_owner_vgpr && !event_options.moi_persistent_sgprs.owner) {
-    if (moi_record_uses_private_owner(event_options, event_options)) {
+  if (!event_point.moi_owner_vgpr && !event_point.moi_persistent_sgprs.owner) {
+    if (moi_record_uses_private_owner(request, event_point)) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)
         owner_resources.original_private_segment_size = *active_private_segment_size;
       derived_owner = resolve_moi_private_workitem_owner(bytes, owner_resources, *private_layout,
-                                                         arch, result.warnings);
+                                                         arch, warnings);
     } else {
-      const auto shift = common_moi_workitem_owner_shift(bytes, resources, arch, result.warnings);
+      const auto shift = common_moi_workitem_owner_shift(bytes, resources, arch, warnings);
       if (shift) {
         derived_owner = MoiWorkitemOwnerDerivationPlan{
             .entry_workitem_x_private_offset = std::nullopt,
@@ -177,18 +176,16 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     if (!derived_owner)
       return std::nullopt;
   }
-  auto probe = plan_moi_probe_resources(
-      result.program_inventory, resources, static_cast<const ConSanRequest &>(event_options),
-      static_cast<const BoundRuntimeResources &>(event_options),
-      static_cast<const ConSanMoiOperatingPoint &>(event_options), spill_managers, arch,
-      std::move(private_layout), event_options.automatic_moi_record_replay_sgpr_spill,
-      result.warnings, active_private_segment_size);
+  auto probe = plan_moi_probe_resources(inventory, resources, request, bound_resources, event_point,
+                                        spill_managers, arch, std::move(private_layout),
+                                        event_point.automatic_moi_record_replay_sgpr_spill,
+                                        warnings, active_private_segment_size);
   if (!probe)
     return std::nullopt;
 
   MoiDescriptorSgprRequirements scalar_requirements;
-  note_moi_sgpr_requirements(scalar_requirements, resources, event_options, event_options,
-                             event_options, arch);
+  note_moi_sgpr_requirements(scalar_requirements, resources, request, bound_resources, event_point,
+                             arch);
   uint16_t required_sgpr_count = 0u;
   for (const auto &[descriptor, count] : scalar_requirements) {
     (void)descriptor;

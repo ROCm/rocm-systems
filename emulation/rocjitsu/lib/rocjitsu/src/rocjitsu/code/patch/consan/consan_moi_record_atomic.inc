@@ -136,8 +136,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       planned_candidate.kernel_descriptor_file_offset =
           resources->owner_descriptor_file_offsets.front();
     }
-    auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
-                                              arch, "ConSan MOI atomic record patch");
+    auto record_event = plan_moi_record_event(
+        bytes, result.program_inventory, result.warnings, *resources, options, options, options,
+        result.moi_operating_point, spill_managers, arch, "ConSan MOI atomic record patch");
     if (!record_event)
       continue;
     selected_candidates.push_back(

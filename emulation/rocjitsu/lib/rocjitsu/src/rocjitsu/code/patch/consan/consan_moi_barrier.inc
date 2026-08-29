@@ -2316,8 +2316,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       planned_candidate.kernel_descriptor_file_offset =
           resources->owner_descriptor_file_offsets.front();
     }
-    auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
-                                              arch, "ConSan MOI barrier record patch");
+    auto record_event = plan_moi_record_event(
+        bytes, result.program_inventory, warnings, *resources, options, options, options,
+        result.moi_operating_point, spill_managers, arch, "ConSan MOI barrier record patch");
     if (!record_event)
       continue;
     selected_candidates.push_back({std::move(*record_event), std::move(planned_candidate)});
