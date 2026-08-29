@@ -1446,6 +1446,31 @@ into an unnecessary public enum.
 **F8 completion criterion:** no broad patch structure serves lowering,
 validation, runtime semantics, and user reporting simultaneously.
 
+#### F8 checkpoint — complete (2026-08-29)
+
+F8 was implemented by commits `026bbe2bc2`, `e0e8717496`, `f964ec569c`,
+`717ded711e`, `fc6dbcfaff`, and `8abdf58025`. The former broad patch record is
+now assembled from narrow proof contracts for geometry, routing, evidence,
+mutation, ABI, and fault effects. `ConSanPatchPlacementEffects`,
+`ConSanPatchLoweringProduct`, and `ConSanPatchMutationProduct` expose only the
+products needed at each transition. Their joined `ConSanPatchInfo` remains a
+private final-validation proof: validation is the only consumer that inspects
+the complete product, while transform debugging and runtime resource projection
+receive purpose-specific views.
+
+Stable reasons which cross component boundaries or select control flow are now
+typed for perturbation decisions, Sampled atomic semantics, exact barrier-pair
+and barrier-group selection, barrier move destinations, and barrier lifecycle
+groups. Rendering remains at presentation edges, and exhaustive tests pin the
+established text for every typed alternative, including nested barrier-group
+failures. Remaining strings are dynamic explanatory detail or one-off error
+sinks paired with typed decisions; production code neither compares nor parses
+them to recover semantics.
+
+The complete nonphysical gate passed 4,707/4,707 tests at `-j16` in 243.55
+seconds across all five emulated targets. The serialized physical `gfx1201`
+gate passed 635/635 tests at `-j1` in 109.22 seconds.
+
 ### F9. Enforce boundaries and delete migration scaffolding
 
 Finish by deleting adapters, reverse maps, duplicated classifiers, obsolete
