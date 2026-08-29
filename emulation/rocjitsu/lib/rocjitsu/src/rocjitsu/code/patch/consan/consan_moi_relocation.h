@@ -54,6 +54,18 @@ plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_o
 
 namespace rocjitsu::consan_moi_impl {
 
+struct MoiDenseBarrierRouterScalarAbi {
+  uint16_t jump_pc_sgpr = 0;
+  uint16_t saved_scc_sgpr = 0;
+  uint16_t key_sgpr = 0;
+  uint16_t call_return_sgpr = 0;
+};
+
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispatcher_text_offset,
+                                     const MoiDenseBarrierRouterScalarAbi &abi,
+                                     bool derive_key_at_entry, rj_code_arch_t arch);
+
 struct MoiIndirectJumpSgprs {
   uint16_t pc_sgpr = 0;
   uint16_t scc_save_sgpr = 0;
