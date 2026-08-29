@@ -1011,32 +1011,27 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   return true;
 }
 
-[[nodiscard]] bool
-candidate_uses_gfx12_scalar_vector_flat_address(const ConSanMoiCandidate &candidate,
-                                                rj_code_arch_t arch) {
-  return consan_uses_gfx12_encoding(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
-         candidate.operands.raw_saddr &&
-         !is_vector_flat_no_saddr(*candidate.operands.raw_saddr, arch);
+[[nodiscard]] bool candidate_uses_scalar_vector_flat_address(const ConSanMoiCandidate &candidate) {
+  return candidate.lowering.form &&
+         candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress;
 }
 
 [[nodiscard]] bool
-candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &candidate,
-                                                      rj_code_arch_t arch) {
-  return consan_uses_gfx12_encoding(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
-         candidate.operands.raw_saddr && candidate.operands.raw_ioffset &&
-         candidate.operands.raw_scale_offset &&
-         (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch) ||
-          *candidate.operands.raw_ioffset != 0);
+candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candidate) {
+  return candidate.lowering.form &&
+         (candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+          candidate.lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress) &&
+         (candidate_uses_scalar_vector_flat_address(candidate) ||
+          candidate.lowering.form->immediate_byte_offset.value_or(0) != 0);
 }
 
-[[nodiscard]] uint16_t gfx12_flat_access_address_scratch_count(const ConSanMoiCandidate &candidate,
-                                                               rj_code_arch_t arch) {
-  if (!candidate_requires_gfx12_flat_address_materialization(candidate, arch))
+[[nodiscard]] uint16_t flat_access_address_scratch_count(const ConSanMoiCandidate &candidate) {
+  if (!candidate_requires_flat_address_materialization(candidate))
     return 0u;
   // A scalar-base VFLAT uses one temporary in addition to the resulting pair.
   // The temporary preserves a load-clobbered vector offset and also carries a
   // SCALE_OFFSET product without overwriting the scalar base.
-  return candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch) ? 3u : 2u;
+  return candidate_uses_scalar_vector_flat_address(candidate) ? 3u : 2u;
 }
 
 /// Materialize the exact gfx12 VFLAT address calculation used by the ISA:
@@ -1045,22 +1040,22 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
 /// For group pointers the low result word is the LDS byte offset consumed by
 /// ConSan, while retaining the high word lets maybe-group probes perform their
 /// ordinary aperture check. The caller preserves VCC/SCC around this sequence.
-[[nodiscard]] bool append_materialize_gfx12_flat_access_address(std::vector<uint32_t> &words,
-                                                                const ConSanMoiCandidate &candidate,
-                                                                uint16_t input_vgpr,
-                                                                uint16_t result_vgpr,
-                                                                rj_code_arch_t arch) {
-  const uint16_t scratch_count = gfx12_flat_access_address_scratch_count(candidate, arch);
-  if (scratch_count == 0u || !candidate.operands.address_vgpr || input_vgpr >= 255u ||
+[[nodiscard]] bool append_materialize_flat_access_address(std::vector<uint32_t> &words,
+                                                          const ConSanMoiCandidate &candidate,
+                                                          uint16_t input_vgpr, uint16_t result_vgpr,
+                                                          rj_code_arch_t arch) {
+  const ConSanAccessLoweringForm *form =
+      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+  const uint16_t scratch_count = flat_access_address_scratch_count(candidate);
+  if (form == nullptr || scratch_count == 0u || !form->address_vgpr || input_vgpr >= 255u ||
       result_vgpr >= 255u || static_cast<uint32_t>(result_vgpr) + scratch_count > 256u)
     return false;
 
-  if (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
-    if (*candidate.operands.raw_saddr > 104u || (*candidate.operands.raw_saddr & 1u) != 0u ||
-        candidate.width_bits() == 0u)
+  if (candidate_uses_scalar_vector_flat_address(candidate)) {
+    if (!form->scalar_address_sgpr || candidate.width_bits() == 0u)
       return false;
     const uint16_t offset_vgpr = static_cast<uint16_t>(result_vgpr + 2u);
-    if (*candidate.operands.raw_scale_offset) {
+    if (form->scale_immediate) {
       const uint32_t byte_count = (candidate.width_bits() + 7u) / 8u;
       const auto scale = instrumentation::build_v_mul_lo_u32_literal(offset_vgpr, offset_vgpr,
                                                                      byte_count, input_vgpr, arch);
@@ -1070,10 +1065,9 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
     } else {
       words.push_back(build_v_mov_b32_e32(offset_vgpr, vector_source_vgpr(input_vgpr), arch));
     }
-    words.push_back(build_v_mov_b32_e32(
-        result_vgpr, static_cast<uint16_t>(*candidate.operands.raw_saddr), arch));
+    words.push_back(build_v_mov_b32_e32(result_vgpr, *form->scalar_address_sgpr, arch));
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(result_vgpr + 1u),
-                                        static_cast<uint16_t>(*candidate.operands.raw_saddr + 1u),
+                                        static_cast<uint16_t>(*form->scalar_address_sgpr + 1u),
                                         arch));
     const auto add_vector_offset =
         instrumentation::build_v_add_u64_vgpr_offset(result_vgpr, offset_vgpr, arch);
@@ -1086,9 +1080,9 @@ candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &
                                         vector_source_vgpr(static_cast<uint16_t>(input_vgpr + 1u)),
                                         arch));
   }
-  if (*candidate.operands.raw_ioffset != 0) {
+  if (form->immediate_byte_offset.value_or(0) != 0) {
     const auto add = instrumentation::build_v_add_u64_signed_i24(
-        result_vgpr, *candidate.operands.raw_ioffset, arch);
+        result_vgpr, *form->immediate_byte_offset, arch);
     if (!add)
       return false;
     words.insert(words.end(), add->begin(), add->end());
@@ -1144,22 +1138,24 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
 // deliberately narrow. Address materialization and scratch-backed owner state
 // both write the scratch window before the guest, while loads produce a value
 // that the final restore would overwrite.
-[[nodiscard]] bool sampled_access_can_emit_spill_over_guest_operands(
-    const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
+[[nodiscard]] bool
+sampled_access_can_emit_spill_over_guest_operands(const MoiOptions &options,
+                                                  const ConSanMoiCandidate &candidate) {
   return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.operands.destination_vgpr &&
          candidate.origin != ConSanAccessOrigin::DirectToLds && options.moi_owner_vgpr &&
          !options.automatic_moi_private_epoch && !options.moi_persistent_sgprs.complete() &&
-         !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+         !candidate_requires_flat_address_materialization(candidate);
 }
 
-[[nodiscard]] bool sampled_access_can_plan_spill_over_guest_operands(
-    const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  if (sampled_access_can_emit_spill_over_guest_operands(options, candidate, arch))
+[[nodiscard]] bool
+sampled_access_can_plan_spill_over_guest_operands(const MoiOptions &options,
+                                                  const ConSanMoiCandidate &candidate) {
+  if (sampled_access_can_emit_spill_over_guest_operands(options, candidate))
     return true;
   if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.operands.destination_vgpr ||
       candidate.origin == ConSanAccessOrigin::DirectToLds || options.automatic_moi_private_epoch ||
       options.moi_persistent_sgprs.complete() ||
-      candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
+      candidate_requires_flat_address_materialization(candidate)) {
     return false;
   }
   // Automatic persistent-state placement runs after the first resource pass.
@@ -1179,14 +1175,13 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   return options.moi_engine == ConSanMoiEngine::Sampled &&
          candidate.origin == ConSanAccessOrigin::NativeLds &&
          (consan_arch_is_rdna(arch) || consan_uses_gfx9_cdna_encoding(arch)) &&
-         !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+         !candidate_requires_flat_address_materialization(candidate);
 }
 
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const MoiOptions &options,
                                                    const ConSanMoiCandidate &candidate,
                                                    rj_code_arch_t arch) {
-  const uint16_t flat_offset_address_count =
-      gfx12_flat_access_address_scratch_count(candidate, arch);
+  const uint16_t flat_offset_address_count = flat_access_address_scratch_count(candidate);
   const uint16_t dynamic_stack_reservoir_count =
       consan_uses_gfx12_encoding(arch) && options.moi_dynamic_stack_spill
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
@@ -1218,7 +1213,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   const bool can_reload_clobbered_address =
       (consan_uses_gfx9_cdna_encoding(arch)) && candidate.origin != ConSanAccessOrigin::Flat &&
       moi_load_clobbers_address(candidate) &&
-      !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+      !candidate_requires_flat_address_materialization(candidate);
   return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
 
@@ -1236,8 +1231,8 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
       // disabled. Auto-sized reports use multiple workgroup banks in that
       // mode, and the persistent owner/epoch tail must not alias the bank.
       base_scratch_count + 1u +
-      (gfx12_flat_access_address_scratch_count(candidate, arch) != 0u
-           ? gfx12_flat_access_address_scratch_count(candidate, arch)
+      (flat_access_address_scratch_count(candidate) != 0u
+           ? flat_access_address_scratch_count(candidate)
        : candidate.origin == ConSanAccessOrigin::DirectToLds ||
                moi_load_clobbers_address(candidate) ||
                moi_access_requires_high_bank_address_capture(candidate, arch)
@@ -1777,8 +1772,8 @@ struct MoiOwnerRegisterReferenceSummary {
   case ConSanMoiEngine::RecordReplay:
     return static_cast<uint16_t>(
         (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
-        (gfx12_flat_access_address_scratch_count(candidate, arch) != 0u
-             ? gfx12_flat_access_address_scratch_count(candidate, arch)
+        (flat_access_address_scratch_count(candidate) != 0u
+             ? flat_access_address_scratch_count(candidate)
          : candidate.origin == ConSanAccessOrigin::DirectToLds ||
                  moi_load_clobbers_address(candidate) ||
                  moi_access_requires_high_bank_address_capture(candidate, arch)
@@ -3313,8 +3308,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
        ((options.moi_engine == ConSanMoiEngine::RecordReplay &&
          !options.moi_dynamic_access_records && !guest_replay_needs_disjoint_address_scratch) ||
         (access_candidate != nullptr && !guest_replay_needs_disjoint_address_scratch &&
-         (sampled_access_can_plan_spill_over_guest_operands(options, *access_candidate,
-                                                            state.arch) ||
+         (sampled_access_can_plan_spill_over_guest_operands(options, *access_candidate) ||
           sampled_access_supports_spill_backed_operand_recovery(options, *access_candidate,
                                                                 state.arch)))));
   const bool supports_sampled_atomic_operand_overlap_spill =
@@ -3506,7 +3500,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions
     if (site_options.moi_engine == ConSanMoiEngine::InlineShadow &&
         (consan_uses_gfx9_cdna_encoding(state.arch)) &&
         candidate.origin != ConSanAccessOrigin::Flat && moi_load_clobbers_address(candidate) &&
-        !candidate_requires_gfx12_flat_address_materialization(candidate, state.arch) &&
+        !candidate_requires_flat_address_materialization(candidate) &&
         (plan.source == ConSanRegisterAllocationSource::SpillRequired ||
          (plan.source == ConSanRegisterAllocationSource::Unsupported &&
           plan.reason == ConSanRegisterPlanReason::NoLegalWindow))) {

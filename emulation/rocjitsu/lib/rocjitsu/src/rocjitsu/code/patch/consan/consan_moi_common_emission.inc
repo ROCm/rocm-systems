@@ -748,8 +748,7 @@ private:
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       options, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
-  const bool materialize_flat_address =
-      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+  const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   const bool materialize_direct_to_lds = candidate.origin == ConSanAccessOrigin::DirectToLds;
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
@@ -758,7 +757,7 @@ private:
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   const uint16_t address_scratch_count = static_cast<uint16_t>(
-      (materialize_flat_address ? gfx12_flat_access_address_scratch_count(candidate, arch)
+      (materialize_flat_address ? flat_access_address_scratch_count(candidate)
                                 : (save_clobbered_address ? 1u : 0u)) +
       (materialize_direct_to_lds ? 1u : 0u) + (reserve_two_address_replay_scratch ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
@@ -889,7 +888,7 @@ private:
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
     words.push_back(build_v_mov_b32_e32(
         materialized_address_vgpr, vector_source_vgpr(*candidate.operands.address_vgpr), arch));
-    if (!candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
+    if (!candidate_uses_scalar_vector_flat_address(candidate)) {
       words.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(materialized_address_vgpr + 1u),
           vector_source_vgpr(static_cast<uint16_t>(*candidate.operands.address_vgpr + 1u)), arch));
@@ -962,8 +961,8 @@ private:
         return std::nullopt;
       }
       if (materialize_flat_address) {
-        if (!append_materialize_gfx12_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
-                                                          *lds_byte_offset_vgpr, arch)) {
+        if (!append_materialize_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
+                                                    *lds_byte_offset_vgpr, arch)) {
           errors.emplace_back(
               "ConSan MOI dynamic access-record probe could not materialize FLAT address");
           return std::nullopt;
@@ -1284,8 +1283,8 @@ private:
   if (materialize_flat_address) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    if (!append_materialize_gfx12_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
-                                                      materialized_address_vgpr, arch)) {
+    if (!append_materialize_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
+                                                materialized_address_vgpr, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not materialize FLAT address");
       return std::nullopt;
     }

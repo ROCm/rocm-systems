@@ -65,7 +65,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       result.warnings.emplace_back("ConSan MOI fence record patch skipped an overlapping patch");
       continue;
     }
-    const uint16_t scratch_count = fence_record_scratch_count(candidate.communication_site, arch);
+    const uint16_t scratch_count =
+        fence_record_scratch_count(candidate.communication_lowering_form);
     const ConSanCandidateResourcePlan *existing_plan =
         resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence_text_offset);
     ConSanCandidateResourcePlan plan =
@@ -597,7 +598,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                          ? sampled_atomic_scratch_count()
                                      : options.moi_engine == ConSanMoiEngine::InlineShadow
                                          ? inline_shadow_atomic_scratch_count(state.arch)
-                                         : atomic_record_scratch_count(candidate.site, state.arch);
+                                         : atomic_record_scratch_count(candidate.lowering_form);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site);
@@ -615,7 +616,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Fence, index, candidate.patch_text_offset,
           candidate.kernel_descriptor_file_offset,
-          fence_record_scratch_count(candidate.communication_site, state.arch), nullptr,
+          fence_record_scratch_count(candidate.communication_lowering_form), nullptr,
           &candidate.communication_site);
       if (candidate.patch_text_offset != candidate.semantic_site.physical.original_text_offset)
         plan.semantic_text_offset = candidate.semantic_site.physical.original_text_offset;

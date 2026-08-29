@@ -24,21 +24,6 @@ inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
-inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
-inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
-
-[[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return 0;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return kGfx1250VectorFlatNoSaddr;
-  return kRdna4VectorFlatNoSaddr;
-}
-
-[[nodiscard]] constexpr bool is_vector_flat_no_saddr(uint32_t raw_saddr, rj_code_arch_t arch) {
-  return raw_saddr == vector_flat_no_saddr(arch);
-}
-
 [[nodiscard]] std::optional<uint16_t> gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
                                                                uint64_t text_file_offset,
                                                                uint64_t container_entry_text_offset,

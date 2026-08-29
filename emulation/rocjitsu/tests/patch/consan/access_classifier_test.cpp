@@ -192,6 +192,15 @@ TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependen
             ConSanAccessClassifierReason::ReservedAddressRegister);
   EXPECT_TRUE(reserved.lowering.compare_observed_value.available());
 
+  ConSanAccessInventorySite invalid_scalar = flat_store_site(12);
+  invalid_scalar.operands.raw_saddr = 105;
+  invalid_scalar.operands.raw_scale_offset = true;
+  const ConSanAccessInventorySite scalar = complete_site(
+      std::move(invalid_scalar), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_EQ(scalar.lowering.replay_guest_access.reason,
+            ConSanAccessClassifierReason::OperandRegisterRange);
+  EXPECT_TRUE(scalar.lowering.compare_observed_value.available());
+
   ConSanAccessInventorySite missing_result = native_store_site("ds_load_b32");
   missing_result.kind = ConSanLdsAccessKind::Read;
   missing_result.operands.data_vgpr.reset();

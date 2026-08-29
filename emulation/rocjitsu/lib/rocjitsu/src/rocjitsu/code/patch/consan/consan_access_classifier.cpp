@@ -354,6 +354,9 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
       replay = Reason::UnsupportedEncoding;
     } else if (*access.operands.raw_ioffset != 0 && !consan_uses_gfx12_encoding(arch)) {
       replay = Reason::NonzeroImmediateOffset;
+    } else if (scalar_vector_address &&
+               (*access.operands.raw_saddr > 104u || (*access.operands.raw_saddr & 1u) != 0u)) {
+      replay = Reason::OperandRegisterRange;
     } else if (*access.operands.address_vgpr >= 255u && !scalar_vector_address) {
       replay = Reason::ReservedAddressRegister;
     } else {

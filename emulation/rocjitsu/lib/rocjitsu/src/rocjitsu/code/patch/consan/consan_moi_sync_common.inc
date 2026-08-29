@@ -424,37 +424,34 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
   return plans;
 }
 
-[[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicSite &site,
-                                                   rj_code_arch_t arch) {
-  if (site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_"))
+[[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicLoweringForm &form) {
+  if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset ||
+      form.kind == ConSanAtomicLoweringFormKind::BufferResourceVectorOffset ||
+      form.kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress ||
+      form.kind == ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress)
     return 5u;
   const bool returned_value_aliases_address =
-      site.returns_old_value.value_or(false) && site.addr_vgpr && site.dst_vgpr &&
-      *site.dst_vgpr >= *site.addr_vgpr && *site.dst_vgpr < *site.addr_vgpr + 2u;
-  return returned_value_aliases_address ||
-                 ((site.mnemonic.starts_with("flat_") || site.mnemonic.starts_with("global_")) &&
-                  (!site.raw_saddr || !is_vector_flat_no_saddr(*site.raw_saddr, arch) ||
-                   site.raw_ioffset.value_or(0) != 0))
-             ? 5u
-             : 3u;
+      form.returns_old_value && form.destination_vgpr &&
+      static_cast<uint32_t>(*form.destination_vgpr) + form.destination_register_count >
+          form.address_vgpr &&
+      static_cast<uint32_t>(form.address_vgpr) + form.address_vgpr_count > *form.destination_vgpr;
+  return returned_value_aliases_address || form.signed_byte_offset != 0 ? 5u : 3u;
 }
 
-[[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicSite &site,
-                                                  rj_code_arch_t arch) {
+[[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicLoweringForm &form) {
   // Fence records are dynamically reserved once per executing wave on every
   // architecture. The common layout keeps five indexed-store temporaries,
   // one derived-owner temporary, and a preserved 64-bit communication token.
-  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), 8u);
+  return std::max<uint16_t>(inline_atomic_scratch_count(form), 8u);
 }
 
-[[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicSite &site,
-                                                   rj_code_arch_t arch) {
+[[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicLoweringForm &form) {
   // Dynamic Record/Replay publication needs seven VGPRs for the slot,
   // address, value, and preserved guest atomic address. Compare-exchange also
   // retains the pre-linearization event index while its success mask is
   // captured and the common emitter publishes the completed record.
-  const uint16_t record_minimum = consan_atomic_is_compare_exchange(site) ? 8u : 7u;
-  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), record_minimum);
+  const uint16_t record_minimum = form.compare_exchange ? 8u : 7u;
+  return std::max<uint16_t>(inline_atomic_scratch_count(form), record_minimum);
 }
 
 [[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch) {

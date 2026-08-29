@@ -2498,8 +2498,7 @@
         "ConSan MOI inline-shadow probe has no scratch VGPR for the expected CAS value");
     return std::nullopt;
   }
-  const bool materialize_flat_address =
-      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+  const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
   const auto source_is_spilled = [&](uint16_t source) {
@@ -2523,9 +2522,8 @@
                                   options.moi_track_atomics) +
                               inline_shadow_loop_scratch_count(options, candidate));
   } else if (materialize_flat_address) {
-    saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + scratch_count -
-                              gfx12_flat_access_address_scratch_count(candidate, arch));
+    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
+        *options.scratch_vgpr + scratch_count - flat_access_address_scratch_count(candidate));
   } else if (spill_backed_lds_byte_offset_source) {
     // Address construction and local exchange consume the guest offset before
     // the transaction initializes its expected CAS value. The authoritative
@@ -2653,8 +2651,8 @@
     return std::nullopt;
   }
   if (materialize_flat_address) {
-    if (!append_materialize_gfx12_flat_access_address(
-            words, candidate, *candidate.operands.address_vgpr, *lds_byte_offset_vgpr, arch)) {
+    if (!append_materialize_flat_access_address(words, candidate, *candidate.operands.address_vgpr,
+                                                *lds_byte_offset_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT address");
       return std::nullopt;
     }

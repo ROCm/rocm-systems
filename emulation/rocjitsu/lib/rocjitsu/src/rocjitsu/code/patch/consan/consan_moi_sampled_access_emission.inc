@@ -579,14 +579,13 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   words.push_back(*save_exec);
   words.push_back(*save_scc);
   words.push_back(*save_vcc);
-  if (candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
+  if (candidate_requires_flat_address_materialization(candidate)) {
     if (!preserved_lds_byte_offset_vgpr) {
       errors.emplace_back("ConSan MOI sampled FLAT address has no preserved address pair");
       return std::nullopt;
     }
-    if (!append_materialize_gfx12_flat_access_address(words, candidate,
-                                                      *preserved_lds_byte_offset_vgpr,
-                                                      *preserved_lds_byte_offset_vgpr, arch)) {
+    if (!append_materialize_flat_access_address(words, candidate, *preserved_lds_byte_offset_vgpr,
+                                                *preserved_lds_byte_offset_vgpr, arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not materialize FLAT address");
       return std::nullopt;
     }
@@ -1223,8 +1222,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
-  const bool materialize_flat_address =
-      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
+  const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   if (!preserved_lds_byte_offset_vgpr &&
       (moi_load_clobbers_address(candidate) || materialize_flat_address)) {
     if (!options.scratch_vgpr)
@@ -1236,8 +1234,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       return std::nullopt;
     words.push_back(build_v_mov_b32_e32(*preserved_lds_byte_offset_vgpr,
                                         vector_source_vgpr(*lds_byte_offset_vgpr), arch));
-    if (materialize_flat_address &&
-        !candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
+    if (materialize_flat_address && !candidate_uses_scalar_vector_flat_address(candidate)) {
       words.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(*preserved_lds_byte_offset_vgpr + 1u),
           vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
