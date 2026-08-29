@@ -4,11 +4,12 @@
 /// use the same qualified synchronization inventory; disabled atomic tracking
 /// deliberately produces no placement constraint.
 [[nodiscard]] std::unordered_set<uint64_t>
-collect_moi_ordering_atomic_offsets(const ConSanTransformArtifacts &result, bool track_atomics) {
+collect_moi_ordering_atomic_offsets(const ConSanObservationPlan &observation_plan,
+                                    bool track_atomics) {
   std::unordered_set<uint64_t> offsets;
   if (!track_atomics)
     return offsets;
-  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+  for (const ConSanAtomicSiteDecision &decision : observation_plan.atomic_site_decisions) {
     if (decision.kind == ConSanSiteDecisionKind::Admitted)
       offsets.insert(decision.semantic_site.physical.original_text_offset);
   }
@@ -23,13 +24,14 @@ collect_moi_ordering_atomic_offsets(const ConSanTransformArtifacts &result, bool
 /// selection; the input already contains only policy-admitted candidates.
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
 order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
-                                   const ConSanTransformArtifacts &result, bool track_atomics) {
+                                   const ConSanObservationPlan &observation_plan,
+                                   bool track_atomics) {
   std::vector<const ConSanMoiCandidate *> candidates = make_moi_candidate_pointer_view(admitted);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();
   });
   const std::unordered_set<uint64_t> ordering_atomic_offsets =
-      collect_moi_ordering_atomic_offsets(result, track_atomics);
+      collect_moi_ordering_atomic_offsets(observation_plan, track_atomics);
   std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
     return !ordering_atomic_offsets.contains(candidate->anchor());
   });
@@ -110,16 +112,17 @@ struct MoiRecordReplayAccessOutput {
 /// route. Record/Replay runtime-kernel decisions are the one excluded class,
 /// matching the engine's explicit no-instrumentation contract. Only
 /// Record/Replay emits independent admitted `FenceRecord` probes.
-[[nodiscard]] uint64_t moi_reserved_access_sync_island_count(const ConSanTransformArtifacts &result,
-                                                             const ConSanRequest &request,
-                                                             const TransformPolicy &policy,
-                                                             const ConSanMoiOperatingPoint &point) {
-  const SynchronizationInventoryView synchronization = result.program_inventory.sync();
+[[nodiscard]] uint64_t
+moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
+                                      const ConSanObservationPlan &observation_plan,
+                                      const ConSanRequest &request, const TransformPolicy &policy,
+                                      const ConSanMoiOperatingPoint &point) {
+  const SynchronizationInventoryView synchronization = program_inventory.sync();
   const uint64_t barrier_count =
       request.moi_track_barriers
           ? std::min<uint64_t>(
                 std::ranges::count_if(
-                    result.observation_plan.barrier_site_decisions,
+                    observation_plan.barrier_site_decisions,
                     [&](const ConSanBarrierSiteDecision &decision) {
                       if (request.moi_engine == ConSanMoiEngine::RecordReplay &&
                           decision.reason == ConSanBarrierPolicyReason::RuntimeKernelExcluded) {
@@ -138,7 +141,7 @@ struct MoiRecordReplayAccessOutput {
           : 0u;
   const uint64_t fence_count =
       request.moi_engine == ConSanMoiEngine::RecordReplay && request.moi_track_atomics
-          ? std::min<uint64_t>(std::ranges::count(result.observation_plan.probe_intents,
+          ? std::min<uint64_t>(std::ranges::count(observation_plan.probe_intents,
                                                   ConSanProbeIntentKind::FenceRecord,
                                                   &ConSanProbeIntent::kind),
                                policy.max_patches)
@@ -171,8 +174,10 @@ constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
 
 class MoiLocalNopIslandAllocator {
 public:
-  MoiLocalNopIslandAllocator(std::span<const uint8_t> text, const ConSanTransformArtifacts &result,
-                             rj_code_arch_t arch, uint32_t island_words,
+  MoiLocalNopIslandAllocator(std::span<const uint8_t> text,
+                             const ProgramInventory &program_inventory,
+                             std::span<const ConSanPatchInfo> existing_patches, rj_code_arch_t arch,
+                             uint32_t island_words,
                              std::span<const ConSanPreappliedReservedRange> reserved_ranges = {})
       : text_(text), nop_(build_s_nop(0, arch)), island_words_(island_words) {
     if (island_words == 0)
@@ -182,18 +187,17 @@ public:
       uint64_t code_end = 0;
     };
     std::vector<OwnerRange> owners;
-    owners.reserve(result.program_inventory.kernels().size() +
-                   result.program_inventory.functions().size());
+    owners.reserve(program_inventory.kernels().size() + program_inventory.functions().size());
     const auto append_owner = [&](uint64_t entry, uint64_t code_size) {
       if (code_size == 0 || entry >= text.size())
         return;
       owners.push_back({entry, entry + std::min<uint64_t>(code_size, text.size() - entry)});
     };
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+    for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
       if (kernel.has_text_range)
         append_owner(kernel.entry_text_offset, kernel.code_size);
     }
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    for (const ConSanFunctionInfo &function : program_inventory.functions())
       append_owner(function.entry_text_offset, function.code_size);
     std::ranges::sort(owners, {}, &OwnerRange::entry);
     std::vector<OwnerRange> unique;
@@ -207,8 +211,8 @@ public:
 
     const uint64_t island_bytes = static_cast<uint64_t>(island_words) * sizeof(uint32_t);
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-    occupied_ranges.reserve(result.patches.size() * 2u + reserved_ranges.size());
-    for (const ConSanPatchInfo &patch : result.patches) {
+    occupied_ranges.reserve(existing_patches.size() * 2u + reserved_ranges.size());
+    for (const ConSanPatchInfo &patch : existing_patches) {
       occupied_ranges.emplace_back(
           patch.anchor_offset, patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u));
       if (patch.trampoline_size != 0u) {
@@ -1465,13 +1469,6 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   return true;
 }
 
-/// Freeze the complete accepted operating point before emission or final
-/// validation consumes it.
-void freeze_moi_operating_point(const ConSanMoiOperatingPoint &point,
-                                ConSanTransformArtifacts &result) {
-  result.moi_operating_point = point;
-}
-
 [[nodiscard]] bool
 moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
                                              std::span<const uint64_t> owner_descriptor_offsets) {
@@ -1984,13 +1981,14 @@ struct MoiResourcePlanningState {
   }
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
-                           const ConSanTransformArtifacts &result, const ConSanRequest &request,
-                           const BoundRuntimeResources &resources,
+                           const ProgramInventory &program_inventory,
+                           const ConSanObservationPlan &observation_plan,
+                           std::span<const ConSanCandidateResourcePlan> site_plans,
+                           const ConSanRequest &request, const BoundRuntimeResources &resources,
                            const ConSanMoiOperatingPoint &point)
       : MoiResourcePlanningState(MoiResourceProblem(input, arch, request, resources,
-                                                    result.program_inventory,
-                                                    result.observation_plan, {}),
-                                 point, result.resource_plans) {}
+                                                    program_inventory, observation_plan, {}),
+                                 point, site_plans) {}
 
   [[nodiscard]] MoiDenseOwnerLivenessProof
   prepare_dense_liveness_for_owners(std::span<const uint64_t> owners,
@@ -2707,7 +2705,7 @@ resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
 /// relocation donors. Empty sites are ignored and adjacent ranges are merged;
 /// consumers may therefore also use the result for logarithmic overlap tests.
 [[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
-collect_moi_synchronization_ranges(const ConSanTransformArtifacts &result) {
+collect_moi_synchronization_ranges(const ProgramInventory &program_inventory) {
   std::vector<std::pair<uint64_t, uint64_t>> ranges;
   const auto append_sites = [&](const auto &sites) {
     for (const auto &site : sites) {
@@ -2720,9 +2718,9 @@ collect_moi_synchronization_ranges(const ConSanTransformArtifacts &result) {
     append_sites(container.atomic_sites);
     append_sites(container.fence_sites);
   };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+  for (const ConSanKernelInfo &kernel : program_inventory.kernels())
     append_container(kernel);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+  for (const ConSanFunctionInfo &function : program_inventory.functions())
     append_container(function);
 
   std::ranges::sort(ranges);
@@ -2765,7 +2763,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
 /// atomic reservoir plan. No emitted storage or router capacity is committed
 /// when the underlying planner fails.
 [[nodiscard]] bool plan_moi_access_direct_reservoirs(
-    const ConSanTransformArtifacts &result, const TransformPolicy &policy, rj_code_arch_t arch,
+    const ProgramInventory &program_inventory, const TransformPolicy &policy, rj_code_arch_t arch,
     const MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
     std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
@@ -2776,10 +2774,10 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
   std::vector<std::pair<uint64_t, uint64_t>> protected_ranges(synchronization_ranges.begin(),
                                                               synchronization_ranges.end());
   protected_ranges.reserve(protected_ranges.size() + candidate_ranges.size() +
-                           result.program_inventory.kernels().size() +
+                           program_inventory.kernels().size() +
                            resource_state.reserved_ranges.size() + dense_entry_hosts.size());
   protected_ranges.insert(protected_ranges.end(), candidate_ranges.begin(), candidate_ranges.end());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
     protected_ranges.emplace_back(
         kernel.entry_text_offset,
         std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
@@ -2814,7 +2812,8 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
 /// claimed pristine NOP islands are retired from the engine's independent
 /// branch-only router as part of the same ownership transaction.
 [[nodiscard]] MoiDenseAccessRoutePlan plan_moi_dense_access_routes(
-    const ConSanTransformArtifacts &result, const ConSanRequest &request,
+    const ProgramInventory &program_inventory,
+    std::span<const ConSanCandidateResourcePlan> site_plans, const ConSanRequest &request,
     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch,
     MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
@@ -2853,7 +2852,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     const ConSanCandidateResourcePlan *group_resource =
         group.candidates.empty()
             ? nullptr
-            : resource_plan_for_candidate(result.resource_plans, *group.candidates.front());
+            : resource_plan_for_candidate(site_plans, *group.candidates.front());
     ConSanMoiOperatingPoint group_point = point;
     if (group_resource != nullptr)
       (void)apply_moi_transient_sgpr_assignment(request, group_point, point,
@@ -2890,7 +2889,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
         is_record_replay &&
         std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
           const ConSanCandidateResourcePlan *candidate_resource =
-              resource_plan_for_candidate(result.resource_plans, *candidate);
+              resource_plan_for_candidate(site_plans, *candidate);
           return candidate_resource != nullptr &&
                  candidate_resource->source == ConSanRegisterAllocationSource::SpillRequired;
         });
@@ -2912,11 +2911,9 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     if (!island && group_resource != nullptr) {
       const bool owner_is_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
       const ConSanKernelInfo *kernel =
-          owner_is_kernel ? result.program_inventory.find_kernel_by_name(group.owner.name)
-                          : nullptr;
+          owner_is_kernel ? program_inventory.find_kernel_by_name(group.owner.name) : nullptr;
       const ConSanFunctionInfo *function =
-          !owner_is_kernel ? result.program_inventory.find_function_by_name(group.owner.name)
-                           : nullptr;
+          !owner_is_kernel ? program_inventory.find_function_by_name(group.owner.name) : nullptr;
       const bool has_owner_range =
           (kernel != nullptr && (!is_record_replay || kernel->has_text_range) &&
            kernel->code_size != 0u) ||
@@ -2947,9 +2944,8 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
                   : collect_moi_dense_owner_occupied_ranges(*function, owner_candidates);
           std::vector<std::pair<uint64_t, uint64_t>> ordering_ranges;
           if (is_record_replay) {
-            ordering_ranges.reserve(result.program_inventory.sync().sync_sequences.size());
-            for (const ConSanSyncSequence &sequence :
-                 result.program_inventory.sync().sync_sequences) {
+            ordering_ranges.reserve(program_inventory.sync().sync_sequences.size());
+            for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
               if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
                   sequence.in_kernel != owner_is_kernel ||
                   sequence.container_name != group.owner.name ||
@@ -3878,8 +3874,8 @@ private:
 
 class MoiPatchOwnerIndex {
 public:
-  explicit MoiPatchOwnerIndex(const ConSanTransformArtifacts &result) {
-    for (const ConSanPatchInfo &patch : result.patches) {
+  explicit MoiPatchOwnerIndex(std::span<const ConSanPatchInfo> patches) {
+    for (const ConSanPatchInfo &patch : patches) {
       if (!is_persistent_access_patch(patch))
         continue;
       for (uint64_t owner : patch.owner_descriptor_file_offsets)

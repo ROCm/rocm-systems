@@ -57,7 +57,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
-  MoiResourcePlanningState resource_state(bytes, arch, result, options, options, options);
+  MoiResourcePlanningState resource_state(bytes, arch, result.program_inventory,
+                                          result.observation_plan, result.resource_plans, options,
+                                          options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -262,8 +264,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
-                                                kMoiLocalIndirectIslandWords);
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
+                                                arch, kMoiLocalIndirectIslandWords);
   std::vector<MoiLocalNopIsland> appended_indirect_islands;
   const bool needs_appended_island_bank =
       planned_candidates.size() > 1u &&

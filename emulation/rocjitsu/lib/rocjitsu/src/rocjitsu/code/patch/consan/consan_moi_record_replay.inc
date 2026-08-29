@@ -46,8 +46,8 @@ void try_apply_first_light_access_record_patch(
   // second text-growth pass. Keep those access bodies at the tail so their
   // one-word branch anchors remain in direct reach of the appended ordering
   // caves even for very large code objects.
-  std::vector<const ConSanMoiCandidate *> candidates =
-      order_moi_replay_access_candidates(admitted, result, options.moi_track_atomics);
+  std::vector<const ConSanMoiCandidate *> candidates = order_moi_replay_access_candidates(
+      admitted, result.observation_plan, options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI first-light probe found no native LDS or likely group "
                                  "flat load/store candidate");
@@ -140,7 +140,8 @@ void try_apply_first_light_access_record_patch(
   // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
       use_indirect_appended
-          ? moi_reserved_access_sync_island_count(result, options, options, options)
+          ? moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+                                                  options, options, options)
           : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
@@ -162,13 +163,13 @@ void try_apply_first_light_access_record_patch(
     original_text = text_bytes;
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
-    local_entry_islands.emplace(text_bytes, result, arch, local_entry_island_words,
-                                resource_state.reserved_ranges);
+    local_entry_islands.emplace(text_bytes, result.program_inventory, result.patches, arch,
+                                local_entry_island_words, resource_state.reserved_ranges);
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, options, arch, resource_state, original_text, candidates,
-      target.has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_slot_words,
-      use_indirect_appended, MoiDenseAccessRouteAbi::RecordReplay,
+      result.program_inventory, result.resource_plans, options, options, arch, resource_state,
+      original_text, candidates, target.has_selectable_vgpr_bank ? 0u : 64u, access_island_begin,
+      access_slot_words, use_indirect_appended, MoiDenseAccessRouteAbi::RecordReplay,
       local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
@@ -253,7 +254,7 @@ void try_apply_first_light_access_record_patch(
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
-      collect_moi_synchronization_ranges(result);
+      collect_moi_synchronization_ranges(result.program_inventory);
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
     return moi_candidate_uses_branch_only_scalar_spill(result.resource_plans,
                                                        result.moi_operating_point, *candidate);
@@ -354,8 +355,8 @@ void try_apply_first_light_access_record_patch(
     }
     std::string relay_error;
     if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, resource_state, original_text, synchronization_ranges,
-            candidate_ranges, dense_entry_hosts, route_frontier_source,
+            result.program_inventory, options, arch, resource_state, original_text,
+            synchronization_ranges, candidate_ranges, dense_entry_hosts, route_frontier_source,
             saturated_multiply(2u, branch_only_routing_demand_count), branch_only_placement_planner,
             branch_router, direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI first-light probe " + relay_error);
@@ -1055,7 +1056,8 @@ void try_apply_first_light_access_record_patch(
   // passes are independent downstream consumers of that frontier. Preserve
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
-  if (moi_reserved_access_sync_island_count(result, options, options, options) != 0u) {
+  if (moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+                                            options, options, options) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }

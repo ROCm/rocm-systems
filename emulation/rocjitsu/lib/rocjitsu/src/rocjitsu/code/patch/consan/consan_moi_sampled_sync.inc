@@ -999,8 +999,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   std::vector<ConSanPatchInfo> patches;
   std::vector<ConSanCommittedLowering> lowering_commits;
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
-                                                kMoiLocalIndirectIslandWords);
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
+                                                arch, kMoiLocalIndirectIslandWords);
   const auto try_emit_direct_barrier = [&](size_t barrier_index, bool allow_local_island) -> bool {
     const Planned &planned = selected[barrier_index];
     const ConSanBarrierSite &site = planned.candidate.barrier.site;
@@ -2105,8 +2105,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         {.text_offset = original_text_size,
          .size = static_cast<uint32_t>(reserved_sync_island_bytes)});
   }
-  MoiLocalNopIslandAllocator indirect_allocator(
-      old_text, result, arch, kMoiLocalIndirectIslandWords, local_island_reserved_ranges);
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
+                                                arch, kMoiLocalIndirectIslandWords,
+                                                local_island_reserved_ranges);
   std::vector<ConSanPatchInfo> patches;
   std::vector<ConSanCommittedLowering> lowering_commits;
   for (const Planned &planned : selected) {

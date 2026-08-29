@@ -73,8 +73,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // Sampled atomic metadata wraps the relocated guest instruction in a
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
-  std::vector<const ConSanMoiCandidate *> candidates =
-      order_moi_replay_access_candidates(admitted, result, options.moi_track_atomics);
+  std::vector<const ConSanMoiCandidate *> candidates = order_moi_replay_access_candidates(
+      admitted, result.observation_plan, options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled probe found no native LDS or likely group flat load/store candidate");
@@ -201,8 +201,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   if (use_indirect_appended && !original_text.empty()) {
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
-    local_entry_islands.emplace(original_text, result, arch, local_entry_island_words,
-                                resource_state.reserved_ranges);
+    local_entry_islands.emplace(original_text, result.program_inventory, result.patches, arch,
+                                local_entry_island_words, resource_state.reserved_ranges);
   }
   BranchOnlyRelayRouter branch_router;
   if (local_entry_islands) {
@@ -210,9 +210,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       (void)branch_router.offer(offset, BranchOnlyRelayProvenance::PristineNop);
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, options, arch, resource_state, original_text, candidates,
-      target->has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_relay_words,
-      use_indirect_appended, MoiDenseAccessRouteAbi::Sampled,
+      result.program_inventory, result.resource_plans, options, options, arch, resource_state,
+      original_text, candidates, target->has_selectable_vgpr_bank ? 0u : 64u, access_island_begin,
+      access_relay_words, use_indirect_appended, MoiDenseAccessRouteAbi::Sampled,
       local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
@@ -230,7 +230,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
-      collect_moi_synchronization_ranges(result);
+      collect_moi_synchronization_ranges(result.program_inventory);
   size_t branch_only_candidate_count = 0u;
   uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
   for (const ConSanMoiCandidate *candidate : candidates) {
@@ -249,8 +249,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     std::string relay_error;
     if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, resource_state, original_text, synchronization_ranges,
-            candidate_ranges, dense_entry_hosts, route_frontier_source,
+            result.program_inventory, options, arch, resource_state, original_text,
+            synchronization_ranges, candidate_ranges, dense_entry_hosts, route_frontier_source,
             2u * branch_only_candidate_count, branch_only_placement_planner, branch_router,
             direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI sampled probe " + relay_error);

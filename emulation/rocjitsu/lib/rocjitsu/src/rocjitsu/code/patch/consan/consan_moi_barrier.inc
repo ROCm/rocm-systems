@@ -836,7 +836,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   MoiDescriptorSgprRequirements visible_evidence_sgpr_requirements;
   MoiDescriptorPrivateRequirements visible_evidence_private_requirements;
   const MoiResourcePlanSiteIndex resource_plan_index(result.resource_plans);
-  MoiPatchOwnerIndex patch_owner_index(result);
+  MoiPatchOwnerIndex patch_owner_index(result.patches);
   if (options.automatic_moi_private_epoch) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
@@ -1134,8 +1134,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   }
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator local_indirect_allocator(old_text, result, arch,
-                                                      kMoiLocalIndirectIslandWords);
+  MoiLocalNopIslandAllocator local_indirect_allocator(
+      old_text, result.program_inventory, result.patches, arch, kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
   std::vector<ConSanCommittedLowering> lowering_commits;
   patches.reserve(planned_candidates.size() * 2u);
@@ -1146,7 +1146,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       options.moi_exec_save_sgpr
           ? find_record_replay_reserved_barrier_island_begin(
                 old_text, result, arch, access_output, planned_candidates.size(),
-                moi_reserved_access_sync_island_count(result, options, options, options))
+                moi_reserved_access_sync_island_count(
+                    result.program_inventory, result.observation_plan, options, options, options))
           : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
@@ -2241,8 +2242,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  MoiResourcePlanningState standalone_resource_state(bytes, arch, result, options, options,
-                                                     options);
+  MoiResourcePlanningState standalone_resource_state(bytes, arch, result.program_inventory,
+                                                     result.observation_plan, result.resource_plans,
+                                                     options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -2307,15 +2309,16 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
   const std::vector<std::pair<uint64_t, uint64_t>> borrowed_barrier_protected_ranges =
-      collect_moi_synchronization_ranges(result);
+      collect_moi_synchronization_ranges(result.program_inventory);
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
-                                                kMoiLocalIndirectIslandWords);
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
+                                                arch, kMoiLocalIndirectIslandWords);
   if (options.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, access_output, selected_candidates.size(),
-        moi_reserved_access_sync_island_count(result, options, options, options));
+        moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+                                              options, options, options));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
                                       reserved_barrier_island_layout->slot_words;

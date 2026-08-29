@@ -988,7 +988,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // dispatch override rejects the transform. Unsupported results use this
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
-  freeze_moi_operating_point(effective_options, result);
+  result.moi_operating_point = effective_options;
   ConSanMoiOperatingPointAttempt dispatch_fallback = plan_moi_dispatch_id_fallback(
       effective_options, effective_options, resource_problem, result.resource_plans);
   if (dispatch_fallback.accepted()) {
@@ -1000,7 +1000,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
-    freeze_moi_operating_point(effective_options, result);
+    result.moi_operating_point = effective_options;
   std::optional<ConSanMoiScalarValidationFailure> scalar_validation_failure;
   if (result.outcome != ConSanTransformOutcome::Unsupported) {
     scalar_validation_failure = validate_moi_dispatch_id_sgprs(effective_options, effective_options,
@@ -1041,7 +1041,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates,
                                  result);
   }
-  freeze_moi_operating_point(effective_options, result);
+  result.moi_operating_point = effective_options;
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_options);
   if (scalar_validation_failure) {
@@ -1145,7 +1145,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_persistent_sgprs.record_replay_workgroup = {};
     effective_options.moi_dispatch_id_vgpr.reset();
     effective_options.owner_persistent_vgprs.clear();
-    freeze_moi_operating_point(effective_options, result);
+    result.moi_operating_point = effective_options;
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
@@ -1177,7 +1177,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
                                          prologue_scratch_assignments, arch, result);
   if (result.errors.empty())
-    freeze_moi_operating_point(effective_options, result);
+    result.moi_operating_point = effective_options;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     publish_pending_moi_lowering_rejections(result);
     return result;

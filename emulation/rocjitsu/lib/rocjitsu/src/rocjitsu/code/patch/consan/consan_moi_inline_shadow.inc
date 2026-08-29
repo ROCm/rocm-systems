@@ -108,7 +108,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
       use_indirect_appended
-          ? moi_reserved_access_sync_island_count(result, options, options, options)
+          ? moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+                                                  options, options, options)
           : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
@@ -125,7 +126,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   }
   const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
-      collect_moi_synchronization_ranges(result);
+      collect_moi_synchronization_ranges(result.program_inventory);
   const auto relocation_overlaps_synchronization = [&](uint64_t begin, uint64_t end) {
     const auto after = std::ranges::lower_bound(synchronization_ranges, end, {},
                                                 [](const auto &range) { return range.first; });
@@ -133,8 +134,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   };
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
-    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
-                                resource_state.reserved_ranges);
+    local_entry_islands.emplace(original_text, result.program_inventory, result.patches, arch,
+                                kIndirectIslandWords, resource_state.reserved_ranges);
   BranchOnlyRelayRouter branch_router;
   std::optional<uint64_t> latest_generated_frontier_word;
   if (local_entry_islands) {
@@ -146,9 +147,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   };
 
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result, options, options, arch, resource_state, original_text, candidates,
-      target->moi_dense_route_group_capacity, access_island_begin, access_relay_words,
-      use_indirect_appended, MoiDenseAccessRouteAbi::InlineShadow,
+      result.program_inventory, result.resource_plans, options, options, arch, resource_state,
+      original_text, candidates, target->moi_dense_route_group_capacity, access_island_begin,
+      access_relay_words, use_indirect_appended, MoiDenseAccessRouteAbi::InlineShadow,
       local_entry_islands ? &*local_entry_islands : nullptr, &branch_router);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
@@ -194,10 +195,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       return;
     }
     std::string relay_error;
-    if (!plan_moi_access_direct_reservoirs(
-            result, options, arch, resource_state, original_text, synchronization_ranges,
-            candidate_ranges, dense_entry_hosts, route_frontier_source, 2u * candidates.size(),
-            placement_planner, branch_router, direct_branch_reservoirs, &relay_error)) {
+    if (!plan_moi_access_direct_reservoirs(result.program_inventory, options, arch, resource_state,
+                                           original_text, synchronization_ranges, candidate_ranges,
+                                           dense_entry_hosts, route_frontier_source,
+                                           2u * candidates.size(), placement_planner, branch_router,
+                                           direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
       return;
     }

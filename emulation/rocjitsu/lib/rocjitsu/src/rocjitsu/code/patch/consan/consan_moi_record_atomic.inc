@@ -56,7 +56,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
-  MoiResourcePlanningState resource_state(bytes, arch, result, options, options, options);
+  MoiResourcePlanningState resource_state(bytes, arch, result.program_inventory,
+                                          result.observation_plan, result.resource_plans, options,
+                                          options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -164,8 +166,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
-                                                kMoiLocalIndirectIslandWords);
+  MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
+                                                arch, kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
   std::vector<ConSanCommittedLowering> lowering_commits;
   for (const PlannedAtomicRecord &planned : selected_candidates) {

@@ -2884,7 +2884,8 @@ void try_apply_owner_epoch_prologue_patch(
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> patches;
-  MoiLocalNopIslandAllocator entry_islands(old_text, result, arch, 7u);
+  MoiLocalNopIslandAllocator entry_islands(old_text, result.program_inventory, result.patches, arch,
+                                           7u);
   for (const PlannedOwnerEpochPrologue &item : target_kernels) {
     const ConSanKernelInfo &kernel = item.kernel;
     const ConSanKernelInfo *canonical_kernel =
