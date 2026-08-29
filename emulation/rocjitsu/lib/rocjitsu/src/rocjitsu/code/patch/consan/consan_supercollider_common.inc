@@ -16,8 +16,19 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
   return offsets;
 }
 
-[[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
-                                                 ConSanTransformArtifacts &result) {
+[[nodiscard]] bool
+initialize_sc_access_coverage(const ConSanOptions &options, ConSanTransformArtifacts &result,
+                              const ConSanLoweringObservation *prepared_observation) {
+  if (prepared_observation != nullptr) {
+    if (!prepared_observation->well_formed()) {
+      result.errors.emplace_back(
+          "ConSan SuperCollider received an invalid prepared observation product");
+      return false;
+    }
+    result.observation_plan = prepared_observation->plan;
+    result.coverage_ledger = prepared_observation->initial_coverage;
+    return true;
+  }
   ConSanObservationProduct observation = assemble_consan_observation_product(
       result.program_inventory, static_cast<const ConSanRequest &>(options),
       static_cast<const ConSanDebugOverrides &>(options));

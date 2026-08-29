@@ -63,6 +63,7 @@ TEST(ConSanRequestContractTest, DefaultsExposeOnlyConstructionSentinel) {
   EXPECT_EQ(request.moi_runtime_sample_stride, 1u);
   EXPECT_EQ(request.delay_mode, ConSanDelayMode::Nop);
   EXPECT_EQ(request.report_marker, 1u);
+  EXPECT_EQ(request.supercollider_evidence_mode, ConSanSuperColliderEvidenceMode::StickyMarker);
   EXPECT_EQ(request.moi_auto_report_buffer_size, 0u);
 
   ConSanRequest selected = request;
@@ -82,6 +83,13 @@ TEST(ConSanRequestContractTest, AcceptsEverySupportedModeAndRejectsInvalidEnums)
        {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::InlineShadow, ConSanMoiEngine::Sampled}) {
     EXPECT_EQ(validate_consan_request(valid_moi_request(engine)), ConSanContractIssue::None);
   }
+  for (ConSanSuperColliderEvidenceMode mode :
+       {ConSanSuperColliderEvidenceMode::TrapOnly, ConSanSuperColliderEvidenceMode::StickyMarker}) {
+    ConSanRequest request;
+    request.flavor = ConSanFlavor::SuperCollider;
+    request.supercollider_evidence_mode = mode;
+    EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::None);
+  }
 
   ConSanRequest invalid_flavor = valid_moi_request(ConSanMoiEngine::RecordReplay);
   invalid_flavor.flavor = static_cast<ConSanFlavor>(255);
@@ -89,6 +97,10 @@ TEST(ConSanRequestContractTest, AcceptsEverySupportedModeAndRejectsInvalidEnums)
   ConSanRequest invalid_engine = valid_moi_request(ConSanMoiEngine::RecordReplay);
   invalid_engine.moi_engine = static_cast<ConSanMoiEngine>(255);
   EXPECT_EQ(validate_consan_request(invalid_engine), ConSanContractIssue::InvalidMode);
+  ConSanRequest invalid_sc_evidence;
+  invalid_sc_evidence.flavor = ConSanFlavor::SuperCollider;
+  invalid_sc_evidence.supercollider_evidence_mode = ConSanSuperColliderEvidenceMode::Count;
+  EXPECT_EQ(validate_consan_request(invalid_sc_evidence), ConSanContractIssue::InvalidMode);
 }
 
 TEST(ConSanRequestContractTest, ValidatesStaticAndRuntimeSamplingBoundaries) {

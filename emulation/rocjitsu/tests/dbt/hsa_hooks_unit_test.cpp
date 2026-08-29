@@ -3938,6 +3938,7 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
   request.flavor = rocjitsu::ConSanFlavor::SuperCollider;
   request.probe_lds_check_trap = true;
   request.delay_nops = 2;
+  request.supercollider_evidence_mode = rocjitsu::ConSanSuperColliderEvidenceMode::TrapOnly;
   rocjitsu::ConSanDebugOverrides debug;
   debug.scratch_vgpr = 3;
   rocjitsu::TransformPolicy transform_policy;
@@ -3946,7 +3947,10 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
       rocjitsu::transform_consan(bytes, request, transform_policy, enabled_consan_runtime_policy(),
                                  debug, complete_consan_runtime_capabilities(), {});
   ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(direct.errors);
+      << "errors=" << testing::PrintToString(direct.errors)
+      << " warnings=" << testing::PrintToString(direct.warnings)
+      << " intents=" << direct.observation_plan.probe_intents.size()
+      << " patches=" << direct.debug_report().patches.size();
   ASSERT_EQ(direct.replacement.size(), bytes.size());
 
   const auto estimate = rocjitsu::consan_hook::consan_transform_major_image_reservation(

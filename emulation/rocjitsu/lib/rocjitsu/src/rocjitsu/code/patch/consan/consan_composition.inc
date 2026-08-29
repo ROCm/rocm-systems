@@ -506,7 +506,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
     std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {},
     bool require_applicable_fault_plan = false, ConSanLoweringExecution *execution = nullptr,
-    ConSanLoweringExtent extent = ConSanLoweringExtent::Complete) {
+    ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
+    const ConSanLoweringObservation *observation = nullptr) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
@@ -993,6 +994,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                               inventory_builder.access_sites(), synchronization_inventory, result);
   }
   result.program_inventory = inventory_builder.view();
+  if (extent == ConSanLoweringExtent::ThroughProgramInventory)
+    return result;
   if (options.fault_dry_run) {
     if (execution != nullptr)
       execution->note_resource_solving_and_lowering();
@@ -1013,7 +1016,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
     return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution,
-                                extent);
+                                extent, observation);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
@@ -1021,8 +1024,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return result;
   }
 
-  const bool sc_observation_valid = initialize_sc_access_coverage(options, result);
-  if (execution != nullptr)
+  const bool sc_observation_valid = initialize_sc_access_coverage(options, result, observation);
+  if (execution != nullptr && observation == nullptr)
     execution->note_observation_plan();
   if (!sc_observation_valid)
     return result;

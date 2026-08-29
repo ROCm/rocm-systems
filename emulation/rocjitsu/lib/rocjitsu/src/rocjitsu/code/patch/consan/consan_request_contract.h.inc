@@ -244,6 +244,13 @@ static_assert(kConSanContractIssues.size() == static_cast<size_t>(ConSanContract
   default:
     return ConSanContractIssue::InvalidMode;
   }
+  switch (request.supercollider_evidence_mode) {
+  case ConSanSuperColliderEvidenceMode::TrapOnly:
+  case ConSanSuperColliderEvidenceMode::StickyMarker:
+    break;
+  default:
+    return ConSanContractIssue::InvalidMode;
+  }
   if (request.moi_sample_stride == 0 || request.moi_runtime_sample_stride == 0 ||
       request.moi_runtime_sample_stride > (1u << 24u) ||
       (request.moi_runtime_sample_stride & (request.moi_runtime_sample_stride - 1u)) != 0) {

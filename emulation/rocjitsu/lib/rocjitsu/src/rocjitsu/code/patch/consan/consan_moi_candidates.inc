@@ -299,8 +299,18 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
 /// coverage ledger. Current access lowerers consume the admitted candidate
 /// projection; policy decisions and final coverage retain the complete typed
 /// account of excluded and admitted sites.
-[[nodiscard]] bool initialize_moi_access_observation_plan(const MoiOptions &options,
-                                                          ConSanTransformArtifacts &result) {
+[[nodiscard]] bool
+initialize_moi_access_observation_plan(const MoiOptions &options, ConSanTransformArtifacts &result,
+                                       const ConSanLoweringObservation *prepared_observation) {
+  if (prepared_observation != nullptr) {
+    if (!prepared_observation->well_formed()) {
+      result.errors.emplace_back("ConSan MOI received an invalid prepared observation product");
+      return false;
+    }
+    result.observation_plan = prepared_observation->plan;
+    result.coverage_ledger = prepared_observation->initial_coverage;
+    return true;
+  }
   ConSanObservationProduct observation = assemble_consan_observation_product(
       result.program_inventory, static_cast<const ConSanRequest &>(options),
       static_cast<const ConSanDebugOverrides &>(options));

@@ -595,7 +595,12 @@ bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
 }
 
 bool ConSanSuperColliderEvidenceRequirements::well_formed() const {
-  return reason == ConSanEvidenceRequirementReason::None &&
+  if (reason != ConSanEvidenceRequirementReason::None)
+    return false;
+  if (mode == ConSanSuperColliderEvidenceMode::TrapOnly) {
+    return marker_bytes == 0u && runtime_requirements == RuntimeCapabilityRequirements{};
+  }
+  return mode == ConSanSuperColliderEvidenceMode::StickyMarker &&
          (marker_bytes == 0u || marker_bytes == sizeof(uint32_t)) &&
          runtime_requirements.host_device_visible_memory &&
          runtime_requirements.host_device_coherent_memory &&
@@ -789,12 +794,24 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
 }
 
 ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents) {
+plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                                   ConSanSuperColliderEvidenceMode mode) {
   ConSanSuperColliderEvidenceRequirements requirements;
+  requirements.mode = mode;
   requirements.reason =
       validate_evidence_intent_input(evidence_intents, ConSanCapabilityEngine::SuperCollider);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
+  if (mode != ConSanSuperColliderEvidenceMode::TrapOnly &&
+      mode != ConSanSuperColliderEvidenceMode::StickyMarker) {
+    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return requirements;
+  }
+
+  if (mode == ConSanSuperColliderEvidenceMode::TrapOnly) {
+    requirements.reason = ConSanEvidenceRequirementReason::None;
+    return requirements;
+  }
 
   requirements.marker_bytes = evidence_intents.intents.empty() ? 0u : sizeof(uint32_t);
   requirements.runtime_requirements.host_device_visible_memory = true;

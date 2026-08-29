@@ -509,6 +509,12 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
               ConSanPipelineStageStatus::Completed);
     EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
               ConSanPipelineStageStatus::Deferred);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+              ConSanPipelineStageStatus::Blocked);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 0u);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
+              ConSanPipelineStageStatus::Blocked);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->execution_count, 0u);
   };
 
   check.operator()<ConSanRecordReplayEvidenceRequirements>(
@@ -592,6 +598,10 @@ TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyEngine) {
                    *result.evidence_requirements));
     EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
               ConSanPipelineStageStatus::NotApplicable);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+              ConSanPipelineStageStatus::Completed);
+    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
+              ConSanPipelineStageStatus::Completed);
   }
 }
 
@@ -618,6 +628,12 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::EvidenceRequirements)->execution_count, 2u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
+  EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
             ConSanPipelineStageStatus::Completed);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->status,
@@ -971,7 +987,7 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
                                                   debug, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 2u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
@@ -1021,7 +1037,7 @@ TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy
                        ConSanDebugOverrides{}, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 2u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.outcome, direct.outcome);

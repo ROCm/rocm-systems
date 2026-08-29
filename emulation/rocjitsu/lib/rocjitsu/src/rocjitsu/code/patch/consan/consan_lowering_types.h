@@ -13,6 +13,7 @@ namespace rocjitsu {
 /// Select how far one native lowering pass may execute.
 enum class ConSanLoweringExtent : uint8_t {
   Complete,
+  ThroughProgramInventory,
   ThroughObservationPlan,
 };
 

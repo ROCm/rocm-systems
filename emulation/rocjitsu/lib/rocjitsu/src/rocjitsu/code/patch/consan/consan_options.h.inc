@@ -327,6 +327,20 @@ struct ConSanMoiTransientSgprAssignment {
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
 
+/// Evidence retained when SuperCollider observes a mismatched replay.
+///
+/// Trap-only instrumentation reports synchronously and owns no runtime
+/// allocation. Sticky-marker instrumentation also publishes a host-visible
+/// word and therefore requires a concrete executable-lifetime binding before
+/// lowering. Keeping this choice in the semantic request prevents a
+/// hook-local presentation option from silently changing the pipeline's
+/// evidence and resource contracts.
+enum class ConSanSuperColliderEvidenceMode : uint8_t {
+  TrapOnly,
+  StickyMarker,
+  Count,
+};
+
 /// User-visible sanitizer choices that determine which semantic observations
 /// ConSan requests from a code object.
 ///
@@ -382,6 +396,9 @@ struct ConSanRequest {
   uint16_t delay_var_ssrc = 106;
   /// Sticky value written when SuperCollider observes instability.
   uint32_t report_marker = 1;
+  /// Mismatch evidence protocol selected for SuperCollider instrumentation.
+  ConSanSuperColliderEvidenceMode supercollider_evidence_mode =
+      ConSanSuperColliderEvidenceMode::StickyMarker;
 
   /// Maximum automatic MOI evidence allocation requested for one code object.
   /// Zero disables automatic allocation without supplying an address.

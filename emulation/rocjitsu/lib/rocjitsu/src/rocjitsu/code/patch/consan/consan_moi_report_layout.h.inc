@@ -618,16 +618,15 @@ struct ConSanInlineShadowEvidenceRequirements {
   bool operator==(const ConSanInlineShadowEvidenceRequirements &) const = default;
 };
 
-/// Address-free SuperCollider sticky-marker contract for one code object.
+/// Address-free SuperCollider mismatch-evidence contract for one code object.
 ///
-/// SuperCollider does not share an MOI record union: redundant execution
-/// publishes a fixed sticky mismatch marker. `marker_bytes` is zero when the
-/// valid observation plan contains no admitted access and otherwise states the
-/// complete marker requirement. Runtime properties and executable lifetime
-/// remain explicit even though the current registry implements the allocation.
-/// This alternative intrinsically denotes a sticky marker whose loss
-/// invalidates completeness and whose concrete binding has executable lifetime.
+/// SuperCollider does not share an MOI record union. Trap-only evidence owns no
+/// runtime storage; sticky-marker evidence publishes one fixed mismatch word.
+/// `marker_bytes` is zero for trap-only evidence or an empty marker plan and
+/// otherwise states the complete allocation requirement.
 struct ConSanSuperColliderEvidenceRequirements {
+  /// Requested mismatch-evidence protocol.
+  ConSanSuperColliderEvidenceMode mode = ConSanSuperColliderEvidenceMode::StickyMarker;
   /// Runtime facts required before marker allocation or executable binding.
   RuntimeCapabilityRequirements runtime_requirements;
   /// Required sticky-marker storage; zero means no admitted observation.
@@ -679,8 +678,9 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
 
 /// Derive the fixed SuperCollider marker contract from a typed observation
 /// plan. No report-layout or allocation mechanism participates.
-[[nodiscard]] ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents);
+[[nodiscard]] ConSanSuperColliderEvidenceRequirements plan_consan_supercollider_evidence(
+    const ConSanEvidenceIntentPlan &evidence_intents,
+    ConSanSuperColliderEvidenceMode mode = ConSanSuperColliderEvidenceMode::StickyMarker);
 
 /// Revalidates a caller-carried layout against the canonical planner and the
 /// registered allocation size. A malformed, noncanonical, wrong-engine, or

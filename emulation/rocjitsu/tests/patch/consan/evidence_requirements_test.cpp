@@ -964,6 +964,14 @@ TEST(ConSanEvidenceRequirements, SuperColliderMarkerContractCoversEmptyAndObserv
   EXPECT_TRUE(marker.runtime_requirements.host_device_coherent_memory);
   EXPECT_FALSE(marker.runtime_requirements.device_atomic_publication);
   EXPECT_TRUE(marker.runtime_requirements.executable_binding);
+
+  const auto trap_only = plan_consan_supercollider_evidence(
+      evidence_intents(observed), ConSanSuperColliderEvidenceMode::TrapOnly);
+  ASSERT_TRUE(trap_only.complete());
+  EXPECT_EQ(trap_only.mode, ConSanSuperColliderEvidenceMode::TrapOnly);
+  EXPECT_FALSE(trap_only.requires_binding());
+  EXPECT_EQ(trap_only.marker_bytes, 0u);
+  EXPECT_EQ(trap_only.runtime_requirements, RuntimeCapabilityRequirements{});
 }
 
 TEST(ConSanEvidenceRequirements, SuperColliderRejectsInvalidWrongForeignAndMalformedPlans) {
@@ -1014,6 +1022,7 @@ TEST(ConSanEvidenceRequirements, SuperColliderWellFormedChecksEveryMarkerInvaria
   expect_rejected([](auto &value) { value.runtime_requirements.executable_binding = false; });
   expect_rejected(
       [](auto &value) { ++*value.runtime_requirements.minimum_report_allocation_bytes; });
+  expect_rejected([](auto &value) { value.mode = ConSanSuperColliderEvidenceMode::Count; });
 }
 
 TEST(ConSanEvidenceRequirements, ClosedVariantPreservesEachAlternativeAndWellFormedContract) {

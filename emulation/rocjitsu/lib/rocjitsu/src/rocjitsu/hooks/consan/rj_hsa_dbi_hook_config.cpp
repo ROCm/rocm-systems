@@ -683,6 +683,10 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_sc_report_mode_env(&config.sc_report_mode))
     return std::nullopt;
+  config.supercollider_evidence_mode =
+      config.sc_report_mode == ScReportMode::Trap
+          ? rocjitsu::ConSanSuperColliderEvidenceMode::TrapOnly
+          : rocjitsu::ConSanSuperColliderEvidenceMode::StickyMarker;
   if (!parse_bool_env("RJ_CONSAN_PROBE_LDS_CHECK_TRAP", false, &config.probe_lds_check_trap))
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_PROBE_FLAT_CHECK_TRAP", false, &config.probe_flat_check_trap))
