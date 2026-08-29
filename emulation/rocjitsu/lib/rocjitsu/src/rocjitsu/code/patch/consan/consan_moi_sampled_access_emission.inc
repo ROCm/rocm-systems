@@ -490,12 +490,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
   // executing the displaced instruction so sampled publication remains tied
   // to the guest access rather than to the loaded payload.
   if (relocate_instruction &&
-      (candidate.origin == ConSanAccessOrigin::DirectToLds ||
-       moi_load_clobbers_address(candidate)) &&
+      (candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate)) &&
       !preserved_lds_byte_offset_vgpr) {
     const uint16_t saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
+    if (candidate.is_direct_to_lds()) {
       if (!options.moi_exec_save_sgpr) {
         errors.emplace_back(
             "ConSan MOI sampled direct-to-LDS probe requires an EXEC-save SGPR pair");
@@ -529,7 +528,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     // Metadata consumes the low-bank captured address, while the guest still
     // names its original encoded SRC0 under the restored application mode.
     const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
+        capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
         {.image = bytes,
          .candidate = &candidate,
@@ -1145,8 +1144,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       return std::nullopt;
     const bool spilled_address =
         range_overlaps(*lds_byte_offset_vgpr, 1u, spill->vgpr_base, spill->vgpr_count);
-    if (candidate.operands.destination_vgpr &&
-        range_overlaps(*candidate.operands.destination_vgpr,
+    if (candidate.lowering.form->destination_vgpr &&
+        range_overlaps(*candidate.lowering.form->destination_vgpr,
                        candidate_payload_vgpr_count(candidate), spill->vgpr_base,
                        spill->vgpr_count)) {
       errors.emplace_back(
@@ -1166,7 +1165,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     const uint16_t replay_address_vgpr =
-        preserved_lds_byte_offset_vgpr.value_or(*candidate.operands.address_vgpr);
+        preserved_lds_byte_offset_vgpr.value_or(*candidate.lowering.form->address_vgpr);
     const auto guest_words = build_moi_relocated_guest_access_words(
         {.image = bytes,
          .candidate = &candidate,

@@ -2515,7 +2515,7 @@
       (consan_uses_gfx9_cdna_encoding(arch)) && moi_load_clobbers_address(candidate) &&
       !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
-  if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
+  if (candidate.is_direct_to_lds()) {
     saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
@@ -2614,7 +2614,7 @@
   // otherwise the loaded payload becomes the exact-shadow cell index.
   if (saved_lds_byte_offset_vgpr) {
     if (!spill_backed_lds_byte_offset_source) {
-      if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
+      if (candidate.is_direct_to_lds()) {
         if (!options.moi_exec_save_sgpr) {
           errors.emplace_back(
               "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
@@ -2651,7 +2651,8 @@
     return std::nullopt;
   }
   if (materialize_flat_address) {
-    if (!append_materialize_flat_access_address(words, candidate, *candidate.operands.address_vgpr,
+    if (!append_materialize_flat_access_address(words, candidate,
+                                                *candidate.lowering.form->address_vgpr,
                                                 *lds_byte_offset_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT address");
       return std::nullopt;
@@ -2759,16 +2760,17 @@
     words.insert(words.end(), accounting_words.begin(), accounting_words.end());
     words.push_back(*restore_valid_exec);
   }
-  if (candidate.container.is_kernel() && candidate.origin == ConSanAccessOrigin::Flat &&
+  if (candidate.container.is_kernel() && candidate.is_flat() &&
       candidate.flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
     // Likely provenance deliberately admits flat sites whose static dataflow
     // cannot prove one aperture. Resolve that uncertainty with the same high
     // address comparison used by hardware: a 32-bit SHARED_BASE source is the
     // shared aperture's high half. Global lanes bypass shadow bookkeeping and
     // later rejoin for the displaced guest access.
-    uint16_t address_hi_source = materialize_flat_address
-                                     ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
-                                     : static_cast<uint16_t>(*candidate.operands.address_vgpr + 1u);
+    uint16_t address_hi_source =
+        materialize_flat_address
+            ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
+            : static_cast<uint16_t>(*candidate.lowering.form->address_vgpr + 1u);
     if (!materialize_flat_address && source_is_spilled(address_hi_source)) {
       const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
       const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
@@ -3247,7 +3249,7 @@
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   const uint16_t guest_address_vgpr =
-      capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
+      capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
   const auto guest_words = build_moi_relocated_guest_access_words(
       {.image = bytes,
        .candidate = &candidate,

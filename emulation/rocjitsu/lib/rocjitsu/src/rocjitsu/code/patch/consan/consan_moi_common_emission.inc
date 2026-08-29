@@ -749,7 +749,7 @@ private:
       options, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
-  const bool materialize_direct_to_lds = candidate.origin == ConSanAccessOrigin::DirectToLds;
+  const bool materialize_direct_to_lds = candidate.is_direct_to_lds();
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
@@ -886,12 +886,14 @@ private:
   } else if (materialize_flat_address && options.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    words.push_back(build_v_mov_b32_e32(
-        materialized_address_vgpr, vector_source_vgpr(*candidate.operands.address_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
+                                        vector_source_vgpr(*candidate.lowering.form->address_vgpr),
+                                        arch));
     if (!candidate_uses_scalar_vector_flat_address(candidate)) {
       words.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(materialized_address_vgpr + 1u),
-          vector_source_vgpr(static_cast<uint16_t>(*candidate.operands.address_vgpr + 1u)), arch));
+          vector_source_vgpr(static_cast<uint16_t>(*candidate.lowering.form->address_vgpr + 1u)),
+          arch));
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
   } else if (save_clobbered_address) {
@@ -909,7 +911,7 @@ private:
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     const uint16_t guest_address_vgpr =
-        capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
+        capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
         {.image = bytes,
          .candidate = &candidate,

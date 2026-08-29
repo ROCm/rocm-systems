@@ -25,6 +25,24 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   [[nodiscard]] bool is_native_two_range() const {
     return lowering.form && lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
   }
+  /// Return whether the classifier normalized this as any native LDS form.
+  [[nodiscard]] bool is_native_lds() const {
+    return lowering.form &&
+           (lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange ||
+            lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange);
+  }
+  /// Return whether the classifier normalized this as any FLAT address form.
+  [[nodiscard]] bool is_flat() const {
+    return lowering.form &&
+           (lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+            lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress);
+  }
+  /// Return whether the classifier normalized this as any direct-to-LDS form.
+  [[nodiscard]] bool is_direct_to_lds() const {
+    return lowering.form &&
+           (lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress ||
+            lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
+  }
   /// Return the classifier-owned encoded offset scale.
   [[nodiscard]] uint32_t encoded_offset_scale_bytes() const {
     return lowering.form ? lowering.form->encoded_offset_scale_bytes : 0u;

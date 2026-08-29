@@ -923,7 +923,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               (candidate_options.moi_sampled_check ? 7u : 5u) +
               (candidate_options.moi_runtime_sample_stride > 1u || window_bank_count > 1u ? 1u
                                                                                           : 0u));
-          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
           body_options.high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }

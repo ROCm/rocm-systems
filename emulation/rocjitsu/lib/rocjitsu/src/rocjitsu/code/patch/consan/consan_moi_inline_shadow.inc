@@ -1076,7 +1076,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                                 : std::span<const uint32_t>{};
         body_options.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
         if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
-          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
           body_options.high_bank_address_destination = static_cast<uint16_t>(
               consan_detail::inline_shadow_loop_counter_vgpr(
                   planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),

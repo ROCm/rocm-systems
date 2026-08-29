@@ -1297,7 +1297,7 @@ void try_apply_first_light_access_record_patch(
                   candidate_options, layout.record_replay_dispatch_token_capacity)
                   ? 10u
                   : 6u;
-          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
           body_options.high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }
