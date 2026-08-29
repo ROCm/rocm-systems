@@ -22,6 +22,19 @@ namespace {
 
 } // namespace
 
+bool is_release_cache_event(const ConSanSyncEvent *event) {
+  return event != nullptr && (event->mnemonic == "global_wb" || event->mnemonic == "buffer_wb" ||
+                              event->mnemonic == "buffer_wbl2");
+}
+
+bool is_acquire_cache_event(const ConSanSyncEvent *event) {
+  // gfx11 buffer_gl1_inv plus buffer_gl0_inv is admitted only by the exact
+  // ordered-pair matcher in semantic association. A lone gl0 operation is
+  // workgroup-local cache maintenance, not a complete addressed acquire.
+  return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
+                              event->mnemonic == "s_dcache_inv");
+}
+
 bool consan_ordinary_acquire_metadata_compatible(const ConSanSyncEvent &load,
                                                  const ConSanSyncSequence &load_sequence,
                                                  const ConSanSyncEvent &cache,

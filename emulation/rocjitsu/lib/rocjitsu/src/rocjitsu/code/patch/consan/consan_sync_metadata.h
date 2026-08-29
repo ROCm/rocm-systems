@@ -22,9 +22,23 @@ enum class ConSanOrdinaryAcquireMetadataPolicy : uint8_t {
   BoundedPathRdna3CachePairMember,
 };
 
+/// Classify the cache-maintenance endpoints that can carry an atomic or
+/// ordinary-memory release/acquire edge. Ordered multi-event target forms are
+/// deliberately handled by their exact sequence matchers instead.
+[[nodiscard]] bool is_release_cache_event(const ConSanSyncEvent *event);
+[[nodiscard]] bool is_acquire_cache_event(const ConSanSyncEvent *event);
+
 [[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
     const ConSanSyncEvent &load, const ConSanSyncSequence &load_sequence,
     const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence,
     ConSanOrdinaryAcquireMetadataPolicy policy);
+
+[[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
+    const ConSanSyncEvent &load, const ConSanSyncSequence &load_sequence,
+    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence);
+
+[[nodiscard]] bool consan_ordinary_release_metadata_compatible(
+    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence,
+    const ConSanSyncEvent &store, const ConSanSyncSequence &store_sequence);
 
 } // namespace rocjitsu

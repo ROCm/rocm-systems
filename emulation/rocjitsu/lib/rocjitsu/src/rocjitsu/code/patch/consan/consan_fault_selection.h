@@ -49,6 +49,12 @@ struct ExactBarrierDropGroup {
   ExactBarrierDropPair second;
 };
 
+/// Decide whether a cross-block destination carries the exact structured-CFG
+/// proof and explicit request opt-in required by barrier-move mutation.
+[[nodiscard]] bool
+consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
+                                             const ConSanOptions &options);
+
 [[nodiscard]] const ConSanFaultSite *
 find_fault_site_by_identity(const ConSanTransformArtifacts &result, std::string_view identity,
                             ConSanFaultSiteKind kind);

@@ -1,16 +1,25 @@
+[[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site);
+
+[[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
+                                             const ConSanTransformArtifacts &result,
+                                             const ConSanOptions &options);
+
+[[nodiscard]] const ConSanFaultSite *
+select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
+                           ConSanFaultSiteKind kind, uint32_t legacy_index);
+
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
 select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
                                         const ConSanOptions &options) {
   return select_ordinary_acquire_mutation_target(
-      result,
-      ConSanFaultSelection{
-          .primary_site_identity = options.fault_site_identity,
-          .primary_sequence_identity = {},
-          .companion_site_identity = {},
-          .companion_sequence_identity = {},
-          .kernel_name_filter = options.test_kernel_name_filter,
-          .ordinal = options.fault_ordinary_index,
-      });
+      result, ConSanFaultSelection{
+                  .primary_site_identity = options.fault_site_identity,
+                  .primary_sequence_identity = {},
+                  .companion_site_identity = {},
+                  .companion_sequence_identity = {},
+                  .kernel_name_filter = options.test_kernel_name_filter,
+                  .ordinal = options.fault_ordinary_index,
+              });
 }
 
 [[nodiscard]] bool
@@ -311,7 +320,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
                 "ConSan fault dry run rejected barrier-move destination across a control-flow "
                 "or container boundary");
           } else if (destination->basic_block_index != *sequence->basic_block_index &&
-                     !admits_cross_block_barrier_move(*destination, options)) {
+                     !consan_fault_admits_cross_block_barrier_move(*destination, options)) {
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected control-flow or container boundary: cross-block "
                 "barrier move lacks a matching proven completing or destructive structured "
@@ -1165,7 +1174,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     }
     const bool cross_block =
         destination->basic_block_index != *selected_sequence->basic_block_index;
-    if (cross_block && !admits_cross_block_barrier_move(*destination, options)) {
+    if (cross_block && !consan_fault_admits_cross_block_barrier_move(*destination, options)) {
       result.warnings.emplace_back(
           "ConSan barrier move fault rejected control-flow or container boundary: cross-block "
           "destination lacks a matching proven completing or destructive structured diamond "
@@ -1686,7 +1695,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
 
 void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                const ConSanOptions &options, ConSanTransformArtifacts &result) {
-  if (!lds_address_fault_arch_supported(arch)) {
+  if (!consan_lds_address_fault_arch_supported(arch)) {
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
     return;
   }
@@ -2258,4 +2267,33 @@ check_trap_compare_vgpr(const ConSanAccessInventorySite &access, uint16_t chunk_
                : std::nullopt;
   }
   return std::nullopt;
+}
+[[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site) {
+  return {.text_offset = site.text_offset,
+          .file_offset = site.file_offset,
+          .size = site.size,
+          .range_name = std::string(site.in_kernel ? "kernel:" : "function:") + site.container_name,
+          .mnemonic = site.mnemonic};
+}
+
+[[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
+                                             const ConSanTransformArtifacts &result,
+                                             const ConSanOptions &options) {
+  return consan_execution_owners_include_requested_kernel(owners, result,
+                                                          options.test_kernel_name_filter);
+}
+
+[[nodiscard]] const ConSanFaultSite *
+select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
+                           ConSanFaultSiteKind kind, uint32_t legacy_index) {
+  return select_fault_site_for_plan(result,
+                                    ConSanFaultSelection{
+                                        .primary_site_identity = options.fault_site_identity,
+                                        .primary_sequence_identity = {},
+                                        .companion_site_identity = {},
+                                        .companion_sequence_identity = {},
+                                        .kernel_name_filter = options.test_kernel_name_filter,
+                                        .ordinal = legacy_index,
+                                    },
+                                    kind);
 }

@@ -50,6 +50,24 @@ exact_barrier_drop_pair_range(const ExactBarrierDropPair &pair) {
 
 } // namespace
 
+bool consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
+                                                  const ConSanOptions &options) {
+  if (options.fault_barrier_move_direction != ConSanBarrierMoveDirection::Earlier ||
+      !destination.structured_guard_block_index || !destination.structured_source_block_index ||
+      !destination.structured_guard_offset || !destination.structured_source_offset) {
+    return false;
+  }
+  switch (destination.cfg_contract) {
+  case ConSanBarrierMoveCfgContract::SameBlock:
+    return false;
+  case ConSanBarrierMoveCfgContract::CompletingStructuredDiamond:
+    return options.fault_allow_completing_conditional_barrier_move;
+  case ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
+    return options.fault_allow_destructive_divergent_barrier_move;
+  }
+  return false;
+}
+
 const ConSanFaultSite *find_fault_site_by_identity(const ConSanTransformArtifacts &result,
                                                    std::string_view identity,
                                                    ConSanFaultSiteKind kind) {

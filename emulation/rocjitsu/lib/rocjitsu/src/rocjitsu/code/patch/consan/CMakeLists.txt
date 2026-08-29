@@ -16,6 +16,7 @@ target_sources(
         consan_branch_only_relay_router.cpp
         consan_descriptor_growth.cpp
         consan_fault_selection.cpp
+        consan_fault_target_ops.cpp
         consan_final_validation.cpp
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
@@ -57,6 +58,7 @@ target_sources(
         consan_relay_target_ops.cpp
         consan_semantic_classifiers.cpp
         consan_sync_event_index.cpp
+        consan_sync_analysis.cpp
         consan_sync_metadata.cpp
         consan_supercollider_target_ops.cpp
         consan_types.cpp

@@ -1,51 +1,57 @@
-enum class AtomicFaultEncoding : uint8_t {
-  Unsupported,
-  CdnaFlat,
-  FlatLike,
-  Buffer,
-  Ds,
-};
 
-[[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
-                                                        rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch) &&
-      ((mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst)) ||
-       (mnemonic.starts_with("global_atomic") && size == sizeof(cdna4::FlatGlblMachineInst))))
-    return AtomicFaultEncoding::CdnaFlat;
-  if (consan_uses_gfx12_encoding(arch) &&
-      (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
-      size == sizeof(rdna4::VflatMachineInst))
-    return AtomicFaultEncoding::FlatLike;
-  if (consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("buffer_atomic") &&
-      size == sizeof(rdna4::VbufferMachineInst))
-    return AtomicFaultEncoding::Buffer;
-  if (consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) &&
-      lds_width_bits(mnemonic) == 32u && size == sizeof(rdna4::VdsMachineInst))
-    return AtomicFaultEncoding::Ds;
-  return AtomicFaultEncoding::Unsupported;
-}
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
-[[nodiscard]] bool atomic_fault_supports_scope(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
-}
+// This retained `.inc` path is the private implementation of one compiled
+// semantic-analysis component. It is not an include-order fragment.
 
-[[nodiscard]] bool atomic_fault_supports_order(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::CdnaFlat || encoding == AtomicFaultEncoding::FlatLike ||
-         encoding == AtomicFaultEncoding::Buffer;
-}
+#include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 
-[[nodiscard]] bool atomic_fault_supports_address(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer ||
-         encoding == AtomicFaultEncoding::Ds;
-}
+#include "rocjitsu/analysis/kernel_scope.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
+#include "rocjitsu/code/patch/consan/consan_cfg.h"
+#include "rocjitsu/code/patch/consan/consan_fault_target_ops.h"
+#include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
+#include "rocjitsu/code/patch/consan/consan_perturbation.h"
+#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
+#include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
+#include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
+#include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
+#include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
-[[nodiscard]] bool lds_address_fault_arch_supported(rj_code_arch_t arch) {
-  return consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx12_encoding(arch);
-}
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+namespace rocjitsu {
+namespace {
 
 [[nodiscard]] bool lds_address_fault_site_supported(const ConSanAccessInventorySite &site,
                                                     rj_code_arch_t arch) {
-  if (site.origin != ConSanAccessOrigin::NativeLds || !lds_address_fault_arch_supported(arch) ||
+  if (site.origin != ConSanAccessOrigin::NativeLds ||
+      !consan_lds_address_fault_arch_supported(arch) ||
       !site.lowering.replay_guest_access.available() || !site.operands.address_vgpr ||
       site.instruction_size != 2u * sizeof(uint32_t) ||
       (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
@@ -267,9 +273,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.container_name = container.name;
     event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                     "|event=" + std::string(kind) +
-                     "|pc=0x" + consan_fixed_hex(event.text_offset, 16) +
-                     "|mnemonic=" + event.mnemonic +
+                     "|event=" + std::string(kind) + "|pc=0x" +
+                     consan_fixed_hex(event.text_offset, 16) + "|mnemonic=" + event.mnemonic +
                      "|occurrence=" + std::to_string(event.occurrence);
     events.push_back(std::move(event));
   };
@@ -1117,8 +1122,7 @@ void build_barrier_move_destination_inventory(
         destination.identity =
             event->code_object_fingerprint + "|" +
             std::string(sequence.in_kernel ? "kernel=" : "function=") + sequence.container_name +
-            "|destination=instruction|pc=0x" +
-            consan_fixed_hex(destination.text_offset, 16) +
+            "|destination=instruction|pc=0x" + consan_fixed_hex(destination.text_offset, 16) +
             "|mnemonic=" + destination.mnemonic + "|size=" + std::to_string(destination.size);
         if (!seen.insert(destination.identity).second)
           continue;
@@ -1132,8 +1136,8 @@ void build_barrier_move_destination_inventory(
           destination.rejection_reason = "fence-operation";
         } else if (!instruction.is_memory_op()) {
           destination.rejection_reason = "not-memory-operation";
-        } else if (!is_relocatable_consan_barrier_destination(
-                       instruction, instruction.src_loc(), text, arch, &relocatable_error)) {
+        } else if (!is_relocatable_consan_barrier_destination(instruction, instruction.src_loc(),
+                                                              text, arch, &relocatable_error)) {
           destination.rejection_reason = "not-relocatable:" + relocatable_error;
         } else {
           destination.suitable = true;
@@ -1163,24 +1167,6 @@ void build_barrier_move_destination_inventory(
       }
     }
   }
-}
-
-[[nodiscard]] bool admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
-                                                   const ConSanOptions &options) {
-  if (options.fault_barrier_move_direction != ConSanBarrierMoveDirection::Earlier ||
-      !destination.structured_guard_block_index || !destination.structured_source_block_index ||
-      !destination.structured_guard_offset || !destination.structured_source_offset) {
-    return false;
-  }
-  switch (destination.cfg_contract) {
-  case ConSanBarrierMoveCfgContract::SameBlock:
-    return false;
-  case ConSanBarrierMoveCfgContract::CompletingStructuredDiamond:
-    return options.fault_allow_completing_conditional_barrier_move;
-  case ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
-    return options.fault_allow_destructive_divergent_barrier_move;
-  }
-  return false;
 }
 
 [[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventSemanticIndex &events,
@@ -1384,19 +1370,6 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
       return expected_offset;
   }
   return std::nullopt;
-}
-
-[[nodiscard]] bool is_release_cache_event(const ConSanSyncEvent *event) {
-  return event != nullptr && (event->mnemonic == "global_wb" || event->mnemonic == "buffer_wb" ||
-                              event->mnemonic == "buffer_wbl2");
-}
-
-[[nodiscard]] bool is_acquire_cache_event(const ConSanSyncEvent *event) {
-  // gfx11 buffer_gl1_inv plus buffer_gl0_inv is admitted only by the exact
-  // ordered-pair matcher below. A lone gl0 operation is workgroup-local cache
-  // maintenance, not a complete addressed acquire boundary.
-  return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
-                              event->mnemonic == "s_dcache_inv");
 }
 
 [[nodiscard]] bool has_only_waits_between(const ConSanSyncSequence &before,
@@ -1799,8 +1772,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
             ? "exact same-block LDS-zero wait before workgroup group-FLAT acquire-release"
             : "exact same-block LDS-zero wait before workgroup group-FLAT release";
     sequence.release_wait_text_offset = *boundary;
-    sequence.identity +=
-        "|workgroup-release-wait=pc=0x" + consan_fixed_hex(*boundary, 16);
+    sequence.identity += "|workgroup-release-wait=pc=0x" + consan_fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;
   }
 }
@@ -2408,8 +2380,7 @@ void associate_ordinary_acquire_sync_sequences(
     sequence.confidence_reason =
         "exact same-block workgroup group-FLAT load/acquire-zero-wait sequence";
     sequence.raw_scope = 1u;
-    sequence.identity +=
-        "|workgroup-acquire-wait-end=pc=0x" + consan_fixed_hex(*wait_end, 16);
+    sequence.identity += "|workgroup-acquire-wait-end=pc=0x" + consan_fixed_hex(*wait_end, 16);
     sequence.end_text_offset = *wait_end;
   }
 }
@@ -2705,33 +2676,71 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
 }
 
-[[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site) {
-  return {.text_offset = site.text_offset,
-          .file_offset = site.file_offset,
-          .size = site.size,
-          .range_name = std::string(site.in_kernel ? "kernel:" : "function:") + site.container_name,
-          .mnemonic = site.mnemonic};
+} // namespace
+
+bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_bytes,
+                                       const AmdGpuCodeObject &code_object, Decoder &decoder,
+                                       rj_code_arch_t arch, const ConSanOptions &options,
+                                       ProgramInventoryBuilder &inventory_builder,
+                                       ConSanPerturbationPlanningState &perturbation,
+                                       ConSanTransformArtifacts &result) {
+  SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
+  const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
+                                        options.fault_dry_run || options.has_fault_mutation() ||
+                                        options.sc_perturb_kind != ConSanPerturbationKind::None ||
+                                        options.abort_unmatched_barrier_wait;
+  if (!needs_semantic_inventory) {
+    if (std::ranges::any_of(result.program_inventory.access_sites(),
+                            [](const ConSanAccessInventorySite &site) {
+                              return site.container.kind == ConSanProgramContainerKind::Function;
+                            })) {
+      // SuperCollider's ordinary clean transform does not consume
+      // synchronization semantics. Shared-function sites still need kernel
+      // ownership, while kernel-local sites carry their descriptor directly.
+      annotate_execution_owners(code_object, decoder, arch, nullptr,
+                                inventory_builder.access_sites(), synchronization_inventory,
+                                result);
+    }
+    result.program_inventory = inventory_builder.view();
+    return true;
+  }
+
+  build_fault_site_inventory(code_object_bytes, arch, result);
+  build_sync_event_inventory(code_object_bytes, synchronization_inventory, result, arch);
+  if (options.flavor == ConSanFlavor::Moi &&
+      !canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
+    result.program_inventory = inventory_builder.view();
+    return false;
+  }
+
+  const SyncEventSemanticIndex sync_events =
+      build_sync_event_semantic_index(synchronization_inventory.sync_events);
+  const auto sync_blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
+  associate_barrier_sync_sequences(
+      sync_blocks,
+      consan_requires_extended_barrier_pairs(static_cast<const ConSanRequest &>(options),
+                                             static_cast<const ConSanDebugOverrides &>(options),
+                                             static_cast<const MutationRequest &>(options)),
+      synchronization_inventory);
+  associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
+                                  result);
+  build_barrier_lifecycle_group_inventory(synchronization_inventory);
+  if (options.fault_move_barrier) {
+    build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
+                                             synchronization_inventory.sync_sequences, result);
+  }
+  annotate_execution_owners(code_object, decoder, arch, &sync_blocks,
+                            inventory_builder.access_sites(), synchronization_inventory, result);
+  associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
+                                            synchronization_inventory);
+  associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
+                                            synchronization_inventory, result);
+  build_moi_fence_candidate_inventory(synchronization_inventory);
+  result.program_inventory = inventory_builder.view();
+  build_perturbation_candidate_inventory(result.program_inventory, perturbation);
+  annotate_fault_sites_with_sync_sequences(result);
+  return true;
 }
 
-[[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                             const ConSanTransformArtifacts &result,
-                                             const ConSanOptions &options) {
-  return consan_execution_owners_include_requested_kernel(owners, result,
-                                                          options.test_kernel_name_filter);
-}
-
-[[nodiscard]] const ConSanFaultSite *
-select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
-                           ConSanFaultSiteKind kind, uint32_t legacy_index) {
-  return select_fault_site_for_plan(
-      result,
-      ConSanFaultSelection{
-          .primary_site_identity = options.fault_site_identity,
-          .primary_sequence_identity = {},
-          .companion_site_identity = {},
-          .companion_sequence_identity = {},
-          .kernel_name_filter = options.test_kernel_name_filter,
-          .ordinal = legacy_index,
-      },
-      kind);
-}
+} // namespace rocjitsu
