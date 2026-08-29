@@ -889,8 +889,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
-        const auto record_emission =
-            resolve_moi_record_event_emission_plan(candidate_options, resources->base, arch);
+        const auto record_emission = resolve_moi_record_event_emission_plan(
+            candidate_options, candidate_options, candidate_options, resources->base, arch);
         if (!record_emission) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
@@ -1105,8 +1105,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
         continue;
       }
-      record_emission =
-          resolve_moi_record_event_emission_plan(candidate_options, *scratch_vgpr, arch);
+      record_emission = resolve_moi_record_event_emission_plan(
+          candidate_options, candidate_options, candidate_options, *scratch_vgpr, arch);
       if (!record_emission) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");

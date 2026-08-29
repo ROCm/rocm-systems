@@ -55,44 +55,42 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 /// Snapshot the already-resolved Record/Replay lowering state needed by a
 /// native event emitter. Owner-local assignment remains a planning concern;
 /// this function performs no mutation and cannot choose a different binding.
-[[nodiscard]] std::optional<MoiRecordEventEmissionPlan>
-resolve_moi_record_event_emission_plan(const MoiOptions &event_options, uint16_t scratch_vgpr,
-                                       rj_code_arch_t arch) {
+[[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch) {
   const auto workgroup_sources =
-      record_replay_persistent_workgroup_sources(event_options.moi_engine, event_options);
-  const auto special_state = moi_special_state_sgprs(event_options, event_options);
-  if (!event_options.moi_exec_save_sgpr || !event_options.moi_report_buffer_address ||
+      record_replay_persistent_workgroup_sources(request.moi_engine, point);
+  const auto special_state = moi_special_state_sgprs(request, point);
+  if (!point.moi_exec_save_sgpr || !bound_resources.moi_report_buffer_address ||
       !workgroup_sources || !special_state) {
     return std::nullopt;
   }
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
-  if (event_options.moi_runtime_sample_stride > 1u &&
-      !event_options.automatic_moi_record_replay_sgpr_spill) {
-    runtime_workgroup_gate = plan_moi_runtime_workgroup_gate(
-        event_options, event_options, event_options, *workgroup_sources, arch);
+  if (request.moi_runtime_sample_stride > 1u && !point.automatic_moi_record_replay_sgpr_spill) {
+    runtime_workgroup_gate =
+        plan_moi_runtime_workgroup_gate(request, bound_resources, point, *workgroup_sources, arch);
   }
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,
-      .moi_exec_save_sgpr = event_options.moi_exec_save_sgpr,
-      .moi_owner_vgpr = event_options.moi_owner_vgpr,
-      .moi_epoch_vgpr = event_options.moi_epoch_vgpr,
-      .moi_workgroup_key_vgpr = event_options.moi_workgroup_key_vgpr,
-      .moi_dispatch_id_vgpr = event_options.moi_dispatch_id_vgpr,
-      .moi_record_replay_workgroup_vgprs = event_options.moi_record_replay_workgroup_vgprs,
-      .moi_persistent_sgprs = event_options.moi_persistent_sgprs,
-      .moi_report_buffer_address = event_options.moi_report_buffer_address,
-      .automatic_moi_record_replay_sgpr_spill =
-          event_options.automatic_moi_record_replay_sgpr_spill,
-      .moi_record_replay_dispatch_key_sgpr = event_options.moi_record_replay_dispatch_key_sgpr,
-      .moi_record_replay_call_return_sgpr = event_options.moi_record_replay_call_return_sgpr,
+      .moi_exec_save_sgpr = point.moi_exec_save_sgpr,
+      .moi_owner_vgpr = point.moi_owner_vgpr,
+      .moi_epoch_vgpr = point.moi_epoch_vgpr,
+      .moi_workgroup_key_vgpr = point.moi_workgroup_key_vgpr,
+      .moi_dispatch_id_vgpr = point.moi_dispatch_id_vgpr,
+      .moi_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs,
+      .moi_persistent_sgprs = point.moi_persistent_sgprs,
+      .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
+      .automatic_moi_record_replay_sgpr_spill = point.automatic_moi_record_replay_sgpr_spill,
+      .moi_record_replay_dispatch_key_sgpr = point.moi_record_replay_dispatch_key_sgpr,
+      .moi_record_replay_call_return_sgpr = point.moi_record_replay_call_return_sgpr,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
-      .dispatch_id_sources = {moi_report_dispatch_id_word_source(event_options, event_options,
+      .dispatch_id_sources = {moi_report_dispatch_id_word_source(point, bound_resources,
                                                                  /*high_word=*/false),
-                              moi_report_dispatch_id_word_source(event_options, event_options,
+                              moi_report_dispatch_id_word_source(point, bound_resources,
                                                                  /*high_word=*/true)},
       .runtime_workgroup_gate = runtime_workgroup_gate,
-      .indirect_jump = moi_indirect_jump_sgprs(event_options, event_options),
+      .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };
 }
 
@@ -151,7 +149,8 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     return std::nullopt;
   }
 
-  auto emission = resolve_moi_record_event_emission_plan(event_options, resources.base, arch);
+  auto emission = resolve_moi_record_event_emission_plan(event_options, event_options,
+                                                         event_options, resources.base, arch);
   if (!emission) {
     result.warnings.emplace_back(std::string(warning_context) +
                                  " has an incomplete Record/Replay emission plan");
