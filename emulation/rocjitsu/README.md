@@ -112,6 +112,11 @@ rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
 
 See [docs/building.md](docs/building.md) for container setup with PyTorch.
 
+For a model-level correctness check rather than a smoke test,
+[tests/ml/gpt_oss_kernels.py](tests/ml/README.md) runs every kernel a
+`gpt-oss-20b` forward pass dispatches under vLLM and validates each against a
+float64 reference, on either emulated architecture.
+
 ## Documentation
 
 ### Getting started
