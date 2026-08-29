@@ -55,7 +55,6 @@ inline void rcclRegisterShutdownHandler() {
   static std::once_flag once;
   std::call_once(once, []() { atexit(rcclShutdownHandler); });
 }
-}
 
 // RCCL workaround (gfx950): hipMemUnmap on cuMem VMM *peer* allocations can
 // deadlock in the HSA busy-wait during ncclCommDestroy teardown. To avoid the

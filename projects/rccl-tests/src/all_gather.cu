@@ -69,14 +69,19 @@ void AllGatherGetBw(size_t count, size_t typesize, double sec, double* algBw, do
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
-testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
-  if (!reqs || !commProperties) return testInternalError;
+testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
+  if (!reqs || !comm) return testInternalError;
+
+  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
+    return testNcclError;
+  }
 
   switch(deviceImpl) {
     case 3: { // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
-      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+      if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
-        return testInternalError;
+        return testInvalidUsage;
       }
       // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
       // kernel self-selects (allGatherCtas, clamped to allGatherPoolCtas()), decoupled
@@ -362,9 +367,10 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
     double sec = devUs * 1.0e-6;
     double algBw = (double)totalBytes / 1.0e9 / sec;
     double busBw = algBw * ((double)(nRanksGlobal - 1) / (double)nRanksGlobal);
-    printf("#[ag-devtime] size %12zu B  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
-           totalBytes, gridCtas, loop, skip, devUs, algBw, busBw);
-    fflush(stdout);
+    const char* tierName = gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "SDMA";
+    snprintf(args->devtimeAugmentLine, sizeof(args->devtimeAugmentLine),
+             "#[ag-devtime] size %12zu B  tier %-4s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
+             totalBytes, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
   }
   return testSuccess;
 }

@@ -122,7 +122,7 @@ struct testColl {
   testResult_t (*getCollImplInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
       const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels);
   // Optional device-side (in-kernel wall_clock64) timing hook. Non-null only for
-  // collectives that implement it (currently AllToAll). Driven by BenchTime via
+  // collectives that implement it (AllToAll, AllGather). Driven by BenchTime via
   // --device_timing (0=off, 1=augment, 2=device-time-only):
   //   - outDeltaSec == nullptr (mode 1): prints an extra device-only
   //     latency/busbw line alongside the normal graph/hipEvent numbers (report,
