@@ -1277,6 +1277,32 @@ over immutable problems and explicit results; and no fallback restores state
 through a shared artifact or diagnostic bus. Any surviving aggregate is
 confined to top-level orchestration and is not a cross-component bus.
 
+#### F5 checkpoint — complete (2026-08-29)
+
+F5 was implemented by commits `e202685042` through `0b9c143560` (with the
+preceding scalar-preservation contract and dummy-dependency removal in
+`2f65592f71` and `1272cb11d1`). Placement and native emission now consume
+named request, bound-resource, accepted-operating-point, per-site plan,
+scratch, and debug contracts rather than `MoiOptions`. The 19 surviving
+`const MoiOptions &` parameters are confined to top-level transformation,
+composition, and engine-application entry points; none remains in placement or
+native emission.
+
+`MoiResourceProblem` binds the immutable image, target, request, resources,
+inventory, observation plan, and candidate set. Solver attempts publish
+`ConSanMoiOperatingPointAttempt` or `ConSanMoiResourcePlanningResult`, with
+typed `ConSanMoiFallbackKind` acceptance and owned plans and diagnostics.
+Direct contract tests cover immutable problem binding, structural failure
+versus unsupported sites, and publication of accepted typed fallbacks. The
+solver no longer snapshots or resizes a shared artifact, warning, error, or
+resource-plan bus to roll back a rejected attempt.
+
+The complete nonphysical gate passed 4,702/4,702 tests at `-j16` in 242.11
+seconds across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. This is
+eight tests more than the F4 inventory. The serialized physical `gfx1201` gate
+passed 635/635 tests at `-j1` in 107.16 seconds, preserving the full physical
+inventory.
+
 ### F6. Turn conceptual lowerer components into compiled components
 
 Only after F1-F5 establish their interfaces should the textual `.inc`
