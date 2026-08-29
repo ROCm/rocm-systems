@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_trust.h"
 
 #include <algorithm>
@@ -576,62 +577,6 @@ struct RecordReplayPressureTelemetry {
   uint32_t maximum_site_token = 0;
   uint64_t invalid_site_token_count = 0;
 };
-
-struct AutoMoiReportSnapshotRange {
-  size_t offset = 0;
-  size_t size = 0;
-};
-
-struct AutoMoiRecordReplaySnapshotPlan {
-  std::array<AutoMoiReportSnapshotRange, 6> ranges{};
-  size_t range_count = 0;
-  size_t copied_bytes = 0;
-};
-
-/// Plans the cacheable host snapshot needed to summarize one quiescent
-/// Record/Replay report. The open-addressed access table must be copied in
-/// full because occupied slots may appear anywhere. Append-only event and
-/// diagnostic arrays need only their published prefixes.
-[[nodiscard]] inline std::optional<AutoMoiRecordReplaySnapshotPlan>
-plan_auto_moi_record_replay_snapshot(const ConSanMoiReportHeader &header,
-                                     const ConSanMoiReportBufferLayout &layout,
-                                     size_t allocation_size, uint32_t access_table_capacity,
-                                     uint32_t visible_barriers, uint32_t visible_atomics,
-                                     uint32_t visible_fences, uint32_t visible_diagnostics) {
-  AutoMoiRecordReplaySnapshotPlan result;
-  const auto append = [&](size_t offset, uint32_t count, size_t element_size) {
-    if (count == 0)
-      return true;
-    if (offset > allocation_size ||
-        static_cast<size_t>(count) > (allocation_size - offset) / element_size)
-      return false;
-    const size_t size = static_cast<size_t>(count) * element_size;
-    if (result.range_count == result.ranges.size() ||
-        result.copied_bytes > std::numeric_limits<size_t>::max() - size)
-      return false;
-    result.ranges[result.range_count++] = {.offset = offset, .size = size};
-    result.copied_bytes += size;
-    return true;
-  };
-
-  if (!append(0, 1, sizeof(ConSanMoiReportHeader)) ||
-      !append(layout.access_records_offset, access_table_capacity, sizeof(ConSanMoiAccessRecord)) ||
-      !append(layout.barrier_records_offset, visible_barriers, sizeof(ConSanMoiBarrierRecord)) ||
-      !append(layout.atomic_records_offset, visible_atomics, sizeof(ConSanMoiAtomicRecord)) ||
-      !append(layout.fence_records_offset, visible_fences, sizeof(ConSanMoiFenceRecord)) ||
-      !append(layout.diagnostic_records_offset, visible_diagnostics,
-              sizeof(ConSanMoiDiagnosticRecord))) {
-    return std::nullopt;
-  }
-  if (access_table_capacity != header.access_record_capacity ||
-      visible_barriers > header.barrier_record_capacity ||
-      visible_atomics > header.atomic_record_capacity ||
-      visible_fences > header.fence_record_capacity ||
-      visible_diagnostics > header.diagnostic_capacity) {
-    return std::nullopt;
-  }
-  return result;
-}
 
 struct CompactRecordReplayAccessRecords {
   uint32_t committed_record_count = 0;

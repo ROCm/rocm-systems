@@ -6,6 +6,7 @@
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 
@@ -15,11 +16,25 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <vector>
 
 namespace rocjitsu::consan_hook {
+
+namespace {
+
+bool copy_coarse_report_snapshot(void *context, void *destination, const void *source, size_t size,
+                                 int32_t *status) {
+  auto *core = static_cast<CoreApiTable *>(context);
+  if (core == nullptr || core->hsa_memory_copy_fn == nullptr)
+    return false;
+  const hsa_status_t copy_status = core->hsa_memory_copy_fn(destination, source, size);
+  if (status != nullptr)
+    *status = static_cast<int32_t>(copy_status);
+  return copy_status == HSA_STATUS_SUCCESS;
+}
+
+} // namespace
 
 class AutoMoiReportBufferRegistry {
 public:
@@ -722,33 +737,39 @@ private:
       ++summary.inline_malformed_count;
     if (entry.sampled_static_mapping_malformed)
       ++summary.sampled_static_mapping_malformed_count;
-    // Summarization performs several passes over report data. Reading a
-    // fine-grained HSA allocation field by field can be orders of magnitude
-    // slower than sequential copies into ordinary host memory. Snapshot after
-    // dispatch completion, then keep parsing and replay on cacheable storage.
-    // Default-initialization deliberately leaves uncopied Record/Replay tail
-    // capacity untouched; no parser is allowed to read those ranges.
-    std::unique_ptr<uint8_t[]> snapshot(new uint8_t[entry.size]);
-    if (entry.fine_grained) {
-      std::memcpy(snapshot.get(), entry.ptr, sizeof(rocjitsu::ConSanMoiReportHeader));
-    } else {
-      if (core == nullptr || core->hsa_memory_copy_fn == nullptr) {
+    const rocjitsu::ConSanMoiEngine expected_engine =
+        entry.inline_shadow    ? rocjitsu::ConSanMoiEngine::InlineShadow
+        : entry.direct_sampled ? rocjitsu::ConSanMoiEngine::Sampled
+                               : rocjitsu::ConSanMoiEngine::RecordReplay;
+    const AutoMoiReportSnapshot snapshot = capture_auto_moi_report_snapshot(
+        {.source = entry.ptr,
+         .size = entry.size,
+         .expected_layout = entry.layout,
+         .expected_engine = expected_engine,
+         .fine_grained = entry.fine_grained},
+        core != nullptr && core->hsa_memory_copy_fn != nullptr ? copy_coarse_report_snapshot
+                                                               : nullptr,
+        core);
+    if (!snapshot.complete()) {
+      if (snapshot.failure == AutoMoiReportSnapshotFailure::CopyUnavailable) {
         log_message(kLogInfo,
                     "ConSan MOI auto report reader=%llu needs hsa_memory_copy for "
                     "coarse-grained summary",
                     static_cast<unsigned long long>(entry.reader));
-        return summary;
-      }
-      const hsa_status_t copy_status =
-          core->hsa_memory_copy_fn(snapshot.get(), entry.ptr, entry.size);
-      if (copy_status != HSA_STATUS_SUCCESS) {
+      } else if (snapshot.failure == AutoMoiReportSnapshotFailure::CopyFailed) {
         log_message(kLogInfo, "ConSan MOI auto report reader=%llu hsa_memory_copy failed status=%d",
-                    static_cast<unsigned long long>(entry.reader), static_cast<int>(copy_status));
-        return summary;
+                    static_cast<unsigned long long>(entry.reader), snapshot.copy_status);
+      } else {
+        log_message(kLogInfo, "ConSan MOI auto report reader=%llu has invalid snapshot source",
+                    static_cast<unsigned long long>(entry.reader));
       }
-      summary.coarse_grained_snapshot_bytes = entry.size;
+      return summary;
     }
-    const void *report_ptr = snapshot.get();
+    if (entry.fine_grained)
+      summary.fine_grained_snapshot_bytes = snapshot.copied_bytes;
+    else
+      summary.coarse_grained_snapshot_bytes = snapshot.copied_bytes;
+    const void *report_ptr = snapshot.bytes.data();
 
     const auto *header = static_cast<const rocjitsu::ConSanMoiReportHeader *>(report_ptr);
     if (!rocjitsu::consan_moi_report_header_is_current(*header)) {
@@ -760,10 +781,6 @@ private:
       return summary;
     }
     const rocjitsu::ConSanMoiReportBufferLayout &expected_layout = entry.layout;
-    const rocjitsu::ConSanMoiEngine expected_engine =
-        entry.inline_shadow    ? rocjitsu::ConSanMoiEngine::InlineShadow
-        : entry.direct_sampled ? rocjitsu::ConSanMoiEngine::Sampled
-                               : rocjitsu::ConSanMoiEngine::RecordReplay;
     if (!rocjitsu::consan_moi_report_layout_matches_header(*header, expected_layout,
                                                            expected_engine, entry.size)) {
       log_message(kLogInfo, "ConSan MOI auto report reader=%llu has inconsistent ABI-v%u layout",
@@ -790,33 +807,6 @@ private:
         std::min(header->fence_record_count, entry.fence_record_capacity);
     const uint32_t raw_visible_diagnostics =
         std::min(header->diagnostic_count, header->diagnostic_capacity);
-    if (entry.fine_grained) {
-      if (expected_engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
-        const auto snapshot_plan = rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
-            *header, expected_layout, entry.size, expected_layout.access_record_capacity,
-            visible_barriers, visible_atomics, visible_fences, raw_visible_diagnostics);
-        if (!snapshot_plan) {
-          log_message(kLogInfo,
-                      "ConSan MOI auto report reader=%llu has invalid sparse snapshot ranges",
-                      static_cast<unsigned long long>(entry.reader));
-          return summary;
-        }
-        const auto *source = static_cast<const uint8_t *>(entry.ptr);
-        for (const auto &range :
-             std::span(snapshot_plan->ranges.data(), snapshot_plan->range_count)) {
-          if (range.offset == 0)
-            continue;
-          std::memcpy(snapshot.get() + range.offset, source + range.offset, range.size);
-        }
-        summary.fine_grained_snapshot_bytes = snapshot_plan->copied_bytes;
-      } else {
-        std::memcpy(snapshot.get() + sizeof(rocjitsu::ConSanMoiReportHeader),
-                    static_cast<const uint8_t *>(entry.ptr) +
-                        sizeof(rocjitsu::ConSanMoiReportHeader),
-                    entry.size - sizeof(rocjitsu::ConSanMoiReportHeader));
-        summary.fine_grained_snapshot_bytes = entry.size;
-      }
-    }
     const uint32_t dropped_records =
         access_record_count > visible_records ? access_record_count - visible_records : 0;
     const uint32_t dropped_barriers =

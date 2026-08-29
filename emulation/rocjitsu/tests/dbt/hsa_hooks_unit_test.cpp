@@ -3470,6 +3470,66 @@ TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRe
       0, 1));
 }
 
+TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
+  rocjitsu::ConSanMoiAutoReportInventory inventory;
+  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 2;
+  inventory.barrier_event_count = 16;
+  inventory.atomic_event_count = 8;
+  inventory.fence_event_count = 4;
+  inventory.diagnostic_count = 8;
+  inventory.record_replay_dispatch_token_capacity = 2;
+  inventory.record_replay_access_dispatch_bank_count = 1;
+  inventory.record_replay_access_owner_bank_count = 1;
+  inventory.record_replay_address_group_headroom = 1;
+  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+
+  std::vector<uint8_t> source(report.required_bytes, 0xa5);
+  auto header = rocjitsu::make_consan_moi_report_header_for_layout(1, 2, report.layout);
+  header.barrier_record_count = 1;
+  header.atomic_record_count = 1;
+  header.fence_record_count = 1;
+  header.diagnostic_count = 1;
+  std::memcpy(source.data(), &header, sizeof(header));
+  const rocjitsu::consan_hook::AutoMoiReportSnapshotRequest request{
+      .source = source.data(),
+      .size = source.size(),
+      .expected_layout = report.layout,
+      .expected_engine = rocjitsu::ConSanMoiEngine::RecordReplay,
+      .fine_grained = true,
+  };
+
+  const auto sparse = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(request);
+  ASSERT_TRUE(sparse.complete());
+  EXPECT_LT(sparse.copied_bytes, source.size());
+  EXPECT_EQ(sparse.bytes[report.layout.barrier_records_offset], 0xa5);
+  EXPECT_EQ(
+      sparse.bytes[report.layout.barrier_records_offset + sizeof(rocjitsu::ConSanMoiBarrierRecord)],
+      0u);
+
+  source[0] = 0;
+  const auto malformed = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(request);
+  ASSERT_TRUE(malformed.complete());
+  EXPECT_EQ(malformed.copied_bytes, source.size());
+  EXPECT_EQ(malformed.bytes, source);
+
+  auto coarse_request = request;
+  coarse_request.fine_grained = false;
+  const auto unavailable = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(coarse_request);
+  EXPECT_EQ(unavailable.failure,
+            rocjitsu::consan_hook::AutoMoiReportSnapshotFailure::CopyUnavailable);
+
+  const auto failing_copy = [](void *, void *, const void *, size_t, int32_t *status) {
+    *status = 17;
+    return false;
+  };
+  const auto failed = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(
+      coarse_request, failing_copy, nullptr);
+  EXPECT_EQ(failed.failure, rocjitsu::consan_hook::AutoMoiReportSnapshotFailure::CopyFailed);
+  EXPECT_EQ(failed.copy_status, 17);
+}
+
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
   EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(0), 0u);
   EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(3), 3u);
