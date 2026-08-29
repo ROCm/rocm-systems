@@ -160,10 +160,11 @@ private:
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
-    const ConSanBarrierSite &site, const MoiOptions &options, rj_code_arch_t arch,
-    std::optional<uint16_t> visible_evidence_scratch_vgpr, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, uint32_t original_barrier_word,
-    uint64_t cave_text_offset, uint64_t return_text_offset,
+    const ConSanBarrierSite &site, const ConSanRequest &request,
+    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
+    rj_code_arch_t arch, std::optional<uint16_t> visible_evidence_scratch_vgpr,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
     std::vector<std::string> &errors) {
   const bool publish_visible_evidence = visible_evidence_scratch_vgpr.has_value();
@@ -171,7 +172,7 @@ private:
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   if (publish_visible_evidence &&
-      (!options.moi_report_buffer_address || !options.moi_exec_save_sgpr)) {
+      (!bound_resources.moi_report_buffer_address || !point.moi_exec_save_sgpr)) {
     errors.emplace_back(
         "ConSan MOI inline barrier visible evidence requires report and scalar state");
     return std::nullopt;
@@ -186,8 +187,8 @@ private:
     const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
     const uint16_t rank_vgpr = static_cast<uint16_t>(scratch + (cdna ? 2u : 0u));
     const uint16_t address_vgpr = static_cast<uint16_t>(scratch + (cdna ? 0u : 1u));
-    const uint16_t active_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
-    const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u);
+    const uint16_t active_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
+    const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
     const auto save_active_exec =
         instrumentation::build_s_mov_b64(active_exec_sgpr, kRdna4ExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
@@ -211,24 +212,25 @@ private:
     words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
     words.push_back(*first_active);
     words.push_back(*narrow_first);
-    if (!append_publish_visible_evidence_if_zero(
-            words,
-            *options.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
-            rank_vgpr, address_vgpr, temporary_exec_sgpr, arch))
+    if (!append_publish_visible_evidence_if_zero(words,
+                                                 *bound_resources.moi_report_buffer_address +
+                                                     offsetof(ConSanMoiReportHeader, event_counter),
+                                                 rank_vgpr, address_vgpr, temporary_exec_sgpr,
+                                                 arch))
       return false;
     words.push_back(*restore_exec);
     return true;
   };
-  if (options.moi_persistent_sgprs.epoch) {
-    const auto special_state = moi_special_state_sgprs(options, options);
-    if (!options.moi_exec_save_sgpr || !special_state) {
+  if (point.moi_persistent_sgprs.epoch) {
+    const auto special_state = moi_special_state_sgprs(request, point);
+    if (!point.moi_exec_save_sgpr || !special_state) {
       errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
       return std::nullopt;
     }
     const auto save_scc = instrumentation::build_s_cselect_b32(special_state->scc_save_sgpr,
                                                                scalar_positive_inline_u32(1),
                                                                scalar_positive_inline_u32(0), arch);
-    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(*options.moi_persistent_sgprs.epoch,
+    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(*point.moi_persistent_sgprs.epoch,
                                                                 /*literal=*/255u, arch);
     // The compare consumes the following literal word. If the epoch is already
     // saturated, skip the two-word CDNA4-compatible increment sequence. This
@@ -256,7 +258,7 @@ private:
     if (scalar_spill)
       words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
     if (publish_visible_evidence) {
-      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
         return std::nullopt;
       }
@@ -268,8 +270,8 @@ private:
     words.push_back(consan_moi_exact_shadow::max_epoch);
     words.push_back(*skip_increment);
     if (!append_moi_entry_salu_write(words,
-                                     build_s_add_u32(*options.moi_persistent_sgprs.epoch,
-                                                     *options.moi_persistent_sgprs.epoch,
+                                     build_s_add_u32(*point.moi_persistent_sgprs.epoch,
+                                                     *point.moi_persistent_sgprs.epoch,
                                                      scalar_positive_inline_u32(1), arch),
                                      arch)) {
       errors.emplace_back("ConSan MOI scalar inline barrier could not encode saturating add");
@@ -277,8 +279,7 @@ private:
     }
     if (publish_visible_evidence) {
       if (!append_visible_evidence(words) ||
-          !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options),
-                                            arch)) {
+          !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
         return std::nullopt;
       }
@@ -300,7 +301,7 @@ private:
     } else if (const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
       words.push_back(build_s_branch(*ret, arch));
     } else {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
       if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                              words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                              jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -310,16 +311,16 @@ private:
     }
     return words;
   }
-  if (!options.moi_epoch_vgpr) {
+  if (!point.moi_epoch_vgpr) {
     errors.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch requires RJ_CONSAN_MOI_EPOCH_VGPR");
     return std::nullopt;
   }
 
   const auto increment_epoch = instrumentation::build_v_add_u32(
-      *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
+      *point.moi_epoch_vgpr, scalar_positive_inline_u32(1), *point.moi_epoch_vgpr, arch);
   const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
-      *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr, arch);
+      *point.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *point.moi_epoch_vgpr, arch);
   if (!increment_epoch || !saturate_epoch) {
     errors.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch could not encode saturating epoch add");
@@ -340,7 +341,7 @@ private:
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (publish_visible_evidence &&
-      !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
     return std::nullopt;
   }
@@ -348,7 +349,7 @@ private:
   words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
   if (publish_visible_evidence &&
       (!append_visible_evidence(words) ||
-       !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))) {
+       !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))) {
     errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
     return std::nullopt;
   }
@@ -369,7 +370,7 @@ private:
   } else if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -384,11 +385,12 @@ private:
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_private_epoch_barrier_cave_words(
-    const ConSanBarrierSite &site, const MoiOptions &options, uint16_t scratch_vgpr,
-    uint32_t epoch_offset, const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
+    const ConSanBarrierSite &site, const ConSanRequest &request,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, uint32_t epoch_offset,
+    const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
+    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+    std::vector<std::string> &errors) {
   const auto load_epoch = instrumentation::build_private_load_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
   const auto increment_epoch = instrumentation::build_v_add_u32(
@@ -448,7 +450,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   } else if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -1200,14 +1202,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     if (planned.private_epoch_offset && planned.scratch_vgpr && planned.spill) {
       return build_inline_shadow_private_epoch_barrier_cave_words(
-          planned.candidate.site, candidate_options, *planned.scratch_vgpr,
+          planned.candidate.site, candidate_options, candidate_options, *planned.scratch_vgpr,
           *planned.private_epoch_offset, *planned.spill,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, original_barrier_word,
           body_offset, return_offset, call_return_sgpr, gfx1250_vgpr_msb_mode, result.errors);
     }
     return build_inline_shadow_barrier_epoch_cave_words(
-        planned.candidate.site, candidate_options, arch, planned.scratch_vgpr,
-        planned.spill ? &*planned.spill : nullptr,
+        planned.candidate.site, candidate_options, candidate_options, candidate_options, arch,
+        planned.scratch_vgpr, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, original_barrier_word, body_offset,
         return_offset, call_return_sgpr, gfx1250_vgpr_msb_mode, result.errors);
   };
