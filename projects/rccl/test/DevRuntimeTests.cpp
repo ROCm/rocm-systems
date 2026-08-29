@@ -4591,6 +4591,118 @@ TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommCreate, like the window register entry point, defers the work: it
+// validates, deep-copies the caller's requirements so a background thread can
+// use them safely, and queues a task for ncclGroupEnd.
+
+class DevCommCreateTest : public NcclVersionCompatTest {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> rankToNode;
+  std::vector<int> localRankToRank;
+  std::vector<ncclPeerInfo> peers;
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  ncclDevComm outDevComm{};
+
+  void SetUp() override {
+    NcclVersionCompatTest::SetUp();
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
+
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nRanks = 1;
+    comm->localRanks = 1;
+    comm->symmetricSupport = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    rankToNode.assign({0});
+    comm->rankToNode = rankToNode.data();
+    localRankToRank.assign({0});
+    comm->localRankToRank = localRankToRank.data();
+    peers.assign(1, ncclPeerInfo{});
+    peers[0].totalGlobalMem = 1u << 20;
+    comm->peerInfo = peers.data();
+  }
+
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
+      ncclDevrCommCreateTask* t = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
+      freeDevCommRequirements(t->reqs);
+      free(t);
+    }
+    free(comm->devrState.lsaRankList);
+    g_callocCallIndex = 0;
+    g_callocFailAt = -1;
+    NcclVersionCompatTest::TearDown();
+  }
+};
+
+// The queued task owns a copy of the requirements, not the caller's -- that is
+// the whole point of the deep copy, since a background thread reads it after
+// this call returns.
+TEST_F(DevCommCreateTest, Succeeds_QueuesTaskWithCopiedRequirements) {
+  reqs.ginSignalCount = 5;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  ASSERT_FALSE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+
+  ncclDevrCommCreateTask* task = ncclIntruQueueHead(&comm->devrState.commCreateTaskQueue);
+  ASSERT_NE(task->reqs, nullptr);
+  EXPECT_NE(task->reqs, &reqs);  // a copy, not the caller's object
+  EXPECT_EQ(task->reqs->ginSignalCount, 5);
+  EXPECT_EQ(task->outDevComm, &outDevComm);
+  EXPECT_EQ(task->devCompat, &ncclDevCommCompat_v22902);
+}
+
+// Branch: an uninitialised requirements struct is rejected before its version
+// is read.
+TEST_F(DevCommCreateTest, UninitialisedRequirements_ReturnsInvalidUsage) {
+  ncclDevCommRequirements raw{};
+  raw.magic = 0;
+
+  EXPECT_EQ(ncclDevCommCreate(comm, &raw, &outDevComm), ncclInvalidUsage);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// Branch: a device communicator needs symmetric memory, so a communicator
+// without it is refused -- unlike window registration, which accepts host-RMA.
+TEST_F(DevCommCreateTest, NoSymmetricSupport_ReturnsInvalidUsage) {
+  comm->symmetricSupport = 0;
+
+  EXPECT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclInvalidUsage);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// Branch: a version the library cannot serve is refused before any work starts.
+TEST_F(DevCommCreateTest, UnsupportedVersion_ReturnsErrorWithoutQueueing) {
+  reqs.version = NCCL_VERSION_CODE + 1;
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// Branch: the task allocation fails.
+TEST_F(DevCommCreateTest, TaskAllocFails_ReturnsErrorWithoutQueueing) {
+  g_callocFailAt = g_callocCallIndex;
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+// Branch: the requirements filter a compat record may install runs against the
+// copy, and its failure aborts the create.
+TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
+  ncclDevCommCompat_v22902.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    return ncclInvalidArgument;
+  };
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
