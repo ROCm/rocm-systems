@@ -85,6 +85,30 @@ struct ConSanMoiAcceptedResources {
   std::vector<ConSanCandidateResourcePlan> site_plans;
 };
 
+/// Correctness-preserving operating-point fallback selected by MOI placement.
+///
+/// These values cross the solver/orchestrator boundary and therefore remain
+/// typed. User-facing wording is produced only after the caller accepts the
+/// associated operating point.
+enum class ConSanMoiFallbackKind : uint8_t {
+  DynamicStackScalarSpill,
+  SampledLiteralDispatchId,
+  RecordReplayZeroGeneration,
+};
+
+/// Unpublished output of one operating-point fallback attempt.
+///
+/// A rejected attempt still records the exact point that was evaluated, but
+/// carries no fallback kind and publishes no diagnostics. An accepted attempt
+/// moves its operating point and diagnostics together into orchestration.
+struct ConSanMoiOperatingPointAttempt {
+  ConSanMoiOperatingPoint attempted_operating_point;
+  std::optional<ConSanMoiFallbackKind> accepted_fallback;
+  std::vector<std::string> diagnostics;
+
+  [[nodiscard]] bool accepted() const { return accepted_fallback.has_value(); }
+};
+
 /// Complete, unpublished output of one MOI resource-planning attempt.
 ///
 /// `plans` contains every access and synchronization-site allocation derived

@@ -1453,24 +1453,11 @@ apply_moi_transient_sgpr_assignment(MoiOptions &options, const ConSanMoiOperatin
   return true;
 }
 
-/// Capture the complete attempted operating point carried by lowering. Search
-/// and fallback code stores this value as one rollback unit instead of
-/// retaining independently selected flags or assignment vectors.
-[[nodiscard]] ConSanMoiOperatingPoint capture_moi_operating_point(const MoiOptions &options) {
-  return static_cast<const ConSanMoiOperatingPoint &>(options);
-}
-
-/// Restore every transient-placement choice and owner assignment from one
-/// prior operating-point attempt. Caller configuration is deliberately left
-/// untouched; only state that placement selected is rolled back.
-void restore_moi_operating_point(MoiOptions &options, const ConSanMoiOperatingPoint &point) {
-  static_cast<ConSanMoiOperatingPoint &>(options) = point;
-}
-
 /// Freeze the complete accepted operating point before emission or final
 /// validation consumes it.
-void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifacts &result) {
-  result.moi_operating_point = capture_moi_operating_point(options);
+void freeze_moi_operating_point(const ConSanMoiOperatingPoint &point,
+                                ConSanTransformArtifacts &result) {
+  result.moi_operating_point = point;
 }
 
 [[nodiscard]] bool
@@ -5733,33 +5720,41 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   return false;
 }
 
-[[nodiscard]] bool configure_moi_dispatch_id_overrides(MoiOptions &options,
-                                                       ConSanTransformArtifacts &result,
-                                                       const MoiResourceProblem &problem,
-                                                       const MoiResourcePlanningState &state) {
-  const rj_code_arch_t arch = state.arch;
+[[nodiscard]] ConSanMoiOperatingPointAttempt
+plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperatingPoint &base,
+                              const MoiResourceProblem &problem,
+                              std::span<const ConSanCandidateResourcePlan> site_plans) {
+  MoiOptions options(input);
+  static_cast<ConSanMoiOperatingPoint &>(options) = base;
+  ConSanMoiOperatingPointAttempt attempt{
+      .attempted_operating_point = base,
+      .accepted_fallback = std::nullopt,
+      .diagnostics = {},
+  };
+  const rj_code_arch_t arch = problem.arch();
   if (!consan_is_capability_arch(arch) ||
       (options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::Sampled) ||
       !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
       !options.moi_exec_save_sgpr) {
-    return false;
+    return attempt;
   }
 
   // Dispatch placement runs before transient EXEC-save placement. Record/Replay
   // needs a complete owner-local scalar ABI for every newly included component.
   // Sampled instead retains the independently proven EXEC window and overrides
   // only a conflicting dispatch pair with its literal identity representation.
-  const ConSanMoiOperatingPoint prior_operating_point = capture_moi_operating_point(options);
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
       options.owner_transient_sgprs;
   owner_transient_sgprs.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
   const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled;
-  if (!configure_automatic_moi_transient_sgpr_assignments(options, problem, result.resource_plans,
-                                                          result.warnings, state, dispatch_only)) {
-    restore_moi_operating_point(options, prior_operating_point);
-    return false;
+  MoiResourcePlanningState planning_state(problem, options, site_plans);
+  std::vector<std::string> diagnostics;
+  if (!configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans, diagnostics,
+                                                          planning_state, dispatch_only)) {
+    attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+    return attempt;
   }
 
   if (dispatch_only) {
@@ -5769,7 +5764,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // resurrect a code-object-wide EXEC window that the owner had already
     // rejected, silently dropping all sites in that component.
     const auto dispatch_assignments = std::move(owner_transient_sgprs);
-    owner_transient_sgprs = prior_operating_point.owner_transient_sgprs;
+    owner_transient_sgprs = base.owner_transient_sgprs;
     for (const ConSanMoiTransientSgprAssignment &dispatch_assignment : dispatch_assignments) {
       auto prior =
           std::ranges::find(owner_transient_sgprs, dispatch_assignment.descriptor_file_offset,
@@ -5780,15 +5775,15 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         // global EXEC base, so admitting that newly synthesized assignment
         // would resurrect the excluded owner with an unsafe transient
         // window. Owners that safely use the global EXEC ABI remain eligible.
-        if (prior_operating_point.automatic_moi_partial_exec_save_sgprs) {
+        if (base.automatic_moi_partial_exec_save_sgprs) {
           const std::array owners{dispatch_assignment.descriptor_file_offset};
-          const auto owner_contexts = resolve_moi_scalar_owner_contexts(state, owners);
+          const auto owner_contexts = resolve_moi_scalar_owner_contexts(planning_state, owners);
           if (!owner_contexts ||
               !moi_scalar_contexts_admit_reserved_window(
                   owner_contexts->summaries, *options.moi_exec_save_sgpr,
                   moi_exec_save_sgpr_count(
-                      resolve_moi_exec_save_requirement(options, options, options), state.arch),
-                  state.arch)) {
+                      resolve_moi_exec_save_requirement(options, options, options), arch),
+                  arch)) {
             continue;
           }
         }
@@ -5800,8 +5795,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // The dispatch-only proof must not reclassify a globally liveness-dead
     // EXEC window as an owner-wide reserved window. The latter is deliberately
     // stricter and would reject guest uses outside instrumentation sites.
-    options.automatic_moi_partial_exec_save_sgprs =
-        prior_operating_point.automatic_moi_partial_exec_save_sgprs;
+    options.automatic_moi_partial_exec_save_sgprs = base.automatic_moi_partial_exec_save_sgprs;
   }
 
   // The component planner connects all callers of shared text. It retains the
@@ -5811,17 +5805,22 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const bool selected_zero_generation = std::ranges::any_of(
       owner_transient_sgprs, [](const auto &assignment) { return !assignment.dispatch_id_sgpr; });
   if (!selected_zero_generation) {
-    restore_moi_operating_point(options, prior_operating_point);
-    return false;
+    attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+    return attempt;
   }
 
-  result.warnings.emplace_back(
+  diagnostics.emplace_back(
       options.moi_engine == ConSanMoiEngine::Sampled
           ? "ConSan MOI selected owner-local literal dispatch IDs where the hardware pair "
             "overlaps guest scalar state"
           : "ConSan MOI selected owner-local zero-generation records where the hardware "
             "dispatch-ID pair overlaps guest scalar state");
-  return true;
+  attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+  attempt.accepted_fallback = options.moi_engine == ConSanMoiEngine::Sampled
+                                  ? ConSanMoiFallbackKind::SampledLiteralDispatchId
+                                  : ConSanMoiFallbackKind::RecordReplayZeroGeneration;
+  attempt.diagnostics = std::move(diagnostics);
+  return attempt;
 }
 
 [[nodiscard]] bool validate_moi_dispatch_id_sgprs(const MoiOptions &options,

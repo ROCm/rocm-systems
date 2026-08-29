@@ -949,7 +949,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
-  const ConSanMoiOperatingPoint exec_planning_base = capture_moi_operating_point(effective_options);
+  const ConSanMoiOperatingPoint exec_planning_base = effective_options;
   std::vector<std::string> exec_planning_warnings;
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, resource_problem, result.resource_plans, exec_planning_warnings,
@@ -960,7 +960,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // search. Re-run that search with the dynamic frame ABI visible so its
     // stack registers, scalar width, and any architecture-specific scratch
     // demand participate in the same resource proof.
-    restore_moi_operating_point(effective_options, exec_planning_base);
+    static_cast<ConSanMoiOperatingPoint &>(effective_options) = exec_planning_base;
     effective_options.moi_dynamic_stack_spill = true;
     exec_planning_warnings.clear();
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
@@ -980,9 +980,16 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
   freeze_moi_operating_point(effective_options, result);
-  if (configure_moi_dispatch_id_overrides(effective_options, result, resource_problem,
-                                          resource_planning_state))
+  ConSanMoiOperatingPointAttempt dispatch_fallback = plan_moi_dispatch_id_fallback(
+      effective_options, effective_options, resource_problem, result.resource_plans);
+  if (dispatch_fallback.accepted()) {
+    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
+        std::move(dispatch_fallback.attempted_operating_point);
+    result.warnings.insert(result.warnings.end(),
+                           std::make_move_iterator(dispatch_fallback.diagnostics.begin()),
+                           std::make_move_iterator(dispatch_fallback.diagnostics.end()));
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||

@@ -294,6 +294,22 @@ TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedS
   EXPECT_FALSE(std::move(planning).accept());
 }
 
+TEST(ConSan, MoiOperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
+  ConSanMoiOperatingPointAttempt rejected;
+  rejected.attempted_operating_point.moi_exec_save_sgpr = 42u;
+  EXPECT_FALSE(rejected.accepted());
+  EXPECT_FALSE(rejected.accepted_fallback.has_value());
+
+  ConSanMoiOperatingPointAttempt accepted;
+  accepted.attempted_operating_point.moi_exec_save_sgpr = 44u;
+  accepted.accepted_fallback = ConSanMoiFallbackKind::SampledLiteralDispatchId;
+  accepted.diagnostics.emplace_back("rendered only after acceptance");
+  ASSERT_TRUE(accepted.accepted());
+  EXPECT_EQ(*accepted.accepted_fallback, ConSanMoiFallbackKind::SampledLiteralDispatchId);
+  EXPECT_EQ(accepted.attempted_operating_point.moi_exec_save_sgpr, 44u);
+  EXPECT_EQ(accepted.diagnostics.size(), 1u);
+}
+
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   ConSanMoiPersistentSgprState state;
   EXPECT_FALSE(state.complete());
