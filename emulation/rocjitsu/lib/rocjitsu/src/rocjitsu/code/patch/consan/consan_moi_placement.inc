@@ -2173,15 +2173,14 @@ struct MoiScalarOwnerContextGroupsResolution {
   std::optional<uint64_t> unresolved_owner;
 };
 
-[[nodiscard]] MoiScalarOwnerContextGroupsResolution
-resolve_moi_resource_plan_scalar_owner_contexts(const MoiResourcePlanningState &state,
-                                                const ConSanTransformArtifacts &result) {
+[[nodiscard]] MoiScalarOwnerContextGroupsResolution resolve_moi_resource_plan_scalar_owner_contexts(
+    const MoiResourcePlanningState &state, std::span<const ConSanCandidateResourcePlan> plans) {
   MoiScalarOwnerContextGroupsResolution resolved;
   resolved.planning_state_valid = state.valid;
   if (!state.valid)
     return resolved;
-  resolved.groups.reserve(result.resource_plans.size());
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  resolved.groups.reserve(plans.size());
+  for (const ConSanCandidateResourcePlan &plan : plans) {
     if (plan.owner_descriptor_file_offsets.empty())
       continue;
     auto owners = resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
@@ -4234,7 +4233,8 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(
-    MoiOptions &options, ConSanTransformArtifacts &result,
+    MoiOptions &options, const MoiResourceProblem &problem,
+    std::span<const ConSanCandidateResourcePlan> site_plans, std::vector<std::string> &warnings,
     const MoiResourcePlanningState &planning_state, bool dispatch_only = false) {
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
       options.owner_transient_sgprs;
@@ -4256,7 +4256,7 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
   const auto ensure_owner = [&](uint64_t descriptor_offset) {
     parent.try_emplace(descriptor_offset, descriptor_offset);
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const ConSanCandidateResourcePlan &plan : site_plans) {
     // This pass also precedes persistent-state placement. A provisional
     // NoLegalWindow plan is not irrecoverable: owner-local persistent VGPRs
     // can shrink the site's final ABI, after which it still needs a transient
@@ -4277,7 +4277,7 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
     }
     return root;
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const ConSanCandidateResourcePlan &plan : site_plans) {
     if (plan.owner_descriptor_file_offsets.empty())
       continue;
     const uint64_t first = plan.owner_descriptor_file_offsets.front();
@@ -4301,9 +4301,9 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
 
   std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
   std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(result.resource_plans.size() +
-                                result.observation_plan.probe_intents.size() +
-                                result.program_inventory.kernels().size());
+  included_site_offsets.reserve(site_plans.size() +
+                                problem.observation_plan().probe_intents.size() +
+                                problem.inventory().kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
     // Several semantic intents can name one physical instruction. Liveness and
     // def/use are set unions and need only be incorporated once per instruction.
@@ -4329,9 +4329,9 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
         unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
     }
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+  for (const ConSanCandidateResourcePlan &plan : site_plans)
     include_site(plan.text_offset);
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+  for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
     include_site(intent.physical_site.original_text_offset);
   // Inline's component-local transient window is established only inside an
   // access or synchronization body. Its RDNA entry relay and return use
@@ -4339,7 +4339,7 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
   if (options.moi_init_owner_epoch && options.moi_engine != ConSanMoiEngine::InlineShadow) {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+    for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
 
@@ -4586,7 +4586,7 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
       // descriptor/runtime ABI state rather than a fixed range.
       const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) -> std::optional<bool> {
         const ConSanKernelInfo *kernel =
-            result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+            problem.inventory().find_kernel_by_descriptor(descriptor_offset);
         if (kernel == nullptr)
           return std::nullopt;
         if (kernel->uses_dynamic_stack)
@@ -4786,7 +4786,7 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
       const bool all_owners_use_fixed_stack =
           !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
             const ConSanKernelInfo *kernel =
-                result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+                problem.inventory().find_kernel_by_descriptor(descriptor_offset);
             if (kernel != nullptr && kernel->uses_dynamic_stack)
               return !*kernel->uses_dynamic_stack;
             const auto descriptor = read_kernel_descriptor(state.bytes, descriptor_offset);
@@ -4904,21 +4904,23 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
                             return !assignment.dispatch_id_sgpr;
                           })) {
     options.automatic_moi_private_dispatch_id = true;
-    result.warnings.emplace_back(
+    warnings.emplace_back(
         "ConSan MOI deferred incompatible owner-local dispatch identity to private or "
         "persistent VGPR state");
   }
-  result.warnings.emplace_back(
+  warnings.emplace_back(
       "ConSan MOI assigned owner-local transient SGPR windows to independent owner components");
   return true;
 }
 
 [[nodiscard]] bool
 configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArtifacts &result,
-                                        const MoiResourcePlanningState &planning_state,
-                                        std::span<const ConSanMoiCandidate> candidates) {
-  const std::span<const uint8_t> bytes = planning_state.bytes;
-  const rj_code_arch_t arch = planning_state.arch;
+                                        const MoiResourceProblem &problem,
+                                        const MoiResourcePlanningState &planning_state) {
+  std::vector<std::string> &warnings = result.warnings;
+  const std::span<const uint8_t> bytes = problem.image();
+  const rj_code_arch_t arch = problem.arch();
+  const std::span<const ConSanMoiCandidate> candidates = problem.candidates();
   if (options.moi_exec_save_sgpr)
     return false;
   const uint16_t count =
@@ -4927,13 +4929,13 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
     return false;
 
   const auto plan_contexts =
-      resolve_moi_resource_plan_scalar_owner_contexts(planning_state, result);
+      resolve_moi_resource_plan_scalar_owner_contexts(planning_state, result.resource_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning = "ConSan MOI could not resolve an owner context for automatic EXEC-save "
                           "SGPR placement";
     if (plan_contexts.unresolved_owner)
       warning += " at descriptor file offset " + std::to_string(*plan_contexts.unresolved_owner);
-    result.warnings.push_back(std::move(warning));
+    warnings.push_back(std::move(warning));
     return false;
   }
   // A provisional CDNA resource failure may disappear after owner-local
@@ -4945,7 +4947,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   const MoiScalarOwnerContextResolution scalar_contexts =
       collect_moi_scalar_owner_contexts(plan_contexts.groups, true);
   if (scalar_contexts.contexts.empty()) {
-    result.warnings.emplace_back(
+    warnings.emplace_back(
         "ConSan MOI could not derive automatic EXEC-save SGPRs without an owned candidate "
         "scope");
     return false;
@@ -4992,8 +4994,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
     options.moi_exec_save_sgpr = base;
     options.moi_exec_save_sgprs_persistent =
         options.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_inline_access_present;
-    result.warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
-                                 std::to_string(base) + ":s" + std::to_string(base + count - 1u));
+    warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
+                          std::to_string(base) + ":s" + std::to_string(base + count - 1u));
     return true;
   }
 
@@ -5091,8 +5093,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
       options.moi_dispatch_id_sgpr = component_dispatch_sgpr;
-      const bool assigned_component_local =
-          configure_automatic_moi_transient_sgpr_assignments(options, result, planning_state);
+      const bool assigned_component_local = configure_automatic_moi_transient_sgpr_assignments(
+          options, problem, result.resource_plans, warnings, planning_state);
       const bool can_exclude_incompatible_component = consan_uses_gfx9_cdna_encoding(arch);
       // Relocating persistent dispatch state is worthwhile only when the new
       // owner-wide window actually recovers an incompatible component.  If
@@ -5103,11 +5105,11 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
           component_dispatch_sgpr == prior_dispatch_sgpr || assigned_component_local;
       if (relocation_recovers_component &&
           (assigned_component_local || can_exclude_incompatible_component)) {
-        result.warnings.emplace_back(
+        warnings.emplace_back(
             "ConSan MOI reserved a high EXEC-save SGPR window, assigned component-local "
             "scalar state where available, and excluded incompatible owners");
         if (component_dispatch_sgpr != prior_dispatch_sgpr) {
-          result.warnings.emplace_back(
+          warnings.emplace_back(
               "ConSan MOI relocated automatic dispatch-ID state beside the owner-wide "
               "EXEC-save window");
         }
@@ -5139,8 +5141,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   bool saw_site = false;
   std::unordered_set<uint64_t> included_site_offsets;
   included_site_offsets.reserve(result.resource_plans.size() +
-                                result.observation_plan.probe_intents.size() +
-                                result.program_inventory.kernels().size());
+                                problem.observation_plan().probe_intents.size() +
+                                problem.inventory().kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
     if (!included_site_offsets.insert(text_offset).second)
       return;
@@ -5162,14 +5164,14 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   };
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     include_site(plan.text_offset);
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+  for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
     include_site(intent.physical_site.original_text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (!plan.owner_descriptor_file_offsets.empty())
       include_site(plan.text_offset);
   }
   if (options.moi_init_owner_epoch) {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+    for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
   if (state.valid && saw_site) {
@@ -5196,9 +5198,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
         continue;
       }
       options.moi_exec_save_sgpr = static_cast<uint16_t>(base);
-      result.warnings.emplace_back(
-          "ConSan MOI automatically assigned liveness-dead EXEC-save SGPRs s" +
-          std::to_string(base) + ":s" + std::to_string(base + count - 1u));
+      warnings.emplace_back("ConSan MOI automatically assigned liveness-dead EXEC-save SGPRs s" +
+                            std::to_string(base) + ":s" + std::to_string(base + count - 1u));
       return true;
     }
   }
@@ -5329,7 +5330,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
         options.moi_inline_call_return_sgpr = call_return;
         options.moi_inline_dispatch_key_sgpr = dispatch_key;
         options.moi_inline_indirect_scc_sgpr = scc;
-        result.warnings.emplace_back(
+        warnings.emplace_back(
             "ConSan MOI automatically assigned spill-backed Inline SGPRs s" +
             std::to_string(*spill_base) + ":s" + std::to_string(*spill_base + count - 1u) +
             ", dense call-return s" + std::to_string(*call_return) + ":s" +
@@ -5372,10 +5373,10 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
       options.moi_exec_save_sgpr = candidate;
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
-      result.warnings.emplace_back(
-          "ConSan MOI reserved a high EXEC-save SGPR window and excluded only "
-          "incompatible full-pressure owner groups");
-      (void)configure_automatic_moi_transient_sgpr_assignments(options, result, state);
+      warnings.emplace_back("ConSan MOI reserved a high EXEC-save SGPR window and excluded only "
+                            "incompatible full-pressure owner groups");
+      (void)configure_automatic_moi_transient_sgpr_assignments(
+          options, problem, result.resource_plans, warnings, state);
       return true;
     }
   }
@@ -5387,8 +5388,9 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   if (moi_supports_full_pressure_component_state(arch, options.moi_engine)) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_partial_exec_save_sgprs = true;
-    if (configure_automatic_moi_transient_sgpr_assignments(options, result, state)) {
-      result.warnings.emplace_back(
+    if (configure_automatic_moi_transient_sgpr_assignments(options, problem, result.resource_plans,
+                                                           warnings, state)) {
+      warnings.emplace_back(
           "ConSan MOI admitted full-pressure owners with component-local scalar state");
       return true;
     }
@@ -5396,8 +5398,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
     options.automatic_moi_partial_exec_save_sgprs = false;
   }
 
-  result.warnings.emplace_back(
-      "ConSan MOI could not place a fresh automatic EXEC-save SGPR window");
+  warnings.emplace_back("ConSan MOI could not place a fresh automatic EXEC-save SGPR window");
   return false;
 }
 
@@ -5410,7 +5411,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   if (options.moi_engine == ConSanMoiEngine::InlineShadow)
     return false;
 
-  const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, result);
+  const auto plan_contexts =
+      resolve_moi_resource_plan_scalar_owner_contexts(state, result.resource_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic hw_id owner SGPR placement";
@@ -5486,7 +5488,8 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
       options.moi_dispatch_id_vgpr) {
     return false;
   }
-  const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, result);
+  const auto plan_contexts =
+      resolve_moi_resource_plan_scalar_owner_contexts(state, result.resource_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning =
         "ConSan MOI could not resolve an owner context for automatic dispatch-ID SGPR placement";
@@ -5732,6 +5735,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
 
 [[nodiscard]] bool configure_moi_dispatch_id_overrides(MoiOptions &options,
                                                        ConSanTransformArtifacts &result,
+                                                       const MoiResourceProblem &problem,
                                                        const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
   if (!consan_is_capability_arch(arch) ||
@@ -5752,7 +5756,8 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   owner_transient_sgprs.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
   const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled;
-  if (!configure_automatic_moi_transient_sgpr_assignments(options, result, state, dispatch_only)) {
+  if (!configure_automatic_moi_transient_sgpr_assignments(options, problem, result.resource_plans,
+                                                          result.warnings, state, dispatch_only)) {
     restore_moi_operating_point(options, prior_operating_point);
     return false;
   }

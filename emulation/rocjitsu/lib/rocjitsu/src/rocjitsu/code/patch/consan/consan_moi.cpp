@@ -952,7 +952,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   const ConSanMoiOperatingPoint exec_planning_base = capture_moi_operating_point(effective_options);
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
-      effective_options, result, resource_planning_state, moi_candidates);
+      effective_options, result, resource_problem, resource_planning_state);
   if (!effective_options.moi_dynamic_stack_spill &&
       automatic_moi_scalar_spill_needs_dynamic_stack_planning(effective_options, result)) {
     // Scalar spilling is selected only after the first transient-window
@@ -964,7 +964,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
     exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
-        effective_options, result, resource_planning_state, moi_candidates);
+        effective_options, result, resource_problem, resource_planning_state);
   }
   if (exec_planning_changed)
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
@@ -975,7 +975,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
   freeze_moi_operating_point(effective_options, result);
-  if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
+  if (configure_moi_dispatch_id_overrides(effective_options, result, resource_problem,
+                                          resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     freeze_moi_operating_point(effective_options, result);
