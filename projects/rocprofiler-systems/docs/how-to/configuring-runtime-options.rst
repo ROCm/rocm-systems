@@ -480,7 +480,7 @@ Generating a default configuration file
    ROCPROFSYS_PERFETTO_BACKEND                         = inprocess
    ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB                  = 1024000
    ROCPROFSYS_PERFETTO_COMBINE_TRACES                  = false
-   ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.proto
+   ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.pftrace
    ROCPROFSYS_PERFETTO_FILL_POLICY                     = discard
    ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
    ROCPROFSYS_SAMPLING_CPUS                            =

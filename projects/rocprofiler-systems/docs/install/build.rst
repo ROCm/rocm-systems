@@ -184,7 +184,7 @@ Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VA
 option means that the Timemory support for this feature has been integrated
 into Perfetto support for ROCm Systems Profiler, for example, ``ROCPROFSYS_USE_PAPI=<VAL>`` also configures
 ``TIMEMORY_USE_PAPI=<VAL>``. This means the data that Timemory is able to collect via this package
-is passed along to Perfetto and is displayed when the ``.proto`` file is visualized
+is passed along to Perfetto and is displayed when the ``.pftrace`` file is visualized
 in `the Perfetto UI <https://ui.perfetto.dev>`_.
 
 .. code-block:: shell
