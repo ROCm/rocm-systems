@@ -554,7 +554,8 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
 
 [[nodiscard]] bool write_word_bytes(std::vector<uint8_t> &bytes, uint64_t offset, uint32_t word);
 
-void note_dynamic_stack_private_requirement(ConSanPatchInfo &info, const VgprSpillSequence *spill);
+void note_dynamic_stack_private_requirement(ConSanPatchAbiEffects &effects,
+                                            const VgprSpillSequence *spill);
 
 [[nodiscard]] bool apply_spill_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,

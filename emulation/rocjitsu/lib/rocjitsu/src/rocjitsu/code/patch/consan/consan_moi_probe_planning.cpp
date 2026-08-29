@@ -86,22 +86,23 @@ void note_moi_probe_private_requirements(MoiDescriptorPrivateRequirements &requi
 /// metadata including a dynamic-stack addend. Keeping this projection beside
 /// the plan prevents engines from publishing different metadata for the same
 /// preservation transaction.
-void note_moi_probe_patch_info(ConSanPatchInfo &info, const MoiPlannedProbeResources &probe) {
-  info.scratch_vgpr = probe.resources.base;
-  info.owner_descriptor_file_offsets = probe.resources.owner_descriptor_file_offsets;
+void note_moi_probe_patch_info(ConSanPatchAbiEffects &effects,
+                               const MoiPlannedProbeResources &probe) {
+  effects.scratch_vgpr = probe.resources.base;
+  effects.owner_descriptor_file_offsets = probe.resources.owner_descriptor_file_offsets;
   if (probe.private_layout) {
-    info.persistent_epoch_private_offset = probe.private_layout->epoch_offset;
-    info.persistent_owner_private_offset = probe.private_layout->owner_offset;
-    info.persistent_workgroup_key_private_offset = probe.private_layout->workgroup_key_offset;
-    info.persistent_dispatch_id_private_offset = probe.private_layout->dispatch_id_offset;
-    info.persistent_record_replay_workgroup_private_offsets =
+    effects.persistent_epoch_private_offset = probe.private_layout->epoch_offset;
+    effects.persistent_owner_private_offset = probe.private_layout->owner_offset;
+    effects.persistent_workgroup_key_private_offset = probe.private_layout->workgroup_key_offset;
+    effects.persistent_dispatch_id_private_offset = probe.private_layout->dispatch_id_offset;
+    effects.persistent_record_replay_workgroup_private_offsets =
         probe.private_layout->record_replay_workgroup_offsets;
-    info.persistent_private_state_end = probe.private_layout->ephemeral_base;
+    effects.persistent_private_state_end = probe.private_layout->ephemeral_base;
   }
-  info.required_private_segment_size = probe.required_private_bytes;
+  effects.required_private_segment_size = probe.required_private_bytes;
   if (probe.spill) {
-    info.spilled_vgpr_count = probe.spill->vgpr_count;
-    note_dynamic_stack_private_requirement(info, &*probe.spill);
+    effects.spilled_vgpr_count = probe.spill->vgpr_count;
+    note_dynamic_stack_private_requirement(effects, &*probe.spill);
   }
 }
 

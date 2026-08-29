@@ -32,6 +32,7 @@ plan_moi_probe_resources(const ProgramInventory &inventory, ResolvedMoiScratchPl
 void note_moi_probe_private_requirements(MoiDescriptorPrivateRequirements &requirements,
                                          const MoiPlannedProbeResources &probe);
 
-void note_moi_probe_patch_info(ConSanPatchInfo &info, const MoiPlannedProbeResources &probe);
+void note_moi_probe_patch_info(ConSanPatchAbiEffects &effects,
+                               const MoiPlannedProbeResources &probe);
 
 } // namespace rocjitsu::consan_moi_impl

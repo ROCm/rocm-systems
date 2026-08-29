@@ -35,6 +35,66 @@ concept HasPatchValidationProof = requires(const T &patch) {
 static_assert(HasPatchValidationProof<ConSanPatchInfo>);
 static_assert(!HasPatchValidationProof<ConSanPatchDebugRecord>);
 
+template <typename T>
+concept HasCommittedPatchGeometry = requires(const T &patch) {
+  patch.kind;
+  patch.anchor_offset;
+  patch.trampoline_offset;
+  patch.relocated_guest_instruction_offset;
+};
+
+template <typename T>
+concept HasPatchRoutingProof = requires(const T &patch) {
+  patch.branch_only_entry_relay_offsets;
+  patch.entry_prologue_chained_trampoline_offset;
+};
+
+template <typename T>
+concept HasPatchEvidenceEffect = requires(const T &patch) {
+  patch.covered_sync_event_count;
+  patch.sampled_window_bank_count;
+};
+
+template <typename T>
+concept HasPatchMutationProof = requires(const T &patch) {
+  patch.perturbation_edge;
+  patch.barrier_move_cfg_contract;
+};
+
+template <typename T>
+concept HasPatchAbiEffects = requires(const T &patch) {
+  patch.required_private_segment_size;
+  patch.owner_descriptor_file_offsets;
+};
+
+template <typename T>
+concept HasPatchFaultProof = requires(const T &patch) {
+  patch.fault_sequence_identity;
+  patch.fault_target_address_vgpr;
+};
+
+static_assert(std::derived_from<ConSanPatchInfo, ConSanCommittedPatchGeometry>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchRoutingProof>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchEvidenceEffect>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchMutationProof>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchAbiEffects>);
+static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchFaultProof>);
+
+static_assert(HasCommittedPatchGeometry<ConSanCommittedPatchGeometry>);
+static_assert(!HasPatchRoutingProof<ConSanCommittedPatchGeometry>);
+static_assert(!HasPatchAbiEffects<ConSanCommittedPatchGeometry>);
+static_assert(!HasPatchFaultProof<ConSanCommittedPatchGeometry>);
+static_assert(HasPatchRoutingProof<ConSanPatchRoutingProof>);
+static_assert(!HasCommittedPatchGeometry<ConSanPatchRoutingProof>);
+static_assert(HasPatchEvidenceEffect<ConSanPatchEvidenceEffect>);
+static_assert(!HasCommittedPatchGeometry<ConSanPatchEvidenceEffect>);
+static_assert(HasPatchMutationProof<ConSanPatchMutationProof>);
+static_assert(!HasPatchAbiEffects<ConSanPatchMutationProof>);
+static_assert(HasPatchAbiEffects<ConSanPatchAbiEffects>);
+static_assert(!HasCommittedPatchGeometry<ConSanPatchAbiEffects>);
+static_assert(HasPatchFaultProof<ConSanPatchFaultProof>);
+static_assert(!HasPatchMutationProof<ConSanPatchFaultProof>);
+
 [[nodiscard]] RuntimeCapabilities complete_runtime_capabilities() {
   return {
       .backend = ConSanRuntimeBackend::PhysicalHsa,

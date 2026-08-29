@@ -1821,28 +1821,29 @@ dispatch_id_preload_rejection_reason(std::string_view kernel_name,
                        : " persistent_vgpr=" + std::to_string(capture.vgpr.value_or(kMaxVgprs)));
 }
 
-void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchIdPreloadPlan &plan,
+void note_dispatch_id_patch_info(ConSanPatchAbiEffects &effects,
+                                 const ConSanMoiDispatchIdPreloadPlan &plan,
                                  ConSanMoiDispatchIdCapture capture) {
-  info.dispatch_id_capture_sgpr = capture.sgpr;
-  info.dispatch_id_capture_vgpr = capture.vgpr;
-  info.dispatch_id_source_sgpr = plan.dispatch_id_sgpr;
-  info.dispatch_id_original_user_sgpr_count = plan.original_user_sgpr_count;
-  info.dispatch_id_expanded_user_sgpr_count = plan.expanded_user_sgpr_count;
-  info.dispatch_id_system_sgpr_count = plan.system_sgpr_count;
-  info.dispatch_id_kernarg_reload_sgpr = plan.kernarg_reload_sgpr;
-  info.dispatch_id_kernarg_reload_base_sgpr = plan.kernarg_reload_base_sgpr;
-  info.dispatch_id_kernarg_reload_offset_dwords = plan.kernarg_reload_offset_dwords;
-  info.dispatch_id_kernarg_reload_count = plan.kernarg_reload_count;
-  info.dispatch_id_shifted_guest_sgpr_count = plan.shifted_guest_sgpr_count;
-  info.dispatch_id_shifted_system_sgpr_count = plan.shifted_system_sgpr_count;
-  info.dispatch_id_system_sgpr_shift = plan.system_sgpr_shift;
-  info.dispatch_id_original_kernarg_preload_length = plan.original_kernarg_preload_length;
-  info.dispatch_id_replacement_kernarg_preload_length = plan.replacement_kernarg_preload_length;
-  info.dispatch_id_required_sgpr_count = static_cast<uint16_t>(
+  effects.dispatch_id_capture_sgpr = capture.sgpr;
+  effects.dispatch_id_capture_vgpr = capture.vgpr;
+  effects.dispatch_id_source_sgpr = plan.dispatch_id_sgpr;
+  effects.dispatch_id_original_user_sgpr_count = plan.original_user_sgpr_count;
+  effects.dispatch_id_expanded_user_sgpr_count = plan.expanded_user_sgpr_count;
+  effects.dispatch_id_system_sgpr_count = plan.system_sgpr_count;
+  effects.dispatch_id_kernarg_reload_sgpr = plan.kernarg_reload_sgpr;
+  effects.dispatch_id_kernarg_reload_base_sgpr = plan.kernarg_reload_base_sgpr;
+  effects.dispatch_id_kernarg_reload_offset_dwords = plan.kernarg_reload_offset_dwords;
+  effects.dispatch_id_kernarg_reload_count = plan.kernarg_reload_count;
+  effects.dispatch_id_shifted_guest_sgpr_count = plan.shifted_guest_sgpr_count;
+  effects.dispatch_id_shifted_system_sgpr_count = plan.shifted_system_sgpr_count;
+  effects.dispatch_id_system_sgpr_shift = plan.system_sgpr_shift;
+  effects.dispatch_id_original_kernarg_preload_length = plan.original_kernarg_preload_length;
+  effects.dispatch_id_replacement_kernarg_preload_length = plan.replacement_kernarg_preload_length;
+  effects.dispatch_id_required_sgpr_count = static_cast<uint16_t>(
       capture.sgpr
           ? std::max<uint32_t>(plan.required_sgpr_count, static_cast<uint32_t>(*capture.sgpr) + 2u)
           : plan.required_sgpr_count);
-  info.dispatch_id_preload_inserted = plan.descriptor_change_required();
+  effects.dispatch_id_preload_inserted = plan.descriptor_change_required();
 }
 
 void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_arch_t arch,

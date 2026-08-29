@@ -6680,11 +6680,12 @@ void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requir
                                   spill.total_private_bytes);
 }
 
-void note_dynamic_stack_private_requirement(ConSanPatchInfo &info, const VgprSpillSequence *spill) {
+void note_dynamic_stack_private_requirement(ConSanPatchAbiEffects &effects,
+                                            const VgprSpillSequence *spill) {
   if (spill == nullptr || !spill->uses_dynamic_stack_frame)
     return;
-  info.dynamic_private_segment_addend =
-      std::max(info.dynamic_private_segment_addend, spill->dynamic_frame_bytes);
+  effects.dynamic_private_segment_addend =
+      std::max(effects.dynamic_private_segment_addend, spill->dynamic_frame_bytes);
 }
 
 /// Accumulate the fixed private-memory requirement owned by one planned MOI

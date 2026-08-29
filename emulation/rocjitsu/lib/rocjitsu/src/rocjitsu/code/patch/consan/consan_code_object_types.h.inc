@@ -478,13 +478,24 @@ consan_program_container_ref(const ConSanFunctionInfo &function) {
   };
 }
 
-struct ConSanPatchInfo {
+/// Byte ranges and stable identity of one committed patch. This is the only
+/// slice needed to publish an intent-bound lowering location.
+struct ConSanCommittedPatchGeometry {
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
   ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
   uint64_t anchor_offset = 0;
   uint64_t trampoline_offset = 0;
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
+  /// Exact replacement-text location of a guest instruction relocated into
+  /// this instrumentation body. Mutation composition uses this provenance
+  /// instead of assuming a fixed position within a variable-sized probe.
+  std::optional<uint64_t> relocated_guest_instruction_offset;
+};
+
+/// Exact control-flow routing proof retained for final validation. Emitters
+/// populate this slice, but semantic policy and runtime reporting never see it.
+struct ConSanPatchRoutingProof {
   /// Branch-relay words owned by this patch, either in a dead tail of its
   /// replaced anchor or after its primary trampoline body. Relay-reservoir
   /// validation uses this exact provenance when proving routes.
@@ -522,6 +533,11 @@ struct ConSanPatchInfo {
   /// the two 256-byte hardware entry slots.
   std::optional<uint64_t> dispatch_id_primary_prologue_offset;
   std::optional<uint64_t> dispatch_id_secondary_prologue_offset;
+};
+
+/// Evidence-mechanism placement facts emitted by a patch. These facts support
+/// lowering composition and independent validation, not runtime attribution.
+struct ConSanPatchEvidenceEffect {
   /// Original synchronization events represented by one typed sequence body.
   /// Zero means the ordinary one-anchor/one-site accounting rule.
   uint32_t covered_sync_event_count = 0;
@@ -532,10 +548,10 @@ struct ConSanPatchInfo {
   uint32_t sampled_window_bank_count = 0;
   ConSanLdsAccessKind sampled_access_kind = ConSanLdsAccessKind::Other;
   uint32_t sampled_access_range_count = 0;
-  /// Exact replacement-text location of a guest instruction relocated into
-  /// this instrumentation body. Mutation composition uses this provenance
-  /// instead of assuming a fixed position within a variable-sized probe.
-  std::optional<uint64_t> relocated_guest_instruction_offset;
+};
+
+/// Validation-only description of a deliberately mutated guest operation.
+struct ConSanPatchMutationProof {
   /// Whole-pair markerless barrier moves record whether the exact barrier
   /// bytes precede or follow the displaced destination instruction.
   std::optional<ConSanBarrierMoveDirection> barrier_move_direction;
@@ -563,6 +579,12 @@ struct ConSanPatchInfo {
   std::optional<uint64_t> perturbation_source_owner_descriptor_file_offset;
   bool perturbation_composite_atomic_overlap = false;
   bool perturbation_composite_removed_boundary = false;
+};
+
+/// Register, private-memory, group-memory, and descriptor effects committed by
+/// instrumentation. Descriptor mutation consumes this slice independently of
+/// byte geometry and validation identities.
+struct ConSanPatchAbiEffects {
   std::optional<uint16_t> scratch_vgpr;
   /// Ordinary scalar borrowed by a spill-backed VCC save. The scalar is
   /// preserved through scalar_vcc_spill_vgpr and is never a fresh allocation.
@@ -683,6 +705,11 @@ struct ConSanPatchInfo {
   /// Kernel descriptors whose dispatches can execute this patch. Shared
   /// helper patches name every reachable owner.
   std::vector<uint64_t> owner_descriptor_file_offsets;
+};
+
+/// Pristine identities and decoded operands used only to validate fault
+/// mutations against the original code object.
+struct ConSanPatchFaultProof {
   /// Pristine identities retained for exact ordinary-load mutation proof.
   std::string fault_primary_identity;
   std::string fault_companion_identity;
@@ -693,3 +720,13 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> fault_original_address_vgpr;
   std::optional<uint16_t> fault_target_address_vgpr;
 };
+
+/// Private construction record joining the independently owned patch products.
+/// Consumers should accept the narrow base contract they need; only final
+/// validation is expected to inspect the complete joined proof.
+struct ConSanPatchInfo : ConSanCommittedPatchGeometry,
+                         ConSanPatchRoutingProof,
+                         ConSanPatchEvidenceEffect,
+                         ConSanPatchMutationProof,
+                         ConSanPatchAbiEffects,
+                         ConSanPatchFaultProof {};

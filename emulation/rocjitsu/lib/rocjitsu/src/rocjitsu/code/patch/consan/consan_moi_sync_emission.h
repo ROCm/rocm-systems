@@ -12,23 +12,20 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] bool
-append_moi_atomic_lowering_commit(ConSanTransformArtifacts &result,
-                                  const consan_detail::MoiAtomicEvidenceSitePlan &plan,
-                                  const ConSanPatchInfo &patch, std::string_view probe_name,
-                                  std::vector<ConSanCommittedLowering> &commits);
+[[nodiscard]] bool append_moi_atomic_lowering_commit(
+    ConSanTransformArtifacts &result, const consan_detail::MoiAtomicEvidenceSitePlan &plan,
+    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
+    std::vector<ConSanCommittedLowering> &commits);
 
-[[nodiscard]] bool
-append_moi_fence_lowering_commit(ConSanTransformArtifacts &result,
-                                 const consan_detail::MoiFenceEvidenceSitePlan &plan,
-                                 const ConSanPatchInfo &patch, std::string_view probe_name,
-                                 std::vector<ConSanCommittedLowering> &commits);
+[[nodiscard]] bool append_moi_fence_lowering_commit(
+    ConSanTransformArtifacts &result, const consan_detail::MoiFenceEvidenceSitePlan &plan,
+    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
+    std::vector<ConSanCommittedLowering> &commits);
 
-[[nodiscard]] bool
-append_moi_barrier_lowering_commit(ConSanTransformArtifacts &result,
-                                   const consan_detail::MoiBarrierEvidenceSitePlan &plan,
-                                   const ConSanPatchInfo &patch, std::string_view probe_name,
-                                   std::vector<ConSanCommittedLowering> &commits);
+[[nodiscard]] bool append_moi_barrier_lowering_commit(
+    ConSanTransformArtifacts &result, const consan_detail::MoiBarrierEvidenceSitePlan &plan,
+    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
+    std::vector<ConSanCommittedLowering> &commits);
 
 [[nodiscard]] bool publish_moi_sync_lowering_commits(ConSanTransformArtifacts &result,
                                                      std::vector<ConSanCommittedLowering> commits,
