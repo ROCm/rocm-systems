@@ -21,6 +21,7 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_lowerer.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
@@ -74,25 +75,13 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
-#include "rocjitsu/code/patch/consan/consan_analysis.inc"
-
-#include "rocjitsu/code/patch/consan/consan_placement.inc"
-
-#include "rocjitsu/code/patch/consan/consan_sync_analysis.inc"
-
-#include "rocjitsu/code/patch/consan/consan_fault_injection.inc"
-
-#include "rocjitsu/code/patch/consan/consan_supercollider.inc"
-
-#include "rocjitsu/code/patch/consan/consan_composition.inc"
-
 ConSanTransformArtifacts
 rederive_consan_mutation_validation_inventory(std::span<const uint8_t> original_image) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_drop_barrier = true;
   options.fault_dry_run = true;
-  return try_patch_consan_impl(original_image, options);
+  return run_consan_lowering_core(original_image, options);
 }
 
 ConSanPerturbationValidationInventory
@@ -101,8 +90,7 @@ rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> origi
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
   ConSanPerturbationValidationInventory inventory;
-  inventory.artifacts =
-      try_patch_consan_impl(original_image, options, {}, std::nullopt, &inventory.planning);
+  inventory.artifacts = run_consan_lowering_core(original_image, options, &inventory.planning);
   return inventory;
 }
 
@@ -175,13 +163,13 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       // A pristine report-sizing inventory deliberately excludes the live
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.
-      ConSanTransformArtifacts result = try_patch_consan_impl(
-          code_object_bytes, options, {}, std::nullopt, nullptr, {}, {}, false, execution);
+      ConSanTransformArtifacts result =
+          run_consan_lowering_core(code_object_bytes, options, nullptr, {}, {}, execution);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
     }
-    if (!initialize_consan_lowering_observation(options, inventory, execution, observation)) {
+    if (!install_consan_lowering_observation(options, inventory, execution, observation)) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
@@ -217,9 +205,9 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.size());
   try {
     MoiOptions effective_options = options;
-    ConSanTransformArtifacts result = try_patch_consan_impl(
-        code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation,
-        preapplied_mutation, initial_owner_transient_sgprs, false, execution, extent, observation);
+    ConSanTransformArtifacts result = run_consan_lowering_core(
+        code_object_bytes, effective_options, inspected_perturbation, preapplied_mutation,
+        initial_owner_transient_sgprs, execution, extent, observation);
     const bool stopped_after_inventory =
         extent == ConSanLoweringExtent::ThroughProgramInventory && execution != nullptr &&
         execution->program_inventory_passes != 0u && execution->observation_plan_passes == 0u;
@@ -266,9 +254,7 @@ ConSanTransformArtifacts test_apply_consan_fault_plans(std::span<const uint8_t> 
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
-  AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-  const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-  apply_fault_mutation_to_inventory(code_object, arch, application_context,
+  apply_consan_fault_mutation_plans(code_object_bytes, application_context,
                                     planned_artifacts.fault_plans, planned_artifacts);
   return finalize_consan_result(std::move(planned_artifacts), code_object_bytes,
                                 application_context.moi_report_dispatch_id);

@@ -134,8 +134,8 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
     std::vector<ConSanAccessInventorySite> decoded_accesses;
-    decode_kernel_stats(code_object_bytes, decoder, arch, decoded_range, decoded_accesses,
-                        result.warnings);
+    decode_consan_kernel_inventory(code_object_bytes, decoder, arch, decoded_range,
+                                   decoded_accesses, result.warnings);
     inventory.reattribute_access_range(range.text_offset, range.size, *kernel, decoded_accesses,
                                        code_object_bytes);
     append_unique_sites(decoded_range.ordinary_memory_sites, kernel->ordinary_memory_sites);
@@ -922,13 +922,13 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
 
   for (ConSanKernelInfo &kernel : inventory_builder.kernels()) {
-    decode_kernel_stats(code_object_bytes, *decoder, arch, kernel, inventory_builder.access_sites(),
-                        result.warnings);
+    decode_consan_kernel_inventory(code_object_bytes, *decoder, arch, kernel,
+                                   inventory_builder.access_sites(), result.warnings);
   }
   std::vector<ConSanAccessInventorySite> function_accesses;
   for (ConSanFunctionInfo &function : inventory_builder.functions())
-    decode_function_stats(code_object_bytes, *decoder, arch, function, function_accesses,
-                          result.warnings);
+    decode_consan_function_inventory(code_object_bytes, *decoder, arch, function, function_accesses,
+                                     result.warnings);
   const auto append_function_accesses = [&] {
     inventory_builder.access_sites().insert(inventory_builder.access_sites().end(),
                                             std::make_move_iterator(function_accesses.begin()),
@@ -951,21 +951,21 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         "ConSan stopped before CFG analysis because an instruction could not be decoded");
     return result;
   }
-  relay_flat_pointer_provenance_across_calls(
-      code_object_bytes, *code_object, arch, inventory_builder.kernels(),
-      inventory_builder.functions(), function_accesses, result.warnings);
+  refine_consan_flat_pointer_provenance(code_object_bytes, *code_object, arch,
+                                        inventory_builder.kernels(), inventory_builder.functions(),
+                                        function_accesses, result.warnings);
   append_function_accesses();
   publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {
     for (ConSanKernelInfo &kernel : inventory_builder.kernels())
-      preflight_kernel(kernel, result.warnings);
+      preflight_consan_kernel(kernel, result.warnings);
   }
   reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, inventory_builder, result);
   if (!result.errors.empty()) {
     return result;
   }
-  prune_unreachable_inferred_ranges(
+  prune_consan_unreachable_inferred_ranges(
       *code_object, *decoder, arch, result.program_inventory.preapplied_mutation().code_ranges,
       inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites());
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||

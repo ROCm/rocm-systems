@@ -15,6 +15,16 @@ namespace rocjitsu {
 class Decoder;
 class Instruction;
 
+// Target encoding sentinels used while normalizing FLAT/VGLOBAL operands.
+inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
+inline constexpr uint32_t kRdna3FlatNoSaddrEncoding = 0x7cu;
+inline constexpr uint32_t kRdna3GlobalNoSaddrEncoding = 0x7cu;
+
+/// Interpret the low 13 bits as a signed VGLOBAL/SCRATCH displacement.
+[[nodiscard]] constexpr int32_t sign_extend_13_bit_offset(uint32_t value) {
+  return static_cast<int32_t>(value << 19u) >> 19u;
+}
+
 [[nodiscard]] std::unique_ptr<Instruction>
 decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
                            uint64_t source_offset);
