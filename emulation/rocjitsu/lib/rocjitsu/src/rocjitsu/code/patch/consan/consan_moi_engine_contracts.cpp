@@ -61,6 +61,10 @@ bool record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperati
   return record_replay_entry_workgroup_capture_count(point) <= 1u;
 }
 
+bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) {
+  return point.moi_dispatch_id_sgpr || point.moi_dispatch_id_vgpr;
+}
+
 void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanMoiOperatingPoint &point,
                                     const ConSanMoiOperatingPoint &allocation) {
   patch.persistent_owner_vgpr = point.moi_owner_vgpr;

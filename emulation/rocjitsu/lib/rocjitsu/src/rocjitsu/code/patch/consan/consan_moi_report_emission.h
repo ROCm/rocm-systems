@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 
 #include <optional>
@@ -40,7 +41,6 @@ struct ConSanMoiReportDispatchIdWordSource {
 
 enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
 
-[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point);
 [[nodiscard]] bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine,
                                                          rj_code_arch_t arch);
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource
