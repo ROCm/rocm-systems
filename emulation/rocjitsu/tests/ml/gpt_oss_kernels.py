@@ -42,6 +42,7 @@ import platform
 import sys
 import time
 import traceback
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -1328,7 +1329,7 @@ def _attn_swa_triton(s: Shape, gen: torch.Generator):
     "single-query decode step against a full cache",
 )
 def _attn_decode(s: Shape, gen: torch.Generator):
-    one = Shape(**{**s.__dict__, "num_tokens": 1})
+    one = dataclasses.replace(s, num_tokens=1)
     q, k, v, sinks = _attention_inputs(one, gen)
     got = _attention_torch(one, q, k, v, sinks, None)
     return got, ref_attention_sinks(
@@ -2186,10 +2187,15 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
-    results = [run_case(c, shape, args.seed) for c in cases]
-    for r in results:
+    # Print each case as it finishes rather than batching at the end: at the
+    # `model` profile a single case can run for minutes, and a suite that prints
+    # nothing until the last one is indistinguishable from a hung one.
+    results = []
+    for c in cases:
+        r = run_case(c, shape, args.seed)
+        results.append(r)
         print(
-            f"  {r.status.upper():<5} {r.name:<24} {r.impl:<7} "
+            f"  {r.status.upper():<5} {r.name:<24} {r.impl:<10} "
             f"rel={r.max_rel_err:.3e} tol={r.tolerance:.1e} {r.seconds:6.2f}s"
             + (f"  {r.detail}" if r.detail else ""),
             flush=True,
@@ -2201,7 +2207,7 @@ def main(argv: list[str] | None = None) -> int:
         results.extend(extra)
         for r in extra:
             print(
-                f"  {r.status.upper():<5} {r.name:<24} {r.impl:<7} "
+                f"  {r.status.upper():<5} {r.name:<24} {r.impl:<10} "
                 f"rel={r.max_rel_err:.3e}" + (f"  {r.detail}" if r.detail else ""),
                 flush=True,
             )
