@@ -118,7 +118,10 @@ struct drained_record
     uint64_t start_ticks  = 0;
     uint64_t end_ticks    = 0;
     bool     start_known  = false;
-    bool     loss_free    = true;
+    // No loss_free field: a torn/lossy record is dropped at the top of pair_records
+    // (the !copied_record.loss_free guard), so every record that reaches here is
+    // trusted by construction. The loss verdict lives on the copy side
+    // (copied_record.loss_free and the ring_cursors counts), not per drained record.
 };
 
 // Carries the copier's loss verdict, since pairing happens on another thread.
@@ -393,7 +396,6 @@ pair_records(const copied_record* records,
                 out.doorbell_off = rec.doorbell_off;
                 out.dispatch_id  = rec.dispatch_id;
                 out.end_ticks    = ts;
-                out.loss_free    = records[i].loss_free;
                 out.start_known  = false;
                 on_record(out);
             }
@@ -412,13 +414,8 @@ pair_records(const copied_record* records,
                 out.doorbell_off = rec.doorbell_off;
                 out.dispatch_id  = rec.dispatch_id;
                 out.end_ticks    = ts;
-                // Only the EOP's loss_free is needed, not eop.loss_free &&
-                // start.loss_free: a START is retained above only after clearing the
-                // same !loss_free guard, so the paired START is always loss_free. A
-                // lossy START is instead dropped, and its EOP arrives start-unknown.
-                out.loss_free   = records[i].loss_free;
-                out.start_ticks = it->second.start_ticks;
-                out.start_known = true;
+                out.start_ticks  = it->second.start_ticks;
+                out.start_known  = true;
                 state.pending_starts.erase(it);
                 ++seen;
                 on_record(out);

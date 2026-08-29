@@ -70,7 +70,7 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
     shortx2_t i16_vec;
     rccl_float8 fp8[4];
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8[0];
 #elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
 
@@ -96,7 +96,7 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
     shortx2_t i16_vec;
     rccl_bfloat8 fp8[4];
   } u1{0};
-  u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
+  u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(u1.i16_vec, v1, /* scale */ 1.f, 0);
   return u1.fp8[0];
 #elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
 
@@ -122,7 +122,7 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8;
 #elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
   float2_t v;
@@ -155,7 +155,7 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8;
 #elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
   float2_t v;

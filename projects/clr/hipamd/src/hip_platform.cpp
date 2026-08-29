@@ -323,9 +323,15 @@ void __hipUnregisterFatBinary(void** modules) {
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
     std::call_once(unregister_device_sync, []() {
       for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // SyncAllStreams only guarantees the GPU finished and the host observed
+        // the completion signals — the HSA async-handler thread can still be
+        // inside a completion callback.  That callback reports kernel names that
+        // point into the Kernel objects RemoveFatBinary is about to destroy, so
+        // the handlers have to be drained too, not just the streams.
+        for (auto* device : hipDevice->devices()) {
+          device->WaitForHsaAsyncHandlersIdle();
+        }
       }
     });
   }

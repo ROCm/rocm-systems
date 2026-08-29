@@ -69,6 +69,12 @@ struct QueueState
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
     std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
+
+    /// Signal-less admission latch (§1.5.4). Plain bool, guarded by gate_lock: set
+    /// by the destroy path's close_admission_and_snapshot() so no later batch can
+    /// register against this queue's window, read in signal_less_batch_eligible()
+    /// which already holds gate_lock. Never an atomic -- one lock orders both.
+    bool admission_closed = false;
 };
 
 using queue_state_ptr_t = std::shared_ptr<QueueState>;
@@ -211,6 +217,37 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite = false);
  */
 void
 destroy_queue_state(const hsa_queue_t* queue);
+
+// The fence across EVERY live queue: teardown step 2 and the (a) fence of a
+// hub-aware sync. The caller must hold no hub, registry or gate lock.
+void
+fence_all_queue_gates();
+
+/// The hardware queue has consumed every packet we submitted. The inline path's
+/// analogue of `_active_kernels == 0`, which only the legacy path maintains.
+inline bool
+hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
+{
+    return real_rdid >= next_submit_pos;
+}
+
+// Close signal-less admission and snapshot the submit position in ONE gate_lock
+// section (§1.5.4, Path-4 step 0): set admission_closed (SW-2, no later batch can
+// register against this queue's window) AND read next_submit_pos, ordered by the
+// same lock that serialises every publishing critical section. Returns that
+// snapshot P. No separate fence and no atomic are needed.
+uint64_t
+close_admission_and_snapshot(const hsa_queue_t* queue);
+
+/// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until this queue's
+/// hardware read index has caught up with the sampled submit position `P`, so
+/// every packet in that snapshot -- hence every registered START -- has been
+/// consumed by the CP before the caller decides anything was lost (§1.3 Path 4).
+///
+/// False on deadline; true immediately with no state or when P is already drained.
+/// Takes no lock: P was snapshotted under gate_lock by close_admission_and_snapshot.
+bool
+wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t submit_pos, uint64_t deadline_ns);
 
 /**
  * @brief Check if queue interposition has been installed
