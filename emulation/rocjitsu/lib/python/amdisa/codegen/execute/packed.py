@@ -179,8 +179,16 @@ def gen_pk_binop(
             ),
         }
         lo_expr, hi_expr = i_op_map[op]
-        L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-        L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
+        if op in ('add', 'sub'):
+            L.append(
+                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_lo, b_lo, inst_.clamp));'
+            )
+            L.append(
+                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_hi, b_hi, inst_.clamp));'
+            )
+        else:
+            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
+            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
@@ -216,8 +224,16 @@ def gen_pk_binop(
             ),
         }
         lo_expr, hi_expr = u_op_map[op]
-        L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-        L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
+        if op in ('add', 'sub'):
+            L.append(
+                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_lo, b_lo, inst_.clamp));'
+            )
+            L.append(
+                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_hi, b_hi, inst_.clamp));'
+            )
+        else:
+            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
+            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )

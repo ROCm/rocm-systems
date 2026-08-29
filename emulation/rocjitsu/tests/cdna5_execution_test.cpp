@@ -185,13 +185,19 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
       uint32_t rhs;
       uint32_t expected;
     };
-    constexpr std::array<TestCase, 8> kBoundaryCases = {{
+    constexpr std::array<TestCase, 12> kBoundaryCases = {{
         {cdna5::kVAddNcU32Vop3, UINT32_MAX, 1u, UINT32_MAX},
         {cdna5::kVSubNcU32Vop3, 7u, 3u, 4u},
+        {cdna5::kVSubrevNcU32Vop3, 3u, 7u, 4u},
+        {cdna5::kVSubrevNcU32Vop3, 7u, 3u, 0u},
         {cdna5::kVAddNcI32Vop3, static_cast<uint32_t>(INT32_MAX), 1u,
          static_cast<uint32_t>(INT32_MAX)},
+        {cdna5::kVAddNcI32Vop3, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(-1),
+         static_cast<uint32_t>(INT32_MIN)},
         {cdna5::kVSubNcI32Vop3, static_cast<uint32_t>(INT32_MIN), 1u,
          static_cast<uint32_t>(INT32_MIN)},
+        {cdna5::kVSubNcI32Vop3, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(-1),
+         static_cast<uint32_t>(INT32_MAX)},
         {cdna5::kVAddNcU16Vop3, UINT16_MAX, 1u, UINT16_MAX},
         {cdna5::kVSubNcU16Vop3, 0u, 1u, 0u},
         {cdna5::kVAddNcI16Vop3, static_cast<uint16_t>(INT16_MAX), 1u,
@@ -219,6 +225,90 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
     cdna5::VAddNcU32Vop3 wrap_inst(wrap_words.data());
     wrap_inst.execute_impl(*wf);
     EXPECT_EQ(cu->read_vgpr(base + 2, 0), 0u) << "scalar " << scalar;
+  }
+}
+
+TEST(Gfx1250ExecutionTest, Vop3PackedIntegerClampSaturatesSelectedHalves) {
+  ForceScalarGuard guard;
+  struct TestCase {
+    uint16_t opcode;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t expected;
+  };
+  constexpr std::array kCases{
+      TestCase{cdna5::kVPkAddI16Vop3p, 0x7fff8000u, 0x0001ffffu, 0x80007fffu},
+      TestCase{cdna5::kVPkSubI16Vop3p, 0x7fff8000u, 0xffff0001u, 0x80007fffu},
+      TestCase{cdna5::kVPkAddU16Vop3p, 0xffff0000u, 0x00010001u, 0x0001ffffu},
+      TestCase{cdna5::kVPkSubU16Vop3p, 0x0000ffffu, 0x00010001u, 0xfffe0000u},
+  };
+  for (uint32_t scalar = 0; scalar < 2; ++scalar) {
+    util::set_force_scalar_for_testing(scalar != 0);
+    for (const TestCase &test : kCases) {
+      Gfx1250Sim sim;
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1u);
+      const uint32_t base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base, 0, test.src0);
+      cu->write_vgpr(base + 1, 0, test.src1);
+      const auto words = cdna5::build_vop3p(
+          test.opcode,
+          {.vdst = 2, .opsel = 3, .clamp = 1, .src0 = 256, .src1 = 257, .opsel_hi = 0});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      inst->execute(*inst, wf);
+      EXPECT_EQ(cu->read_vgpr(base + 2, 0), test.expected) << "scalar " << scalar;
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
+  ForceScalarGuard guard;
+  struct TestCase {
+    uint16_t opcode;
+    uint32_t src0;
+    uint32_t src1;
+    bool carry_in;
+  };
+  constexpr std::array kCases{
+      TestCase{cdna5::kVAddCoU32Vop3SdstEnc, UINT32_MAX, 1u, false},
+      TestCase{cdna5::kVSubCoU32Vop3SdstEnc, 0u, 1u, false},
+      TestCase{cdna5::kVSubrevCoU32Vop3SdstEnc, 1u, 0u, false},
+      TestCase{cdna5::kVAddCoCiU32Vop3SdstEnc, UINT32_MAX, 0u, true},
+      TestCase{cdna5::kVSubCoCiU32Vop3SdstEnc, 0u, 0u, true},
+      TestCase{cdna5::kVSubrevCoCiU32Vop3SdstEnc, 0u, 0u, true},
+  };
+  for (uint32_t scalar = 0; scalar < 2; ++scalar) {
+    util::set_force_scalar_for_testing(scalar != 0);
+    for (const TestCase &test : kCases) {
+      Gfx1250Sim sim;
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1u);
+      const uint32_t base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base, 0, test.src0);
+      cu->write_vgpr(base + 1, 0, test.src1);
+      write_wave_sgpr(*cu, *wf, 4, test.carry_in ? 1u : 0u);
+      write_wave_sgpr(*cu, *wf, 2, 0u);
+      const auto words = cdna5::build_vop3_sdst_enc(
+          test.opcode, {.vdst = 2, .sdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 4});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      inst->execute(*inst, wf);
+      EXPECT_EQ(cu->read_vgpr(base + 2, 0), test.opcode == cdna5::kVAddCoU32Vop3SdstEnc ||
+                                                    test.opcode == cdna5::kVAddCoCiU32Vop3SdstEnc
+                                                ? UINT32_MAX
+                                                : 0u)
+          << "scalar " << scalar;
+      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, 1u) << "scalar " << scalar;
+    }
   }
 }
 

@@ -4077,6 +4077,47 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
+def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna5.xml'
+    parser = Parser(str(isa_xml), Cdna5Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+
+    def generated_body(name: str, enc_name: str, *, result_writer=None) -> str:
+        enc = next(enc for enc in spec.inst_encodings if enc.enc_name == enc_name)
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        generator._current_enc = enc
+        return generator._gen_execute_body(
+            inst,
+            semantics.instructions[name],
+            enc.enc_name,
+            result_writer=result_writer,
+        )
+
+    vop3 = generated_body('V_ADD_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint32_t>' in vop3
+    assert 'inst_.clamp' in vop3
+
+    subrev = generated_body('V_SUBREV_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint32_t>' in subrev
+    assert subrev.index('read_lane(src1, lane)') < subrev.index('read_lane(src0, lane)')
+    assert 'inst_.clamp' in subrev
+
+    vop2 = generated_body('V_ADD_NC_U32', 'ENC_VOP2')
+    assert 'vop3_integer_add' not in vop2
+    assert 'inst_.clamp' not in vop2
+
+    carry = generated_body(
+        'V_ADD_CO_U32', 'VOP3_SDST_ENC', result_writer='commit_result'
+    )
+    assert 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX' in carry
+    assert 'inst_.clamp' in carry
+    assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
+
+
 def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):
     encodings_h = (amdgpu_generated_root / 'rdna4' / 'encodings.h').read_text()
 

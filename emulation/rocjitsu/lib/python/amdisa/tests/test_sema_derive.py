@@ -1878,6 +1878,33 @@ class TestDeriveVectorAddCo:
         }
         assert 'sub_co' in call_names
 
+    @pytest.mark.parametrize(
+        ('operation', 'expected'),
+        [
+            ('add', 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'),
+            ('sub', 'inst_.clamp && a < b ? 0u'),
+            ('rsub', 'inst_.clamp && a < b ? 0u'),
+            ('addc', 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'),
+            ('subbc', 'inst_.clamp && a < b ? 0u'),
+            ('subbrevco', 'inst_.clamp && a < b ? 0u'),
+        ],
+    )
+    def test_vop3_clamp_saturates_result_without_changing_carry(
+        self, operation, expected
+    ):
+        sem = _FakeSem('V_CARRY_U32', 'vector_add_co', operation, 'u32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(
+            block,
+            LoweringContext(
+                exec_model=block.pragma,
+                integer_saturation_dtype='u32',
+            ),
+        )
+
+        assert expected in cpp
+        assert 'vcc |= (1ULL << lane)' in cpp
+
 
 class TestDeriveVectorCndmask:
     def test_cndmask(self):
@@ -2450,6 +2477,29 @@ class TestDerivePacked:
         assert 'util::bf16_to_f32' in cpp
         assert 'util::f32_to_bf16' in cpp
         assert 'util::f32_to_f16' not in cpp
+
+    @pytest.mark.parametrize(
+        ('operation', 'data_type', 'helper'),
+        [
+            ('add', 'i16', 'vop3_integer_add<int16_t>'),
+            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
+            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
+            ('sub', 'u16', 'vop3_integer_sub<uint16_t>'),
+        ],
+    )
+    def test_pk_integer_add_sub_clamps_each_selected_half(
+        self, operation, data_type, helper
+    ):
+        cpp = gen_pk_binop(
+            ['vdst'],
+            ['src0', 'src1'],
+            operation,
+            data_type,
+            ('inst_.opsel', 'inst_.opsel_hi'),
+        )
+
+        assert cpp.count(helper) == 2
+        assert cpp.count('inst_.clamp') == 2
 
     def test_pk_ternary_bf16_generator_uses_fma_and_bf16_helpers(self):
         cpp = gen_pk_ternary(

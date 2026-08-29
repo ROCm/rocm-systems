@@ -1751,6 +1751,31 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    if ctx.integer_saturation_dtype == 'u32' and callee in (
+        'add_co',
+        'sub_co',
+        'addc_co',
+        'subbc_co',
+    ):
+        if callee in ('add_co', 'addc_co'):
+            terms = ' + '.join(f'static_cast<uint64_t>({arg})' for arg in args)
+            return (
+                f'[&]() {{ uint64_t w = {terms};'
+                ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
+                ' else vcc &= ~(1ULL << lane);'
+                ' return inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'
+                ' : static_cast<uint32_t>(w); }()'
+            )
+        minuend, subtrahend, *borrow = args
+        borrow_expr = f' + static_cast<uint64_t>({borrow[0]})' if borrow else ''
+        return (
+            f'[&]() {{ uint64_t a = static_cast<uint64_t>({minuend}),'
+            f' b = static_cast<uint64_t>({subtrahend}){borrow_expr};'
+            ' if (a < b) vcc |= (1ULL << lane);'
+            ' else vcc &= ~(1ULL << lane);'
+            ' return inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b); }()'
+        )
+
     pseudo_scalar_operations = {
         'exp2': 'EXP2',
         'log2': 'LOG2',

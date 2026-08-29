@@ -3376,8 +3376,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_co_result_simd(Inst &inst, Wavefront &wf,
                                                                  CarryOp carry_op,
                                                                  WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3429,8 +3429,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_cin_result_simd(Inst &inst, Wavefront &wf,
                                                                   CarryOp carry_op,
                                                                   WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3613,8 +3613,8 @@ template <FmaMixDst DstMode, typename Inst>
 /// output) and op_sel_hi = 3 (both srcs feed their high half into the
 /// high output) — the LLVM-AS encoder emits this for the default-mode
 /// pk mnemonics, and the SIMD fast path bails when any other combination
-/// is requested. The scalar bodies do NOT apply neg / neg_hi / clamp on
-/// these integer pk ops, so the SIMD path also passes through. Functor
+/// or integer saturation is requested. The scalar bodies apply CLAMP to
+/// packed integer add/sub independently for each selected half. Functor
 /// receives the two source u32 lane vectors (each holding {low16, high16}
 /// packed) and returns the same shape; the per-half decompose / recompose
 /// lives inside the functor for op-specific flexibility (e.g. mul_lo
@@ -3625,7 +3625,7 @@ template <typename Inst, typename Op>
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+  if (inst.inst_.clamp || inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;

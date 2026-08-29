@@ -2946,7 +2946,7 @@ inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(w);
+      return inst.inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX : static_cast<uint32_t>(w);
     }());
   }
   commit_result(vcc);
@@ -2996,7 +2996,7 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(w);
+      return inst.inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX : static_cast<uint32_t>(w);
     }());
   }
   commit_result(vcc);
@@ -3411,7 +3411,7 @@ inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(w);
+      return inst.inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX : static_cast<uint32_t>(w);
     }());
   }
   commit_result(vcc);
@@ -17175,8 +17175,10 @@ inline void execute_v_pk_add_i16_vop3p([[maybe_unused]] Inst &inst,
     int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo + b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi + b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<int16_t>(a_lo, b_lo, inst.inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<int16_t>(a_hi, b_hi, inst.inst_.clamp));
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
                             static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -17204,8 +17206,10 @@ inline void execute_v_pk_add_u16_vop3p([[maybe_unused]] Inst &inst,
     uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo + b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi + b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(a_lo, b_lo, inst.inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(a_hi, b_hi, inst.inst_.clamp));
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
                             static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -17893,8 +17897,10 @@ inline void execute_v_pk_sub_i16_vop3p([[maybe_unused]] Inst &inst,
     int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo - b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi - b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<int16_t>(a_lo, b_lo, inst.inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<int16_t>(a_hi, b_hi, inst.inst_.clamp));
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
                             static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -17922,8 +17928,10 @@ inline void execute_v_pk_sub_u16_vop3p([[maybe_unused]] Inst &inst,
     uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo - b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi - b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(a_lo, b_lo, inst.inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(a_hi, b_hi, inst.inst_.clamp));
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
                             static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -19020,14 +19028,14 @@ inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-               c = static_cast<uint64_t>(
-                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
-      if (a < b + c)
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
+                   static_cast<uint64_t>(
+                       ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
+      if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(a - b - c);
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);
@@ -19067,13 +19075,13 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
-      uint32_t a = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-               b = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+      uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
       if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return a - b;
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);
@@ -19403,14 +19411,14 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-               c = static_cast<uint64_t>(
-                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
-      if (a < b + c)
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)) +
+                   static_cast<uint64_t>(
+                       ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
+      if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(a - b - c);
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);
@@ -19464,14 +19472,14 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               c = static_cast<uint64_t>(
-                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
-      if (a < b + c)
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
+                   static_cast<uint64_t>(
+                       ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
+      if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(a - b - c);
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);
@@ -19525,14 +19533,14 @@ inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               c = static_cast<uint64_t>(
-                   ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
-      if (a < b + c)
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
+                   static_cast<uint64_t>(
+                       ((amdgpu::read_wave_mask_scalar(inst.src2, wf) >> lane) & 1));
+      if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return static_cast<uint32_t>(a - b - c);
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);
@@ -19574,13 +19582,13 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
-      uint32_t a = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-               b = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+      uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+               b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
       if (a < b)
         vcc |= (1ULL << lane);
       else
         vcc &= ~(1ULL << lane);
-      return a - b;
+      return inst.inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b);
     }());
   }
   commit_result(vcc);

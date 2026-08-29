@@ -6151,10 +6151,15 @@ class CodeGenerator:
                 inst_fields = getattr(self, '_current_inst_fields', set())
                 if (
                     is_vop3
-                    and cls == 'vector_binop'
-                    and op in ('add', 'sub', 'subrev', 'rsub')
-                    and dtype in ('i16', 'u16', 'i32', 'u32')
                     and 'clamp' in inst_fields
+                    and (
+                        (
+                            cls == 'vector_binop'
+                            and op in ('add', 'sub', 'subrev', 'rsub')
+                            and dtype in ('i16', 'u16', 'i32', 'u32')
+                        )
+                        or (cls == 'vector_add_co' and dtype == 'u32')
+                    )
                 ):
                     lctx.integer_saturation_dtype = dtype
                 if cls == 'vector_cmp':
