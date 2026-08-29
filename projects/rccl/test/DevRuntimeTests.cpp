@@ -4216,6 +4216,167 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 
 
 // ---------------------------------------------------------------------------
+// getNcclVersionCompat picks the compatibility record covering the version the
+// caller compiled against, refusing a caller newer than the library.
+//
+// The compat table is three globals defined in DevRuntimeTestsStubs.cc, zeroed
+// there, so each test sets the version window it needs.
+
+class NcclVersionCompatTest : public ::testing::Test {
+protected:
+  void SetUp() override { Reset(); }
+  void TearDown() override {
+    Reset();
+    ResetDevRuntimeFakes();
+  }
+  static void Reset() {
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v23000 = ncclDevCommCompat{};
+  }
+};
+
+// A version inside a record's window selects it.
+TEST_F(NcclVersionCompatTest, VersionInWindow_SelectsThatRecord) {
+  ncclDevCommCompat_v22902.minVersion = 1;
+  ncclDevCommCompat_v22902.maxVersion = 100;
+  ncclDevCommCompat_v22907.minVersion = 101;
+  ncclDevCommCompat_v22907.maxVersion = 200;
+
+  ncclDevCommCompat* out = nullptr;
+  ASSERT_EQ(getNcclVersionCompat(150, &out), ncclSuccess);
+  EXPECT_EQ(out, &ncclDevCommCompat_v22907);
+}
+
+// Boundaries are inclusive at both ends.
+TEST_F(NcclVersionCompatTest, VersionAtWindowEdges_SelectsRecord) {
+  ncclDevCommCompat_v22902.minVersion = 10;
+  ncclDevCommCompat_v22902.maxVersion = 20;
+
+  ncclDevCommCompat* out = nullptr;
+  ASSERT_EQ(getNcclVersionCompat(10, &out), ncclSuccess);
+  EXPECT_EQ(out, &ncclDevCommCompat_v22902);
+  ASSERT_EQ(getNcclVersionCompat(20, &out), ncclSuccess);
+  EXPECT_EQ(out, &ncclDevCommCompat_v22902);
+}
+
+// Branch: a version no record covers means the library is not backwards
+// compatible with it.
+TEST_F(NcclVersionCompatTest, VersionOutsideEveryWindow_ReturnsError) {
+  ncclDevCommCompat_v22902.minVersion = 10;
+  ncclDevCommCompat_v22902.maxVersion = 20;
+
+  ncclDevCommCompat* out = &ncclDevCommCompat_v23000;
+  EXPECT_NE(getNcclVersionCompat(50, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);  // cleared on entry
+}
+
+// Branch: a caller compiled against a newer NCCL than this library is refused
+// outright -- a different failure from "no record covers it".
+TEST_F(NcclVersionCompatTest, CallerNewerThanLibrary_ReturnsInvalidUsage) {
+  ncclDevCommCompat* out = nullptr;
+  EXPECT_EQ(getNcclVersionCompat(NCCL_VERSION_CODE + 1, &out), ncclInvalidUsage);
+}
+
+// Branch: the version check can be disabled, after which the same version falls
+// through to the ordinary table lookup.
+TEST_F(NcclVersionCompatTest, VersionCheckDisabled_FallsThroughToLookup) {
+  ncclDevCommCompat_v22902.minVersion = 0;
+  ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE + 10;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ENABLE_VERSION_CHECK" ? 0 : deftVal;
+  });
+
+  ncclDevCommCompat* out = nullptr;
+  ASSERT_EQ(getNcclVersionCompat(NCCL_VERSION_CODE + 1, &out), ncclSuccess);
+  EXPECT_EQ(out, &ncclDevCommCompat_v22902);
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclCommQueryProperties reports what the communicator can do. Fields beyond a
+// version threshold are only filled for callers new enough to have them.
+
+class CommQueryPropertiesTest : public NcclVersionCompatTest {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> rankToNode;
+  std::vector<int> localRankToRank;
+  std::vector<ncclPeerInfo> peers;
+  ncclCommProperties_t props{};
+
+  void SetUp() override {
+    NcclVersionCompatTest::SetUp();
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
+
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->rank = 2;
+    comm->nRanks = 8;
+    comm->cudaDev = 3;
+    comm->nvmlDev = 4;
+    comm->localRanks = 1;
+    comm->symmetricSupport = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    rankToNode.assign({0});
+    comm->rankToNode = rankToNode.data();
+    localRankToRank.assign({0});
+    comm->localRankToRank = localRankToRank.data();
+    peers.assign(8, ncclPeerInfo{});
+    peers[0].totalGlobalMem = 1u << 20;
+    comm->peerInfo = peers.data();
+
+    props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  }
+
+  void TearDown() override {
+    free(comm->devrState.lsaRankList);
+    NcclVersionCompatTest::TearDown();
+  }
+};
+
+// The basic fields come straight off the communicator.
+TEST_F(CommQueryPropertiesTest, ReportsCommIdentity) {
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.rank, 2);
+  EXPECT_EQ(props.nRanks, 8);
+  EXPECT_EQ(props.cudaDev, 3);
+  EXPECT_EQ(props.nvmlDev, 4);
+  EXPECT_EQ(props.deviceApiSupport, 1);
+}
+
+// Branch: multicast is reported unavailable across cliques even when the device
+// supports it, because NVLS does not span them.
+TEST_F(CommQueryPropertiesTest, CrossClique_ReportsNoMultimemSupport) {
+  comm->nvlsSupport = 1;
+  comm->p2pCrossClique = true;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.multimemSupport, 0);
+}
+
+// The same communicator without cliques does report it, so the flag is what
+// makes the difference rather than nvlsSupport alone.
+TEST_F(CommQueryPropertiesTest, SingleClique_ReportsMultimemSupport) {
+  comm->nvlsSupport = 1;
+  comm->p2pCrossClique = false;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_NE(props.multimemSupport, 0);
+}
+
+// Branch: an uninitialised properties struct is rejected, since its version and
+// size fields would otherwise be read as garbage.
+TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
+  ncclCommProperties_t raw{};
+  raw.magic = 0;
+  EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
 // Each && arm short-circuits, so each needs its own test.
 
