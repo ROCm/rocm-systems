@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <unordered_map>
 
@@ -72,6 +73,17 @@ descriptor_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &
                       rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   const uint32_t allocated = (granulated + 1u) * descriptor_vgpr_granularity(descriptor, arch);
   return static_cast<uint16_t>(std::min<uint32_t>(allocated, REGISTER_SET_MAX_VGPRS));
+}
+
+/// Decode the unified VGPR allocation directly from one descriptor in an ELF
+/// image. A missing or truncated descriptor has no allocation fact.
+[[nodiscard]] inline std::optional<uint16_t>
+read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
+                                      uint64_t descriptor_file_offset, rj_code_arch_t arch) {
+  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
+  if (!descriptor)
+    return std::nullopt;
+  return descriptor_vgpr_allocation_count(*descriptor, arch);
 }
 
 /// Return the ordinary-VGPR prefix that ConSan may use for scratch state.

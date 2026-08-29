@@ -2,15 +2,6 @@ namespace {
 
 namespace kd = rocr::llvm::amdhsa;
 
-[[nodiscard]] std::optional<uint16_t>
-read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
-                                      uint64_t descriptor_file_offset, rj_code_arch_t arch) {
-  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
-  if (!descriptor)
-    return std::nullopt;
-  return descriptor_vgpr_allocation_count(*descriptor, arch);
-}
-
 /// One kernel descriptor's merged register-file extent requirement.
 ///
 /// The value is deliberately register-class-neutral: VGPR and SGPR planners
