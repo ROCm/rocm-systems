@@ -21,6 +21,7 @@
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
+#include "rocjitsu/code/patch/consan/consan_fault_injection.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 #include "rocjitsu/code/patch/consan/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
@@ -40,6 +41,7 @@
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
+#include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
 #include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
@@ -88,8 +90,6 @@ namespace rocjitsu {
 namespace {
 
 namespace kd = rocr::llvm::amdhsa;
-
-#include "rocjitsu/code/patch/consan/consan_fault_injection.inc"
 
 #include "rocjitsu/code/patch/consan/consan_supercollider.inc"
 

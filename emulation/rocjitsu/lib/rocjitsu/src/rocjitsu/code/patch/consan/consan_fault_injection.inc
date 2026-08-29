@@ -172,8 +172,7 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
 }
 
 void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
-                               ConSanTransformArtifacts &result,
-                               bool require_applicable_plan = false) {
+                               ConSanTransformArtifacts &result, bool require_applicable_plan) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto reject_application = [&](std::string dry_run_warning, std::string application_error) {
     if (require_applicable_plan)
