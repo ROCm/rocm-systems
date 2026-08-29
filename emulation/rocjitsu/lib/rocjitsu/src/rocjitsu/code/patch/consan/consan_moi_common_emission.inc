@@ -670,20 +670,6 @@ private:
   return true;
 }
 
-[[nodiscard]] bool append_compute_effective_lds_byte_offset(std::vector<uint32_t> &words,
-                                                            uint16_t dst_vgpr, uint16_t addr_vgpr,
-                                                            uint32_t static_byte_offset,
-                                                            rj_code_arch_t arch) {
-  if (static_byte_offset == 0)
-    return true;
-
-  const auto mov_offset =
-      instrumentation::build_v_mov_b32_literal(dst_vgpr, static_byte_offset, arch);
-  const auto add_offset =
-      instrumentation::build_v_add_u32(dst_vgpr, vector_source_vgpr(addr_vgpr), dst_vgpr, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(mov_offset, add_offset);
-}
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
