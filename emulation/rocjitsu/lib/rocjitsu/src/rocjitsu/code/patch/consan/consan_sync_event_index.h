@@ -24,6 +24,16 @@ build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events);
 [[nodiscard]] const ConSanSyncEvent *find_sequence_member_event(const SyncEventSemanticIndex &index,
                                                                 SemanticSiteId identity);
 
+/// Verify that every declared sequence member resolves to the same ordered,
+/// bounded event in the immutable program inventory.
+[[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
+                                              const ConSanSyncSequence &sequence);
+
+/// Indexed form used while synchronization analysis is still constructing its
+/// immutable inventory revision.
+[[nodiscard]] bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
+                                              const ConSanSyncSequence &sequence);
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_CODE_PATCH_CONSAN_SYNC_EVENT_INDEX_H

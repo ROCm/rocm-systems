@@ -2442,48 +2442,6 @@ void associate_ordinary_acquire_sync_sequences(
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-[[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
-                                              const ConSanSyncSequence &sequence) {
-  if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
-    return false;
-  uint64_t prior_end = sequence.begin_text_offset;
-  for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
-    const SemanticSiteId &identity = sequence.member_semantic_ids[index];
-    SemanticSiteId event_identity = identity;
-    event_identity.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-    const ConSanSyncEvent *event = result.program_inventory.sync().find_event(event_identity);
-    if (event == nullptr || event->container_name != sequence.container_name ||
-        event->identity != sequence.member_event_identities[index] ||
-        event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
-        event->text_offset < sequence.begin_text_offset ||
-        event->text_offset + event->size > sequence.end_text_offset) {
-      return false;
-    }
-    prior_end = event->text_offset + event->size;
-  }
-  return !sequence.member_semantic_ids.empty();
-}
-
-[[nodiscard]] bool sequence_has_exact_members(const SyncEventSemanticIndex &events,
-                                              const ConSanSyncSequence &sequence) {
-  if (sequence.member_semantic_ids.size() != sequence.member_event_identities.size())
-    return false;
-  uint64_t prior_end = sequence.begin_text_offset;
-  for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
-    const ConSanSyncEvent *event =
-        find_sequence_member_event(events, sequence.member_semantic_ids[index]);
-    if (event == nullptr || event->container_name != sequence.container_name ||
-        event->identity != sequence.member_event_identities[index] ||
-        event->in_kernel != sequence.in_kernel || event->text_offset < prior_end ||
-        event->text_offset < sequence.begin_text_offset ||
-        event->text_offset + event->size > sequence.end_text_offset) {
-      return false;
-    }
-    prior_end = event->text_offset + event->size;
-  }
-  return !sequence.member_semantic_ids.empty();
-}
-
 [[nodiscard]] bool sequence_atomic_has_device_or_system_scope(const SyncEventSemanticIndex &events,
                                                               const ConSanSyncSequence &sequence) {
   const ConSanSyncEvent *atomic = nullptr;
