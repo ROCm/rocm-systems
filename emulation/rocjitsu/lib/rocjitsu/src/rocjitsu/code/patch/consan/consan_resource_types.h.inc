@@ -128,6 +128,9 @@ struct ConSanMoiOperatingPointAttempt {
 /// Typed reason that an operating-point placement step rejected its input.
 enum class ConSanMoiPlacementRejection : uint8_t {
   DispatchIdSgprUnavailable,
+  AmbiguousWorkgroupCapture,
+  PartialOwnerEpochVgprOverride,
+  PersistentStateUnavailable,
 };
 
 /// Unpublished output of one operating-point placement step.
@@ -141,6 +144,21 @@ struct ConSanMoiOperatingPointUpdate {
   bool changed = false;
   std::optional<ConSanMoiPlacementRejection> rejection;
   std::vector<std::string> diagnostics;
+
+  [[nodiscard]] bool accepted() const { return !rejection.has_value(); }
+};
+
+/// Unpublished result of persistent-state placement.
+///
+/// Entry scratch belongs to the exact attempted operating point that required
+/// it. Keeping both in one result prevents orchestration from retaining
+/// prologue resources after rejecting or replacing the corresponding point.
+struct ConSanMoiPersistentPlacementUpdate {
+  ConSanMoiOperatingPoint attempted_operating_point;
+  bool changed = false;
+  std::optional<ConSanMoiPlacementRejection> rejection;
+  std::vector<std::string> diagnostics;
+  std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments;
 
   [[nodiscard]] bool accepted() const { return !rejection.has_value(); }
 };

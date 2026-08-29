@@ -438,8 +438,8 @@ struct ConSanMoiReportDispatchIdWordSource {
   uint32_t literal = 0;
 };
 
-[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const MoiOptions &options) {
-  return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
+[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) {
+  return point.moi_dispatch_id_sgpr || point.moi_dispatch_id_vgpr;
 }
 
 // Sampled reports are already isolated by their versioned report-buffer

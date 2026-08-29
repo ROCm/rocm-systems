@@ -1022,10 +1022,25 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // admission plan, not merely on the user's request to inventory barriers or
   // atomics. A code object containing only rejected sync sites remains
   // access-only instrumentation.
+  ConSanMoiPersistentPlacementUpdate persistent_placement =
+      configure_automatic_moi_persistent_vgprs(effective_options, resource_problem,
+                                               effective_options, result.resource_plans,
+                                               resource_planning_state);
+  result.warnings.insert(result.warnings.end(),
+                         std::make_move_iterator(persistent_placement.diagnostics.begin()),
+                         std::make_move_iterator(persistent_placement.diagnostics.end()));
   std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments;
-  if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state,
-                                               prologue_scratch_assignments))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+  if (!persistent_placement.accepted()) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+  } else {
+    const bool persistent_placement_changed = persistent_placement.changed;
+    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
+        std::move(persistent_placement.attempted_operating_point);
+    prologue_scratch_assignments = std::move(persistent_placement.prologue_scratch_assignments);
+    if (persistent_placement_changed)
+      rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates,
+                                 result);
+  }
   freeze_moi_operating_point(effective_options, result);
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_options);

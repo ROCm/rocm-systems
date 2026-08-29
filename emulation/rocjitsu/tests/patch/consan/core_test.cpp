@@ -351,6 +351,24 @@ TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionToge
   EXPECT_EQ(rejected.rejection, ConSanMoiPlacementRejection::DispatchIdSgprUnavailable);
 }
 
+TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint) {
+  ConSanMoiPersistentPlacementUpdate accepted;
+  accepted.attempted_operating_point.moi_owner_vgpr = 40u;
+  accepted.attempted_operating_point.moi_epoch_vgpr = 41u;
+  accepted.changed = true;
+  accepted.prologue_scratch_assignments.push_back(
+      {.descriptor_file_offset = 96u, .scratch_vgpr = 42u});
+  EXPECT_TRUE(accepted.accepted());
+  EXPECT_TRUE(accepted.changed);
+  ASSERT_EQ(accepted.prologue_scratch_assignments.size(), 1u);
+  EXPECT_EQ(accepted.prologue_scratch_assignments.front().descriptor_file_offset, 96u);
+  EXPECT_EQ(accepted.prologue_scratch_assignments.front().scratch_vgpr, 42u);
+
+  ConSanMoiPersistentPlacementUpdate rejected = accepted;
+  rejected.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;
+  EXPECT_FALSE(rejected.accepted());
+}
+
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   ConSanMoiPersistentSgprState state;
   EXPECT_FALSE(state.complete());
