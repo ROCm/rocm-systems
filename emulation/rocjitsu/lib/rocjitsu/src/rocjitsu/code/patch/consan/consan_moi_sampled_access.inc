@@ -207,7 +207,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const uint32_t local_entry_island_words =
         moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(original_text, result.program_inventory, result.patches, arch,
-                                local_entry_island_words, resource_state.reserved_ranges);
+                                local_entry_island_words,
+                                moi_resource_reserved_ranges(resource_state));
   }
   BranchOnlyRelayRouter branch_router;
   if (local_entry_islands) {
@@ -402,11 +403,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           use_dense_call ? dense_entry_islands.at(candidate_ptr)
                          : access_island_begin + candidate_indices.at(candidate_ptr) *
                                                      access_relay_words * sizeof(uint32_t);
-      auto planned_entry = plan_moi_access_entry_island(
+      auto planned_entry = plan_moi_access_entry_island_with_policy(
           original_text, candidate, candidate_entry_island_words, preferred_entry_island,
           access_island_word_count, use_dense_call,
-          local_entry_islands ? &*local_entry_islands : nullptr, resource_state.block_index,
-          resource_state.decoder.get(), arch, candidate_errors,
+          local_entry_islands ? &*local_entry_islands : nullptr, resource_state,
+          moi_resource_decoder(resource_state), arch, candidate_errors,
           [](uint64_t, uint64_t) { return true; });
       if (!planned_entry) {
         result.warnings.emplace_back(

@@ -49,6 +49,7 @@ target_sources(
         consan_moi_record_replay.cpp
         consan_moi_runtime_workgroup_gate.cpp
         consan_moi_sampled_access_emission.cpp
+        consan_moi_sampled.cpp
         consan_moi_sampled_atomic_emission.cpp
         consan_moi_shared_lowering.cpp
         consan_moi_support.cpp

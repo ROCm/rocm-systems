@@ -41,6 +41,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sampled.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
@@ -161,8 +162,6 @@ using consan_moi_detail::resolve_moi_report_layout;
 namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
 
