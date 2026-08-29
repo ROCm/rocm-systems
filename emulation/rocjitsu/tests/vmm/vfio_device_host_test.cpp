@@ -287,6 +287,16 @@ TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
     uint32_t regions = 0;
     uint32_t irqs = 0;
     ASSERT_TRUE(client.device_info(regions, irqs));
+
+    // What the guest actually sees, rather than what the device asked for. The
+    // capability only reaches it if vfu_setup_device_nr_irqs() ran for the kind
+    // the plan chose, and nothing else covers that path: the device-side tests
+    // stop at interrupts() and plan_interrupts().
+    uint32_t intx_vectors = 0;
+    ASSERT_TRUE(client.irq_info(VFIO_PCI_INTX_IRQ_INDEX, intx_vectors));
+    EXPECT_EQ(intx_vectors, 1u)
+        << "the guest is offered no legacy pin, so its driver's pci_alloc_irq_vectors() fails "
+           "and the probe fails with it";
   }
 
   // No stop is requested: the disconnect alone must end serving.

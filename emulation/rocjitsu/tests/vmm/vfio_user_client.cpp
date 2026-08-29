@@ -217,6 +217,23 @@ bool VfioUserClient::device_info(uint32_t &region_count, uint32_t &irq_count) {
   return true;
 }
 
+bool VfioUserClient::irq_info(uint32_t index, uint32_t &count) {
+  vfio_irq_info request_body{};
+  request_body.argsz = sizeof(request_body);
+  request_body.index = index;
+
+  std::vector<std::byte> reply;
+  if (!request(VFIO_USER_DEVICE_GET_IRQ_INFO,
+               {reinterpret_cast<const std::byte *>(&request_body), sizeof(request_body)}, -1,
+               reply) ||
+      reply.size() < sizeof(vfio_irq_info)) {
+    return false;
+  }
+
+  count = reinterpret_cast<const vfio_irq_info *>(reply.data())->count;
+  return true;
+}
+
 bool VfioUserClient::region_info(uint32_t region, uint64_t &size, uint32_t &flags) {
   vfio_region_info request_body{};
   request_body.argsz = sizeof(request_body);

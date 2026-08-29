@@ -3,7 +3,12 @@
 
 #include "rocjitsu/vmm/vfu/bus_plan.h"
 
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+
 #include <gtest/gtest.h>
+
+#include <cstdint>
 
 namespace {
 
@@ -93,6 +98,22 @@ TEST(InterruptPlan, AdvertisesOnePinWhenAsked) {
 
   ASSERT_TRUE(plan.supported);
   EXPECT_EQ(plan.intx_count, 1u);
+}
+
+// The device asking and the transport advertising are written apart, so nothing
+// else pairs them. Asking for a kind this transport cannot advertise is worse
+// than asking for none: the function is refused before it is served at all, so
+// the guest sees no device rather than a device without interrupts.
+TEST(InterruptPlan, AdvertisesWhatTheModelledGpuAsksFor) {
+  rocjitsu::config::KfdDeviceConfig configured;
+  configured.gfx_target_version = 120500;
+  configured.vendor_id = 0x1002;
+  configured.device_id = 0x1250;
+  configured.local_mem_size = 16ULL * 1024 * 1024;
+  rocjitsu::GpuPciDevice device("gpu", rocjitsu::gpu_pci_spec_from_config(configured, {}), nullptr);
+
+  EXPECT_TRUE(rocjitsu::plan_interrupts(device.interrupts()).supported)
+      << "the transport cannot advertise the capability this device asks for";
 }
 
 TEST(InterruptPlan, RefusesMsiXUntilItIsImplemented) {

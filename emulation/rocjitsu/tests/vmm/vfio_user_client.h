@@ -42,6 +42,12 @@ public:
   /// @param[out] irq_count Interrupt types reported.
   [[nodiscard]] bool device_info(uint32_t &region_count, uint32_t &irq_count);
 
+  /// @brief Ask how many vectors an interrupt index offers.
+  /// @param[in] index VFIO interrupt index, e.g. VFIO_PCI_INTX_IRQ_INDEX.
+  /// @param[out] count Vectors the server reports for it.
+  /// @retval false The server refused the request.
+  [[nodiscard]] bool irq_info(uint32_t index, uint32_t &count);
+
   /// @brief Read the size and flags of one region.
   /// @param[in] region Region index.
   /// @param[out] size Region size in bytes.

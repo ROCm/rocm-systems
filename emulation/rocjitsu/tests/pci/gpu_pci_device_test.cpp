@@ -150,6 +150,24 @@ TEST_F(GpuDevice, AcceptsTheHdpFlushTheDriverIssues) {
       << "the flush hole is not modelled, so the write was dropped";
 }
 
+// The driver asks the bus for one vector of any kind and treats not getting one
+// as fatal rather than as doing without: `pci_alloc_irq_vectors` returning
+// negative fails the interrupt block's initialization, which fails the probe.
+// So a function advertising no interrupt capability at all is refused before it
+// has raised, or failed to raise, anything.
+TEST_F(GpuDevice, AdvertisesAnInterruptTheDriverCanAllocate) {
+  const simdojo::InterruptSpec interrupts = device_.interrupts();
+
+  EXPECT_NE(interrupts.kind, simdojo::InterruptKind::None)
+      << "a device with no interrupt capability fails the driver's probe";
+  // The kind is deliberately not asserted: this stage advertises a pin and a
+  // later one advertises MSI-X, and freezing the kind here would only record
+  // which stage this is. That the transport can actually advertise whichever
+  // kind is asked for is checked next to the transport, in bus_plan_test: this
+  // device is modelled whether or not the vfio-user backend is built, so a test
+  // here that called into it would leave the whole suite unlinkable without it.
+}
+
 // The driver's PCI table wildcards the device ID and matches on the class, so
 // this is the field that decides whether amdgpu attaches at all.
 TEST_F(GpuDevice, PresentsTheClassAmdgpuBindsOn) {

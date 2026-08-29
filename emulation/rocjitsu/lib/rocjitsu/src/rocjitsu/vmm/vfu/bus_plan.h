@@ -47,8 +47,14 @@ struct InterruptPlan {
 /// @returns The plan; @ref InterruptPlan::supported is false for capabilities
 ///          this transport does not implement, which the caller must refuse
 ///          rather than quietly substitute something else for.
-/// @details A device that raises nothing is advertised with nothing: telling a
-/// guest about a pin the device never asserts invites a driver to wait on it.
+/// @details A device that raises nothing is normally advertised with nothing:
+/// telling a guest about a pin the device never asserts invites a driver to
+/// wait on it. The exception belongs to the DEVICE, not to this function: a
+/// device facing a driver that refuses a function with no interrupt capability
+/// at all should itself request IntxPin, because there the choice is not
+/// between a pin and silence but between a pin nobody asserts yet and no
+/// device. This function never substitutes a capability the device did not
+/// ask for; an unsupported one comes back with supported false.
 [[nodiscard]] InterruptPlan plan_interrupts(const simdojo::InterruptSpec &spec);
 
 } // namespace rocjitsu
