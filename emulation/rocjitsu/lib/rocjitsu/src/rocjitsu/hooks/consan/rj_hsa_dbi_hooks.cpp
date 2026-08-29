@@ -4188,8 +4188,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
 
     // A large production object may produce hundreds of thousands of detailed
-    // inventory, coverage, and patch-proof records below. Preserve the stable
-    // line-oriented format while amortizing the stderr lock and write cost.
+    // inventory, coverage, static-mapping, and diagnostic records below.
+    // Preserve the stable line-oriented format while amortizing the stderr
+    // lock and write cost.
     ScopedDetailedLogBatch detailed_log_batch;
     log_message(
         kLogInfo,
