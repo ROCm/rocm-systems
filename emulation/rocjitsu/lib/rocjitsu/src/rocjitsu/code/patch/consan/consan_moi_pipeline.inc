@@ -718,10 +718,10 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
           resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
       const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);
-      const bool admitted = !missing_dispatch && owner_contexts &&
-                            moi_scalar_contexts_admit_reserved_window(
-                                owner_contexts->summaries, dispatch_base,
-                                kMoiDispatchStateSgprCount, state.arch);
+      const bool admitted =
+          !missing_dispatch && owner_contexts &&
+          moi_scalar_contexts_admit_reserved_window(owner_contexts->summaries, dispatch_base,
+                                                    kMoiDispatchStateSgprCount, state.arch);
       if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
@@ -733,7 +733,8 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions &opti
   if (consan_is_capability_arch(state.arch) && options.automatic_moi_partial_exec_save_sgprs &&
       options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
-    const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);
+    const uint16_t exec_count = moi_exec_save_sgpr_count(
+        resolve_moi_exec_save_requirement(options, options, options), state.arch);
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {

@@ -412,7 +412,10 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
         spill_backed_scalar_window ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
     const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine);
     if (!spill_backed_scalar_window &&
-        (!saved_frame_offset || *saved_frame_offset >= moi_exec_save_sgpr_count(options, arch))) {
+        (!saved_frame_offset ||
+         *saved_frame_offset >=
+             moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options),
+                                      arch))) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
       return std::nullopt;
     }
@@ -422,7 +425,8 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
             : static_cast<uint16_t>(*options.moi_exec_save_sgpr + *saved_frame_offset);
     const uint32_t additional_frame_bytes =
         spill_backed_scalar_window
-            ? static_cast<uint32_t>(moi_exec_save_sgpr_count(options, arch)) *
+            ? static_cast<uint32_t>(moi_exec_save_sgpr_count(
+                  resolve_moi_exec_save_requirement(options, options, options), arch)) *
                   SpillManager::kSlotBytes
             : 0u;
     auto spill = build_dynamic_stack_vgpr_spill_sequence(

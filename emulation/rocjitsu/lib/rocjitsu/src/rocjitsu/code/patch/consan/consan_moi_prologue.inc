@@ -2139,7 +2139,10 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
                                 moi_descriptor_system_sgpr_count(descriptor));
       const uint16_t scalar_base = *kernel_options.moi_exec_save_sgpr;
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
-          static_cast<uint32_t>(scalar_base) + moi_exec_save_sgpr_count(kernel_options, arch),
+          static_cast<uint32_t>(scalar_base) +
+              moi_exec_save_sgpr_count(
+                  resolve_moi_exec_save_requirement(kernel_options, kernel_options, kernel_options),
+                  arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
         entry_scalar_spill =
@@ -2183,8 +2186,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
         .workgroup_sources = std::move(workgroup_sources),
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
-        .runtime_workgroup_selection_source =
-            moi_runtime_workgroup_selection_source(),
+        .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
         .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
         .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
@@ -2707,7 +2709,11 @@ void try_apply_owner_epoch_prologue_patch(
       const uint16_t sgpr_base = needs_full_entry_scalar_backup ? *kernel_options.moi_exec_save_sgpr
                                                                 : *kernel_options.moi_owner_sgpr;
       const uint16_t borrowed_sgpr_count =
-          needs_full_entry_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
+          needs_full_entry_scalar_backup
+              ? moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                             kernel_options, kernel_options, kernel_options),
+                                         arch)
+              : 1u;
       const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
       if (!original_descriptor) {
         result.errors.emplace_back(
@@ -2806,8 +2812,7 @@ void try_apply_owner_epoch_prologue_patch(
         .record_replay_workgroup_vgprs = kernel_options.moi_record_replay_workgroup_vgprs,
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
-        .runtime_workgroup_selection_source =
-            moi_runtime_workgroup_selection_source(),
+        .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
         .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
         .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
         .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
@@ -2826,8 +2831,8 @@ void try_apply_owner_epoch_prologue_patch(
     uint32_t required_sgpr_count = owner_required_sgpr_count;
     if (kernel_options.moi_dispatch_id_sgpr) {
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) +
-                                   kMoiDispatchStateSgprCount);
+          required_sgpr_count,
+          static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) + kMoiDispatchStateSgprCount);
     }
     if (kernel_options.moi_persistent_sgprs.owner) {
       required_sgpr_count = std::max<uint32_t>(

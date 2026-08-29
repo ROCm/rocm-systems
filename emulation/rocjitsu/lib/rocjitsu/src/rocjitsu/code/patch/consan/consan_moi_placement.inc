@@ -903,8 +903,6 @@ struct MoiSgprRange {
                                                          consan_moi_exact_shadow::granule_bytes);
 }
 
-[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const MoiOptions &options, rj_code_arch_t arch);
-
 [[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const MoiOptions &options) {
   return options.moi_engine == ConSanMoiEngine::InlineShadow &&
          options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
@@ -930,7 +928,8 @@ struct MoiSgprRange {
   // local/dynamic state through +25 and preserve application EXEC in the
   // dedicated +26:+27 pair.
   const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
-  const uint16_t required_sgpr_count = moi_exec_save_sgpr_count(options, arch);
+  const uint16_t required_sgpr_count =
+      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options), arch);
   const uint16_t max_exec_save_sgpr =
       static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
   if (*options.moi_exec_save_sgpr > max_exec_save_sgpr || *options.moi_exec_save_sgpr % 2u != 0u) {
@@ -3986,103 +3985,6 @@ resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandi
                          : resolve_moi_scratch_plan(*plan, options, options, expected_count);
 }
 
-[[nodiscard]] constexpr std::optional<uint16_t>
-moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine) {
-  switch (engine) {
-  case ConSanMoiEngine::InlineShadow:
-    return 24u;
-  case ConSanMoiEngine::RecordReplay:
-    return 5u;
-  case ConSanMoiEngine::Sampled:
-    return 8u;
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] constexpr std::optional<uint16_t>
-moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
-  const auto frame_save_offset = moi_dynamic_stack_frame_save_sgpr_offset(engine);
-  if (!frame_save_offset)
-    return std::nullopt;
-  // The displaced frame base is the final value in every dynamic-stack
-  // scalar layout. Keep that contract explicit beside the offset table.
-  return static_cast<uint16_t>(*frame_save_offset + 1u);
-}
-
-[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const MoiOptions &options, rj_code_arch_t arch) {
-  if (options.moi_engine == ConSanMoiEngine::Sampled) {
-    // Claim selection and optional wave sampling predicate on VCC. A winning
-    // lane narrows EXEC while publishing, and every scalar predicate may
-    // change SCC. The runtime fast gate and sampled-sync cave are mutually
-    // exclusive bodies and share the same eight-register layout through +7.
-    // gfx1250 dense access streams additionally reserve an aligned temporary
-    // call-return pair through +7. The body returns with its ordinary
-    // indirect-PC pair, so the probe may reuse that temporary after dispatch.
-    if (!options.moi_report_buffer_address)
-      return 0u;
-    if (options.automatic_moi_record_replay_sgpr_spill)
-      return 8u;
-    if (options.moi_dynamic_stack_spill)
-      return moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u);
-    if (consan_uses_gfx12_cdna_execution(arch))
-      return 8u;
-    return options.moi_track_atomics ? 8u : 7u;
-  }
-  if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    if (!options.moi_report_buffer_address)
-      return 0;
-    // Access probes reserve every transient mask plus the dedicated
-    // application EXEC pair. Atomic-only objects use masks through +21 and do
-    // not pay for access state they cannot execute. Dynamic-stack spills still
-    // need the final frame-base save slot even in atomic-only objects.
-    const uint16_t engine_count =
-        options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
-    const uint16_t dynamic_stack_count =
-        options.moi_dynamic_stack_spill
-            ? moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u)
-            : 0u;
-    return std::max(engine_count, dynamic_stack_count);
-  }
-  if (record_replay_uses_automatic_banked_capture(options)) {
-    // Automatic access capture keeps the application EXEC pair through the
-    // full distinct-address traversal, uses one scalar address key, and keeps
-    // the selected group's EXEC in an aligned pair through +13 while one lane
-    // performs publication.
-    // Dense routing already occupies the call-return pair through +7, while
-    // dynamic stack owners retain their frame-base snapshot at +5.
-    return 14u;
-  }
-  constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
-  const uint16_t runtime_workgroup_gate_count =
-      options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_runtime_sample_stride > 1u
-          ? kRuntimeWorkgroupGateSgprCount
-          : 0u;
-  if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      options.moi_record_replay_dense_barrier_router)
-    return std::max<uint16_t>(8u, runtime_workgroup_gate_count);
-  if (options.automatic_moi_record_replay_sgpr_spill) {
-    // Sampled access transfer and dense routing use slots +0..+7. Compact
-    // Record/Replay access, fence, and atomic bodies use only +0..+3, but a
-    // sparse owner prologue hashes its workgroup in slots +0..+6 before any
-    // site-local scalar spill exists. Reserve the union so component
-    // placement and entry backup protect every register the complete
-    // transform can touch.
-    return options.moi_engine == ConSanMoiEngine::Sampled
-               ? 8u
-               : std::max<uint16_t>(4u, runtime_workgroup_gate_count);
-  }
-  if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_dynamic_stack_spill)
-    // Preserve the compiler frame base in addition to EXEC, VCC, and SCC.
-    // The dynamic spill setup reuses the ordinary SCC-save slot.
-    return std::max(moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u),
-                    runtime_workgroup_gate_count);
-  // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
-  // RDNA-family objects additionally reserve a dispatch key and an aligned
-  // call-return pair for the relocated router.
-  return options.moi_report_buffer_address ? std::max<uint16_t>(5u, runtime_workgroup_gate_count)
-                                           : 0u;
-}
-
 [[nodiscard]] std::optional<uint16_t>
 inline_shadow_visible_evidence_sgpr(const MoiOptions &options) {
   if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_exec_save_sgpr) {
@@ -4130,8 +4032,10 @@ moi_sgpr_range_overlaps_transient_state(const MoiOptions &options,
     return state_base && range_overlaps(base, width, *state_base, state_width);
   };
   const auto overlaps_assignment = [&](const ConSanMoiTransientSgprAssignment &assignment) {
-    return range_overlaps(base, width, assignment.exec_save_sgpr,
-                          moi_exec_save_sgpr_count(options, arch)) ||
+    return range_overlaps(
+               base, width, assignment.exec_save_sgpr,
+               moi_exec_save_sgpr_count(
+                   resolve_moi_exec_save_requirement(options, options, options), arch)) ||
            overlaps(assignment.owner_sgpr) ||
            overlaps(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
            overlaps(assignment.indirect_pc_sgpr, 2u) || overlaps(assignment.indirect_scc_sgpr) ||
@@ -4139,7 +4043,9 @@ moi_sgpr_range_overlaps_transient_state(const MoiOptions &options,
            overlaps(assignment.visible_evidence_sgpr) ||
            overlaps(assignment.dynamic_stack_borrowed_sgpr, 2u);
   };
-  return overlaps(options.moi_exec_save_sgpr, moi_exec_save_sgpr_count(options, arch)) ||
+  return overlaps(options.moi_exec_save_sgpr,
+                  moi_exec_save_sgpr_count(
+                      resolve_moi_exec_save_requirement(options, options, options), arch)) ||
          overlaps(options.moi_owner_sgpr) ||
          overlaps(options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
          overlaps(options.moi_inline_indirect_pc_sgpr, 2u) ||
@@ -4153,8 +4059,7 @@ moi_sgpr_range_overlaps_transient_state(const MoiOptions &options,
          std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
 }
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSource>
-moi_runtime_workgroup_selection_source() {
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSource> moi_runtime_workgroup_selection_source() {
   // A cached Record/Replay selection needs storage distinct from the exact
   // workgroup tuple. In particular, replacing persistent X with the boolean
   // collapses every selected workgroup to X=1 and makes their private LDS
@@ -4163,8 +4068,8 @@ moi_runtime_workgroup_selection_source() {
   return std::nullopt;
 }
 
-[[nodiscard]] bool moi_has_probe_entry_runtime_workgroup_gate(
-    const ConSanMoiWorkgroupSources &workgroup_sources) {
+[[nodiscard]] bool
+moi_has_probe_entry_runtime_workgroup_gate(const ConSanMoiWorkgroupSources &workgroup_sources) {
   const auto register_backed = [](const ConSanMoiWorkgroupSource &source) {
     return source.scalar_src.has_value() || source.vector_src.has_value();
   };
@@ -4447,7 +4352,8 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
       unavailable_by_component[root] |= it->second;
   }
 
-  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+  const uint16_t count =
+      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options), arch);
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
   const auto overlaps_architectural_state = [&](uint16_t base, uint16_t width) {
     return persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch);
@@ -4952,9 +4858,9 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
                               branch_only_scalar_spill || dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_id_sgpr &&
-                moi_scalar_contexts_admit_reserved_window(
-                    component_contexts->summaries, *options.moi_dispatch_id_sgpr,
-                    kMoiDispatchStateSgprCount, arch) &&
+                moi_scalar_contexts_admit_reserved_window(component_contexts->summaries,
+                                                          *options.moi_dispatch_id_sgpr,
+                                                          kMoiDispatchStateSgprCount, arch) &&
                 !range_overlaps(selected_sgpr, count, *options.moi_dispatch_id_sgpr,
                                 kMoiDispatchStateSgprCount)
             ? options.moi_dispatch_id_sgpr
@@ -5014,7 +4920,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   const rj_code_arch_t arch = planning_state.arch;
   if (options.moi_exec_save_sgpr)
     return false;
-  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+  const uint16_t count =
+      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options), arch);
   if (count == 0)
     return false;
 
@@ -5077,8 +4984,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
     if (options.moi_owner_sgpr && range_overlaps(base, count, *options.moi_owner_sgpr, 1u)) {
       continue;
     }
-    if (options.moi_dispatch_id_sgpr && range_overlaps(base, count, *options.moi_dispatch_id_sgpr,
-                                                       kMoiDispatchStateSgprCount)) {
+    if (options.moi_dispatch_id_sgpr &&
+        range_overlaps(base, count, *options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount)) {
       continue;
     }
     options.moi_exec_save_sgpr = base;
@@ -5523,7 +5430,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   for (uint32_t sgpr = scalar_contexts.tail_floor; sgpr < moi_ordinary_sgpr_limit(arch); ++sgpr) {
     if (options.moi_exec_save_sgpr &&
         range_overlaps(static_cast<uint16_t>(sgpr), 1u, *options.moi_exec_save_sgpr,
-                       moi_exec_save_sgpr_count(options, arch))) {
+                       moi_exec_save_sgpr_count(
+                           resolve_moi_exec_save_requirement(options, options, options), arch))) {
       continue;
     }
     if (!moi_scalar_contexts_admit_reserved_window(scalar_contexts.summaries,
@@ -5646,7 +5554,9 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     }
     if (options.moi_exec_save_sgpr &&
         range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
-                       *options.moi_exec_save_sgpr, moi_exec_save_sgpr_count(options, arch))) {
+                       *options.moi_exec_save_sgpr,
+                       moi_exec_save_sgpr_count(
+                           resolve_moi_exec_save_requirement(options, options, options), arch))) {
       continue;
     }
     options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
@@ -5689,7 +5599,9 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
       }
       if (options.moi_exec_save_sgpr &&
           range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
-                         *options.moi_exec_save_sgpr, moi_exec_save_sgpr_count(options, arch))) {
+                         *options.moi_exec_save_sgpr,
+                         moi_exec_save_sgpr_count(
+                             resolve_moi_exec_save_requirement(options, options, options), arch))) {
         continue;
       }
       options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
@@ -5743,8 +5655,10 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
             (options.moi_owner_sgpr &&
              range_overlaps(candidate, dispatch_state_count, *options.moi_owner_sgpr, 1u)) ||
             (options.moi_exec_save_sgpr &&
-             range_overlaps(candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
-                            moi_exec_save_sgpr_count(options, arch))) ||
+             range_overlaps(
+                 candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
+                 moi_exec_save_sgpr_count(
+                     resolve_moi_exec_save_requirement(options, options, options), arch))) ||
             (has_dynamic_stack_owner &&
              moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count))) {
           continue;
@@ -5863,9 +5777,12 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
         if (prior_operating_point.automatic_moi_partial_exec_save_sgprs) {
           const std::array owners{dispatch_assignment.descriptor_file_offset};
           const auto owner_contexts = resolve_moi_scalar_owner_contexts(state, owners);
-          if (!owner_contexts || !moi_scalar_contexts_admit_reserved_window(
-                                     owner_contexts->summaries, *options.moi_exec_save_sgpr,
-                                     moi_exec_save_sgpr_count(options, state.arch), state.arch)) {
+          if (!owner_contexts ||
+              !moi_scalar_contexts_admit_reserved_window(
+                  owner_contexts->summaries, *options.moi_exec_save_sgpr,
+                  moi_exec_save_sgpr_count(
+                      resolve_moi_exec_save_requirement(options, options, options), state.arch),
+                  state.arch)) {
             continue;
           }
         }
@@ -5910,9 +5827,11 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
   const bool overlaps_owner = options.moi_owner_sgpr && range_overlaps(base, dispatch_state_count,
                                                                        *options.moi_owner_sgpr, 1u);
-  const bool overlaps_exec = options.moi_exec_save_sgpr &&
-                             range_overlaps(base, dispatch_state_count, *options.moi_exec_save_sgpr,
-                                            moi_exec_save_sgpr_count(options, arch));
+  const bool overlaps_exec =
+      options.moi_exec_save_sgpr &&
+      range_overlaps(base, dispatch_state_count, *options.moi_exec_save_sgpr,
+                     moi_exec_save_sgpr_count(
+                         resolve_moi_exec_save_requirement(options, options, options), arch));
   const bool below_entry_window = base < 20u;
   const bool unaligned = base % 2u != 0u;
   const bool beyond_ordinary_file =
@@ -5989,12 +5908,16 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const auto overlaps_architectural_state = [&](std::optional<uint16_t> base, uint16_t width) {
     return base && persistent_sgpr_range_overlaps_reserved_ordinary_range(*base, width, arch);
   };
-  const bool exec_invalid = options.moi_exec_save_sgpr &&
-                            (static_cast<uint32_t>(*options.moi_exec_save_sgpr) +
-                                     moi_exec_save_sgpr_count(options, arch) >
-                                 limit ||
-                             overlaps_architectural_state(options.moi_exec_save_sgpr,
-                                                          moi_exec_save_sgpr_count(options, arch)));
+  const bool exec_invalid =
+      options.moi_exec_save_sgpr &&
+      (static_cast<uint32_t>(*options.moi_exec_save_sgpr) +
+               moi_exec_save_sgpr_count(
+                   resolve_moi_exec_save_requirement(options, options, options), arch) >
+           limit ||
+       overlaps_architectural_state(
+           options.moi_exec_save_sgpr,
+           moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options),
+                                    arch)));
   const bool owner_invalid =
       options.moi_owner_sgpr && (*options.moi_owner_sgpr >= limit ||
                                  overlaps_architectural_state(options.moi_owner_sgpr, 1u));
@@ -6057,7 +5980,8 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     if (!options.moi_inline_dynamic_stack_borrowed_sgpr)
       return false;
     const uint16_t base = *options.moi_inline_dynamic_stack_borrowed_sgpr;
-    const uint16_t exec_count = moi_exec_save_sgpr_count(options, arch);
+    const uint16_t exec_count = moi_exec_save_sgpr_count(
+        resolve_moi_exec_save_requirement(options, options, options), arch);
     const bool overlaps_persistent =
         (options.moi_persistent_sgprs.owner &&
          range_overlaps(base, 2u, *options.moi_persistent_sgprs.owner, 1u)) ||
@@ -6378,8 +6302,10 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
           resolved_contexts ? resolved_contexts->tail_floor : moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
         if ((options.moi_exec_save_sgpr &&
-             range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
-                            moi_exec_save_sgpr_count(options, arch))) ||
+             range_overlaps(
+                 base, scalar_count, *options.moi_exec_save_sgpr,
+                 moi_exec_save_sgpr_count(
+                     resolve_moi_exec_save_requirement(options, options, options), arch))) ||
             (options.moi_dispatch_id_sgpr &&
              range_overlaps(base, scalar_count, *options.moi_dispatch_id_sgpr,
                             kMoiDispatchStateSgprCount)) ||
@@ -7204,7 +7130,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 rj_code_arch_t arch) {
   uint16_t required_count = 0;
   if (options.moi_exec_save_sgpr) {
-    const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+    const uint16_t count = moi_exec_save_sgpr_count(
+        resolve_moi_exec_save_requirement(options, options, options), arch);
     required_count = static_cast<uint16_t>(*options.moi_exec_save_sgpr + count);
   }
   if (options.moi_owner_source == ConSanMoiOwnerSource::HwId && options.moi_owner_sgpr) {
@@ -7212,9 +7139,9 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
         std::max<uint16_t>(required_count, static_cast<uint16_t>(*options.moi_owner_sgpr + 1u));
   }
   if (options.moi_dispatch_id_sgpr) {
-    required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr +
-                                              kMoiDispatchStateSgprCount));
+    required_count =
+        std::max<uint16_t>(required_count, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr +
+                                                                 kMoiDispatchStateSgprCount));
   }
   if (options.moi_persistent_sgprs.owner)
     required_count = std::max<uint16_t>(

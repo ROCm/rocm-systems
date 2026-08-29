@@ -470,7 +470,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         constexpr uint16_t reservoir_count =
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
         const uint32_t scalar_frame_bytes =
-            static_cast<uint32_t>(moi_exec_save_sgpr_count(candidate_options, arch)) *
+            static_cast<uint32_t>(moi_exec_save_sgpr_count(
+                resolve_moi_exec_save_requirement(candidate_options, candidate_options,
+                                                  candidate_options),
+                arch)) *
             SpillManager::kSlotBytes;
         if (resources->count < reservoir_count) {
           result.warnings.emplace_back(

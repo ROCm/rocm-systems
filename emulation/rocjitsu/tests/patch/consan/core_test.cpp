@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 
 namespace rocjitsu {
@@ -186,6 +187,66 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
   EXPECT_EQ(fresh_attempt.moi_owner_sgpr, 3u);
   EXPECT_EQ(fresh_attempt.moi_owner_vgpr, 4u);
   EXPECT_EQ(fresh_attempt.moi_epoch_vgpr, 5u);
+}
+
+TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
+  ConSanRequest request;
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  request.moi_track_atomics = true;
+  request.moi_dynamic_access_records = false;
+  request.moi_runtime_sample_stride = 7u;
+  BoundRuntimeResources resources;
+  resources.moi_report_buffer_address = 0x1000u;
+  resources.moi_report_layout = ConSanMoiReportBufferLayout{};
+  resources.moi_report_layout->record_replay_dispatch_token_capacity = 4u;
+  ConSanMoiOperatingPoint point;
+  point.automatic_moi_record_replay_sgpr_spill = true;
+  point.moi_dynamic_stack_spill = true;
+  point.moi_inline_access_present = true;
+  point.moi_record_replay_dense_barrier_router = true;
+
+  EXPECT_EQ(resolve_moi_exec_save_requirement(request, resources, point),
+            (MoiExecSaveRequirement{
+                .engine = ConSanMoiEngine::RecordReplay,
+                .has_report_buffer = true,
+                .track_atomics = true,
+                .automatic_banked_record_capture = true,
+                .runtime_sample_stride = 7u,
+                .scalar_spill = true,
+                .dynamic_stack_spill = true,
+                .inline_access_present = true,
+                .dense_record_barrier_router = true,
+            }));
+
+  request.moi_dynamic_access_records = true;
+  EXPECT_FALSE(
+      resolve_moi_exec_save_requirement(request, resources, point).automatic_banked_record_capture);
+}
+
+TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
+  MoiExecSaveRequirement requirement;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 0u);
+
+  requirement.has_report_buffer = true;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 5u);
+  requirement.runtime_sample_stride = 2u;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
+  requirement.dense_record_barrier_router = true;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
+  requirement.automatic_banked_record_capture = true;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 14u);
+
+  requirement = {.engine = ConSanMoiEngine::Sampled, .has_report_buffer = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 8u);
+  requirement.track_atomics = true;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
+
+  requirement = {.engine = ConSanMoiEngine::InlineShadow, .has_report_buffer = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4), 22u);
+  requirement.inline_access_present = true;
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4),
+            kConSanMoiInlineExecSaveSgprCount);
 }
 
 TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {

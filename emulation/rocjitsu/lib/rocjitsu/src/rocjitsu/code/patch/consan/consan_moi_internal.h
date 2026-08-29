@@ -35,6 +35,37 @@ namespace rocjitsu {
 
 struct MoiOptions;
 
+/// Immutable facts that determine the size of MOI's transient scalar-save ABI.
+///
+/// The construction authority projects only request, runtime-binding, and
+/// attempted-operating-point facts that affect the ABI. Placement and emission
+/// consume this value instead of independently consulting the complete MOI
+/// option bus, so changing an unrelated option cannot change scalar sizing.
+struct MoiExecSaveRequirement {
+  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
+  bool has_report_buffer = false;
+  bool track_atomics = false;
+  bool automatic_banked_record_capture = false;
+  uint32_t runtime_sample_stride = 1u;
+  bool scalar_spill = false;
+  bool dynamic_stack_spill = false;
+  bool inline_access_present = false;
+  bool dense_record_barrier_router = false;
+
+  bool operator==(const MoiExecSaveRequirement &) const = default;
+};
+
+[[nodiscard]] MoiExecSaveRequirement
+resolve_moi_exec_save_requirement(const ConSanRequest &request,
+                                  const BoundRuntimeResources &resources,
+                                  const ConSanMoiOperatingPoint &operating_point);
+
+[[nodiscard]] std::optional<uint16_t>
+moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine);
+
+[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
+                                                rj_code_arch_t arch);
+
 /// One scalar, vector, or entry-captured private-state source for a
 /// workgroup-coordinate component.
 ///

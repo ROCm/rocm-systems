@@ -655,7 +655,8 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &res
     warnings.emplace_back("ConSan MOI spill-backed Inline scalar state has no private capacity");
     return std::nullopt;
   }
-  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+  const uint16_t count =
+      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options), arch);
   if (moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
     if (vgpr_spill == nullptr || !vgpr_spill->uses_dynamic_stack_frame) {
       warnings.emplace_back(
