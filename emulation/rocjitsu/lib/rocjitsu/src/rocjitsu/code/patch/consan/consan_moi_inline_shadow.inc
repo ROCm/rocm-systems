@@ -416,7 +416,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      const auto reload = moi_indirect_jump_sgprs(candidate_options);
+      const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
       if (!reload) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
@@ -885,7 +885,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
-                               arch);
+                               candidate_options, candidate_options, arch);
     if (planned_patch.workgroup_shadow) {
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
                                 *planned_patch.workgroup_shadow);
@@ -939,7 +939,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       if (planned_patch.private_dispatch_id_offset) {
-        const auto reload = moi_indirect_jump_sgprs(candidate_options);
+        const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
         if (!reload) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow access lost its private dispatch reload pair");
@@ -1032,7 +1032,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           return;
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no indirect jump scalar state");
@@ -1176,7 +1176,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                     : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {
-            const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+            const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
             empty_exec_continuation_word_offset = cave_words->size();
             if (!jump_sgprs ||
                 !append_moi_scc_preserving_indirect_jump(
@@ -1201,7 +1201,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                displaced_tail_words.end());
           }
         } else if (planned_patch.entry_island_offset) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
           empty_exec_continuation_word_offset = cave_words->size();
           if (!jump_sgprs) {
             result.errors.emplace_back(
@@ -1360,7 +1360,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             if (planned_patch.private_dispatch_id_offset) {
-              const auto reload = moi_indirect_jump_sgprs(candidate_options);
+              const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
               if (!reload) {
                 result.errors.emplace_back(
                     "ConSan MOI inline-shadow access lost its private dispatch reload pair");

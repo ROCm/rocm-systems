@@ -208,7 +208,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -635,7 +635,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     words.insert(words.end(), store->begin(), store->end());
     words.push_back(*wait);
   }
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state restore");
     return std::nullopt;
   }
@@ -654,7 +654,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -1048,7 +1048,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_offset);
     if (!fwd) {
       const auto reserved_fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
-      const auto indirect_state = moi_indirect_jump_sgprs(candidate_options);
+      const auto indirect_state = moi_indirect_jump_sgprs(candidate_options, candidate_options);
       std::vector<uint32_t> island_words;
       const bool reserved_island_valid =
           reserved_fwd && indirect_state &&
@@ -1217,8 +1217,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const auto special_state = moi_special_state_sgprs(group_options);
-      const auto indirect_state = moi_indirect_jump_sgprs(group_options);
+      const auto special_state = moi_special_state_sgprs(group_options, group_options);
+      const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state ||
@@ -1261,7 +1261,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
       MoiDenseOwnerLivenessProof host_owner_proof =
           resource_state.prepare_dense_liveness_for_owners(group_owners, host_bootstrap_ranges);
       std::vector<uint64_t> anchors;
@@ -2284,8 +2284,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         continue;
       }
       const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
-      auto special_state = moi_special_state_sgprs(group_options);
-      auto indirect_state = moi_indirect_jump_sgprs(group_options);
+      auto special_state = moi_special_state_sgprs(group_options, group_options);
+      auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state ||
           (spill_backed_router && (!group_options.moi_record_replay_dispatch_key_sgpr ||
@@ -2448,8 +2448,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                 group_options.moi_inline_indirect_scc_sgpr = saved_scc_sgpr;
                 group_options.moi_record_replay_dispatch_key_sgpr = key_sgpr;
                 group_options.moi_record_replay_call_return_sgpr = call_return_sgpr;
-                special_state = moi_special_state_sgprs(group_options);
-                indirect_state = moi_indirect_jump_sgprs(group_options);
+                special_state = moi_special_state_sgprs(group_options, group_options);
+                indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
                 found = special_state.has_value() && indirect_state.has_value();
                 break;
               }
@@ -2469,7 +2469,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
       auto dense_host = find_moi_dense_relay_host(
           resource_state, old_text,
           {
@@ -2821,7 +2821,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                !moi_scalar_contexts_conflict_with_physical_vcc(route_scalar_summaries, ranges,
                                                                arch);
       };
-      auto route_state = moi_indirect_jump_sgprs(route_options);
+      auto route_state = moi_indirect_jump_sgprs(route_options, route_options);
       if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {
         bool found = false;
         for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
@@ -2834,7 +2834,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
               continue;
             route_options.moi_inline_indirect_pc_sgpr = candidate_pair;
             route_options.moi_inline_indirect_scc_sgpr = candidate_scc;
-            route_state = moi_indirect_jump_sgprs(route_options);
+            route_state = moi_indirect_jump_sgprs(route_options, route_options);
             found = route_state.has_value();
             if (found)
               break;

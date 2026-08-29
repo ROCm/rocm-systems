@@ -718,7 +718,7 @@ void try_apply_first_light_access_record_patch(
           std::vector<uint32_t> displaced_words =
               borrowed_entry_words_for_candidate(candidate_ptr).value_or(std::vector<uint32_t>{});
           const size_t candidate_words = candidate.size() / sizeof(uint32_t);
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
           const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
               resource_state, resources->owner_descriptor_file_offsets, candidate.anchor(),
               resources->required_vgpr_count, candidate_options);
@@ -778,7 +778,7 @@ void try_apply_first_light_access_record_patch(
         if (borrowed_entry_prototype) {
           actual_borrowed_entry = build_moi_borrowed_record_replay_entry(
               candidate.anchor(), reservation->body_offset, borrowed_entry_prototype->backup_vgpr,
-              *moi_indirect_jump_sgprs(candidate_options),
+              *moi_indirect_jump_sgprs(candidate_options, candidate_options),
               displaced_original_size / sizeof(uint32_t), arch);
         }
         if ((borrowed_entry_prototype && !actual_borrowed_entry) ||
@@ -1111,7 +1111,7 @@ void try_apply_first_light_access_record_patch(
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
-                               arch);
+                               candidate_options, candidate_options, arch);
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
@@ -1177,7 +1177,8 @@ void try_apply_first_light_access_record_patch(
       note_moi_replay_access_patch_info(info, planned_patch);
       info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
-        const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(candidate_options);
+        const MoiIndirectJumpSgprs jump_sgprs =
+            *moi_indirect_jump_sgprs(candidate_options, candidate_options);
         info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
         info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
         info.branch_only_borrowed_backup_vgpr = planned_patch.borrowed_entry->backup_vgpr;
@@ -1214,7 +1215,8 @@ void try_apply_first_light_access_record_patch(
         }
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
+          const MoiSpecialStateSgprs special_state =
+              *moi_special_state_sgprs(candidate_options, candidate_options);
           std::vector<uint32_t> island_words;
           if (planned_patch.borrowed_entry) {
             island_words = planned_patch.borrowed_entry->island_words;
@@ -1238,7 +1240,7 @@ void try_apply_first_light_access_record_patch(
             }
           } else if (append_moi_scc_preserving_indirect_jump(
                          island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                         moi_indirect_jump_sgprs(candidate_options)->pc_sgpr,
+                         moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
                          special_state.scc_save_sgpr,
                          /*capture_scc=*/true, arch)) {
             island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
@@ -1359,11 +1361,12 @@ void try_apply_first_light_access_record_patch(
         if (planned_patch.dense_call_anchor) {
           if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
               candidate_options.automatic_moi_record_replay_sgpr_spill) {
-            const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
+            const MoiSpecialStateSgprs special_state =
+                *moi_special_state_sgprs(candidate_options, candidate_options);
             const size_t return_begin = cave_words->size();
             if (!append_moi_scc_preserving_indirect_jump(
                     *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                    moi_indirect_jump_sgprs(candidate_options)->pc_sgpr,
+                    moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
                     special_state.scc_save_sgpr, /*capture_scc=*/true, arch)) {
               result.errors.emplace_back(
                   "ConSan MOI first-light probe could not encode its dense long return");
@@ -1391,10 +1394,12 @@ void try_apply_first_light_access_record_patch(
           }
           cave_words->push_back(build_s_branch(*direct_return, arch));
         } else if (planned_patch.entry_island_offset) {
-          const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
+          const MoiSpecialStateSgprs special_state =
+              *moi_special_state_sgprs(candidate_options, candidate_options);
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, special_state.scc_save_sgpr,
+                  moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
+                  special_state.scc_save_sgpr,
                   /*capture_scc=*/false, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its long return");

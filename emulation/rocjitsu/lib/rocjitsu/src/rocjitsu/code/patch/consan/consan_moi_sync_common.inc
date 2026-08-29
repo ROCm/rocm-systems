@@ -2608,7 +2608,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   }
 
   failure.stage = "transaction initialization";
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
       !append_inline_workgroup_key(words, workgroup_sources,
                                    moi_workgroup_key_register_plan(options), workgroup_key,
                                    static_cast<uint16_t>(base + 6u), temporary,
@@ -2789,7 +2789,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // the retry-loop temporary, whose lifetime ends at the claim boundary.
     words.push_back(build_v_mov_b32_e32(source_version, vector_source_vgpr(cas_new), arch));
     if (!restore_exec(original_exec) ||
-        !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+        !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
       return false;
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -2810,7 +2810,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // the claim's prior even version for the successor commit.
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(base + 8u),
                                         vector_source_vgpr(source_version), arch));
-    if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch))
+    if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
       return false;
     if (predicate_on_compare_exchange_success &&
         (!restore_exec(claimed_exec) || !narrow_compare_exchange_success() ||
@@ -2975,7 +2975,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         !restore_exec(original_exec))
       return false;
     words.push_back(publisher_handoff);
-    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
       return false;
     failure.succeeded = true;
     return true;
@@ -3073,7 +3073,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                        temporary, cas_new, arch))
     return false;
   if (!restore_exec(original_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
     return false;
 
   failure.stage = "guest completion";
@@ -3093,7 +3093,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   words.push_back(*guest_store_drain);
 
   failure.stage = "release commit";
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
       !restore_exec(claimed_exec))
     return false;
   const auto commit_new =
@@ -3131,7 +3131,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
                                        temporary, cas_new, arch) ||
       !restore_exec(original_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
     return false;
   failure.succeeded = true;
   return true;
@@ -3235,7 +3235,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   };
   if (address_plan.requires_materialization()) {
-    const auto special_state = moi_special_state_sgprs(options);
+    const auto special_state = moi_special_state_sgprs(options, options);
     if (!special_state) {
       errors.emplace_back(
           "ConSan MOI inline atomic address materialization requires special-state SGPRs");
@@ -3520,7 +3520,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
         kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u), arch);
     if (!restore_original_exec ||
-        !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
+        !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
         !append_inline_workgroup_key(words, *workgroup_sources,
                                      moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
                                      temporary_vgpr, value_vgpr,
@@ -3596,7 +3596,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     words.push_back(*restore_original_exec);
-    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
       errors.emplace_back("ConSan MOI inline acquire could not restore pre-guest state");
       return std::nullopt;
     }
@@ -3619,7 +3619,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
   }
 
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
       !append_inline_workgroup_key(words, *workgroup_sources,
                                    moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
                                    temporary_vgpr, value_vgpr,
@@ -3647,7 +3647,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // the same ABI-v6 transaction. CAS publication is narrowed to lanes whose
     // dynamic compare succeeded inside the transaction, after its original
     // EXEC mask has been preserved.
-    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
+    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch) ||
         !append_inline_versioned_release_transaction(
             words, bytes, candidate, address_plan, *workgroup_sources, options, arch, slot_base,
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
@@ -3677,7 +3677,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
   words.push_back(*restore_original_exec);
 
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI inline atomic patch could not restore VCC/SCC");
     return std::nullopt;
   }

@@ -552,7 +552,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
           static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   }
 
-  const auto publication_state = moi_sampled_publication_state_sgprs(options);
+  const auto publication_state = moi_sampled_publication_state_sgprs(options, options);
   if (!publication_state) {
     errors.emplace_back("ConSan MOI sampled probe has no scalar publication-state layout");
     return std::nullopt;

@@ -188,7 +188,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
-    const auto special = moi_special_state_sgprs(options);
+    const auto special = moi_special_state_sgprs(options, options);
     if (!special)
       return false;
     const auto materialize = build_consan_moi_atomic_address_materialization(
@@ -362,7 +362,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto contention_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -546,7 +546,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
@@ -691,7 +691,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch))
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
     return std::nullopt;
   const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
   if (!save_exec)
@@ -982,7 +982,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
@@ -1010,7 +1010,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_branch(*direct, arch));
     } else {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
       if (!jump_sgprs || !append_moi_prepare_scc_preserving_indirect_jump(
                              words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                              jump_sgprs->scc_save_sgpr, arch)) {

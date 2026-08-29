@@ -295,8 +295,8 @@ template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
       errors.emplace_back(std::string(lost_assignment_error));
       return false;
     }
-    const auto jump_sgprs = moi_indirect_jump_sgprs(group_options);
-    const auto special_state = moi_special_state_sgprs(group_options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(group_options, group_options);
+    const auto special_state = moi_special_state_sgprs(group_options, group_options);
     std::vector<uint32_t> host_words = host.displaced_words;
     if (!jump_sgprs || (!use_indirect_jump_scc_save && !special_state) ||
         !append_moi_scc_preserving_indirect_jump(

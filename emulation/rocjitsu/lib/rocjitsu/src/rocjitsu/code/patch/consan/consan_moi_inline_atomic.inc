@@ -247,7 +247,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     if (planned.private_layout && planned.private_layout->dispatch_id_offset)
       candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
-    note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
+    note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options,
+                               candidate_options, candidate_options, arch);
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
@@ -383,7 +384,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
               "assignment");
           continue;
         }
-        const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
+        const auto scalar_abi =
+            moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
         if (!scalar_abi || scalar_abi->call_return_sgpr) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay has no explicit-key scalar ABI");
@@ -410,7 +412,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           owner_end = owner_begin + function->code_size;
         }
         const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-            group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
+            group_options, group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
         MoiDenseOwnerLivenessProof owner_proof =
             resource_state.prepare_dense_liveness_for_owners(group_owners, bootstrap_ranges);
         if (!owner_proof.complete || owner_proof.contexts.empty()) {

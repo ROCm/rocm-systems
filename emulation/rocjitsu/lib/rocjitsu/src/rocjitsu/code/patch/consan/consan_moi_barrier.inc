@@ -218,7 +218,7 @@ private:
     return true;
   };
   if (options.moi_persistent_sgprs.epoch) {
-    const auto special_state = moi_special_state_sgprs(options);
+    const auto special_state = moi_special_state_sgprs(options, options);
     if (!options.moi_exec_save_sgpr || !special_state) {
       errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
       return std::nullopt;
@@ -254,7 +254,7 @@ private:
     if (scalar_spill)
       words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
     if (publish_visible_evidence) {
-      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
         return std::nullopt;
       }
@@ -275,7 +275,8 @@ private:
     }
     if (publish_visible_evidence) {
       if (!append_visible_evidence(words) ||
-          !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+          !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options),
+                                            arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
         return std::nullopt;
       }
@@ -297,7 +298,7 @@ private:
     } else if (const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
       words.push_back(build_s_branch(*ret, arch));
     } else {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
       if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                              words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                              jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -337,7 +338,7 @@ private:
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (publish_visible_evidence &&
-      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
     return std::nullopt;
   }
@@ -345,7 +346,7 @@ private:
   words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
   if (publish_visible_evidence &&
       (!append_visible_evidence(words) ||
-       !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))) {
+       !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))) {
     errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
     return std::nullopt;
   }
@@ -366,7 +367,7 @@ private:
   } else if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -445,7 +446,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   } else if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+    const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -1087,7 +1088,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
-                                 arch);
+                                 candidate_options, candidate_options, arch);
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
       if (!scratch_vgpr) {
@@ -1280,7 +1281,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     // one otherwise-supported site must not abort the whole code object.
     if (cave_text_offset >= return_text_offset &&
         !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) &&
-        !moi_indirect_jump_sgprs(candidate_options)) {
+        !moi_indirect_jump_sgprs(candidate_options, candidate_options)) {
       result.warnings.emplace_back(
           candidate_options.moi_inline_branch_only_scalar_spill
               ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
@@ -1311,10 +1312,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!island_offset) {
         const bool has_spill_backed_inline_router =
             candidate_options.automatic_moi_inline_sgpr_spill &&
-            moi_inline_dense_router_scalar_abi(candidate_options, arch).has_value();
+            moi_inline_dense_router_scalar_abi(candidate_options, candidate_options, arch)
+                .has_value();
         const bool has_spill_backed_record_replay_router =
             candidate_options.automatic_moi_record_replay_sgpr_spill &&
-            moi_indirect_jump_sgprs(candidate_options) &&
+            moi_indirect_jump_sgprs(candidate_options, candidate_options) &&
             candidate_options.moi_record_replay_dispatch_key_sgpr &&
             candidate_options.moi_record_replay_call_return_sgpr;
         const bool has_spill_backed_dense_router =
@@ -1372,7 +1374,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return;
     }
     if (island_offset) {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
       std::vector<uint32_t> island_words;
       if (!jump_sgprs ||
           !append_moi_scc_preserving_indirect_jump(
@@ -1530,7 +1532,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             "ConSan MOI reused barrier relay lost its transient scalar assignment");
         return ReusedDenseRelayResult::Failed;
       }
-      const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
+      const auto scalar_abi =
+          moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
       if (!scalar_abi || !scalar_abi->call_return_sgpr) {
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
@@ -1740,9 +1743,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             "ConSan MOI dense barrier relay lost its transient scalar assignment");
         return;
       }
-      const auto special_state = moi_special_state_sgprs(group_options);
-      const auto indirect_state = moi_indirect_jump_sgprs(group_options);
-      const auto inline_dense_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
+      const auto special_state = moi_special_state_sgprs(group_options, group_options);
+      const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
+      const auto inline_dense_abi =
+          moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
       const bool spill_backed_inline_router = group_options.automatic_moi_inline_sgpr_spill;
       const bool spill_backed_record_replay_router =
           group_options.automatic_moi_record_replay_sgpr_spill;
@@ -1797,7 +1801,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
       MoiDenseOwnerLivenessProof host_owner_proof =
           resource_state.prepare_dense_liveness_for_owners(
               group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);

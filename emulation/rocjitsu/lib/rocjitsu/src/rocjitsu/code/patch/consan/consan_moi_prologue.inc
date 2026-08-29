@@ -550,7 +550,7 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
                                                         const MoiOptions &options,
                                                         rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              moi_indirect_jump_sgprs(options), arch);
+                                              moi_indirect_jump_sgprs(options, options), arch);
 }
 
 [[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
@@ -605,7 +605,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context) {
-  const auto jump_sgprs = moi_indirect_jump_sgprs(options);
+  const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
   return jump_sgprs &&
          emit_moi_local_indirect_entry_island(
              text, island_text_offset, cave_text_offset, anchor_text_offset, *jump_sgprs,
@@ -2171,7 +2171,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(kernel_options);
+          inline_shadow_visible_evidence_sgpr(kernel_options, kernel_options);
     }
     MoiPrivateEpochPrologueEmissionPlan emission{
         .scratch_vgpr = *access_patch->scratch_vgpr,
@@ -2798,7 +2798,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(kernel_options);
+          inline_shadow_visible_evidence_sgpr(kernel_options, kernel_options);
     }
     MoiOwnerEpochPrologueEmissionPlan emission{
         .owner_vgpr = *kernel_options.moi_owner_vgpr,

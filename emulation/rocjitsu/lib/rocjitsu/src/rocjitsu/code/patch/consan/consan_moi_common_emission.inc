@@ -402,8 +402,8 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
     }
     const bool spill_backed_scalar_window =
         options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill;
-    const auto special_state = moi_special_state_sgprs(options);
-    const auto indirect_state = moi_indirect_jump_sgprs(options);
+    const auto special_state = moi_special_state_sgprs(options, options);
+    const auto indirect_state = moi_indirect_jump_sgprs(options, options);
     if (!special_state || (spill_backed_scalar_window && !indirect_state)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
@@ -962,7 +962,7 @@ private:
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
     for (const ConSanAccessRange &range : access_ranges) {
-      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
       }
@@ -1143,7 +1143,8 @@ private:
       // EXEC are still intact, so wave termination cannot race those stores.
       words.push_back(*wait_store);
       words.push_back(*restore_exec);
-      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options),
+                                            arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not restore VCC/SCC");
         return std::nullopt;
       }
@@ -1282,7 +1283,7 @@ private:
     return false;
   };
   if (!options.moi_exec_save_sgpr ||
-      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
   }
@@ -2300,7 +2301,7 @@ private:
     return fail("ConSan MOI first-light probe could not bind its EXEC restore");
   }
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -2651,7 +2652,7 @@ template <typename PlannedPatch>
   uint32_t relocated_entry_return_words = 0u;
 
   if (inline_shadow_route) {
-    const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
+    const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
     if (!scalar_abi)
       return fail("lost its inline-shadow dense scalar ABI");
     pc_sgpr = scalar_abi->indirect_jump.pc_sgpr;
@@ -2672,7 +2673,7 @@ template <typename PlannedPatch>
     }
     const uint16_t base = *group_options.moi_exec_save_sgpr;
     const std::optional<MoiSpecialStateSgprs> special_state =
-        moi_special_state_sgprs(group_options);
+        moi_special_state_sgprs(group_options, group_options);
     if (!special_state)
       return fail("lost its dense special-state scalar ABI");
     pc_sgpr = spill_backed ? *group_options.moi_inline_indirect_pc_sgpr : base;

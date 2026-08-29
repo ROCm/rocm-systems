@@ -675,7 +675,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
-                               arch);
+                               candidate_options, candidate_options, arch);
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
@@ -834,7 +834,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         }
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
+          const MoiSpecialStateSgprs special_state =
+              *moi_special_state_sgprs(candidate_options, candidate_options);
           std::vector<uint32_t> island_words;
           if (planned_patch.runtime_fast_gate) {
             std::vector<std::string> workgroup_errors;
@@ -866,7 +867,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           if (island_words.empty() &&
               append_moi_scc_preserving_indirect_jump(
                   island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, special_state.scc_save_sgpr,
+                  moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
+                  special_state.scc_save_sgpr,
                   /*capture_scc=*/true, arch)) {
             island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
           }
@@ -942,8 +944,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         std::optional<uint16_t> return_scc_sgpr;
         std::optional<MoiIndirectJumpSgprs> return_jump_sgprs;
         if (planned_patch.dense_call_anchor || planned_patch.entry_island_offset) {
-          return_scc_sgpr = moi_sampled_access_return_scc_sgpr(candidate_options);
-          return_jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+          return_scc_sgpr =
+              moi_sampled_access_return_scc_sgpr(candidate_options, candidate_options);
+          return_jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
           if (!return_scc_sgpr || !return_jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe has no stable long-return scalar state");
