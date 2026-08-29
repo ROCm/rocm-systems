@@ -19,9 +19,16 @@ namespace {
 
 constexpr uint64_t kVramBytes = 16ULL * 1024 * 1024;
 
+/// @brief The only part with an IP discovery profile.
+/// @details Every device built here is meant to be that part: a configuration
+/// naming anything else deliberately has no profile and cannot become usable,
+/// which two tests below cover on purpose.
+constexpr uint32_t kModelledTarget = 120500;
+
 /// @brief A configuration equivalent to what a config file would supply.
 rocjitsu::GpuPciDeviceSpec configured_spec() {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.vendor_id = 0x1002;
   device.device_id = 0x1250;
   device.pci_revision_id = 0x5a;
@@ -156,6 +163,7 @@ TEST_F(GpuDevice, KeepsDoorbellWritesForTheCommandProcessorToFind) {
 // different config file rather than a different class.
 TEST(GpuDeviceFromConfig, PresentsTheConfiguredIdentityAndApertures) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.vendor_id = 0x1002;
   device.device_id = 0x74a1;
   device.pci_revision_id = 0x02;
@@ -192,6 +200,7 @@ TEST(GpuDeviceFromConfig, PresentsTheConfiguredIdentityAndApertures) {
 // An unset subsystem follows the device rather than reading as an unrelated one.
 TEST(GpuDeviceFromConfig, DefaultsTheSubsystemToTheDeviceItself) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.vendor_id = 0x1002;
   device.device_id = 0x1250;
   device.local_mem_size = kVramBytes;
@@ -207,6 +216,7 @@ TEST(GpuDeviceFromConfig, DefaultsTheSubsystemToTheDeviceItself) {
 // device refuses rather than answering wrongly.
 TEST(GpuDeviceFromConfig, RefusesARegisterApertureThatCannotReachThoseRegisters) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = kVramBytes;
   rocjitsu::config::PciDeviceConfig pci;
   pci.register_aperture_bytes = 4096;
@@ -221,16 +231,20 @@ TEST(GpuDeviceFromConfig, RefusesARegisterApertureThatCannotReachThoseRegisters)
 // discovery table the driver looks for sits at the top of memory, outside it.
 // Reaching that means the indirect window has to work, and has to use the same
 // address encoding the driver does.
-class GpuDeviceIndirectWindow : public ::testing::TestWithParam<uint64_t> {
+class GpuDeviceWindow : public ::testing::Test {
 public:
   static constexpr uint64_t kMemoryBytes = 8ULL * 1024 * 1024 * 1024;
 
 protected:
-  rocjitsu::GpuPciDevice gpu_{"gpu", spec(), nullptr};
+  explicit GpuDeviceWindow(uint64_t capacity = kMemoryBytes)
+      : gpu_{"gpu", spec(capacity), nullptr} {}
 
-  static rocjitsu::GpuPciDeviceSpec spec() {
+  rocjitsu::GpuPciDevice gpu_;
+
+  static rocjitsu::GpuPciDeviceSpec spec(uint64_t capacity) {
     rocjitsu::config::KfdDeviceConfig device;
-    device.local_mem_size = kMemoryBytes;
+    device.gfx_target_version = kModelledTarget;
+    device.local_mem_size = capacity;
     rocjitsu::config::PciDeviceConfig pci;
     pci.vram_aperture_bytes = 1024 * 1024;
     return rocjitsu::gpu_pci_spec_from_config(device, pci);
@@ -260,6 +274,80 @@ protected:
   }
 };
 
+// The scratch registers all read zero, which tells the driver the table is at
+// the top of memory rather than somewhere the device names. Nothing else checks
+// that anything is actually there: a device that answers every register
+// correctly and leaves that address empty looks healthy right up until the
+// driver reads a zero signature and refuses it.
+TEST_F(GpuDeviceWindow, PublishesADiscoveryTableWhereTheRegistersPromiseOne) {
+  ASSERT_TRUE(gpu_.usable());
+  ASSERT_EQ(read_register(rocjitsu::MmioRegister::DriverScratch2), 0u)
+      << "the device names its own discovery address, so it is not at the top of memory";
+
+  select(kMemoryBytes - rocjitsu::GpuPciDevice::kDiscoveryOffsetFromTopOfVram);
+
+  EXPECT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u);
+}
+
+// The driver never learns the byte count. It reads a count of megabytes out of
+// RCC_CONFIG_MEMSIZE and computes the address itself, so a capacity that is not
+// a whole number of megabytes has two candidate addresses and only the rounded
+// one is ever read. Publishing at the true top instead misses by the remainder,
+// and the driver then reports a bad signature rather than a bad address. Some
+// of the shipped configs have exactly such a capacity.
+class GpuDeviceUnroundedMemory : public GpuDeviceWindow {
+protected:
+  /// @brief A capacity whose last megabyte is incomplete, by half of one.
+  static constexpr uint64_t kUnroundedBytes = kMemoryBytes + 512 * 1024;
+
+  GpuDeviceUnroundedMemory() : GpuDeviceWindow(kUnroundedBytes) {}
+};
+
+// A reset republishes the table. Without that, a guest that resets the device
+// and re-reads the signature finds whatever the previous guest left there, and
+// the failure surfaces as a driver that will not attach for no visible reason.
+TEST_F(GpuDeviceWindow, RestoresTheDiscoveryTableOnReset) {
+  const uint64_t table_at =
+      (static_cast<uint64_t>(read_register(rocjitsu::MmioRegister::RccConfigMemsize)) << 20) -
+      rocjitsu::GpuPciDevice::kDiscoveryOffsetFromTopOfVram;
+
+  select(table_at);
+  ASSERT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u);
+
+  // Corrupt it the only way a guest can: through the indirect window.
+  select(table_at);
+  write_register(rocjitsu::MmioRegister::MmData, 0xdeadbeefu);
+  select(table_at);
+  ASSERT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0xdeadbeefu)
+      << "the signature was not actually overwritten, so this proves nothing";
+
+  gpu_.reset(simdojo::ResetKind::FunctionLevel);
+
+  select(table_at);
+  EXPECT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u)
+      << "reset left the previous guest's bytes where the driver looks for the table";
+}
+
+TEST_F(GpuDeviceUnroundedMemory, PublishesWhereTheReportedCapacityPointsNotAtTheRealTop) {
+  ASSERT_TRUE(gpu_.usable());
+
+  const uint64_t reported_top =
+      static_cast<uint64_t>(read_register(rocjitsu::MmioRegister::RccConfigMemsize)) << 20;
+  ASSERT_LT(reported_top, kUnroundedBytes) << "this capacity does not round down, so it proves "
+                                              "nothing about which address is used";
+
+  select(reported_top - rocjitsu::GpuPciDevice::kDiscoveryOffsetFromTopOfVram);
+  EXPECT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u)
+      << "nothing is where the driver computes the address from the capacity it was given";
+
+  select(kUnroundedBytes - rocjitsu::GpuPciDevice::kDiscoveryOffsetFromTopOfVram);
+  EXPECT_NE(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u)
+      << "the table is at the true top of memory, which the driver never reads";
+}
+
+class GpuDeviceIndirectWindow : public GpuDeviceWindow,
+                                public ::testing::WithParamInterface<uint64_t> {};
+
 TEST_P(GpuDeviceIndirectWindow, ReachesMemoryTheApertureCannot) {
   const uint64_t address = GetParam();
   ASSERT_TRUE(gpu_.usable());
@@ -277,11 +365,13 @@ TEST_P(GpuDeviceIndirectWindow, ReachesMemoryTheApertureCannot) {
 }
 
 // Below, at and above the bit where the address splits between the two index
-// registers, plus the top of memory where the discovery table lives.
+// registers, plus high memory the aperture cannot reach. The last address stays
+// clear of the discovery table at the very top, which this test would otherwise
+// overwrite.
 INSTANTIATE_TEST_SUITE_P(AcrossTheIndexRegisterBoundary, GpuDeviceIndirectWindow,
                          ::testing::Values(0x1000ULL, 0x7ffffffcULL, 0x80000000ULL, 0x80000004ULL,
                                            0x1'0000'0000ULL,
-                                           GpuDeviceIndirectWindow::kMemoryBytes - 0x10000));
+                                           GpuDeviceIndirectWindow::kMemoryBytes - 0x20000));
 
 // Bit 31 of MM_INDEX chooses the space the indirect window addresses. Only the
 // memory side is modelled, and answering a register-side request out of the
@@ -326,6 +416,7 @@ TEST(GpuDeviceIndirectWindow, RefusesAnAccessToTheRegisterSpace) {
 // address the device did not use. The remainder is simply unreachable.
 TEST(GpuDeviceFromConfig, ReportsACapacityTheDriverCanReadAndStaysUsable) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = kVramBytes + 512;
 
   const rocjitsu::GpuPciDevice odd("odd", rocjitsu::gpu_pci_spec_from_config(device, {}), nullptr);
@@ -336,6 +427,7 @@ TEST(GpuDeviceFromConfig, ReportsACapacityTheDriverCanReadAndStaysUsable) {
 
 TEST(GpuDeviceFromConfig, RefusesAnApertureThatIsNotALegalBarSize) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = kVramBytes;
   rocjitsu::config::PciDeviceConfig pci;
   pci.doorbell_aperture_bytes = 3 * 1024 * 1024;
@@ -358,6 +450,7 @@ TEST(GpuDeviceFromConfig, AcceptsTheMinimumApertureAndReachesEveryPreDiscoveryRe
       << "the advertised minimum must itself be a legal BAR size";
 
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = kVramBytes;
   rocjitsu::config::PciDeviceConfig pci;
   pci.register_aperture_bytes = rocjitsu::GpuPciDevice::kMinRegisterApertureBytes;
@@ -387,6 +480,7 @@ TEST(GpuDeviceFromConfig, AcceptsTheMinimumApertureAndReachesEveryPreDiscoveryRe
 // the bus, so an omitted section has to yield a BAR that is legal anyway.
 TEST(GpuDeviceFromConfig, DerivesALegalApertureForAConfigWithNoBusSection) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = 192ULL * 1024 * 1024 * 1024;
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
@@ -414,6 +508,7 @@ class GpuDeviceApertureBoundary : public ::testing::TestWithParam<uint64_t> {};
 TEST_P(GpuDeviceApertureBoundary, AgreesWithThePciMinimumForAMemoryBar) {
   const uint64_t aperture = GetParam();
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = 64 * 1024 * 1024;
   rocjitsu::config::PciDeviceConfig pci;
   pci.vram_aperture_bytes = aperture;
@@ -439,6 +534,7 @@ class GpuDeviceCapacityBoundary : public ::testing::TestWithParam<CapacityCase> 
 TEST_P(GpuDeviceCapacityBoundary, OnlyAcceptsACapacityTheDriverCanRead) {
   const CapacityCase &capacity = GetParam();
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = capacity.bytes;
 
   const rocjitsu::GpuPciDevice gpu("gpu", rocjitsu::gpu_pci_spec_from_config(device, {}), nullptr);
@@ -461,6 +557,7 @@ INSTANTIATE_TEST_SUITE_P(
 // fits inside it, rather than one larger than its own memory.
 TEST(GpuDeviceFromConfig, CapsTheDerivedApertureAtTheMemoryItHas) {
   rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
   device.local_mem_size = 100ULL * 1024 * 1024;
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});

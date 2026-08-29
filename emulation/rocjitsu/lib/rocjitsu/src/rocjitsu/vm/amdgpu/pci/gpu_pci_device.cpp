@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
+#include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
+#include "rocjitsu/vm/amdgpu/pci/ip_discovery_profile.h"
 #include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
 #include "util/log.h"
 
@@ -11,9 +13,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <format>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace rocjitsu {
@@ -36,6 +40,37 @@ constexpr uint32_t kIndirectMemorySelect = 0x80000000;
 
 /// @brief Address bit at which the high index register begins.
 constexpr unsigned kIndirectHighShift = 31;
+
+/// @brief Write a whole buffer at an offset, resuming after a short write.
+///
+/// @details A single pwrite is permitted to transfer fewer bytes than asked
+/// for, and a discovery table is large enough that a partial store would leave
+/// the driver reading a truncated table rather than none at all: the signature
+/// at the front would be intact, so the failure would surface as a malformed
+/// record rather than as an absent table.
+/// @param[in] fd File to write to.
+/// @param[in] bytes Buffer to store.
+/// @param[in] at Byte offset within @p fd.
+/// @retval true The whole buffer was stored.
+/// @retval false The write failed or the file would take no more.
+[[nodiscard]] bool write_all_at(int fd, std::span<const std::byte> bytes, uint64_t at) {
+  std::size_t done = 0;
+  while (done < bytes.size()) {
+    const ssize_t wrote =
+        ::pwrite(fd, bytes.data() + done, bytes.size() - done, static_cast<off_t>(at + done));
+    if (wrote < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    if (wrote == 0) {
+      return false;
+    }
+    done += static_cast<std::size_t>(wrote);
+  }
+  return true;
+}
 
 } // namespace
 
@@ -137,7 +172,75 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
   registers_.assign(register_count, 0);
   modelled_.assign(register_count, false);
   reset_registers();
+
+  // A device that answers every pre-discovery register and then has nothing at
+  // the address those answers point to is worse than one that fails to
+  // construct: the driver would read a zero signature and reject it, with the
+  // registers all looking correct.
+  if (!publish_discovery_table()) {
+    return;
+  }
   usable_ = true;
+}
+
+bool GpuPciDevice::publish_discovery_table() {
+  // Guarded rather than left to pwrite returning EBADF, because this is now
+  // reachable from the public reset() as well as from a device whose memory
+  // never came up, and because reading and writing memory guard the same way.
+  if (vram_fd_ < 0) {
+    util::Logger::warn(
+        std::format("{}: no video memory to publish a discovery table into", name()));
+    return false;
+  }
+  if (spec_.discovery.blocks.empty()) {
+    util::Logger::warn(std::format("{}: no discovery profile for this configuration, so a guest "
+                                   "driver would find nothing to attach to",
+                                   name()));
+    return false;
+  }
+  const IpDiscoveryBuild built = build_ip_discovery_table(spec_.discovery);
+  if (!built.ok()) {
+    util::Logger::warn(
+        std::format("{}: cannot build a discovery table: {}", name(), built.problem));
+    return false;
+  }
+  const IpDiscoveryValidation checked = validate_ip_discovery_table(built.table);
+  if (!checked.valid) {
+    util::Logger::warn(std::format("{}: would publish a discovery table the driver refuses: {}",
+                                   name(), checked.problem));
+    return false;
+  }
+  if (built.table.size() > kDiscoveryTableBytes) {
+    util::Logger::warn(std::format("{}: the discovery table is {} bytes, more than the {} the "
+                                   "driver reads",
+                                   name(), built.table.size(), kDiscoveryTableBytes));
+    return false;
+  }
+  // The driver never learns the byte count. It reads the megabyte count out of
+  // RCC_CONFIG_MEMSIZE and computes the address itself, as
+  // `(vram_size << 20) - DISCOVERY_TMR_OFFSET` (amdgpu_discovery.c:1996-1997).
+  // Publishing at a top-of-memory derived from the unrounded byte count would
+  // therefore miss by the remainder for any capacity that is not a whole number
+  // of megabytes, and the driver would read zeros and reject the signature with
+  // no hint that the address was the problem. Deriving the address from the
+  // value the device already committed to in reset_registers() is what keeps
+  // the two from drifting; configs/gfx1151.json is one of the capacities that
+  // would otherwise miss, by 446464 bytes.
+  const uint64_t reported_bytes = static_cast<uint64_t>(vram_megabytes_) << 20;
+  if (reported_bytes < kDiscoveryOffsetFromTopOfVram) {
+    util::Logger::warn(std::format("{}: {} bytes of video memory has no room for a discovery "
+                                   "table {} from the top",
+                                   name(), reported_bytes, kDiscoveryOffsetFromTopOfVram));
+    return false;
+  }
+
+  const uint64_t at = reported_bytes - kDiscoveryOffsetFromTopOfVram;
+  if (!write_all_at(vram_fd_, built.table, at)) {
+    util::Logger::warn(std::format("{}: cannot store the {}-byte discovery table at {:#x}: {}",
+                                   name(), built.table.size(), at, std::strerror(errno)));
+    return false;
+  }
+  return true;
 }
 
 GpuPciDevice::~GpuPciDevice() {
@@ -183,6 +286,11 @@ void GpuPciDevice::reset_registers() {
   // Reporting no memory, or all-ones, makes it give up before it starts.
   define_register(byte_offset_of(MmioRegister::RccConfigMemsize), vram_megabytes_);
   define_register(byte_offset_of(MmioRegister::Mp0SmnC2pmsg33), kFirmwareInitDoneBit);
+  // Zero says this is a physical function with virtualization disabled, which is
+  // what lets the driver treat the device as passed through to it whole. The
+  // alternative would be to model the SR-IOV mailbox a virtual function reaches
+  // its host through, which this device does not have.
+  define_register(byte_offset_of(MmioRegister::RccIovFuncIdentifier), 0);
   // Zero here tells the driver the discovery table is not published through
   // these registers, so it looks for it at the top of video memory instead.
   define_register(byte_offset_of(MmioRegister::DriverScratch0), 0);
@@ -341,6 +449,15 @@ void GpuPciDevice::reset(simdojo::ResetKind kind) {
   // back, which is why a device that exports one is served to a single client.
   std::ranges::fill(doorbells_, std::byte{0});
   reset_registers();
+  // The table is restored rather than assumed intact. On real hardware it lives
+  // in memory the security processor reserves and the driver cannot write; here
+  // it is ordinary video memory, reachable through MM_DATA, so a guest that
+  // scribbles over it once would otherwise make every later bind fail.
+  if (!publish_discovery_table()) {
+    util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
+                                   "binding after this reset will refuse the device",
+                                   name()));
+  }
 }
 
 } // namespace rocjitsu
