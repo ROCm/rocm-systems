@@ -33,6 +33,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"

@@ -129,10 +129,10 @@ std::optional<uint16_t> flat_check_trap_compare_vgpr(const ConSanAccessInventory
 
 std::optional<uint16_t> check_trap_compare_vgpr(const ConSanAccessInventorySite &access,
                                                 uint16_t chunk_index, rj_code_arch_t arch,
-                                                uint16_t gfx1250_vgpr_msb_mode) {
+                                                uint16_t selectable_vgpr_bank_mode) {
   if (access.kind == ConSanLdsAccessKind::Read) {
     const uint32_t dst_bank = consan_arch_has_selectable_vgpr_bank(arch)
-                                  ? static_cast<uint32_t>((gfx1250_vgpr_msb_mode >> 6u) & 0x3u)
+                                  ? static_cast<uint32_t>((selectable_vgpr_bank_mode >> 6u) & 0x3u)
                                   : 0u;
     const uint32_t physical_vgpr =
         dst_bank * 256u + access.operands.destination_vgpr.value_or(0u) + chunk_index;

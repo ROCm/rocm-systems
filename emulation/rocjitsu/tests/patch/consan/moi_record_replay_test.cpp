@@ -6579,13 +6579,14 @@ TEST(ConSanMoi, Gfx1250DenseBarrierHostAvoidsImplicitHighVgprBank) {
   ASSERT_TRUE(original.is_valid());
   ASSERT_EQ(original.text_sections().size(), 1u);
   const Section *text = original.text_sections().front();
-  const std::optional<uint16_t> host_mode = consan_gfx1250_vgpr_msb_mode_at(
-      bytes, text->sectionOffset(), /*container_entry_text_offset=*/0u,
-      text->sectionOffset() + host->anchor_offset);
+  const std::optional<uint16_t> host_mode = consan_selectable_vgpr_bank_mode_at(
+      ROCJITSU_CODE_ARCH_CDNA5, bytes, text->sectionOffset(),
+      /*container_entry_text_offset=*/0u, text->sectionOffset() + host->anchor_offset);
   ASSERT_TRUE(host_mode);
   EXPECT_EQ(*host_mode, 0u);
-  const std::optional<uint16_t> continuation_mode = consan_gfx1250_vgpr_msb_mode_at(
-      bytes, text->sectionOffset(), /*container_entry_text_offset=*/0u,
+  const std::optional<uint16_t> continuation_mode = consan_selectable_vgpr_bank_mode_at(
+      ROCJITSU_CODE_ARCH_CDNA5, bytes, text->sectionOffset(),
+      /*container_entry_text_offset=*/0u,
       text->sectionOffset() + host->anchor_offset + host->original_size);
   ASSERT_TRUE(continuation_mode);
   EXPECT_EQ(*continuation_mode, 0u);
@@ -11629,7 +11630,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(test_admitted_accesses(result).size(), kAccessCount);
   for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result))
-    EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, candidate), kGuestVgprMsbMode);
+    EXPECT_EQ(test_selectable_vgpr_bank_mode(bytes, candidate), kGuestVgprMsbMode);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -11696,7 +11697,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()),
+  EXPECT_EQ(test_selectable_vgpr_bank_mode(bytes, test_admitted_accesses(result).front()),
             kGuestVgprMsbMode);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 7u);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
@@ -11763,7 +11764,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCaptu
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()),
+  EXPECT_EQ(test_selectable_vgpr_bank_mode(bytes, test_admitted_accesses(result).front()),
             kGuestVgprMsbMode);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
@@ -11832,7 +11833,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesIgnorePreviousGuestVgprMsbMode) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()), 0u);
+  EXPECT_EQ(test_selectable_vgpr_bank_mode(bytes, test_admitted_accesses(result).front()), 0u);
 }
 
 TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {

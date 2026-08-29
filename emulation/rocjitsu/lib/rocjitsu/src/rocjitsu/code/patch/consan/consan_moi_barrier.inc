@@ -223,12 +223,12 @@ private:
     rj_code_arch_t arch, std::optional<uint16_t> visible_evidence_scratch_vgpr,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
     std::vector<std::string> &errors) {
   const bool publish_visible_evidence = visible_evidence_scratch_vgpr.has_value();
-  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
+  const bool control_selectable_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
-      control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+      control_selectable_vgpr_bank && selectable_vgpr_bank_mode.value_or(0u) != 0u;
   if (publish_visible_evidence &&
       (!bound_resources.moi_report_buffer_address || !point.moi_exec_save_sgpr)) {
     errors.emplace_back(
@@ -308,9 +308,9 @@ private:
     // The guest instruction after a patched control transfer may update the
     // VGPR-bank mode as the cave begins executing.  Establish the cave's
     // low-bank invariant even when the replaced barrier itself used mode 0.
-    if (control_gfx1250_vgpr_bank)
+    if (control_selectable_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
+          static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
     if (spill)
       words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
     if (scalar_spill)
@@ -351,7 +351,7 @@ private:
       words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
     if (restore_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
+          0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
     const uint64_t branch_pc =
         cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
     if (call_return_sgpr) {
@@ -389,11 +389,11 @@ private:
   words.reserve(
       40u + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u) +
-      (control_gfx1250_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
+      (control_selectable_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
   words.push_back(original_barrier_word);
-  if (control_gfx1250_vgpr_bank)
+  if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
+        static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
@@ -418,7 +418,7 @@ private:
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
 
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -447,7 +447,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, uint32_t epoch_offset,
     const VgprSpillSequence &spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+    std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
     std::vector<std::string> &errors) {
   const auto load_epoch = instrumentation::build_private_load_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
@@ -466,23 +466,23 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   }
 
   std::vector<uint32_t> words;
-  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
+  const bool control_selectable_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
-      control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+      control_selectable_vgpr_bank && selectable_vgpr_bank_mode.value_or(0u) != 0u;
   words.reserve(
       3u + spill.save_words.size() + load_epoch->size() + store_epoch->size() +
       saturate_epoch->size() + spill.restore_words.size() +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u) +
-      3u + (control_gfx1250_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
+      3u + (control_selectable_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
   words.push_back(original_barrier_word);
   // A guest load may intentionally remain outstanding across the barrier and
   // be consumed after a following waitcnt.  Drain it before saving a
   // spill-backed temporary: otherwise the pending load can complete between
   // our save and restore, and the restore overwrites the guest's new value.
   words.push_back(*drain_guest_vmem);
-  if (control_gfx1250_vgpr_bank)
+  if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
+        static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
@@ -498,7 +498,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
 
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -1245,7 +1245,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       [&](const PlannedInlineEpochBarrier &planned, MoiOptions candidate_options,
           uint32_t original_barrier_word, uint64_t body_offset, uint64_t return_offset,
           std::optional<uint16_t> call_return_sgpr,
-          std::optional<uint16_t> gfx1250_vgpr_msb_mode) -> std::optional<std::vector<uint32_t>> {
+          std::optional<uint16_t> selectable_vgpr_bank_mode)
+      -> std::optional<std::vector<uint32_t>> {
     if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
       if (!planned.record_emission) {
         result.warnings.emplace_back(
@@ -1264,13 +1265,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           planned.candidate.site, candidate_options, candidate_options, *planned.scratch_vgpr,
           *planned.private_epoch_offset, *planned.spill,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, original_barrier_word,
-          body_offset, return_offset, call_return_sgpr, gfx1250_vgpr_msb_mode, result.errors);
+          body_offset, return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
     }
     return build_inline_shadow_barrier_epoch_cave_words(
         planned.candidate.site, candidate_options, candidate_options, candidate_options, arch,
         planned.scratch_vgpr, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, original_barrier_word, body_offset,
-        return_offset, call_return_sgpr, gfx1250_vgpr_msb_mode, result.errors);
+        return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
   };
 
   for (size_t planned_index = 0; planned_index < planned_candidates.size(); ++planned_index) {
@@ -1280,10 +1281,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     uint32_t original_barrier_word = 0;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
-    const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
+    const std::optional<uint16_t> selectable_vgpr_bank_mode =
         arch == ROCJITSU_CODE_ARCH_CDNA5
-            ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
-                                       candidate.container_entry_text_offset, site.file_offset)
+            ? consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
+                                                  candidate.container_entry_text_offset,
+                                                  site.file_offset)
             : std::nullopt;
     MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
@@ -1312,7 +1314,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const uint64_t return_text_offset = site.text_offset + site.size;
         auto local_words = build_engine_barrier_body(
             planned, candidate_options, original_barrier_word, *local_body_offset,
-            return_text_offset, std::nullopt, gfx1250_vgpr_msb_mode);
+            return_text_offset, std::nullopt, selectable_vgpr_bank_mode);
         if (!local_words)
           return;
         if (local_words->size() <= kMoiLocalIndirectIslandWords &&
@@ -1344,7 +1346,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           patches.push_back(std::move(info));
           continue;
         }
-        // gfx1250 may need VGPR-bank setup around this otherwise-small body.
+        // A selectable-bank target may need setup around this otherwise-small body.
         // A claimed short island is therefore only an optimization; if the
         // final body does not fit, retain the island as the indirect entry to
         // the general appended body below.
@@ -1374,7 +1376,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     std::optional<std::vector<uint32_t>> cave_words = build_engine_barrier_body(
         planned, candidate_options, original_barrier_word, cave_text_offset, return_text_offset,
-        std::nullopt, gfx1250_vgpr_msb_mode);
+        std::nullopt, selectable_vgpr_bank_mode);
     if (!cave_words)
       return;
 
@@ -1666,10 +1668,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         uint32_t original_barrier_word = 0;
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                     sizeof(original_barrier_word));
-        const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
+        const std::optional<uint16_t> selectable_vgpr_bank_mode =
             arch == ROCJITSU_CODE_ARCH_CDNA5
-                ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
-                                           candidate.container_entry_text_offset, site.file_offset)
+                ? consan_selectable_vgpr_bank_mode_at(
+                      arch, active_bytes, candidate.text_file_offset,
+                      candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
         MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
@@ -1694,7 +1697,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const uint64_t body_offset = new_text.size() + staged_body_bytes;
         std::optional<std::vector<uint32_t>> body_words = build_engine_barrier_body(
             planned, candidate_options, original_barrier_word, body_offset,
-            site.text_offset + site.size, call_return_sgpr, gfx1250_vgpr_msb_mode);
+            site.text_offset + site.size, call_return_sgpr, selectable_vgpr_bank_mode);
         if (!body_words)
           return ReusedDenseRelayResult::Failed;
         const uint64_t body_bytes = body_words->size() * sizeof(uint32_t);
@@ -1929,10 +1932,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                     sizeof(original_barrier_word));
         const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
-        const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
+        const std::optional<uint16_t> selectable_vgpr_bank_mode =
             arch == ROCJITSU_CODE_ARCH_CDNA5
-                ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
-                                           candidate.container_entry_text_offset, site.file_offset)
+                ? consan_selectable_vgpr_bank_mode_at(
+                      arch, active_bytes, candidate.text_file_offset,
+                      candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
         MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
@@ -1954,7 +1958,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             planned, candidate_options, original_barrier_word, body_offset,
             site.text_offset + site.size,
             spill_backed_router ? std::nullopt : std::optional<uint16_t>(call_return_sgpr),
-            gfx1250_vgpr_msb_mode);
+            selectable_vgpr_bank_mode);
         if (!body_words)
           return;
         append_words_bytes(new_text, *body_words);

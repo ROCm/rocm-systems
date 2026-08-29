@@ -77,8 +77,8 @@ struct ConSanFaultSite {
   uint32_t size = 0;
   uint32_t width_bits = 0;
   std::optional<uint16_t> address_vgpr;
-  /// gfx1250 bank state at this instruction; the address operand uses bits 1:0.
-  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+  /// Target-defined selectable-bank state at this instruction.
+  std::optional<uint16_t> selectable_vgpr_bank_mode;
   std::string mnemonic;
   std::string semantic_role;
   std::string decoded_operands;

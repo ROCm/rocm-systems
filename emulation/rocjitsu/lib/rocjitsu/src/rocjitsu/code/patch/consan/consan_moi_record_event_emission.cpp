@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -100,9 +101,9 @@ using consan_moi_detail::kFenceRecordLayout;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const std::optional<uint16_t> vgpr_msb_mode =
       target != nullptr && target->has_selectable_vgpr_bank
-          ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
-                                     candidate.container_entry_text_offset,
-                                     candidate.site.file_offset)
+          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, candidate.text_file_offset,
+                                                candidate.container_entry_text_offset,
+                                                candidate.site.file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
@@ -807,9 +808,9 @@ using consan_moi_detail::kFenceRecordLayout;
   }
   const std::optional<uint16_t> vgpr_msb_mode =
       target->has_selectable_vgpr_bank
-          ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
-                                     candidate.container_entry_text_offset,
-                                     candidate.patch_file_offset)
+          ? consan_selectable_vgpr_bank_mode_at(arch, bytes, candidate.text_file_offset,
+                                                candidate.container_entry_text_offset,
+                                                candidate.patch_file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(words.size() + candidate.patch_size / sizeof(uint32_t) + 80u +

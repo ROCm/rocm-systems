@@ -2018,8 +2018,8 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     // silently changes its operands.  Keep host relocation in the low bank
     // until the host-body ABI explicitly carries and restores this state.
     if (consan_arch_has_selectable_vgpr_bank(resource_state.arch)) {
-      const std::optional<uint16_t> mode =
-          consan_gfx1250_vgpr_msb_mode_at(text, /*text_file_offset=*/0u, owner_begin, host_offset);
+      const std::optional<uint16_t> mode = consan_selectable_vgpr_bank_mode_at(
+          resource_state.arch, text, /*text_file_offset=*/0u, owner_begin, host_offset);
       if (!mode || *mode != 0u)
         return std::nullopt;
     }

@@ -188,7 +188,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<uint16_t> required_vgpr_allocation_count;
     std::optional<DbiPatchPlacement> placement;
     std::vector<uint64_t> entry_relay_offsets = {};
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+    std::optional<uint16_t> selectable_vgpr_bank_mode;
     std::optional<size_t> dense_call_group_index;
     std::optional<uint16_t> dense_call_return_sgpr;
     std::optional<uint16_t> dense_explicit_key;
@@ -869,11 +869,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       const ConSanAccessInventorySite &site = *site_context.site;
       const ConSanAccessLoweringForm &form = *site.lowering.form;
       ++supported_candidate_count;
-      const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
+      const std::optional<uint16_t> selectable_vgpr_bank_mode =
           target.has_selectable_vgpr_bank &&
                   site.file_offset >= site.physical_id.original_text_offset
-              ? consan_gfx1250_vgpr_msb_mode_at(
-                    original_bytes, site.file_offset - site.physical_id.original_text_offset,
+              ? consan_selectable_vgpr_bank_mode_at(
+                    arch, original_bytes, site.file_offset - site.physical_id.original_text_offset,
                     site_context.container_entry_text_offset, site.file_offset)
               : std::nullopt;
       auto required_vgprs = lds_dword_count(site);
@@ -945,20 +945,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 4u;
-      if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
+      if (spill_vcc_save_to_vgpr && selectable_vgpr_bank_mode.value_or(0u) != 0u)
         requested_words += 2u;
       if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read &&
           form.destination_vgpr) {
         const uint32_t dst_bank =
-            static_cast<uint32_t>((gfx1250_vgpr_msb_mode.value_or(0u) >> 6u) & 0x3u);
+            static_cast<uint32_t>((selectable_vgpr_bank_mode.value_or(0u) >> 6u) & 0x3u);
         for (uint16_t i = 0; i < *required_vgprs; ++i) {
           if (dst_bank * 256u + *form.destination_vgpr + i >= 256u)
             requested_words += 2u;
         }
       }
-      if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
+      if (selectable_vgpr_bank_mode.value_or(0u) != 0u)
         requested_words += 2u;
-      if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u && lds_load_clobbers_address(site))
+      if (selectable_vgpr_bank_mode.value_or(0u) != 0u && lds_load_clobbers_address(site))
         requested_words += 2u;
       const auto choose_context_scratch =
           [&](std::optional<uint16_t> allocation_limit) -> std::optional<uint16_t> {
@@ -1093,7 +1093,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                 build_vgpr_spill_sequence(preview_manager, scratch_vgpr, scratch_vgprs, arch);
             if (spill) {
               requested_words += spill->save_words.size() + spill->restore_words.size();
-              if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
+              if (selectable_vgpr_bank_mode.value_or(0u) != 0u) {
                 requested_words += 2u;
                 if (spill_vcc_save_to_vgpr)
                   requested_words -= 2u;
@@ -1178,7 +1178,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             descriptor_growth,
                                             std::nullopt,
                                             {},
-                                            gfx1250_vgpr_msb_mode,
+                                            selectable_vgpr_bank_mode,
                                             std::nullopt,
                                             std::nullopt,
                                             std::nullopt,
@@ -1209,7 +1209,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           descriptor_growth,
                                           std::nullopt,
                                           {},
-                                          gfx1250_vgpr_msb_mode,
+                                          selectable_vgpr_bank_mode,
                                           std::nullopt,
                                           std::nullopt,
                                           std::nullopt,
@@ -1269,7 +1269,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             descriptor_growth,
                                             std::nullopt,
                                             {},
-                                            gfx1250_vgpr_msb_mode,
+                                            selectable_vgpr_bank_mode,
                                             std::nullopt,
                                             std::nullopt,
                                             std::nullopt,
@@ -1294,7 +1294,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                  descriptor_growth,
                                                  std::nullopt,
                                                  {},
-                                                 gfx1250_vgpr_msb_mode,
+                                                 selectable_vgpr_bank_mode,
                                                  std::nullopt,
                                                  std::nullopt,
                                                  std::nullopt,
@@ -1327,7 +1327,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                 descriptor_growth,
                                                 std::nullopt,
                                                 {},
-                                                gfx1250_vgpr_msb_mode,
+                                                selectable_vgpr_bank_mode,
                                                 std::nullopt,
                                                 std::nullopt,
                                                 std::nullopt,
@@ -1359,7 +1359,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           descriptor_growth,
                                           std::nullopt,
                                           {},
-                                          gfx1250_vgpr_msb_mode,
+                                          selectable_vgpr_bank_mode,
                                           std::nullopt,
                                           std::nullopt,
                                           std::nullopt,
@@ -1389,7 +1389,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                       descriptor_growth,
                                       std::nullopt,
                                       {},
-                                      gfx1250_vgpr_msb_mode,
+                                      selectable_vgpr_bank_mode,
                                       std::nullopt,
                                       std::nullopt,
                                       std::nullopt,
@@ -3217,7 +3217,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<uint32_t> guest_instruction_word_offset;
     auto words = build_lds_check_trap_words(original_bytes, site, target, options, *delay_words,
                                             candidate.scratch_vgpr, candidate.vcc_save_sgpr,
-                                            candidate.gfx1250_vgpr_msb_mode.value_or(0u),
+                                            candidate.selectable_vgpr_bank_mode.value_or(0u),
                                             guest_instruction_word_offset, result.errors);
     if (!words)
       return;
@@ -3235,18 +3235,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         return;
       }
     }
-    if (candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
+    if (candidate.selectable_vgpr_bank_mode.value_or(0u) != 0u) {
       const auto select_low = instrumentation::build_s_set_vgpr_msb_transition(
-          static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch);
+          static_cast<uint8_t>(*candidate.selectable_vgpr_bank_mode), 0u, arch);
       const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
-          0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch);
+          0u, static_cast<uint8_t>(*candidate.selectable_vgpr_bank_mode), arch);
       const size_t original_access_words =
           split_two_address ? split_two_address->access_word_count() : 2u;
       const size_t guest_prefix_words =
           original_access_words + (lds_load_clobbers_address(site) ? 1u : 0u);
       if (!select_low || !restore_guest || words->size() < guest_prefix_words) {
         result.errors.emplace_back(
-            "ConSan LDS check/trap proof could not preserve gfx1250 VGPR-bank mode");
+            "ConSan LDS check/trap proof could not preserve selectable VGPR-bank mode");
         return;
       }
       std::vector<uint32_t> wrapped;

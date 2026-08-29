@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
 #include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
+#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"

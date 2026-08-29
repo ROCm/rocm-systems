@@ -46,11 +46,6 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256u;
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
-[[nodiscard]] std::optional<uint16_t> gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
-                                                               uint64_t text_file_offset,
-                                                               uint64_t container_entry_text_offset,
-                                                               uint64_t site_file_offset);
-
 [[nodiscard]] bool append_moi_flat_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);

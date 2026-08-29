@@ -30,7 +30,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
+    std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors) {
   const bool scalar_persistent = point.moi_persistent_sgprs.complete();
   if (!bound_resources.moi_report_buffer_address || !point.moi_epoch_vgpr ||
       !point.moi_exec_save_sgpr || !point.moi_owner_vgpr ||
@@ -90,24 +90,24 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
-  const bool control_gfx1250_vgpr_bank = target->has_selectable_vgpr_bank;
+  const bool control_selectable_vgpr_bank = target->has_selectable_vgpr_bank;
   const bool restore_guest_vgpr_bank =
-      control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+      control_selectable_vgpr_bank && selectable_vgpr_bank_mode.value_or(0u) != 0u;
   // A patched s_call_i64 can be immediately followed by the guest's next
   // s_set_vgpr_msb.  That program-state update may take effect as control
   // transfers, even when the replaced barrier itself ran in mode zero.  Make
   // every gfx1250 cave establish its low-register invariant explicitly before
   // touching scratch VGPRs.
-  if (control_gfx1250_vgpr_bank)
+  if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
+        static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
   for (uint64_t offset = 0; offset < candidate.barrier.site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.barrier.site.file_offset + offset, sizeof(word));
@@ -115,7 +115,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   }
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, arch));
+        static_cast<uint8_t>(*selectable_vgpr_bank_mode), 0u, arch));
   // Runtime sampling selects LDS addresses, not workgroups. Every workgroup
   // which reaches the guest barrier must therefore inspect its banked causal
   // window and advance its epoch. A separate workgroup-residue gate can skip a
@@ -573,7 +573,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
   const uint64_t branch_pc = cave_text_offset + words.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset);
   if (ret) {
@@ -1261,8 +1261,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           return;
         }
         const uint64_t body_offset = new_text.size();
-        const auto vgpr_msb_mode = gfx1250_vgpr_msb_mode_at(
-            active_bytes, planned.candidate.barrier.text_file_offset,
+        const auto vgpr_msb_mode = consan_selectable_vgpr_bank_mode_at(
+            arch, active_bytes, planned.candidate.barrier.text_file_offset,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
             bytes, planned.candidate, candidate_options, candidate_options, candidate_options,

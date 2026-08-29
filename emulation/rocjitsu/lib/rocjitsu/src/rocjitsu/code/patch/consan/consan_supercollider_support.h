@@ -34,6 +34,6 @@ choose_flat_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t
 flat_check_trap_compare_vgpr(const ConSanAccessInventorySite &access);
 [[nodiscard]] std::optional<uint16_t>
 check_trap_compare_vgpr(const ConSanAccessInventorySite &access, uint16_t chunk_index,
-                        rj_code_arch_t arch, uint16_t gfx1250_vgpr_msb_mode);
+                        rj_code_arch_t arch, uint16_t selectable_vgpr_bank_mode);
 
 } // namespace rocjitsu

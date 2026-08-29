@@ -174,9 +174,9 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     site.width_bits = access.decoded_width_bits;
     site.address_vgpr = access.operands.address_vgpr;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5 && access.file_offset >= site.text_offset) {
-      site.gfx1250_vgpr_msb_mode =
-          consan_gfx1250_vgpr_msb_mode_at(bytes, access.container.text_file_offset,
-                                          access.container.entry_text_offset, access.file_offset);
+      site.selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+          arch, bytes, access.container.text_file_offset, access.container.entry_text_offset,
+          access.file_offset);
     }
     site.mnemonic = access.mnemonic;
     site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";

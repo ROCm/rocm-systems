@@ -50,6 +50,7 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -207,9 +208,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
           candidate.file_offset < candidate.anchor())
         continue;
       const uint64_t text_file_offset = candidate.file_offset - candidate.anchor();
-      candidate.incoming_vgpr_bank_mode =
-          gfx1250_vgpr_msb_mode_at(code_object_bytes, text_file_offset,
-                                   candidate.container.entry_text_offset, candidate.file_offset);
+      candidate.incoming_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+          arch, code_object_bytes, text_file_offset, candidate.container.entry_text_offset,
+          candidate.file_offset);
     }
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&

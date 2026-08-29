@@ -37,6 +37,20 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
+TEST(ConSan, SelectableVgprBankStateDispatchesOnlyToOwningTarget) {
+  constexpr uint32_t kSetVgprBankModeFour = 0xBF860004u;
+  std::array<uint8_t, sizeof(kSetVgprBankModeFour)> bytes{};
+  std::memcpy(bytes.data(), &kSetVgprBankModeFour, sizeof(kSetVgprBankModeFour));
+
+  EXPECT_EQ(
+      consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u, 0u, bytes.size()),
+      4u);
+  EXPECT_FALSE(
+      consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, 0u, bytes.size()));
+  EXPECT_FALSE(consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 1u,
+                                                   bytes.size(), bytes.size()));
+}
+
 TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   ConSanMoiTransientSgprAssignment owner_state;
   owner_state.descriptor_file_offset = 64u;

@@ -72,10 +72,4 @@ consan_capability_engine(ConSanFlavor flavor, ConSanMoiEngine moi_engine) {
   return std::nullopt;
 }
 
-/// Return the active VGPR-bank role mask at an instruction in a gfx1250
-/// container. The scan is bounded by the owning container entry.
-[[nodiscard]] std::optional<uint16_t>
-consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes, uint64_t text_file_offset,
-                                uint64_t container_entry_text_offset, uint64_t site_file_offset);
-
 } // namespace rocjitsu

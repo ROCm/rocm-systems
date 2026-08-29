@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -306,13 +307,14 @@ test_admitted_accesses(const ConSanTransformArtifacts &result) {
 /// Add the gfx1250 execution-mode fact that current lowerers derive directly
 /// from pristine code bytes immediately before emission.
 [[nodiscard]] std::optional<uint16_t>
-test_gfx1250_vgpr_msb_mode(std::span<const uint8_t> bytes,
-                           const ConSanAccessInventorySite &access) {
+test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes,
+                               const ConSanAccessInventorySite &access) {
   const uint64_t anchor = access.physical_id.original_text_offset;
   if (anchor < access.container.entry_text_offset || access.file_offset < anchor)
     return std::nullopt;
-  return consan_gfx1250_vgpr_msb_mode_at(bytes, access.file_offset - anchor,
-                                         access.container.entry_text_offset, access.file_offset);
+  return consan_selectable_vgpr_bank_mode_at(
+      ROCJITSU_CODE_ARCH_CDNA5, bytes, access.file_offset - anchor,
+      access.container.entry_text_offset, access.file_offset);
 }
 
 [[nodiscard]] constexpr bool is_consan_access_intent(ConSanProbeIntentKind kind) {

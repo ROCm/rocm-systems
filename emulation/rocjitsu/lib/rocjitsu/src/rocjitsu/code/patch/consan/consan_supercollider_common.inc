@@ -471,7 +471,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
     std::span<const uint8_t> original_bytes, const ConSanAccessInventorySite &site,
     const ConSanTargetProfile &target, const ConSanOptions &options, uint32_t delay_words,
-    uint16_t scratch_vgpr, uint16_t vcc_save_sgpr, uint16_t gfx1250_vgpr_msb_mode,
+    uint16_t scratch_vgpr, uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   const rj_code_arch_t arch = target.arch;
   guest_instruction_word_offset.reset();
@@ -535,7 +535,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
       form.destination_accvgpr &&
               target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned
           ? std::optional<uint16_t>(compare_scratch_vgpr)
-          : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
+          : check_trap_compare_vgpr(site, 0u, arch, selectable_vgpr_bank_mode);
   if (!first_compare_vgpr) {
     errors.emplace_back("ConSan LDS check/trap proof selected site without compare VGPR");
     return std::nullopt;
@@ -603,7 +603,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   uint32_t compare_mode_switch_words = 0;
   if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read) {
     for (uint16_t i = 0; i < *required_vgprs; ++i) {
-      const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
+      const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
       if (compare_vgpr && *compare_vgpr >= 256u)
         compare_mode_switch_words += 2u;
     }
@@ -677,7 +677,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     words.insert(words.end(), masked_store_value->begin(), masked_store_value->end());
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
-    auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
+    auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
     if (form.destination_accvgpr && uses_gfx9_cdna_encoding) {
       const auto acc_read = consan_sc_build_cdna_accvgpr_read_b32(
           compare_scratch_vgpr, static_cast<uint16_t>(*form.destination_accvgpr + i), target);

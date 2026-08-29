@@ -20,6 +20,7 @@ target_sources(
         consan_fault_selection.cpp
         consan_fault_target_ops.cpp
         consan_final_validation.cpp
+        consan_gfx1250_vgpr_bank_state.cpp
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
         consan_inventory_diagnostics.cpp

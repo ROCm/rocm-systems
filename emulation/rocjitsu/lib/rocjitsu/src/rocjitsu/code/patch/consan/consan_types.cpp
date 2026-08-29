@@ -3,43 +3,9 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/kernel_scope.h"
-#include "rocjitsu/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
-#include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
-#include "rocjitsu/code/patch/instrumentation_builder.h"
-#include "rocjitsu/code/patch/instrumentor.h"
-#include "rocjitsu/code/patch/spill_manager.h"
-#include "rocjitsu/code/patch/trampoline_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
-#include "util/bit.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
-#include <algorithm>
-#include <array>
 #include <cctype>
-#include <cstring>
-#include <initializer_list>
-#include <iterator>
-#include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
 
 namespace rocjitsu {
 
@@ -241,29 +207,6 @@ bool ConSanFaultMutationPlan::well_formed() const {
            !atomic_order_edge && !destructive_incomplete_barrier_drop;
   }
   return false;
-}
-
-std::optional<uint16_t> consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes,
-                                                        uint64_t text_file_offset,
-                                                        uint64_t container_entry_text_offset,
-                                                        uint64_t site_file_offset) {
-  if (text_file_offset > bytes.size() ||
-      container_entry_text_offset > bytes.size() - text_file_offset)
-    return std::nullopt;
-  const uint64_t container_file_offset = text_file_offset + container_entry_text_offset;
-  if (container_file_offset > site_file_offset || site_file_offset > bytes.size())
-    return std::nullopt;
-  uint16_t mode = 0;
-  for (uint64_t offset = container_file_offset; offset + sizeof(uint32_t) <= site_file_offset;
-       offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    if ((word & 0xFFFF0000u) == 0xBF860000u)
-      // The low byte is the mode established by this instruction.  The high
-      // byte records the previous mode and must not become persistent state.
-      mode = static_cast<uint16_t>(word & 0xFFu);
-  }
-  return mode;
 }
 
 const char *consan_flavor_name(ConSanFlavor flavor) {
