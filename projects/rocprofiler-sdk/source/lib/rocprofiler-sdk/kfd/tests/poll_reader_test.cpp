@@ -179,3 +179,94 @@ TEST(stream_pollin, control_fd_ignored)
                          {.fd = 1, .events = POLLIN, .revents = POLLIN}};
     EXPECT_FALSE(any_stream_pollin(backstop, 1)) << "backstop polls control only";
 }
+
+// A stream stuck at POLLERR (no POLLIN) must feed the empty-wake backstop, so the
+// reader falls back to a timeout-only wait instead of spinning: poll() returns
+// POLLERR immediately every pass. any_stream_pollin misses it (no POLLIN bit), so
+// any_stream_error is the second signal that keeps the backstop reachable.
+TEST(stream_error, pollerr_feeds_backstop)
+{
+    // POLLERR only, no POLLIN: any_stream_pollin misses it, any_stream_error sees it.
+    pollfd err_only[] = {{.fd = 0, .events = POLLIN, .revents = 0},
+                         {.fd = 1, .events = POLLIN, .revents = POLLERR}};
+    EXPECT_FALSE(any_stream_pollin(err_only, 2)) << "POLLERR is not POLLIN";
+    EXPECT_TRUE(any_stream_error(err_only, 2)) << "POLLERR on a stream";
+
+    // The control fd is never a stream error, even if it somehow reported POLLERR.
+    pollfd ctrl_err[] = {{.fd = 0, .events = POLLIN, .revents = POLLERR}};
+    EXPECT_FALSE(any_stream_error(ctrl_err, 1)) << "control slot excluded";
+
+    // No error present.
+    pollfd clean[] = {{.fd = 0, .events = POLLIN, .revents = POLLIN},
+                      {.fd = 1, .events = POLLIN, .revents = POLLIN}};
+    EXPECT_FALSE(any_stream_error(clean, 2)) << "no POLLERR";
+
+    // A later stream in error while an earlier one is idle.
+    pollfd second_err[] = {{.fd = 0, .events = POLLIN, .revents = 0},
+                           {.fd = 1, .events = POLLIN, .revents = 0},
+                           {.fd = 2, .events = POLLIN, .revents = POLLERR}};
+    EXPECT_TRUE(any_stream_error(second_err, 3)) << "second stream in error";
+
+    // Backstop-tripped shape: only the control fd is polled (count == 1).
+    pollfd backstop[] = {{.fd = 0, .events = POLLIN, .revents = 0},
+                         {.fd = 1, .events = POLLIN, .revents = POLLERR}};
+    EXPECT_FALSE(any_stream_error(backstop, 1)) << "backstop polls control only";
+}
+
+// A stream wake (POLLIN or POLLERR) that copied nothing is unproductive; a bare
+// control nudge is not.
+TEST(stream_error, unproductive_predicate)
+{
+    EXPECT_TRUE(wake_is_unproductive(/*pollin=*/true, /*pollerr=*/false, /*copied=*/0));
+    EXPECT_TRUE(wake_is_unproductive(false, true, 0));
+    EXPECT_FALSE(wake_is_unproductive(true, false, 5)) << "copied something -> productive";
+    EXPECT_FALSE(wake_is_unproductive(false, false, 0)) << "control nudge only -> not a spin";
+}
+
+// The full sticky-POLLERR state transition: the backstop trips and then STAYS
+// tripped through control-only timeouts (it must not re-burst), clearing only on
+// real copy progress. Drives the pure transition the reader loop uses.
+TEST(spin_backstop, sticky_pollerr_latches_until_progress)
+{
+    int  wakes = 0;
+    auto trip  = [&] { return empty_wake_backstop_tripped(wakes); };
+
+    // Unproductive POLLERR wakes (not timed out, not yet tripped) climb the counter.
+    for(int i = 0; i <= kMaxConsecutiveEmptyWakes; ++i)
+    {
+        ASSERT_FALSE(trip()) << "not tripped yet at " << i;
+        wakes = next_empty_wakes(wakes,
+                                 /*unproductive=*/true,
+                                 /*copied_any=*/false,
+                                 /*timed_out=*/false,
+                                 /*backstop_tripped=*/trip());
+    }
+    ASSERT_TRUE(trip()) << "tripped once past the threshold";
+
+    // Now tripped: control-only timeouts (backstop_tripped=true, copied 0) must HOLD
+    // the latch. The old code reset here, re-bursting ~100 Hz.
+    for(int i = 0; i < 1000; ++i)
+        wakes = next_empty_wakes(wakes,
+                                 /*unproductive=*/false,
+                                 /*copied_any=*/false,
+                                 /*timed_out=*/true,
+                                 /*backstop_tripped=*/true);
+    EXPECT_TRUE(trip()) << "a tripped-backstop timeout must not clear the latch";
+
+    // Real copy progress clears it -> the stream is polled again next pass.
+    wakes = next_empty_wakes(wakes,
+                             /*unproductive=*/false,
+                             /*copied_any=*/true,
+                             /*timed_out=*/false,
+                             /*backstop_tripped=*/true);
+    EXPECT_FALSE(trip()) << "copy progress clears the latch";
+
+    // A GENUINE idle timeout (stream polled, did not fire) also clears it.
+    wakes = 5;
+    wakes = next_empty_wakes(wakes,
+                             /*unproductive=*/false,
+                             /*copied_any=*/false,
+                             /*timed_out=*/true,
+                             /*backstop_tripped=*/false);
+    EXPECT_EQ(wakes, 0) << "an untripped idle timeout is real evidence the spin cleared";
+}
