@@ -19,6 +19,7 @@
 #include "simdojo/components/pci_device.h"
 #include "simdojo/components/register_file.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -224,6 +225,47 @@ public:
   ///
   /// @returns What the driver has said about the ring so far.
   [[nodiscard]] InterruptRing interrupt_ring() const;
+
+  /// @brief One interrupt, as the ring carries it.
+  ///
+  /// @details The driver looks up a handler by the pair of identifiers and
+  /// passes the rest to it. Everything else an entry can carry -- timestamps,
+  /// process and node identifiers -- describes work this device does not run,
+  /// so it is left zero rather than invented.
+  struct InterruptEntry {
+    uint8_t client_id = 0;             ///< Which block is reporting.
+    uint8_t source_id = 0;             ///< What it is reporting.
+    std::array<uint32_t, 4> data = {}; ///< Whatever that source attaches.
+  };
+
+  /// @brief Put one entry in the interrupt ring and raise the message for it.
+  ///
+  /// @details The whole delivery, because the parts are only meaningful
+  /// together: an entry the driver never sees, a write pointer naming an entry
+  /// that is not there, or a message with nothing behind it are each worse than
+  /// doing nothing. The write pointer is published into guest memory as well as
+  /// into its register, because the driver reads it from memory; it reads the
+  /// register only when the pointer it read says an overflow happened.
+  ///
+  /// **Nothing tracks how much of the ring the driver has consumed.** The
+  /// driver acknowledges entries by writing a doorbell, which this device
+  /// records and does not read, so a ring filled faster than it is drained
+  /// overwrites entries the driver has not seen, and reports no overflow. That
+  /// is survivable only while deliveries are occasional; anything raising
+  /// interrupts at a rate needs the read pointer followed first.
+  ///
+  /// Must be called from the thread servicing register access, or with that
+  /// thread stopped: it reads registers and reaches guest memory through the
+  /// transport, neither of which it locks.
+  ///
+  /// @param[in] entry What to report.
+  /// @retval false Nothing was delivered, or not all of it was. A ring that is
+  ///               unusable is declined before anything is written; a failure
+  ///               to publish the pointer leaves an entry nobody is pointed at,
+  ///               which the next delivery overwrites; a message the transport
+  ///               would not take leaves the entry and the pointer in place,
+  ///               for the next delivery's message to cover.
+  [[nodiscard]] bool deliver_interrupt(const InterruptEntry &entry);
 
   /// @brief Render a ring for a diagnostic.
   ///
