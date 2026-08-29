@@ -4,6 +4,16 @@
 # Keep ConSan's DBI hook isolated from the generic rocjitsu hook target. The
 # output directory intentionally remains the parent hooks directory for
 # compatibility with installed layouts and existing validation tooling.
+add_library(rocjitsu_consan_report_trust STATIC rj_hsa_dbi_moi_report_trust.cpp)
+set_target_properties(
+    rocjitsu_consan_report_trust
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_consan_report_trust
+    PUBLIC ${ROCJITSU_SRC_DIR}
+)
+
 add_library(
     rocjitsu_dbi_hooks
     SHARED
@@ -28,6 +38,7 @@ target_link_libraries(
     rocjitsu_dbi_hooks
     PRIVATE
         rocjitsu_hsa_tool_lifetime
+        rocjitsu_consan_report_trust
         rocjitsu_waitcheck_objects
         rocjitsu_dbt_internal
         util
@@ -49,8 +60,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(MSVC)
+    target_compile_options(rocjitsu_consan_report_trust PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_dbi_hooks PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(
+        rocjitsu_consan_report_trust
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
     target_compile_options(
         rocjitsu_dbi_hooks
         PRIVATE -Wall -Wextra -Wpedantic -Werror
