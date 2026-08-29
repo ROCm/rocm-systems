@@ -792,8 +792,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
             new_text, *indirect_entry_island, placement->body_offset, site.text_offset,
-            candidate_options, planned.resources.owner_descriptor_file_offsets, arch, patches,
-            result.errors, "ConSan MOI inline atomic patch")) {
+            static_cast<const ConSanRequest &>(candidate_options),
+            static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
+            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+            "ConSan MOI inline atomic patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);

@@ -544,13 +544,12 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
   return true;
 }
 
-[[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
-                                                        uint64_t cave_text_offset,
-                                                        uint64_t return_text_offset,
-                                                        const MoiOptions &options,
-                                                        rj_code_arch_t arch) {
+[[nodiscard]] bool
+append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
+                                     uint64_t return_text_offset, const ConSanRequest &request,
+                                     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              moi_indirect_jump_sgprs(options, options), arch);
+                                              moi_indirect_jump_sgprs(request, point), arch);
 }
 
 [[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
@@ -598,14 +597,13 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return true;
 }
 
-[[nodiscard]] bool
-emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
-                                     uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const MoiOptions &options,
-                                     std::span<const uint64_t> owner_descriptor_file_offsets,
-                                     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
-                                     std::vector<std::string> &errors, std::string_view context) {
-  const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
+[[nodiscard]] bool emit_moi_local_indirect_entry_island(
+    std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
+    uint64_t anchor_text_offset, const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
+    std::span<const uint64_t> owner_descriptor_file_offsets, rj_code_arch_t arch,
+    std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors,
+    std::string_view context) {
+  const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
   return jump_sgprs &&
          emit_moi_local_indirect_entry_island(
              text, island_text_offset, cave_text_offset, anchor_text_offset, *jump_sgprs,

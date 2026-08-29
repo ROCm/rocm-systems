@@ -3158,6 +3158,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
   MoiOptions options = input_options;
+  const ConSanRequest &request = options;
+  const ConSanMoiOperatingPoint &point = options;
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -3407,8 +3409,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       errors.emplace_back("ConSan MOI inline release could not encode its return");
       return std::nullopt;
     }
@@ -3444,8 +3446,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       errors.emplace_back("ConSan MOI inline acquire-release could not encode its return");
       return std::nullopt;
     }
@@ -3473,8 +3475,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       errors.emplace_back("ConSan MOI inline compare-exchange could not encode its return");
       return std::nullopt;
     }
@@ -3502,8 +3504,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       errors.emplace_back("ConSan MOI inline read-only acquire could not encode its return");
       return std::nullopt;
     }
@@ -3665,8 +3667,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     append_spill_restore();
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       errors.emplace_back("ConSan MOI inline release could not encode its return");
       return std::nullopt;
     }
@@ -3687,8 +3689,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
 
   append_spill_restore();
-  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                            arch)) {
+  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                            point, arch)) {
     errors.emplace_back("ConSan MOI inline atomic could not encode its return");
     return std::nullopt;
   }

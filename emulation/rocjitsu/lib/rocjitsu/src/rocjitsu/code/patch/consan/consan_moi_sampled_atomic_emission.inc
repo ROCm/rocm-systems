@@ -553,8 +553,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
-                                            arch))
+  if (!append_moi_direct_or_indirect_return(
+          words, cave_text_offset, return_text_offset, static_cast<const ConSanRequest &>(options),
+          static_cast<const ConSanMoiOperatingPoint &>(options), arch))
     return std::nullopt;
 
   if (!sequence.resolve_branches(arch))
@@ -990,7 +991,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (preserve_guest_at_anchor) {
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+                                              static_cast<const ConSanRequest &>(options),
+                                              static_cast<const ConSanMoiOperatingPoint &>(options),
                                               arch)) {
       return std::nullopt;
     }
@@ -1021,8 +1024,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
     }
-  } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                                   options, arch)) {
+  } else if (!append_moi_direct_or_indirect_return(
+                 words, cave_text_offset, return_text_offset,
+                 static_cast<const ConSanRequest &>(options),
+                 static_cast<const ConSanMoiOperatingPoint &>(options), arch)) {
     return std::nullopt;
   }
 

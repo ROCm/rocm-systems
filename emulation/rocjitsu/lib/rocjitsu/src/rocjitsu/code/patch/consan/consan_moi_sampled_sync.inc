@@ -1078,7 +1078,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                            : std::nullopt;
         if (local_island && fwd) {
           if (!emit_moi_local_indirect_entry_island(
-                  new_text, *local_island, cave_offset, site.text_offset, candidate_options,
+                  new_text, *local_island, cave_offset, site.text_offset,
+                  static_cast<const ConSanRequest &>(candidate_options),
+                  static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
                   planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
                   "ConSan MOI sampled barrier sync patch")) {
             return false;
@@ -2920,8 +2922,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     if (indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
             new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset,
-            route_options, planned.resources.owner_descriptor_file_offsets, arch, patches,
-            result.errors, "ConSan MOI sampled atomic sync patch")) {
+            static_cast<const ConSanRequest &>(route_options),
+            static_cast<const ConSanMoiOperatingPoint &>(route_options),
+            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+            "ConSan MOI sampled atomic sync patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);
