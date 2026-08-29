@@ -71,6 +71,9 @@ the stacked tool integration PR.
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
   performance problems visible in the implementation, and how the cost behaves as device capacity
   outpaces host-link bandwidth across accelerator generations.
+- **[rocpd schema](kernel_replay_rocpd_schema.md)** — why `dispatch_id` alone stopped identifying a
+  dispatch execution once replay existed, the `replay_pass` column and per-event aggregation added
+  in schema 3.0.4, the alternatives that were dropped, and what is still open.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for

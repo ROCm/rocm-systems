@@ -25,9 +25,19 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+**rocpd:**
+
+  - rocpd schema 3.0.4 records which kernel replay pass produced a dispatch:
+    - `rocpd_kernel_dispatch` gains a nullable `replay_pass` column. It is `NULL` for runs that did not use kernel replay, where a `dispatch_id` identifies a single execution on its own.
+    - `counters_collection` aggregates per event rather than per `dispatch_id`, so the passes of a replayed dispatch stay separate. Outside kernel replay there is exactly one event per `dispatch_id`, so the view returns exactly what it returned under 3.0.3.
+    - `counters_collection` and `pmc_events` expose `replay_pass`, and the counter CSV export includes it for databases that contain replay data.
+    - Schema 3.0.3 remains available for reading databases written by earlier releases.
 
 ### Resolved issues
 
+**rocpd:**
+
+  - Kernel replay passes are no longer collapsed onto a single dispatch in rocpd output. Because every pass of a replayed dispatch reports the same `dispatch_id`, the export previously dropped the dispatch records of all passes after the first, and attached every pass's counter records to the first pass's event. A counter collected by more than one counter group — a sanity counter repeated in each `--pmc` group, for example — was then summed across the passes that collected it and reported as a single inflated value.
 
 ### Removed
 
