@@ -93,8 +93,10 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   const uint16_t value_register_count = static_cast<uint16_t>((site.width_bits + 31u) / 32u);
   const uint16_t data_register_count =
       static_cast<uint16_t>(value_register_count * (compare_exchange ? 2u : 1u));
+  const bool ordinary_load =
+      !is_rmw && site.dst_vgpr && site.data_vgpr && site.dst_vgpr == site.data_vgpr;
   const uint16_t destination_register_count =
-      site.returns_old_value.value_or(false) ? value_register_count : 0u;
+      site.returns_old_value.value_or(false) || ordinary_load ? value_register_count : 0u;
   if ((site.data_vgpr && static_cast<uint32_t>(*site.data_vgpr) + data_register_count > 256u) ||
       (site.dst_vgpr && destination_register_count != 0u &&
        static_cast<uint32_t>(*site.dst_vgpr) + destination_register_count > 256u)) {

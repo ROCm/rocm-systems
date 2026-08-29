@@ -2010,7 +2010,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                  : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
                                           index, site.text_offset,
                                           candidate.atomic.kernel_descriptor_file_offset,
-                                          scratch_count, nullptr, &site);
+                                          scratch_count, nullptr, &candidate.atomic.lowering_form);
     plan.intent_ids = {candidate.atomic.address_capture_intent, candidate.atomic.evidence_intent};
     if (!existing)
       result.resource_plans.push_back(plan);
@@ -2032,7 +2032,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     candidate_options.scratch_vgpr = resources->base;
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == ConSanRegisterAllocationSource::SpillRequired &&
-        sampled_atomic_guest_preserves_address(site, candidate.atomic.is_rmw);
+        sampled_atomic_guest_preserves_address(candidate.atomic.lowering_form);
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
         candidate.atomic.lowering_form, resources->base, resources->count, resources->source,
         allow_post_guest_spill_operand_overlap);
@@ -2686,7 +2686,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     const bool release_only_no_return =
         !planned.candidate.deferred_acquire && !consan_atomic_is_compare_exchange(site) &&
         !site.returns_old_value.value_or(false) &&
-        !(planned.spill && sampled_atomic_spill_overlaps_guest_operands(*planned.spill, site));
+        !(planned.spill && sampled_atomic_spill_overlaps_guest_operands(
+                               *planned.spill, planned.candidate.atomic.lowering_form));
     if (release_only_no_return && physical_anchor_offset == site.text_offset &&
         planned.relocated_guest_size == site.size) {
       BasicBlock *block = block_for_offset(resource_state.block_index, physical_anchor_offset);

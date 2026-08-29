@@ -646,27 +646,24 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
   return true;
 }
 
-[[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site,
+[[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const ConSanAtomicLoweringForm &form,
                                                            uint16_t scratch_vgpr,
                                                            uint16_t scratch_vgpr_count,
                                                            std::vector<std::string> &errors) {
-  if (!site.addr_vgpr) {
-    errors.emplace_back("ConSan MOI atomic record patch requires an address VGPR");
-    return true;
-  }
-  const uint16_t address_vgpr_count =
-      site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
-  if (range_overlaps(*site.addr_vgpr, address_vgpr_count, scratch_vgpr, scratch_vgpr_count)) {
+  if (range_overlaps(form.address_vgpr, form.address_vgpr_count, scratch_vgpr,
+                     scratch_vgpr_count)) {
     errors.emplace_back(
         "ConSan MOI atomic record patch scratch VGPRs overlap the atomic address VGPRs");
     return true;
   }
-  if (site.data_vgpr && range_overlaps(*site.data_vgpr, 1, scratch_vgpr, scratch_vgpr_count)) {
+  if (range_overlaps(form.data_vgpr, form.data_register_count, scratch_vgpr, scratch_vgpr_count)) {
     errors.emplace_back(
         "ConSan MOI atomic record patch scratch VGPRs overlap the atomic data VGPR");
     return true;
   }
-  if (site.dst_vgpr && range_overlaps(*site.dst_vgpr, 1, scratch_vgpr, scratch_vgpr_count)) {
+  if (form.destination_vgpr && form.destination_register_count != 0u &&
+      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
+                     scratch_vgpr_count)) {
     errors.emplace_back(
         "ConSan MOI atomic record patch scratch VGPRs overlap the atomic destination VGPR");
     return true;

@@ -236,7 +236,7 @@
     errors.emplace_back("ConSan MOI atomic record patch has an invalid scratch VGPR window");
     return std::nullopt;
   }
-  if (reject_atomic_candidate_scratch_overlap(candidate.site, *options.scratch_vgpr,
+  if (reject_atomic_candidate_scratch_overlap(candidate.lowering_form, *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
       reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
                                             address_plan.scratch_vgpr_count, "MOI owner", errors) ||
@@ -694,7 +694,8 @@
     return std::nullopt;
   }
   if (static_cast<uint32_t>(*options.scratch_vgpr) + address_plan.scratch_vgpr_count > 256u ||
-      reject_atomic_candidate_scratch_overlap(candidate.communication_site, *options.scratch_vgpr,
+      reject_atomic_candidate_scratch_overlap(candidate.communication_lowering_form,
+                                              *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
       reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
                                             address_plan.scratch_vgpr_count, "MOI owner", errors) ||

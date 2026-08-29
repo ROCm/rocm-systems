@@ -22,34 +22,23 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind, bool is_rmw) {
   return std::nullopt;
 }
 
-[[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicSite &site,
-                                                          bool is_rmw = true) {
-  if (!site.addr_vgpr || !site.dst_vgpr)
+[[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicLoweringForm &form) {
+  if (!form.destination_vgpr || form.destination_register_count == 0u)
     return true;
-  const uint16_t address_count =
-      site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
-  const bool ordinary_load = !is_rmw && (site.mnemonic.starts_with("flat_load") ||
-                                         site.mnemonic.starts_with("global_load"));
-  const uint16_t destination_count =
-      site.returns_old_value.value_or(false) || ordinary_load
-          ? static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u))
-          : 0u;
-  return destination_count == 0u ||
-         !range_overlaps(*site.addr_vgpr, address_count, *site.dst_vgpr, destination_count);
+  return !range_overlaps(form.address_vgpr, form.address_vgpr_count, *form.destination_vgpr,
+                         form.destination_register_count);
 }
 
-[[nodiscard]] bool sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
-                                                                const ConSanAtomicSite &site) {
+[[nodiscard]] bool
+sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
+                                             const ConSanAtomicLoweringForm &form) {
   const auto overlaps = [&](std::optional<uint16_t> base, uint16_t count) {
-    return base && range_overlaps(spill.vgpr_base, spill.vgpr_count, *base, count);
+    return base && count != 0u && range_overlaps(spill.vgpr_base, spill.vgpr_count, *base, count);
   };
-  const bool is_cas = consan_atomic_is_compare_exchange(site);
-  const uint16_t value_count = static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u));
-  const uint16_t address_count =
-      site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
-  return overlaps(site.addr_vgpr, address_count) ||
-         overlaps(site.data_vgpr, static_cast<uint16_t>(value_count * (is_cas ? 2u : 1u))) ||
-         overlaps(site.dst_vgpr, value_count);
+  return range_overlaps(spill.vgpr_base, spill.vgpr_count, form.address_vgpr,
+                        form.address_vgpr_count) ||
+         overlaps(form.data_vgpr, form.data_register_count) ||
+         overlaps(form.destination_vgpr, form.destination_register_count);
 }
 
 [[nodiscard]] bool append_sampled_atomic_guest(std::vector<uint32_t> &words,
@@ -180,10 +169,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     state.cas_result_vgpr = *candidate.site.dst_vgpr;
   }
   const bool guest_first =
-      spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site);
+      spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.lowering_form);
   assert(!defer_guest || !guest_first);
   const bool guest_preserves_address =
-      sampled_atomic_guest_preserves_address(candidate.site, candidate.is_rmw);
+      sampled_atomic_guest_preserves_address(candidate.lowering_form);
   assert(!guest_first || guest_preserves_address);
   if (guest_first && !guest_preserves_address) {
     errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
@@ -675,7 +664,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
           0u;
   const bool defer_guest =
       (release_only || preserve_guest_at_anchor) && !is_cas &&
-      !(spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site));
+      !(spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.lowering_form));
   if (preserve_guest_at_anchor && !defer_guest)
     return std::nullopt;
 

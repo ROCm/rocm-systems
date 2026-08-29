@@ -3056,7 +3056,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
                        uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
-                       const ConSanAtomicSite *atomic_site = nullptr, bool require_spill = false) {
+                       const ConSanAtomicLoweringForm *atomic_form = nullptr,
+                       bool require_spill = false) {
   ConSanCandidateResourcePlan plan;
   plan.site_kind = site_kind;
   plan.candidate_index = candidate_index;
@@ -3217,22 +3218,19 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
           {RegClass::VGPR, *access_candidate->operands.second_data_vgpr, data_count});
     }
   }
-  // Atomic address/payload widths come from ConSan's decoded atomic site.
+  // Atomic address/payload widths come from the classifier-owned lowering form.
   // Reserve them explicitly: generic def/use can understate native two-address
   // operations, and rejecting an overlap only during emission invalidates the
   // whole code-object transform instead of selecting another scratch window.
-  if (atomic_site != nullptr) {
-    if (atomic_site->addr_vgpr) {
-      const uint8_t address_count =
-          atomic_site->mnemonic.starts_with("buffer_") || atomic_site->mnemonic.starts_with("ds_")
-              ? 1u
-              : 2u;
-      request.forbidden.expand({RegClass::VGPR, *atomic_site->addr_vgpr, address_count});
+  if (atomic_form != nullptr) {
+    request.forbidden.expand({RegClass::VGPR, atomic_form->address_vgpr,
+                              static_cast<uint8_t>(atomic_form->address_vgpr_count)});
+    request.forbidden.expand({RegClass::VGPR, atomic_form->data_vgpr,
+                              static_cast<uint8_t>(atomic_form->data_register_count)});
+    if (atomic_form->destination_vgpr && atomic_form->destination_register_count != 0u) {
+      request.forbidden.expand({RegClass::VGPR, *atomic_form->destination_vgpr,
+                                static_cast<uint8_t>(atomic_form->destination_register_count)});
     }
-    if (atomic_site->data_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *atomic_site->data_vgpr, 1});
-    if (atomic_site->dst_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *atomic_site->dst_vgpr, 1});
   }
   if (!options.moi_owner_vgpr && state.register_allocation.owner_persistent_vgprs.empty() &&
       options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
@@ -3457,7 +3455,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
           state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
           candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
-          /*atomic_site=*/nullptr, /*require_spill=*/true);
+          /*atomic_form=*/nullptr, /*require_spill=*/true);
       const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
       const ConSanResourcePlanAlternative alternative{
           .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
@@ -3509,7 +3507,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const MoiOptions
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
           state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.anchor(),
           candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
-          /*atomic_site=*/nullptr, /*require_spill=*/true);
+          /*atomic_form=*/nullptr, /*require_spill=*/true);
       // The reduced window omits the dedicated address snapshot. If it spills
       // the clobbered address, emission recovers the value from its private
       // slot. If it is disjoint, InlineShadow can consume the original address

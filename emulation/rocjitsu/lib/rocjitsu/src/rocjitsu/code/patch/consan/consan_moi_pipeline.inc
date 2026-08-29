@@ -75,7 +75,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
             : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Fence,
                                      candidate_index, candidate.patch_text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
-                                     nullptr, &candidate.communication_site);
+                                     nullptr, &candidate.communication_lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan) {
       if (candidate.patch_text_offset != fence_text_offset)
@@ -601,7 +601,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                          : atomic_record_scratch_count(candidate.lowering_form);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site);
+          candidate.kernel_descriptor_file_offset, scratch_count, nullptr,
+          &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
@@ -617,7 +618,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           state, options, ConSanResourceSiteKind::Fence, index, candidate.patch_text_offset,
           candidate.kernel_descriptor_file_offset,
           fence_record_scratch_count(candidate.communication_lowering_form), nullptr,
-          &candidate.communication_site);
+          &candidate.communication_lowering_form);
       if (candidate.patch_text_offset != candidate.semantic_site.physical.original_text_offset)
         plan.semantic_text_offset = candidate.semantic_site.physical.original_text_offset;
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};

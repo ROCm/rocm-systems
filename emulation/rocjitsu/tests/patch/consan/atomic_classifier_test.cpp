@@ -53,8 +53,37 @@ TEST(ConSanAtomicClassifier, ExactFlatOrderingNormalizesOnAllFiveTargets) {
     EXPECT_EQ(classification.form->address_vgpr, 3u);
     EXPECT_EQ(classification.form->address_vgpr_count, 2u);
     EXPECT_EQ(classification.form->data_vgpr, 7u);
+    EXPECT_EQ(classification.form->data_register_count, 1u);
+    EXPECT_EQ(classification.form->destination_vgpr, 9u);
+    EXPECT_EQ(classification.form->destination_register_count, 1u);
     EXPECT_EQ(classification.form->scope, 1u);
   }
+}
+
+TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
+  const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
+  ConSanAtomicSite load = exact_flat_atomic(target);
+  load.mnemonic = "flat_load_dword";
+  load.data_vgpr = load.dst_vgpr;
+  load.returns_old_value = false;
+  const ConSanAtomicLoweringClassification load_classification =
+      classify_consan_atomic_lowering(load, target.arch, /*is_rmw=*/false);
+  ASSERT_TRUE(load_classification.normalized());
+  ASSERT_TRUE(load_classification.form);
+  EXPECT_FALSE(load_classification.form->is_rmw);
+  EXPECT_EQ(load_classification.form->destination_vgpr, 9u);
+  EXPECT_EQ(load_classification.form->destination_register_count, 1u);
+
+  ConSanAtomicSite store = load;
+  store.mnemonic = "flat_store_dword";
+  store.dst_vgpr.reset();
+  store.data_vgpr = 7u;
+  const ConSanAtomicLoweringClassification store_classification =
+      classify_consan_atomic_lowering(store, target.arch, /*is_rmw=*/false);
+  ASSERT_TRUE(store_classification.normalized());
+  ASSERT_TRUE(store_classification.form);
+  EXPECT_EQ(store_classification.form->destination_vgpr, std::nullopt);
+  EXPECT_EQ(store_classification.form->destination_register_count, 0u);
 }
 
 TEST(ConSanAtomicClassifier, Gfx12ScalarVectorAddressHasOneNormalizedForm) {

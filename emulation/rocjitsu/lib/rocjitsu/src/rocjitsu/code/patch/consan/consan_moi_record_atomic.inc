@@ -103,7 +103,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
             : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
                                      candidate_index, site.text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
-                                     nullptr, &site);
+                                     nullptr, &candidate.lowering_form);
     plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
