@@ -729,6 +729,10 @@ struct ConSanAtomicSiteDecision {
   std::optional<ConSanSynchronizationAssociationId> association;
   /// Dynamic post-guest value required by the atomic semantics.
   ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
+  /// Exact target lowering form accepted by the sole atomic classifier.
+  /// Present exactly for admitted decisions; downstream planners consume this
+  /// value and must not reclassify the raw instruction.
+  std::optional<ConSanAtomicLoweringForm> lowering_form;
   /// Target-neutral intents that collectively observe this operation.
   std::vector<ConSanProbeIntentId> intent_ids;
   /// Every symbol-container name through which this physical event was decoded.
@@ -759,6 +763,9 @@ struct ConSanFenceSiteDecision {
   ConSanFenceAssociation inventory_association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
   /// Qualified complete sequence, when inventory established one.
   std::optional<ConSanSynchronizationAssociationId> association;
+  /// Exact target lowering form of the associated address-bearing operation.
+  /// Present exactly for admitted decisions, including associated-only modes.
+  std::optional<ConSanAtomicLoweringForm> communication_lowering_form;
   /// Target-neutral intents that collectively represent this fence.
   std::vector<ConSanProbeIntentId> intent_ids;
   /// Every symbol-container name through which this physical event was decoded.
@@ -800,7 +807,7 @@ struct ConSanProbeIntent {
   bool operator==(const ConSanProbeIntent &) const = default;
 };
 
-/// Complete target-neutral semantic-policy output for one engine request.
+/// Complete target-normalized semantic-policy output for one engine request.
 ///
 /// Separate decision sequences cover semantic access ranges, barriers, ordered
 /// communication events, and fences; their shared intents cover physical

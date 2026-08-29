@@ -49,6 +49,13 @@ struct ConSanAtomicLoweringForm {
   bool compare_exchange = false;
   bool returns_old_value = false;
 
+  /// Verify the target-normalized shape without reinterpreting raw encoding.
+  [[nodiscard]] constexpr bool is_well_formed() const {
+    return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanAtomicLoweringFormKind::Count) &&
+           instruction_size != 0u && value_width_bits != 0u && value_register_count != 0u &&
+           data_register_count != 0u && address_vgpr_count != 0u;
+  }
+
   bool operator==(const ConSanAtomicLoweringForm &) const = default;
 };
 

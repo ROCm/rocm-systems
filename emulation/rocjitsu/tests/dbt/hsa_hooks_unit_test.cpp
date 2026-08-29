@@ -4747,6 +4747,17 @@ TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable)
   EXPECT_TRUE(g_transform_override_abort_unmatched_waits.front());
 }
 
+rocjitsu::ConSanAtomicLoweringForm diagnostic_atomic_lowering_form() {
+  rocjitsu::ConSanAtomicLoweringForm form;
+  form.kind = rocjitsu::ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress;
+  form.instruction_size = 12u;
+  form.value_width_bits = 32u;
+  form.value_register_count = 1u;
+  form.data_register_count = 1u;
+  form.address_vgpr_count = 1u;
+  return form;
+}
+
 rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
   rocjitsu::ConSanTransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
@@ -4798,6 +4809,7 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
           .reason = rocjitsu::ConSanAtomicPolicyReason::None,
           .association = atomic_association,
+          .lowering_form = diagnostic_atomic_lowering_form(),
           .intent_ids = {{1u}},
           .source_containers = {"atomic_kernel"},
       }},
@@ -4809,6 +4821,7 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
           .reason = rocjitsu::ConSanFencePolicyReason::None,
           .inventory_association = rocjitsu::ConSanFenceAssociation::Qualified,
           .association = fence_association,
+          .communication_lowering_form = diagnostic_atomic_lowering_form(),
           .intent_ids = {{2u}},
           .source_containers = {"fence_kernel"},
       }},
@@ -5129,6 +5142,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
           .reason = rocjitsu::ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
           .association = std::nullopt,
           .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .lowering_form = std::nullopt,
           .intent_ids = {},
           .source_containers = {"isolated_release"},
       }},

@@ -277,16 +277,21 @@ atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
   return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
 }
 
-[[nodiscard]] ConSanAtomicPolicyReason classify_atomic_encoding(const ProgramInventory &inventory,
-                                                                const ConSanSyncEvent &event,
-                                                                const ConSanSyncSequence &sequence,
-                                                                ConSanCapabilityEngine engine) {
+struct AtomicEncodingDecision {
+  ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
+  std::optional<ConSanAtomicLoweringForm> form;
+};
+
+[[nodiscard]] AtomicEncodingDecision classify_atomic_encoding(const ProgramInventory &inventory,
+                                                              const ConSanSyncEvent &event,
+                                                              const ConSanSyncSequence &sequence,
+                                                              ConSanCapabilityEngine engine) {
   const bool ordinary = event.kind == ConSanSyncEventKind::OrdinaryMemory;
   const ConSanAtomicSite *native = ordinary ? nullptr : find_atomic_site(inventory, event);
   const ConSanOrdinaryMemorySite *ordinary_site =
       ordinary ? find_ordinary_site(inventory, event) : nullptr;
   if ((ordinary && ordinary_site == nullptr) || (!ordinary && native == nullptr))
-    return ConSanAtomicPolicyReason::MissingOperands;
+    return {.reason = ConSanAtomicPolicyReason::MissingOperands, .form = std::nullopt};
   ConSanAtomicSite site = ordinary ? normalize_ordinary_site(*ordinary_site) : *native;
 
   // Synchronization analysis owns normalized semantic scope. It may preserve
@@ -303,7 +308,11 @@ atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
       engine == ConSanCapabilityEngine::InlineShadow || (ordinary && !record_buffer_ordinary)
           ? classification.exact_ordering_reason
           : classification.causal_ordering_reason;
-  return atomic_classifier_reason(reason);
+  const ConSanAtomicPolicyReason policy_reason = atomic_classifier_reason(reason);
+  return {
+      .reason = policy_reason,
+      .form = policy_reason == ConSanAtomicPolicyReason::None ? classification.form : std::nullopt,
+  };
 }
 
 [[nodiscard]] bool sequence_is_atomic_contract(const ConSanSyncEvent &event,
@@ -451,6 +460,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
              : ConSanCapabilityDisposition::OutOfContract;
     ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
+    std::optional<ConSanAtomicLoweringForm> lowering_form;
 
     if (!request.tracking_enabled) {
       reason = ConSanAtomicPolicyReason::TrackingDisabled;
@@ -472,8 +482,12 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       result.atomic_errors.push_back(reason);
     } else {
       reason = classify_atomic_semantics(event, membership);
-      if (reason == ConSanAtomicPolicyReason::None)
-        reason = classify_atomic_encoding(inventory, event, *membership.sequence, request.engine);
+      if (reason == ConSanAtomicPolicyReason::None) {
+        AtomicEncodingDecision encoding =
+            classify_atomic_encoding(inventory, event, *membership.sequence, request.engine);
+        reason = encoding.reason;
+        lowering_form = std::move(encoding.form);
+      }
       const bool semantic_not_applicable =
           reason == ConSanAtomicPolicyReason::UnqualifiedSyncSequence ||
           (reason == ConSanAtomicPolicyReason::UnsupportedMemoryRole && membership.sequence &&
@@ -499,6 +513,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .reason = reason,
         .association = std::nullopt,
         .dynamic_result = required_dynamic_result,
+        .lowering_form = std::move(lowering_form),
         .intent_ids = {},
         .source_containers = names,
     };
@@ -554,6 +569,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         .reason = ConSanFencePolicyReason::TrackingDisabled,
         .inventory_association = fence.association,
         .association = std::nullopt,
+        .communication_lowering_form = std::nullopt,
         .intent_ids = {},
         .source_containers = source_container_names(fence_events),
     };
@@ -600,6 +616,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       } else {
         decision.kind = ConSanSiteDecisionKind::Admitted;
         decision.reason = ConSanFencePolicyReason::None;
+        decision.communication_lowering_form = atomic_decision->lowering_form;
         if (request.engine == ConSanCapabilityEngine::RecordReplay) {
           if (!atomic_decision->intent_ids.empty()) {
             const ConSanProbeIntentId capture = atomic_decision->intent_ids.front();

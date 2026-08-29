@@ -287,6 +287,8 @@ bool ConSanObservationPlan::valid() const {
     const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
     if (admitted != (decision.reason == ConSanAtomicPolicyReason::None) ||
         admitted != !decision.intent_ids.empty() ||
+        admitted != decision.lowering_form.has_value() ||
+        (decision.lowering_form && !decision.lowering_form->is_well_formed()) ||
         (admitted && (!decision.association ||
                       (decision.capability != ConSanCapabilityDisposition::Supported &&
                        decision.capability != ConSanCapabilityDisposition::AssociatedOnly)))) {
@@ -314,6 +316,9 @@ bool ConSanObservationPlan::valid() const {
     const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
     if (admitted != (decision.reason == ConSanFencePolicyReason::None) ||
         admitted != !decision.intent_ids.empty() ||
+        admitted != decision.communication_lowering_form.has_value() ||
+        (decision.communication_lowering_form &&
+         !decision.communication_lowering_form->is_well_formed()) ||
         (admitted && (decision.inventory_association != ConSanFenceAssociation::Qualified ||
                       !decision.association ||
                       (decision.capability != ConSanCapabilityDisposition::Supported &&
