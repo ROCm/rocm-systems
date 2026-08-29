@@ -840,13 +840,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
                 workgroup_errors);
             if (workgroup_sources) {
-              auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
-                  bytes, candidate, candidate_options, *workgroup_sources,
-                  planned_patch.runtime_sample_index, *planned_patch.entry_island_offset,
-                  cave_text_offset, planned_patch.placement.return_target,
-                  planned_patch.entry_island_word_count, arch);
-              if (fast_gate)
-                island_words = std::move(*fast_gate);
+              const auto gate_plan =
+                  plan_moi_runtime_workgroup_gate(candidate_options, candidate_options,
+                                                  candidate_options, *workgroup_sources, arch);
+              if (gate_plan) {
+                auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
+                    bytes, candidate, *gate_plan, *workgroup_sources,
+                    *planned_patch.entry_island_offset, cave_text_offset,
+                    planned_patch.placement.return_target, planned_patch.entry_island_word_count,
+                    arch);
+                if (fast_gate)
+                  island_words = std::move(*fast_gate);
+              }
             }
             if (island_words.empty()) {
               result.errors.insert(result.errors.end(), workgroup_errors.begin(),
@@ -882,8 +887,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
               workgroup_errors);
           if (workgroup_sources) {
-            const auto gate_plan =
-                plan_moi_runtime_workgroup_gate(candidate_options, *workgroup_sources, arch);
+            const auto gate_plan = plan_moi_runtime_workgroup_gate(
+                candidate_options, candidate_options, candidate_options, *workgroup_sources, arch);
             if (!gate_plan) {
               result.errors.emplace_back(
                   "ConSan MOI sampled probe lost its dense runtime workgroup gate plan");

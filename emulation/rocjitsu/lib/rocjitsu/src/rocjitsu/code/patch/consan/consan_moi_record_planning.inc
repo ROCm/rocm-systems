@@ -67,8 +67,8 @@ resolve_moi_record_event_emission_plan(const MoiOptions &event_options, uint16_t
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   if (event_options.moi_runtime_sample_stride > 1u &&
       !event_options.automatic_moi_record_replay_sgpr_spill) {
-    runtime_workgroup_gate =
-        plan_moi_runtime_workgroup_gate(event_options, *workgroup_sources, arch);
+    runtime_workgroup_gate = plan_moi_runtime_workgroup_gate(
+        event_options, event_options, event_options, *workgroup_sources, arch);
   }
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,

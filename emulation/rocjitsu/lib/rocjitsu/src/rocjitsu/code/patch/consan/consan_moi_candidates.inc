@@ -441,10 +441,9 @@ struct ConSanMoiReportDispatchIdWordSource {
 // so the stable reader-identity literal is sufficient when a CDNA owner has
 // no persistent SGPR pair. Record/Replay and Inline Shadow retain their
 // stronger hardware-dispatch identity contract.
-[[nodiscard]] bool moi_permits_literal_dispatch_identity(const MoiOptions &options,
+[[nodiscard]] bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine,
                                                          rj_code_arch_t arch) {
-  return consan_arch_uses_literal_dispatch_identity(arch) ||
-         options.moi_engine == ConSanMoiEngine::Sampled;
+  return consan_arch_uses_literal_dispatch_identity(arch) || engine == ConSanMoiEngine::Sampled;
 }
 
 // Code-object-wide CDNA Record/Replay and Inline instrumentation keeps the

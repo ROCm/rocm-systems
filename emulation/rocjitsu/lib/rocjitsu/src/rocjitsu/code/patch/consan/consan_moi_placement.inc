@@ -4084,27 +4084,27 @@ struct MoiRuntimeWorkgroupGatePlan {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
 };
 
-[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan>
-plan_moi_runtime_workgroup_gate(const MoiOptions &options,
-                                const ConSanMoiWorkgroupSources &workgroup_sources,
-                                rj_code_arch_t arch) {
+[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
+    rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const auto cached_selection = moi_runtime_workgroup_selection_source();
-  const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
-  if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u || target == nullptr ||
+  const bool record_replay = request.moi_engine == ConSanMoiEngine::RecordReplay;
+  if (!point.moi_exec_save_sgpr || request.moi_runtime_sample_stride <= 1u || target == nullptr ||
       !moi_has_probe_entry_runtime_workgroup_gate(workgroup_sources) ||
-      (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
-       !moi_permits_literal_dispatch_identity(options, arch))) {
+      (!record_replay && !cached_selection && !point.moi_dispatch_id_sgpr &&
+       !moi_permits_literal_dispatch_identity(request.moi_engine, arch))) {
     return std::nullopt;
   }
   return MoiRuntimeWorkgroupGatePlan{
-      .exec_save_sgpr = *options.moi_exec_save_sgpr,
-      .sample_stride = options.moi_runtime_sample_stride,
-      .sample_offset = options.moi_runtime_sample_offset,
+      .exec_save_sgpr = *point.moi_exec_save_sgpr,
+      .sample_stride = request.moi_runtime_sample_stride,
+      .sample_offset = request.moi_runtime_sample_offset,
       .record_replay = record_replay,
       .cached_selection = cached_selection,
-      .dispatch_id_sgpr = options.moi_dispatch_id_sgpr,
-      .literal_dispatch_id = options.moi_report_dispatch_id,
+      .dispatch_id_sgpr = point.moi_dispatch_id_sgpr,
+      .literal_dispatch_id = resources.moi_report_dispatch_id,
       .direct_call_form = target->direct_call_form,
   };
 }

@@ -1219,12 +1219,18 @@ void try_apply_first_light_access_record_patch(
                   "ConSan MOI first-light probe lost its runtime workgroup sources");
               return;
             }
-            auto gate = build_moi_runtime_workgroup_gate_island_words(
-                bytes, candidate, candidate_options, *planned_patch.runtime_workgroup_sources,
-                planned_patch.record_index, *planned_patch.entry_island_offset, cave_text_offset,
-                planned_patch.placement.return_target, planned_patch.entry_island_word_count, arch);
-            if (gate)
-              island_words = std::move(*gate);
+            const auto gate_plan = plan_moi_runtime_workgroup_gate(
+                candidate_options, candidate_options, candidate_options,
+                *planned_patch.runtime_workgroup_sources, arch);
+            if (gate_plan) {
+              auto gate = build_moi_runtime_workgroup_gate_island_words(
+                  bytes, candidate, *gate_plan, *planned_patch.runtime_workgroup_sources,
+                  *planned_patch.entry_island_offset, cave_text_offset,
+                  planned_patch.placement.return_target, planned_patch.entry_island_word_count,
+                  arch);
+              if (gate)
+                island_words = std::move(*gate);
+            }
           } else if (append_moi_scc_preserving_indirect_jump(
                          island_words, *planned_patch.entry_island_offset, cave_text_offset,
                          moi_indirect_jump_sgprs(candidate_options)->pc_sgpr,
@@ -1250,7 +1256,8 @@ void try_apply_first_light_access_record_patch(
             return;
           }
           const auto gate_plan = plan_moi_runtime_workgroup_gate(
-              candidate_options, *planned_patch.runtime_workgroup_sources, arch);
+              candidate_options, candidate_options, candidate_options,
+              *planned_patch.runtime_workgroup_sources, arch);
           if (!gate_plan) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe lost its dense runtime workgroup gate plan");

@@ -432,7 +432,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     return std::nullopt;
   }
   if (runtime_sampled && !options.moi_dispatch_id_sgpr &&
-      !moi_permits_literal_dispatch_identity(options, arch)) {
+      !moi_permits_literal_dispatch_identity(options.moi_engine, arch)) {
     errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
