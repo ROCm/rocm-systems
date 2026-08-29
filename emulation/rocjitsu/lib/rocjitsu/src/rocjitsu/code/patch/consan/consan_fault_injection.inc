@@ -1749,7 +1749,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
   const uint32_t address_bank =
-      arch == ROCJITSU_CODE_ARCH_CDNA5
+      consan_arch_has_selectable_vgpr_bank(arch)
           ? static_cast<uint32_t>(selected->selectable_vgpr_bank_mode.value_or(0u) & 0x3u)
           : 0u;
   const uint32_t physical_target_address_vgpr = address_bank * 256u + target_address_vgpr;

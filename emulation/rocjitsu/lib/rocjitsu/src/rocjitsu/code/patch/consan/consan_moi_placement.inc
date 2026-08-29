@@ -1604,9 +1604,9 @@ bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &sta
                                              std::span<const uint64_t> owners, uint16_t base,
                                              uint16_t count) {
   const auto contexts = resolve_moi_scalar_owner_contexts(state, owners);
-  return contexts && consan_detail::scalar_owner_contexts_admit_reserved_window(
-                         contexts->summaries, base, count,
-                         consan_uses_gfx9_cdna_encoding(state.arch));
+  return contexts &&
+         consan_detail::scalar_owner_contexts_admit_reserved_window(
+             contexts->summaries, base, count, consan_uses_gfx9_cdna_encoding(state.arch));
 }
 
 struct MoiScalarOwnerContextGroup {
@@ -5504,7 +5504,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   const bool needs_record_replay_workgroup_tuple =
       record_replay_requires_entry_workgroup_capture(request.moi_engine) &&
       has_supported_record_replay_site && !record_replay_has_entry_workgroup_capture(options);
-  const bool needs_gfx1250_cluster_workgroup_id =
+  const bool needs_cluster_workgroup_id =
       needs_record_replay_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
       std::ranges::any_of(program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
         return kernel.uses_cluster_workgroup_id;
@@ -5615,12 +5615,12 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     }
     persistent_base = std::max(persistent_base, scratch_floor);
   }
-  // The gfx1250 Inline local-shadow prologue uses three additional tail VGPRs
-  // only while clearing with a 128-bit LDS store. They must lie above every
-  // guest reference even though owner/epoch remain the only persistent values.
+  // A target with a packed-128 workgroup-shadow clear uses three additional
+  // tail VGPRs while clearing. They must lie above every guest reference even
+  // though owner/epoch remain the only persistent values.
   const uint32_t automatic_owner_epoch_count = has_explicit_owner_epoch ? 0u : 2u;
   const uint32_t record_replay_workgroup_count =
-      needs_record_replay_workgroup_tuple ? (needs_gfx1250_cluster_workgroup_id ? 4u : 3u) : 0u;
+      needs_record_replay_workgroup_tuple ? (needs_cluster_workgroup_id ? 4u : 3u) : 0u;
   const uint32_t dispatch_id_count = needs_persistent_dispatch_vgprs ? 2u : 0u;
   const uint32_t named_persistent_count = automatic_owner_epoch_count +
                                           static_cast<uint32_t>(needs_workgroup_key) +
@@ -5662,9 +5662,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           .x = next,
           .y = static_cast<uint16_t>(next + 1u),
           .z = static_cast<uint16_t>(next + 2u),
-          .cluster_workgroup_id = needs_gfx1250_cluster_workgroup_id
-                                      ? std::optional<uint16_t>(next + 3u)
-                                      : std::nullopt,
+          .cluster_workgroup_id =
+              needs_cluster_workgroup_id ? std::optional<uint16_t>(next + 3u) : std::nullopt,
       };
     }
   };
@@ -6261,9 +6260,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
               .x = next++,
               .y = next++,
               .z = next++,
-              .cluster_workgroup_id = needs_gfx1250_cluster_workgroup_id
-                                          ? std::optional<uint16_t>(next++)
-                                          : std::nullopt,
+              .cluster_workgroup_id =
+                  needs_cluster_workgroup_id ? std::optional<uint16_t>(next++) : std::nullopt,
           };
         }
         if (component_needs_persistent_dispatch_vgprs) {
@@ -6532,7 +6530,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         .x = next_persistent_vgpr++,
         .y = next_persistent_vgpr++,
         .z = next_persistent_vgpr++,
-        .cluster_workgroup_id = needs_gfx1250_cluster_workgroup_id
+        .cluster_workgroup_id = needs_cluster_workgroup_id
                                     ? std::optional<uint16_t>(next_persistent_vgpr++)
                                     : std::nullopt,
     };

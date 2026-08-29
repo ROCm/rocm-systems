@@ -1281,12 +1281,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     uint32_t original_barrier_word = 0;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
-    const std::optional<uint16_t> selectable_vgpr_bank_mode =
-        arch == ROCJITSU_CODE_ARCH_CDNA5
-            ? consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
-                                                  candidate.container_entry_text_offset,
-                                                  site.file_offset)
-            : std::nullopt;
+    const std::optional<uint16_t> selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
+        arch, active_bytes, candidate.text_file_offset, candidate.container_entry_text_offset,
+        site.file_offset);
     MoiOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
                                              result.moi_operating_point,
@@ -1551,7 +1548,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       uint64_t reservation_end = 0;
     };
     std::map<std::vector<uint64_t>, std::vector<ReusableDenseAccessRelay>> reusable_access_relays;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (target->direct_call_form == ConSanDirectCallForm::SCallI64) {
       for (size_t patch_index = 0; patch_index < result.patches.size(); ++patch_index) {
         const ConSanPatchLoweringProduct &dispatcher = result.patches[patch_index];
         if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
@@ -1577,10 +1574,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     const auto find_reusable_access_relay =
         [&](const std::vector<size_t> &indices,
             const std::vector<uint64_t> &owners) -> std::optional<ReusableDenseAccessRelay> {
-      // gfx1250 access relays already derive their dispatch key from the call
-      // return PC. RDNA4 access relays use an explicit two-word key and must
-      // retain their separate one-word barrier router.
-      if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+      // S_CALL_I64 access relays already derive their dispatch key from the
+      // call return PC. Explicit-key relays must retain their separate
+      // one-word barrier router.
+      if (target->direct_call_form != ConSanDirectCallForm::SCallI64)
         return std::nullopt;
       const auto found = reusable_access_relays.find(owners);
       if (found == reusable_access_relays.end())
@@ -1669,11 +1666,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                     sizeof(original_barrier_word));
         const std::optional<uint16_t> selectable_vgpr_bank_mode =
-            arch == ROCJITSU_CODE_ARCH_CDNA5
-                ? consan_selectable_vgpr_bank_mode_at(
-                      arch, active_bytes, candidate.text_file_offset,
-                      candidate.container_entry_text_offset, site.file_offset)
-                : std::nullopt;
+            consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
+                                                candidate.container_entry_text_offset,
+                                                site.file_offset);
         MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
                                                  result.moi_operating_point,
@@ -1933,11 +1928,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                     sizeof(original_barrier_word));
         const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
         const std::optional<uint16_t> selectable_vgpr_bank_mode =
-            arch == ROCJITSU_CODE_ARCH_CDNA5
-                ? consan_selectable_vgpr_bank_mode_at(
-                      arch, active_bytes, candidate.text_file_offset,
-                      candidate.container_entry_text_offset, site.file_offset)
-                : std::nullopt;
+            consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
+                                                candidate.container_entry_text_offset,
+                                                site.file_offset);
         MoiOptions candidate_options = options;
         if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
                                                  result.moi_operating_point,
@@ -2007,7 +2000,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(
             build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+      if (!derive_key_at_entry && target->direct_call_form != ConSanDirectCallForm::SCallI64) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -2019,8 +2012,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
 
-      const auto append_dispatch_target = [&](uint64_t caller_return, uint64_t target) -> bool {
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !derive_key_at_entry) {
+      const auto append_dispatch_target = [&](uint64_t caller_return,
+                                              uint64_t destination) -> bool {
+        if (target->direct_call_form == ConSanDirectCallForm::SCallI64 && !derive_key_at_entry) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
                                             jump_pc_sgpr, call_return_sgpr, arch))
             return false;
@@ -2035,20 +2029,20 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         std::vector<uint32_t> matched_words;
         if (key_encodes_scc) {
-          const ConSanTargetProfile *target = consan_target_profile(arch);
-          if (target == nullptr || !consan_detail::append_restore_moi_scc_from_route_key(
-                                       matched_words,
-                                       consan_detail::MoiEncodedSccRestoreRequest{
-                                           .encoded_sgpr = key_sgpr,
-                                           .normalize_encoded_sgpr = true,
-                                       },
-                                       *target)) {
+          const ConSanTargetProfile *matched_target = consan_target_profile(arch);
+          if (matched_target == nullptr || !consan_detail::append_restore_moi_scc_from_route_key(
+                                               matched_words,
+                                               consan_detail::MoiEncodedSccRestoreRequest{
+                                                   .encoded_sgpr = key_sgpr,
+                                                   .normalize_encoded_sgpr = true,
+                                               },
+                                               *matched_target)) {
             return false;
           }
         }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
+        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, destination,
                                                      jump_pc_sgpr, saved_scc_sgpr,
                                                      /*capture_scc=*/false, arch))
           return false;

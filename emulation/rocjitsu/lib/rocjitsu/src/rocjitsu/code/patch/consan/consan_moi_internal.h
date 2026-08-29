@@ -11,6 +11,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_target_ops.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include <algorithm>
@@ -569,36 +570,6 @@ struct MoiSpecialStateSgprs {
 [[nodiscard]] bool append_restore_moi_special_state(std::vector<uint32_t> &words,
                                                     const MoiSpecialStateSgprs &registers,
                                                     const ConSanTargetProfile &target);
-
-/// Semantic request to restore SCC from bit zero of a scalar route key.
-///
-/// Dense routers may pack the caller's boolean SCC value into the otherwise
-/// aligned low bit of a route key. `encoded_sgpr` names that key; the target
-/// operation owns the generation-specific bit-test opcode. Some routers need
-/// to keep using the key after restoring SCC and therefore normalize the key
-/// itself to zero or one; routers that have already consumed the key can omit
-/// that write. The request states this semantic lifetime choice without
-/// exposing either native instruction to routing policy.
-struct MoiEncodedSccRestoreRequest {
-  /// Scalar register whose bit zero contains the SCC value to restore.
-  uint16_t encoded_sgpr = 0;
-
-  /// Whether to replace the encoded key with its normalized boolean value
-  /// after restoring SCC. False preserves the key and emits only the bit test.
-  bool normalize_encoded_sgpr = true;
-
-  bool operator==(const MoiEncodedSccRestoreRequest &) const = default;
-};
-
-/// Append the target sequence that restores SCC from an encoded route key.
-///
-/// Only target profiles with the qualified gfx9 CDNA bit-test forms are
-/// admitted. When requested, normalization follows the bit test. Unsupported
-/// targets or invalid register assignments return false without changing
-/// `words`.
-[[nodiscard]] bool append_restore_moi_scc_from_route_key(std::vector<uint32_t> &words,
-                                                         const MoiEncodedSccRestoreRequest &request,
-                                                         const ConSanTargetProfile &target);
 
 /// Append the target's device-scope cache refresh before retrying a contended
 /// global publication.

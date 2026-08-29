@@ -320,7 +320,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     if (!cave_words)
       return;
     std::optional<DenseFenceRelay> dense_relay;
-    if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+    if (!direct_entry && !has_indirect_entry_island && consan_arch_has_s_call_i64(arch) &&
         planned.candidate.kernel_descriptor_file_offset && dense_call_return_sgpr &&
         dense_dispatch_key_sgpr && dense_indirect_state && dense_special_state) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
@@ -399,7 +399,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
                                 static_cast<int64_t>(getpc_offset + sizeof(uint32_t));
           const bool delta_encoded = append_pc_delta_builder(
               island_words, arch, jump_sgprs->pc_sgpr, delta, /*minimum_words=*/0u,
-              /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5);
+              /*prefer_literal64=*/consan_arch_has_s_call_i64(arch));
           if (const auto delay = instrumentation::build_salu_dependency_delay(arch);
               delta_encoded && delay) {
             island_words.push_back(*delay);
