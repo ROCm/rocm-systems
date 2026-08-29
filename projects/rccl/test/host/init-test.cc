@@ -1334,6 +1334,61 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
 }
 
+// The MLOPart PCI-function fallback (init.cc:1092-1108). It exists for DPX/XCP/CPX, where HIP exposes
+// each logical GPU as PCI function .N of one physical device and only .0 exists in sysfs as a GPU.
+// Stamping mloPart on a NON-partitioned .0 GPU is not cosmetic: ncclTopoCheckGdr() (paths.cc:517)
+// early-returns "no GDR" for any GPU with mloPart != UNDEF, addInterStep() then reroutes every
+// rail-local GPU->NIC path through the local CPU (PATH_PXB -> PATH_PHB), and the degraded gdrLevel
+// matrix no longer matches any Rome preset on an 8-GPU/8-NIC node. So the guard here is the whole
+// fix: fn and sysfs class decide, and both must agree before mloPart is written.
+namespace {
+constexpr int64_t kPhysGpuBusId = 0x11000;  // 0000:11:00.0 -- physical function
+constexpr int64_t kAliasBusId   = 0x11001;  // 0000:11:00.1 -- a CPX HIP alias function
+constexpr int64_t kHighFnBusId  = 0x1100f;  // 0000:11:00.f -- function >= NCCL_TOPO_MLOPART_DEV_MAX
+}  // namespace
+
+TEST_F(InitMicrotest, FillInfo_PhysicalFunctionZeroGpu_LeavesMloPartUndefined) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;  // .0 is a real GPU in sysfs
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
+  EXPECT_EQ(0, g_pciDeviceClassCalls);  // fn==0 short-circuits before the sysfs probe
+}
+
+TEST_F(InitMicrotest, FillInfo_AliasFunctionNotGpuInSysfs_StampsMloPartFromFunction) {
+  FillInfoComm c;
+  c.get()->busId = kAliasBusId;
+  g_pciDeviceClass = "";  // the alias BDF has no sysfs entry
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(1, info.mloPart);
+  // The probe must ask about the alias BDF; asking about .0 would report a GPU and lose the partition.
+  EXPECT_EQ("0000:11:00.1", g_lastPciDeviceClassBusId);
+}
+
+TEST_F(InitMicrotest, FillInfo_GpuAtNonZeroFunction_LeavesMloPartUndefined) {
+  FillInfoComm c;
+  c.get()->busId = kAliasBusId;
+  g_pciDeviceClass = "0x030000";  // a display-class GPU really lives at .1, so it is no HIP alias
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
+  EXPECT_EQ(1, g_pciDeviceClassCalls);  // fn>0 does reach the probe; the class is what rejects it
+}
+
+TEST_F(InitMicrotest, FillInfo_FunctionAboveMloPartMax_LeavesMloPartUndefined) {
+  FillInfoComm c;
+  c.get()->busId = kHighFnBusId;
+  g_pciDeviceClass = "";  // no sysfs entry, so only the fn bound can reject the stamp
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  // 0xf does not fit the 3-bit overlay index, so it must not be stamped even though sysfs is empty.
+  EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
+  EXPECT_EQ(0, g_pciDeviceClassCalls);
+}
+
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
   g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
   g_hipGetDeviceCount = [](int*) -> hipError_t {
