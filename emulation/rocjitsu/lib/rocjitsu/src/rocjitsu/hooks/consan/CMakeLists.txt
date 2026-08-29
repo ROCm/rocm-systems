@@ -47,6 +47,20 @@ target_include_directories(
 )
 target_link_libraries(rocjitsu_consan_report_analyzer PRIVATE util)
 
+add_library(rocjitsu_consan_report_renderer STATIC rj_hsa_dbi_moi_report_renderer.cpp)
+set_target_properties(
+    rocjitsu_consan_report_renderer
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_consan_report_renderer
+    PUBLIC ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
+)
+target_link_libraries(
+    rocjitsu_consan_report_renderer
+    PRIVATE rocjitsu_consan_report_analyzer util
+)
+
 add_library(
     rocjitsu_dbi_hooks
     SHARED
@@ -74,6 +88,7 @@ target_link_libraries(
         rocjitsu_hsa_tool_lifetime
         rocjitsu_consan_report_analyzer
         rocjitsu_consan_report_decoder
+        rocjitsu_consan_report_renderer
         rocjitsu_consan_report_snapshot
         rocjitsu_consan_report_trust
         rocjitsu_waitcheck_objects
@@ -99,6 +114,7 @@ endif()
 if(MSVC)
     target_compile_options(rocjitsu_consan_report_analyzer PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_consan_report_decoder PRIVATE /W4 /WX)
+    target_compile_options(rocjitsu_consan_report_renderer PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_consan_report_snapshot PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_consan_report_trust PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_dbi_hooks PRIVATE /W4 /WX)
@@ -109,6 +125,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     )
     target_compile_options(
         rocjitsu_consan_report_decoder
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
+    target_compile_options(
+        rocjitsu_consan_report_renderer
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
     target_compile_options(

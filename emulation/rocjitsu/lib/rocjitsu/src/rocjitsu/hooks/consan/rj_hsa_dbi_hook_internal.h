@@ -58,11 +58,6 @@ constexpr uint32_t kConSanAllSupportedPatchBudget = 65536;
 // process. Campaigns whose individual code-object load can legitimately hold
 // the reservation longer must raise this alongside their workload deadline.
 constexpr uint32_t kConSanDefaultFaultReservationTimeoutMs = 30000;
-constexpr uint32_t kConSanMoiAutoDetailLogLimit = 4;
-
-[[nodiscard]] constexpr uint32_t consan_moi_auto_detail_log_count(uint32_t visible_count) {
-  return std::min(visible_count, kConSanMoiAutoDetailLogLimit);
-}
 
 /// Fully parsed hook configuration.
 ///

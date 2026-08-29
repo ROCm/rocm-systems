@@ -1463,6 +1463,7 @@ target_link_libraries(
         rocjitsu_hooks_testing
         rocjitsu_consan_report_analyzer
         rocjitsu_consan_report_decoder
+        rocjitsu_consan_report_renderer
         rocjitsu_consan_report_snapshot
         rocjitsu_consan_report_trust
         ${RJ_OBJECT_LIBS}

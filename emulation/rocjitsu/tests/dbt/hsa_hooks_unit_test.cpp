@@ -39,6 +39,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_renderer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -3673,11 +3674,58 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   EXPECT_EQ(malformed.failure, rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader);
 }
 
+TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {
+  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  input.reader = 101;
+  input.source_address = 0x2000;
+  input.size = 64;
+  input.input_fingerprint = "fixture";
+
+  rocjitsu::consan_hook::AutoMoiDecodedReport invalid;
+  invalid.failure = rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader;
+  invalid.header.magic = 0x1234;
+  invalid.header.abi_version = 9;
+  invalid.header.header_size = 7;
+  const auto failure = rocjitsu::consan_hook::render_auto_moi_report(
+      {input, invalid, invalid.summary, nullptr, nullptr});
+  ASSERT_EQ(failure.size(), 1u);
+  EXPECT_EQ(failure.front().kind, rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Failure);
+  EXPECT_EQ(failure.front().text,
+            "ConSan MOI auto report reader=101 has invalid header magic=0x00001234 abi=9 "
+            "header_size=7");
+
+  rocjitsu::consan_hook::AutoMoiDecodedReport decoded;
+  decoded.header.generation = 5;
+  decoded.issues.push_back({
+      .reason = rocjitsu::consan_hook::AutoMoiReportEvidenceReason::ExactMalformed,
+      .index = 3,
+      .words = {2, 0x11, 0x22, 0x33, 4},
+  });
+  rocjitsu::consan_hook::AutoMoiSampledConflictAnalysis sampled_analysis;
+  rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis replay_analysis;
+  replay_analysis.pressure.unavailable_reason =
+      rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory;
+  const auto rendered = rocjitsu::consan_hook::render_auto_moi_report(
+      {input, decoded, decoded.summary, &sampled_analysis, &replay_analysis});
+  ASSERT_GE(rendered.size(), 2u);
+  EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &diagnostic) {
+    return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Evidence &&
+           diagnostic.text ==
+               "ConSan MOI first malformed exact snapshot reader=101 index=3 version_before=2 "
+               "packed_access=0x0000000000000011 dispatch_id=0x0000000000000022 "
+               "byte_provenance=0x00000033 version_after=4";
+  }));
+  EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &diagnostic) {
+    return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Summary &&
+           diagnostic.text.starts_with("ConSan MOI auto report reader=101 addr=0x2000 bytes=64 ");
+  }));
+}
+
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
-  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(0), 0u);
-  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(3), 3u);
-  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(4), 4u);
-  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(19'064), 4u);
+  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(0), 0u);
+  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(3), 3u);
+  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(4), 4u);
+  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(19'064), 4u);
 }
 
 TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapacity) {
