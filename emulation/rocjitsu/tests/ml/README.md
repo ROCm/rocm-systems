@@ -70,16 +70,23 @@ heads, 32 experts, vocab 201088 -- and most of it is still fast: the QKV
 projection is 2.5s through torch and 1.7s through `tl.dot`, the output
 projection 1.3s, the router 0.04s.
 
-The exception is the vocabulary-sized GEMM in `lm_head_gemm`. With four tokens
+Two cases are slower. `moe_gemm_swiglu` takes ~4 minutes -- 32 experts against
+2880-wide weights is simply a lot of arithmetic, and it completes. The
+vocabulary-sized GEMM in `lm_head_gemm` is the one to avoid: with four tokens
 against a 201088-wide weight, hipBLASLt pads the tile height far past the four
 rows that carry data, so the emulator executes an order of magnitude more work
-than the 4.6 GFLOP the operation needs, and the case runs for tens of minutes.
-That is a property of a tall-skinny GEMM under functional emulation, not a
-defect. Skip it with `--kernel` if you only want the rest:
+than the 4.6 GFLOP the operation needs. It ran for over an hour without
+finishing. That is a property of a tall-skinny GEMM under functional emulation
+rather than a defect, but it means a full `model` sweep is not practical.
+
+Skip it with `--kernel` to get everything else, which does complete -- 25 cases
+on both emulated targets, MoE included:
 
 ```bash
 python tests/ml/gpt_oss_kernels.py --size model \
-    --kernel rms_norm --kernel attention --kernel moe --kernel swiglu
+    --kernel rms_norm --kernel qkv --kernel o_proj --kernel router \
+    --kernel rope --kernel kv_cache --kernel attention --kernel topk \
+    --kernel mxfp4 --kernel swiglu --kernel greedy
 ```
 
 ### Comparing two architectures
