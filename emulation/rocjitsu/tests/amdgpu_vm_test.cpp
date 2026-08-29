@@ -6,6 +6,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
@@ -2191,6 +2192,46 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
 }
 
+TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
+  amdgpu::GpuMemory mem("cdna4_setpc_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_setpc_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_setpc_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  test::HaltSnapshotPlugin *snapshot = nullptr;
+  cu->set_plugin_group(test::make_halt_snapshot_group(&snapshot));
+  ASSERT_NE(snapshot, nullptr);
+
+  constexpr uint64_t kStartPc = 0x1000;
+  constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
+  constexpr uint32_t kTtmp0Selector = 108;
+  const std::array<uint32_t, 4> code = {
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
+
+  auto *wavefront = cu->dispatch_wf(/*wg_id=*/0, kStartPc, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wavefront, nullptr);
+  wavefront->set_ttmp(/*TTMP0=*/0, static_cast<uint32_t>(kTargetPc));
+  wavefront->set_ttmp(/*TTMP1=*/1, static_cast<uint32_t>(kTargetPc >> 32));
+
+  for (uint32_t step = 0; step < code.size() && cu->has_active_wfs(); ++step)
+    static_cast<void>(cu->step());
+
+  ASSERT_FALSE(cu->has_active_wfs());
+  ASSERT_EQ(snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(snapshot->snapshots()[0].sgpr(0), 1u);
+}
+
 TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) {
   VmFixture f("cdna4", 2, 2);
   test::AqlQueue queue(f.mem(), f.cp());
@@ -2806,6 +2847,7 @@ constexpr uint32_t sop1(uint32_t op, uint32_t sdst, uint32_t ssrc0) {
   return (0x17Du << 23) | (sdst << 16) | (op << 8) | ssrc0;
 }
 constexpr uint32_t s_mov_b32(uint32_t sdst, uint32_t ssrc0) { return sop1(0, sdst, ssrc0); }
+constexpr uint32_t s_mov_b64(uint32_t sdst, uint32_t ssrc0) { return sop1(1, sdst, ssrc0); }
 
 // SOP2: encoding[31:30]=0x2, op[29:23], sdst[22:16], ssrc1[15:8], ssrc0[7:0]
 constexpr uint32_t sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0, uint32_t ssrc1) {
@@ -2895,6 +2937,18 @@ constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0
 constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
                             uint32_t soffset = INLINE_CONST(0)) {
   return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
+}
+
+// SMEM (64-bit): CDNA layout.
+// dword0: sbase[5:0], sdata[12:6], soffset_en[14], nv[15], glc[16], imm[17],
+//         op[25:18], encoding[31:26]=0x30
+// dword1: offset[20:0], soffset[31:25]
+constexpr uint32_t smem_lo(uint32_t op, uint32_t sdata, uint32_t sbase, uint32_t imm = 0,
+                           uint32_t soffset_en = 0) {
+  return (0x30u << 26) | (op << 18) | (imm << 17) | (soffset_en << 14) | (sdata << 6) | sbase;
+}
+constexpr uint32_t smem_hi(uint32_t offset, uint32_t soffset = 0) {
+  return (soffset << 25) | (offset & 0x1FFFFFu);
 }
 
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
@@ -3351,6 +3405,82 @@ TEST_P(IsaTest, BranchLoop) {
   step_until_halted(*fx.f.engine, {fx.cu()});
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
+  EXPECT_TRUE(fx.halted());
+}
+
+// SMEM offset forms: IMM=0 (SGPR, M0, unaligned SGPR, s_scratch x64), IMM=1 (aligned,
+// unaligned), IMM=1+SOE, SOE=1 (SGPR, M0, VCC_LO, unaligned SGPR), SBASE = VCC.
+TEST_P(IsaTest, SLoad_OffsetForms) {
+  ExecFixture fx(arch());
+  constexpr uint64_t kBufferAddr = 0x2000;
+  for (uint32_t i = 0; i < 64; ++i)
+    fx.f.mem()->write32(kBufferAddr + i * 4, 0x1000 + i);
+
+  using namespace enc;
+  constexpr uint32_t kM0 = 124, kVccLo = 106;
+  const std::vector<uint32_t> code = {
+      s_mov_b32(SGPR(4), 255), // s[4:5] = kBufferAddr
+      static_cast<uint32_t>(kBufferAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(64)),
+      s_mov_b32(kM0, INLINE_CONST(32)),
+      s_mov_b32(kVccLo, INLINE_CONST(48)),
+      s_mov_b32(SGPR(2), INLINE_CONST(2)),
+      s_mov_b32(SGPR(11), INLINE_CONST(63)),
+      s_mov_b32(SGPR(12), SGPR(4)), // V# s[12:15]: base, stride 0, 256 records
+      s_mov_b32(SGPR(13), INLINE_CONST(0)),
+      s_mov_b32(SGPR(14), 255),
+      256u,
+      s_mov_b32(SGPR(15), INLINE_CONST(0)),
+      smem_lo(cdna4::kSLoadDwordSmem, 7, SGPR(4) / 2),
+      smem_hi(6), // s7 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordx2Smem, 8, SGPR(4) / 2),
+      smem_hi(6), // s[8:9] = [s[4:5] + s6]
+      smem_lo(cdna4::kSBufferLoadDwordSmem, 10, SGPR(12) / 2),
+      smem_hi(6), // s10 = [V# + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 16, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x8), // s16 = [s[4:5] + 8]
+      smem_lo(cdna4::kSLoadDwordSmem, 17, SGPR(4) / 2, /*imm=*/1, /*soffset_en=*/1),
+      smem_hi(0x8, 6), // s17 = [s[4:5] + 8 + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 18, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 6), // s18 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 19, SGPR(4) / 2),
+      smem_hi(kM0), // s19 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 20, SGPR(4) / 2),
+      smem_hi(11), // s20 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 21, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kM0), // s21 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 22, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kVccLo), // s22 = [s[4:5] + vcc_lo]
+      smem_lo(cdna4::kSLoadDwordSmem, 23, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 11), // s23 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 24, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x9), // s24 = [s[4:5] + (9 & ~3)]
+      smem_lo(cdna4::kSScratchLoadDwordSmem, 25, SGPR(4) / 2),
+      smem_hi(2),                 // s25 = [s[4:5] + s2 * 64]
+      s_mov_b64(kVccLo, SGPR(4)), // vcc = s[4:5]
+      smem_lo(cdna4::kSLoadDwordSmem, 26, kVccLo / 2),
+      smem_hi(6), // s26 = [vcc + s6]
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  fx.load_program(code);
+
+  EXPECT_EQ(fx.read_sgpr(7), 0x1010u) << "IMM=0 s_load_dword";
+  EXPECT_EQ(fx.read_sgpr(8), 0x1010u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(9), 0x1011u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(10), 0x1010u) << "IMM=0 s_buffer_load_dword";
+  EXPECT_EQ(fx.read_sgpr(16), 0x1002u) << "IMM=1";
+  EXPECT_EQ(fx.read_sgpr(17), 0x1012u) << "IMM=1 SOE=1";
+  EXPECT_EQ(fx.read_sgpr(18), 0x1010u) << "SOE=1";
+  EXPECT_EQ(fx.read_sgpr(19), 0x1008u) << "IMM=0 M0";
+  EXPECT_EQ(fx.read_sgpr(20), 0x100fu) << "IMM=0 unaligned";
+  EXPECT_EQ(fx.read_sgpr(21), 0x1008u) << "SOE=1 M0";
+  EXPECT_EQ(fx.read_sgpr(22), 0x100cu) << "SOE=1 VCC_LO";
+  EXPECT_EQ(fx.read_sgpr(23), 0x100fu) << "SOE=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(24), 0x1002u) << "IMM=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(25), 0x1020u) << "IMM=0 s_scratch_load_dword";
+  EXPECT_EQ(fx.read_sgpr(26), 0x1010u) << "SBASE=VCC";
   EXPECT_TRUE(fx.halted());
 }
 
