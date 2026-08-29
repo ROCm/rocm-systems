@@ -1508,6 +1508,204 @@ muddied. Falling below 80,000 lines would therefore be an outcome to explain,
 not a target to optimize; remaining above it is acceptable when every durable
 component and line category has a clear owner and purpose.
 
+#### F9 implementation and final accounting checkpoint (2026-08-29)
+
+The F9 implementation is complete through commit `cf1761c67d`. Its reviewable
+cuts remove obsolete patch-owner indexing, publish typed resource rejection
+and diagnostic products, move selectable-bank, SuperCollider, fault, and MOI
+target recipes into their target or family owners, and replace common-code
+target rediscovery with explicit target operations. The last implementation
+cut also adds the checked-in `ConSan.ArchitectureBoundaries` test. That test
+mechanically enforces every rule listed in F9, checks that every active
+implementation fragment has exactly one textual owner, permits only the exact
+three-region SuperCollider wrapper, and keeps retained filename tombstones
+comment-only. The tombstones exist solely because this refactoring operated
+under a no-file-deletion rule; they contain zero implementation lines.
+
+The resulting production component map is now direct source/build structure,
+not a reconstruction from include order:
+
+| Component | Primary authority | Forward product or consumer |
+| --- | --- | --- |
+| Request and public result facade | `consan_pipeline.{h,cpp}`, `consan_types.cpp` | validated request, public stage records, replacement image, diagnostics |
+| Program inventory and synchronization analysis | `consan_program_analysis.cpp`, `consan_sync_analysis.cpp`, inventory/index contracts | immutable `ProgramInventory` and `SynchronizationInventoryView` |
+| Exact target normalization | access and atomic classifier components | normalized access/atomic lowering forms |
+| Semantic observation policy | access, barrier, atomic/fence, perturbation, and observation-policy components | `ConSanObservationPlan`, evidence intent, initialized coverage ledger |
+| Executable transformation transaction | lowerer, pipeline, and composition components | typed pre-binding, resume, lowering, mutation, and publication products |
+| MOI resource solver | `consan_moi_placement.cpp` and placement contracts | immutable problem to explicit attempted/accepted operating point |
+| Shared MOI mechanics | probe, address, relocation, native-ABI, report, record, synchronization, prologue, and workgroup-gate components | narrow operation plans and emitted patch products |
+| Engine lowerers | compiled Record/Replay, Sampled, InlineShadow, and SuperCollider components | intent-bound commits or typed rejections |
+| Target operations | named fault, relay, MOI, SuperCollider, gfx9, gfx12, RDNA3, RDNA4, and gfx1250 files | target-native recipes behind typed operations |
+| Mutation and independent validation | fault, perturbation, composition, and final-validation components | mutation products and independently verified private patch proof |
+| Runtime report path | lifecycle registry plus snapshot, decoder, analyzer, trust, and renderer libraries | typed static mapping to rendered diagnostics |
+
+Dependencies flow down that table through declared headers. Semantic policy
+has no generated ISA dependency or raw product constant. Hooks consume public
+pipeline, report, and diagnostic projections and contain no lowerer-private
+patch, resource, artifact, or target-operation type. Coverage consumes intent
+and commit/rejection events rather than patch geometry. The runtime decoder
+and analyzer consume the typed static mapping. Detailed patch proof remains
+private to lowering and independent validation.
+
+##### Physical composition and coupling
+
+The current build explicitly compiles **77 core and 9 hook/report production
+translation units**, versus 11 core and 3 hook sources at the baseline. The
+old `consan.cpp` and `consan_moi.cpp` implementation-fragment closures have
+fallen from 57,129 lines, 34 physical files, and 68.0% of production to
+**zero implementation-fragment lines**. Their own bodies are now 194 and 602
+code lines. The largest remaining compiled textual body is the single
+SuperCollider component at 6,703 lines, or 7.3% of production; the next two
+are the MOI solver at 5,886 and independent validation at 4,580. Active
+implementation fragments still contain 36,477 lines, but every fragment has
+one checked owner and none includes another implementation fragment except
+the exact, checked SuperCollider wrapper. They are therefore local component
+bodies, not a hidden cross-component include graph.
+
+The baseline dependency counters from Section 3.5 and their current values
+are:
+
+| Coupling signal | Baseline | Current | Interpretation |
+| --- | ---: | ---: | --- |
+| `MoiOptions` references / files | 225 / 27 | 87 / 25 | private attempt context remains, but is no longer the native-emitter bus |
+| `const MoiOptions &` parameters | 146 | 33 | broad read-only parameter plumbing removed |
+| `ConSanTransformArtifacts` references / files | 214 / 32 | 276 / 57 | lexical count grew as compiled stage interfaces name the private coordinator product; public `TransformResult` and hooks expose zero references |
+| `ConSanPatchInfo` references / files | 283 / 32 | 200 / 28 | complete proof is confined to lowering/final validation; coverage and runtime consume no references |
+| Main implementation-fragment closure | 57,129 lines / 2 TUs | 0 lines / 0 TUs | old textual component graph eliminated |
+| Explicit production translation units | 14 | 86 | semantic components now compile through declared interfaces |
+| Largest textual translation-unit body | 35,295 lines | 6,703 lines | maximum compiler-visible implementation concentration fell from 42.0% to 7.3% |
+
+As supplementary current-only graph signals, the production scope has 632
+direct internal ConSan include edges across 157 files. The two deliberately
+broad private aggregation headers, `consan.h` and `consan_moi_internal.h`, have
+38 and 23 direct consumers respectively; neither is visible to runtime report
+analysis, and `consan_transform_debug.h` has no production consumer. These
+counts describe declared dependencies rather than textual implementation
+composition and establish a concrete baseline for any later header-visibility
+work.
+
+##### Recomputed implementation size
+
+The exact production scope and counter from the opening baseline now find:
+
+| Size measure | Baseline | Current | Change |
+| --- | ---: | ---: | ---: |
+| Files | 83 | 229 | +146 |
+| Physical lines | 95,493 | 104,975 | +9,482 |
+| Nonblank lines | 91,064 | 99,083 | +8,019 |
+| Nonblank, comment-excluded implementation lines | 84,041 | **91,450** | **+7,409** |
+
+Tests remain excluded. The fourth refactoring therefore did not reduce
+production size: implementation grew 8.8%. The file-count growth is mostly
+the intended replacement of implicit regions with narrow contracts, compiled
+components, target-operation owners, and host report libraries; twelve
+retained tombstones contribute files but zero code. This is not evidence that
+91,450 lines are inherently required. It is evidence that this pass paid the
+previously hidden cost of explicit boundaries, independent proof, and direct
+tests. The next simplification pass can now delete within named owners without
+first reverse-engineering their dependencies.
+
+Direct product/family-vocabulary lines fell from 1,153 to 1,000, while the
+number of files containing them rose from 36 to 56. That lexical result is
+supplementary, not the semantic ledger below: the smaller count is consistent
+with deletion of repeated target decisions, and the larger file count is
+consistent with splitting those decisions into small family/member owners.
+
+##### Recomputed mode/target variability ledger
+
+The deep-read method in Section 2.1 was repeated against the current
+components. Every one of the 91,450 implementation lines was assigned exactly
+once by its reviewed file, function, or coherent branch owner. Automation was
+used only to remove comments/blank lines, total those assignments, and assert
+complete coverage. Mode/architecture token hits were candidate-navigation
+aids and were not ownership rules. Stable algorithms which merely pass `arch`
+to an owned target operation remain target-neutral; target classifiers,
+capability selection, target operations, and independent target proof are
+target-sensitive.
+
+| Source sensitivity | Baseline | Current | Current share |
+| --- | ---: | ---: | ---: |
+| Neither mode- nor target-specific | 27,336 | **24,674** | 27.0% |
+| Mode-specific, target-neutral | 49,623 | **53,201** | 58.2% |
+| Target-specific, mode-neutral | 3,512 | **6,997** | 7.7% |
+| Both mode- and target-specific | 3,570 | **6,578** | 7.2% |
+| **Total** | **84,041** | **91,450** | **100%** |
+
+The interaction bucket did not shrink. Its increase is chiefly the deliberate
+reclassification of target-operation contracts and independent proof which
+were previously embedded in broad “shared” regions. It remains a modest 7.2%
+of the implementation and is now physically concentrated with explicit
+owners rather than scattered raw recipes.
+
+The exclusive mode partition retains every real subset instead of charging a
+shared line to several modes:
+
+| Mode ownership set | Target-neutral | Target-sensitive | Total |
+| --- | ---: | ---: | ---: |
+| All four modes | 24,674 | 6,997 | 31,671 |
+| Record/Replay + Sampled + InlineShadow (shared MOI) | 20,393 | 2,722 | 23,115 |
+| Record/Replay + InlineShadow | 1,952 | 266 | 2,218 |
+| Record/Replay + Sampled | 375 | 0 | 375 |
+| Sampled + InlineShadow | 57 | 0 | 57 |
+| Record/Replay only | 6,916 | 318 | 7,234 |
+| Sampled only | 7,620 | 80 | 7,700 |
+| InlineShadow only | 8,789 | 1,263 | 10,052 |
+| SuperCollider only | 7,099 | 1,929 | 9,028 |
+| **Total** | **77,875** | **13,575** | **91,450** |
+
+The new exact-subset rows are useful design evidence. The runtime workgroup
+gate is an explicit Record/Replay-plus-Sampled contract, and packed exact-field
+operations form an explicit Sampled-plus-InlineShadow contract; neither is
+duplicated or hidden behind a nominally all-MOI switch.
+
+Per-mode incidence, where subset lines appear in every consuming mode and the
+columns must not be summed, is:
+
+| Mode | Target-neutral mode-sensitive incidence | Target-sensitive mode incidence |
+| --- | ---: | ---: |
+| Record/Replay | 29,636 | 3,306 |
+| Sampled | 28,445 | 2,802 |
+| InlineShadow | 31,191 | 4,251 |
+| SuperCollider | 7,099 | 1,929 |
+
+Target-sensitive mode-neutral code is strongly shared across products. The
+first numeric column below is incidence over the 6,997 physical lines in that
+bucket; the second is incidence over the 6,578 interaction lines:
+
+| Target | Mode-neutral target incidence | Mode-sensitive target incidence |
+| --- | ---: | ---: |
+| `gfx942` / CDNA3 | 6,817 | 5,648 |
+| `gfx950` / CDNA4 | 6,817 | 5,648 |
+| `gfx1100` / RDNA3 | 6,805 | 5,259 |
+| `gfx1201` / RDNA4 | 6,860 | 5,760 |
+| `gfx1250` / CDNA5 | 6,985 | 6,020 |
+
+The requested pair incidence over interaction lines is:
+
+| Mode \ target | `gfx942` | `gfx950` | `gfx1100` | `gfx1201` | `gfx1250` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Record/Replay | 2,737 | 2,737 | 2,495 | 2,848 | 3,064 |
+| Sampled | 2,284 | 2,284 | 2,042 | 2,395 | 2,560 |
+| InlineShadow | 3,582 | 3,582 | 3,270 | 3,723 | 3,939 |
+| SuperCollider | 1,719 | 1,719 | 1,642 | 1,690 | 1,683 |
+
+Every interaction assignment was reviewed into an allowed F9 category:
+
+| Interaction category | Lines | Owners and justification |
+| --- | ---: | --- |
+| Named target operations selected by a mode/subset | 1,229 | MOI and SuperCollider target-operation files own addressing, routing, call/return, member/family encoding, and register-state realization |
+| Independent mode-and-target-aware validation proof | 1,775 | final validation independently decodes and verifies SC routing and InlineShadow/target ABI rather than trusting construction |
+| Legitimate mode selection of a typed target capability | 3,574 | chiefly the immutable MOI solver (1,535 lines), with contained prologue, barrier, report, and engine capability branches |
+| Named extraction debt | **0** | no raw recipe, reverse map, compatibility authority, or unexplained interaction region remains outside the enforced owners |
+| **Total** | **6,578** | |
+
+This is the desired additive architecture even though the accounting became
+larger: adding a target extends target normalization/operations and independent
+proof, not four raw engine recipes; adding an engine selects already-normalized
+operations and does not copy target identity, addressing, relay, or register
+bank mechanisms. The remaining solver and validation interactions are
+intentional cross-dimensional composition, not unowned `N * M` duplication.
+
 ## 6. Test and commit discipline
 
 Each stage should be a sequence of small local commits. A useful commit changes
