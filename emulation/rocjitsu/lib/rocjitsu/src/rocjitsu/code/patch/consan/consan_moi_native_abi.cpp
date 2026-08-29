@@ -3,9 +3,12 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+
+#include <limits>
 
 namespace rocjitsu::consan_moi_impl {
 
@@ -36,6 +39,40 @@ bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
     return false;
   words.push_back(*wait);
   return true;
+}
+
+bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
+                            const ConSanRequest &request, std::vector<std::string> &errors,
+                            std::string_view context) {
+  if (request.delay_nops == 0)
+    return true;
+
+  switch (request.delay_mode) {
+  case ConSanDelayMode::Nop:
+    for (uint32_t i = 0; i < request.delay_nops; ++i)
+      words.push_back(build_s_nop(0, arch));
+    return true;
+  case ConSanDelayMode::Sleep:
+    if (request.delay_nops > std::numeric_limits<uint16_t>::max()) {
+      errors.emplace_back(std::string(context) +
+                          " sleep delay immediate exceeds the 16-bit s_sleep field");
+      return false;
+    }
+    words.push_back(build_s_sleep(static_cast<uint16_t>(request.delay_nops), arch));
+    return true;
+  case ConSanDelayMode::SleepVar:
+    if (request.delay_var_ssrc > std::numeric_limits<uint8_t>::max()) {
+      errors.emplace_back(std::string(context) +
+                          " sleep_var source exceeds the 8-bit scalar source field");
+      return false;
+    }
+    words.push_back(build_s_sleep_var(request.delay_var_ssrc, arch));
+    return true;
+  }
+
+  errors.emplace_back(std::string(context) + " has unknown delay mode '" +
+                      consan_delay_mode_name(request.delay_mode) + "'");
+  return false;
 }
 
 std::optional<MoiWorkitemOwnerDerivation>

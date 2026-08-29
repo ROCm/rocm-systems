@@ -208,4 +208,39 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
          form->address_vgpr && (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;
 }
 
+[[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
+                                                          uint16_t scratch_vgpr,
+                                                          uint16_t scratch_count,
+                                                          std::vector<std::string> &errors) {
+  if (!candidate.lowering.form) {
+    errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
+    return true;
+  }
+  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  if (form.address_vgpr && form.address_vgpr_count != 0u &&
+      range_overlaps(*form.address_vgpr, form.address_vgpr_count, scratch_vgpr, scratch_count)) {
+    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the LDS address VGPRs");
+    return true;
+  }
+  if (form.destination_vgpr && form.destination_register_count != 0u &&
+      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
+                     scratch_count)) {
+    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the destination VGPRs");
+    return true;
+  }
+  const uint16_t data_vgpr_count =
+      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
+  if (form.data_vgpr &&
+      range_overlaps(*form.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
+    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the data VGPRs");
+    return true;
+  }
+  if (form.second_data_vgpr &&
+      range_overlaps(*form.second_data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
+    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the second data VGPRs");
+    return true;
+  }
+  return false;
+}
+
 } // namespace rocjitsu::consan_moi_impl

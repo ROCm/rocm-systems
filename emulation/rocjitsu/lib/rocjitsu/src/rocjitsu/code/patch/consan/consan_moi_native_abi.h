@@ -54,6 +54,10 @@ namespace kd = rocr::llvm::amdhsa;
 [[nodiscard]] bool append_moi_flat_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+[[nodiscard]] bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
+                                          const ConSanRequest &request,
+                                          std::vector<std::string> &errors,
+                                          std::string_view context);
 
 struct MoiWorkitemOwnerDerivation {
   uint16_t vgpr = 0;

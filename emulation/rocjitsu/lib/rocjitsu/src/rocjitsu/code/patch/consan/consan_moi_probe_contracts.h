@@ -19,6 +19,11 @@ struct MoiPrivateEpochLayout {
   uint32_t ephemeral_base = 0;
 };
 
+[[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
+                                                                 uint64_t descriptor_file_offset,
+                                                                 rj_code_arch_t arch,
+                                                                 std::vector<std::string> &errors);
+
 [[nodiscard]] std::optional<consan_detail::MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
 

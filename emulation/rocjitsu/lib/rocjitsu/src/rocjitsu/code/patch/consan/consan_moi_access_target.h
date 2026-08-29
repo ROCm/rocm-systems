@@ -29,6 +29,10 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
 
 [[nodiscard]] uint16_t candidate_payload_vgpr_count(const ConSanMoiCandidate &candidate);
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate);
+[[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
+                                                          uint16_t scratch_vgpr,
+                                                          uint16_t scratch_count,
+                                                          std::vector<std::string> &errors);
 [[nodiscard]] bool
 moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidate,
                                               rj_code_arch_t arch);

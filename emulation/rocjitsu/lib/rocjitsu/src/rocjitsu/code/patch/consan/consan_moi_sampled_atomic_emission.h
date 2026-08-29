@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 
 #include <optional>
 #include <span>
@@ -39,18 +40,6 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind, bool is_rmw);
 [[nodiscard]] bool
 sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
                                              const ConSanAtomicLoweringForm &form);
-
-[[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
-                                                  uint64_t first_address, uint32_t element_size,
-                                                  uint16_t index_vgpr, uint16_t address_vgpr,
-                                                  uint16_t temporary_vgpr, rj_code_arch_t arch);
-
-[[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
-                                 const BoundRuntimeResources &resources,
-                                 const ConSanMoiWorkgroupSources &workgroup_sources,
-                                 uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
-                                 uint16_t owner_vgpr, rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,

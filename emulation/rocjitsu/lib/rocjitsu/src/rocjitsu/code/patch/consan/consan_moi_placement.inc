@@ -819,17 +819,6 @@ struct MoiSgprRange {
   uint16_t width = 0;
 };
 
-[[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
-                                                                 uint64_t descriptor_file_offset,
-                                                                 rj_code_arch_t arch,
-                                                                 std::vector<std::string> &errors) {
-  const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
-  if (!descriptor) {
-    errors.emplace_back("ConSan MOI owner derivation descriptor exceeds ELF bytes");
-    return std::nullopt;
-  }
-  return kernel_wavefront_size(arch, *descriptor) == 32 ? 5 : 6;
-}
 
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
@@ -859,40 +848,6 @@ struct MoiSgprRange {
   return true;
 }
 
-[[nodiscard]] bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                                          const ConSanRequest &request,
-                                          std::vector<std::string> &errors,
-                                          std::string_view context) {
-  if (request.delay_nops == 0)
-    return true;
-
-  switch (request.delay_mode) {
-  case ConSanDelayMode::Nop:
-    for (uint32_t i = 0; i < request.delay_nops; ++i)
-      words.push_back(build_s_nop(0, arch));
-    return true;
-  case ConSanDelayMode::Sleep:
-    if (request.delay_nops > std::numeric_limits<uint16_t>::max()) {
-      errors.emplace_back(std::string(context) +
-                          " sleep delay immediate exceeds the 16-bit s_sleep field");
-      return false;
-    }
-    words.push_back(build_s_sleep(static_cast<uint16_t>(request.delay_nops), arch));
-    return true;
-  case ConSanDelayMode::SleepVar:
-    if (request.delay_var_ssrc > std::numeric_limits<uint8_t>::max()) {
-      errors.emplace_back(std::string(context) +
-                          " sleep_var source exceeds the 8-bit scalar source field");
-      return false;
-    }
-    words.push_back(build_s_sleep_var(request.delay_var_ssrc, arch));
-    return true;
-  }
-
-  errors.emplace_back(std::string(context) + " has unknown delay mode '" +
-                      consan_delay_mode_name(request.delay_mode) + "'");
-  return false;
-}
 
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point) {
@@ -996,12 +951,6 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
          request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
 }
 
-[[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
-    const ConSanRequest &request, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  return request.moi_engine == ConSanMoiEngine::Sampled && candidate.is_native_lds() &&
-         (consan_arch_is_rdna(arch) || consan_uses_gfx9_cdna_encoding(arch)) &&
-         !candidate_requires_flat_address_materialization(candidate);
-}
 
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point,
@@ -1043,79 +992,8 @@ inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
 
-[[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanRequest &request,
-                                                    const ConSanMoiOperatingPoint &point,
-                                                    const ConSanMoiCandidate &candidate,
-                                                    rj_code_arch_t arch) {
-  const uint16_t base_scratch_count = request.moi_sampled_check ? 7u : 5u;
-  const uint16_t two_address_replay_count = consan_uses_gfx12_cdna_execution(arch) &&
-                                                    candidate.is_native_two_range() &&
-                                                    candidate.encoded_offset_scale_bytes() > 8u
-                                                ? 1u
-                                                : 0u;
-  return static_cast<uint16_t>(
-      // Reserve the identity-bank register even when address sampling is
-      // disabled. Auto-sized reports use multiple workgroup banks in that
-      // mode, and the persistent owner/epoch tail must not alias the bank.
-      base_scratch_count + 1u +
-      (flat_access_address_scratch_count(candidate) != 0u
-           ? flat_access_address_scratch_count(candidate)
-       : candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
-               moi_access_requires_high_bank_address_capture(candidate, arch)
-           ? 1u
-           : 0u) +
-      (point.automatic_moi_private_epoch
-           ? (request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
-       : point.moi_persistent_sgprs.complete() ? 2u
-                                               : 0u) +
-      two_address_replay_count);
-}
 
-[[nodiscard]] uint16_t sampled_spill_backed_scratch_count(const ConSanRequest &request,
-                                                          const ConSanMoiOperatingPoint &point,
-                                                          const ConSanMoiCandidate &candidate,
-                                                          rj_code_arch_t arch) {
-  // The publication phases recover an overlapping address into an ordinary
-  // temporary only while that phase consumes it. This keeps the fallback
-  // within the same scratch budget instead of requiring a ninth live value at
-  // full-pressure eight-register Sampled sites.
-  return direct_sampled_scratch_count(request, point, candidate, arch);
-}
 
-[[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
-                                                          uint16_t scratch_vgpr,
-                                                          uint16_t scratch_count,
-                                                          std::vector<std::string> &errors) {
-  if (!candidate.lowering.form) {
-    errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
-    return true;
-  }
-  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
-  if (form.address_vgpr && form.address_vgpr_count != 0u &&
-      range_overlaps(*form.address_vgpr, form.address_vgpr_count, scratch_vgpr, scratch_count)) {
-    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the LDS address VGPRs");
-    return true;
-  }
-  if (form.destination_vgpr && form.destination_register_count != 0u &&
-      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
-                     scratch_count)) {
-    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the destination VGPRs");
-    return true;
-  }
-  const uint16_t data_vgpr_count =
-      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
-  if (form.data_vgpr &&
-      range_overlaps(*form.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
-    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the data VGPRs");
-    return true;
-  }
-  if (form.second_data_vgpr &&
-      range_overlaps(*form.second_data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
-    errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the second data VGPRs");
-    return true;
-  }
-  return false;
-}
 
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
@@ -3868,26 +3746,6 @@ inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
          std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
 }
 
-struct MoiSampledPublicationStateSgprs {
-  uint16_t original_exec_save_sgpr = 0;
-  uint16_t selection_vcc_save_sgpr = 0;
-  uint16_t publication_exec_save_sgpr = 0;
-  uint16_t guest_scc_snapshot_sgpr = 0;
-};
-
-[[nodiscard]] std::optional<MoiSampledPublicationStateSgprs>
-moi_sampled_publication_state_sgprs(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
-    return std::nullopt;
-  const uint16_t base = *point.moi_exec_save_sgpr;
-  return MoiSampledPublicationStateSgprs{
-      .original_exec_save_sgpr = base,
-      .selection_vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
-      .publication_exec_save_sgpr = static_cast<uint16_t>(base + 4u),
-      .guest_scc_snapshot_sgpr = static_cast<uint16_t>(base + 6u),
-  };
-}
 
 [[nodiscard]] std::optional<MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
