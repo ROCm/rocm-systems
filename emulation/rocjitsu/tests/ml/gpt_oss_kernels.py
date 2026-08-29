@@ -872,6 +872,23 @@ def randn(
 # reference -- the scale an elementwise kernel's worst element actually has.
 BF16_EPS = 2.0**-8
 
+# One rule for every case whose output is bfloat16, rather than a per-case
+# number chosen by eye. A correctly rounded bf16 store already costs up to
+# BF16_EPS relative to the value's own magnitude, and measurement across the CPU
+# arm, both emulated targets and all three shape profiles puts the worst case at
+# 1.24x that (rms_norm at the `small` profile, 4.837e-03). Reduction length does
+# not move it: the bf16 rounding of the *inputs* dominates, and a dot product's
+# errors partly cancel, so the vocabulary-sized lm_head GEMM sits at the same
+# 3.3e-03 as the 512-wide router GEMM.
+#
+# Three epsilons therefore leaves every measured case at least 2.4x of margin
+# while still failing on a systematic one-ulp bias -- which is what the BF16
+# truncation defect was, and what the previous 2e-2 to 6e-2 tolerances would
+# have let through. A composite of several such steps gets four.
+TOL_BF16 = 3 * BF16_EPS
+TOL_BF16_COMPOSITE = 4 * BF16_EPS
+TOL_EXACT = 0.0
+
 
 def compare(got: torch.Tensor, want: torch.Tensor) -> tuple[float, float]:
     """Max absolute error, and that error relative to the reference's peak.
@@ -921,7 +938,7 @@ def digest_of(t: torch.Tensor) -> str:
     "embedding",
     "torch",
     torch.bfloat16,
-    0.0,
+    TOL_EXACT,
     "index_select over the vocab table; must be exact",
 )
 def _embedding(s: Shape, gen: torch.Generator):
@@ -936,7 +953,7 @@ def _embedding(s: Shape, gen: torch.Generator):
 # ---- 2. normalisation ----------------------------------------------------
 
 
-@case("rms_norm", "norm", "torch", torch.bfloat16, 6e-3)
+@case("rms_norm", "norm", "torch", torch.bfloat16, TOL_BF16)
 def _rms_norm(s: Shape, gen: torch.Generator):
     x = randn(gen, s.num_tokens, s.hidden_size, dtype=torch.bfloat16)
     w = randn(gen, s.hidden_size, dtype=torch.bfloat16, scale=0.5)
@@ -948,7 +965,7 @@ def _rms_norm(s: Shape, gen: torch.Generator):
     return got, ref_rms_norm(x, w, RMS_NORM_EPS)
 
 
-@case("rms_norm", "norm", "triton", torch.bfloat16, 6e-3)
+@case("rms_norm", "norm", "triton", torch.bfloat16, TOL_BF16)
 def _rms_norm_triton(s: Shape, gen: torch.Generator):
     require_triton()
     x = randn(gen, s.num_tokens, s.hidden_size, dtype=torch.bfloat16)
@@ -967,7 +984,7 @@ def _rms_norm_triton(s: Shape, gen: torch.Generator):
     "norm",
     "torch",
     torch.bfloat16,
-    6e-3,
+    TOL_BF16,
     "residual add fused into the norm, as vLLM's two-output RMSNorm does",
 )
 def _fused_add_rms_norm(s: Shape, gen: torch.Generator):
@@ -994,7 +1011,7 @@ def _fused_add_rms_norm(s: Shape, gen: torch.Generator):
     "gemm",
     "torch",
     torch.bfloat16,
-    2e-2,
+    TOL_BF16,
     "fused QKV projection with bias; attention weights are not quantized in gpt-oss",
 )
 def _qkv(s: Shape, gen: torch.Generator):
@@ -1012,7 +1029,7 @@ def _qkv(s: Shape, gen: torch.Generator):
     "gemm",
     "triton_dot",
     torch.bfloat16,
-    2e-2,
+    TOL_BF16,
     "the same projection through tl.dot, so the matrix cores are exercised",
 )
 def _qkv_dot(s: Shape, gen: torch.Generator):
@@ -1044,7 +1061,7 @@ def _qkv_dot(s: Shape, gen: torch.Generator):
     return out, ref
 
 
-@case("o_proj_gemm", "gemm", "torch", torch.bfloat16, 2e-2)
+@case("o_proj_gemm", "gemm", "torch", torch.bfloat16, TOL_BF16)
 def _o_proj(s: Shape, gen: torch.Generator):
     x = randn(gen, s.num_tokens, s.q_size, dtype=torch.bfloat16)
     w = randn(gen, s.hidden_size, s.q_size, dtype=torch.bfloat16, scale=0.05)
@@ -1059,7 +1076,7 @@ def _o_proj(s: Shape, gen: torch.Generator):
     "gemm",
     "torch",
     torch.bfloat16,
-    2e-2,
+    TOL_BF16,
     "the router stays unquantized (modules_to_not_convert) and is tiny",
 )
 def _router(s: Shape, gen: torch.Generator):
@@ -1071,7 +1088,7 @@ def _router(s: Shape, gen: torch.Generator):
     return got, ref
 
 
-@case("lm_head_gemm", "gemm", "torch", torch.bfloat16, 2e-2)
+@case("lm_head_gemm", "gemm", "torch", torch.bfloat16, TOL_BF16)
 def _lm_head(s: Shape, gen: torch.Generator):
     x = randn(gen, s.num_tokens, s.hidden_size, dtype=torch.bfloat16)
     w = randn(gen, s.vocab_size, s.hidden_size, dtype=torch.bfloat16, scale=0.05)
@@ -1088,7 +1105,7 @@ def _lm_head(s: Shape, gen: torch.Generator):
     "rope",
     "torch",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "YaRN-scaled NeoX rotary with the gpt-oss theta=150000, factor=32 schedule",
 )
 def _rope(s: Shape, gen: torch.Generator):
@@ -1151,7 +1168,7 @@ def _rope_cache(s: Shape, gen: torch.Generator):
     "copy",
     "torch",
     torch.bfloat16,
-    0.0,
+    TOL_EXACT,
     "scatter of new K/V into a paged cache; must be exact",
 )
 def _kv_cache(s: Shape, gen: torch.Generator):
@@ -1225,7 +1242,7 @@ def _attention_torch(s, q, k, v, sinks, window):
     "attention",
     "torch",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "full causal attention with sinks (odd gpt-oss layers)",
 )
 def _attn_full(s: Shape, gen: torch.Generator):
@@ -1241,7 +1258,7 @@ def _attn_full(s: Shape, gen: torch.Generator):
     "attention",
     "torch",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "sliding-window attention with sinks (even gpt-oss layers)",
 )
 def _attn_swa(s: Shape, gen: torch.Generator):
@@ -1252,7 +1269,7 @@ def _attn_swa(s: Shape, gen: torch.Generator):
     )
 
 
-@case("attention_prefill_full", "attention", "triton", torch.bfloat16, 3e-2)
+@case("attention_prefill_full", "attention", "triton", torch.bfloat16, TOL_BF16)
 def _attn_full_triton(s: Shape, gen: torch.Generator):
     require_triton()
     q, k, v, sinks = _attention_inputs(s, gen)
@@ -1286,7 +1303,7 @@ def _attn_full_triton(s: Shape, gen: torch.Generator):
     )
 
 
-@case("attention_prefill_swa", "attention", "triton", torch.bfloat16, 3e-2)
+@case("attention_prefill_swa", "attention", "triton", torch.bfloat16, TOL_BF16)
 def _attn_swa_triton(s: Shape, gen: torch.Generator):
     require_triton()
     q, k, v, sinks = _attention_inputs(s, gen)
@@ -1325,7 +1342,7 @@ def _attn_swa_triton(s: Shape, gen: torch.Generator):
     "attention",
     "torch",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "single-query decode step against a full cache",
 )
 def _attn_decode(s: Shape, gen: torch.Generator):
@@ -1379,14 +1396,14 @@ def _attn_dot(s: Shape, gen: torch.Generator, window: int | None):
     "attention",
     "triton_dot",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "flash tiling with both matmuls through tl.dot, the form vLLM's kernel uses",
 )
 def _attn_full_dot(s: Shape, gen: torch.Generator):
     return _attn_dot(s, gen, None)
 
 
-@case("attention_prefill_swa", "attention", "triton_dot", torch.bfloat16, 3e-2)
+@case("attention_prefill_swa", "attention", "triton_dot", torch.bfloat16, TOL_BF16)
 def _attn_swa_dot(s: Shape, gen: torch.Generator):
     return _attn_dot(s, gen, s.sliding_window)
 
@@ -1396,7 +1413,7 @@ def _attn_swa_dot(s: Shape, gen: torch.Generator):
     "attention",
     "triton",
     torch.bfloat16,
-    3e-2,
+    TOL_BF16,
     "attention over a paged KV cache walked through a block table, as vLLM does",
 )
 def _attn_paged(s: Shape, gen: torch.Generator):
@@ -1457,7 +1474,7 @@ def _attn_paged(s: Shape, gen: torch.Generator):
     "moe_route",
     "torch",
     torch.float32,
-    1e-5,
+    1e-6,
     "softmax over all experts, then top-k and renormalize",
 )
 def _topk(s: Shape, gen: torch.Generator):
@@ -1493,7 +1510,7 @@ def _mxfp4_inputs(s: Shape, gen: torch.Generator, rows: int, cols: int):
     "quant",
     "torch",
     torch.bfloat16,
-    0.0,
+    TOL_EXACT,
     "E2M1 x E8M0 -> bf16; every representable value is exact in bf16",
 )
 def _mxfp4_torch(s: Shape, gen: torch.Generator):
@@ -1517,7 +1534,7 @@ def _mxfp4_torch(s: Shape, gen: torch.Generator):
     "quant",
     "triton",
     torch.bfloat16,
-    0.0,
+    TOL_EXACT,
     "arithmetic E2M1 decode, the form a fused dequant kernel uses",
 )
 def _mxfp4_triton(s: Shape, gen: torch.Generator):
@@ -1543,7 +1560,7 @@ def _mxfp4_triton(s: Shape, gen: torch.Generator):
     "activation",
     "torch",
     torch.bfloat16,
-    6e-3,
+    TOL_BF16,
     "clamped SwiGLU with alpha=1.702, limit=7.0 and interleaved gate/up",
 )
 def _swiglu_torch(s: Shape, gen: torch.Generator):
@@ -1559,7 +1576,7 @@ def _swiglu_torch(s: Shape, gen: torch.Generator):
     return got, ref_swiglu_oai(x, SWIGLU_ALPHA, SWIGLU_LIMIT)
 
 
-@case("swiglu_oai", "activation", "triton", torch.bfloat16, 6e-3)
+@case("swiglu_oai", "activation", "triton", torch.bfloat16, TOL_BF16)
 def _swiglu_triton(s: Shape, gen: torch.Generator):
     require_triton()
     x = randn(
@@ -1618,7 +1635,7 @@ def _moe_inputs(s: Shape, gen: torch.Generator):
     "moe_gemm",
     "torch",
     torch.bfloat16,
-    4e-2,
+    TOL_BF16,
     "gate/up GEMM -> SwiGLU-OAI -> down GEMM, weighted by the routing scores",
 )
 def _moe_torch(s: Shape, gen: torch.Generator):
@@ -1643,7 +1660,7 @@ def _moe_torch(s: Shape, gen: torch.Generator):
     return out.to(torch.bfloat16), ref
 
 
-@case("moe_gemm_swiglu", "moe_gemm", "triton", torch.bfloat16, 4e-2)
+@case("moe_gemm_swiglu", "moe_gemm", "triton", torch.bfloat16, TOL_BF16)
 def _moe_triton(s: Shape, gen: torch.Generator):
     require_triton()
     hidden, w1, b1, w2, b2, weights, ids = _moe_inputs(s, gen)
@@ -1690,7 +1707,7 @@ def _moe_triton(s: Shape, gen: torch.Generator):
     "sampling",
     "torch",
     torch.float32,
-    0.0,
+    TOL_EXACT,
     "argmax over the vocabulary; the token id must match exactly",
 )
 def _sample(s: Shape, gen: torch.Generator):
@@ -1708,7 +1725,7 @@ def _sample(s: Shape, gen: torch.Generator):
     "integration",
     "torch",
     torch.bfloat16,
-    6e-2,
+    TOL_BF16_COMPOSITE,
     "one full gpt-oss layer: norm -> QKV -> RoPE -> attention -> O -> norm -> MoE",
 )
 def _block(s: Shape, gen: torch.Generator):
