@@ -33,6 +33,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"

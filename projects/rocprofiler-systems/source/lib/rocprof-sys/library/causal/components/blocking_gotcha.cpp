@@ -20,6 +20,8 @@
 #include <pthread.h>
 #include <stdexcept>
 
+#include <signal.h>
+
 #pragma weak pthread_join
 #pragma weak pthread_mutex_lock
 #pragma weak pthread_spin_lock
@@ -140,7 +142,10 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
     // hook remains installed so this wrapper is still called, but we make
     // it a zero-overhead passthrough to unblock any threads that would
     // otherwise be stuck in block_backtrace_samples() or postblock().
-    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_args...);
+    if(s_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_args...);
+    }
 
     const std::int64_t _delay_value =
         causal::delay::get_global().load(std::memory_order_relaxed);
@@ -171,15 +176,18 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
 int
 blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
-                            int (*_func)(const sigset_t*, int*), const sigset_t* _set_v,
-                            int* _sig) const noexcept
+                            int (*func)(const sigset_t*, int*), const sigset_t* set_v,
+                            int* sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_set_v, _sig);
+    if(s_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*func)(set_v, sig);
+    }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    sigset_t _set = *_set_v;
+    sigset_t _set = *set_v;
     causal_gotcha::remove_signals(&_set);
     siginfo_t _info;
 
@@ -199,7 +207,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
     if(_ret == -1)
         return errno;  // If there was an error, return the error code
     else
-        *_sig = _ret;  // sig is declared as non-null so skip check
+        *sig = _ret;  // sig is declared as non-null so skip check
 
     return 0;
 }
@@ -210,7 +218,10 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
                             const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_set_v, _info_v);
+    if(s_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_set_v, _info_v);
+    }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
@@ -242,7 +253,9 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
     if(s_shutdown.load(std::memory_order_relaxed))
+    {
         return (*_func)(_set_v, _info_v, _wait_v);
+    }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
@@ -266,11 +279,14 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*_func)(const sigset_t*),
+blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigset_t*),
                             const sigset_t* _set_v) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_set_v);
+    if(s_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*func)(_set_v);
+    }
 
     auto _old_set = sigset_t{};
     int  _sig     = 0;
