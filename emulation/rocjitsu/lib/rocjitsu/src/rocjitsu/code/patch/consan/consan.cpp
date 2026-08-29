@@ -28,6 +28,7 @@
 #include "rocjitsu/code/patch/consan/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
