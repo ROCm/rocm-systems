@@ -69,6 +69,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -143,22 +144,65 @@ struct rocpd_db
     rocpd_db(rocpd_db&&)                 = delete;
     rocpd_db& operator=(rocpd_db&&) = delete;
 
-    sqlite3*            conn                = nullptr;
-    std::string         uuid                = {};
-    std::string         guid                = {};
-    schema_map_t        schemas             = {};
-    track_map_t         tracks              = {};
-    size_t              event_id_counter    = 0;
-    size_t              sample_id_counter   = 0;
-    statement_cache_t   statements          = {};
-    pending_batch_map_t pending_batches     = {};
-    fk_parent_map_t     fk_parent_tables    = {};
-    flushing_set_t      flushing_tables     = {};
-    uint64_t            pending_touch_count = 0;
-    batch_stats_map_t   batch_stats         = {};
+    sqlite3*            conn                       = nullptr;
+    std::string         uuid                       = {};
+    std::string         guid                       = {};
+    schema_map_t        schemas                    = {};
+    track_map_t         tracks                     = {};
+    size_t              event_id_counter           = 0;
+    size_t              sample_id_counter          = 0;
+    size_t              kernel_dispatch_id_counter = 0;
+    statement_cache_t   statements                 = {};
+    pending_batch_map_t pending_batches            = {};
+    fk_parent_map_t     fk_parent_tables           = {};
+    flushing_set_t      flushing_tables            = {};
+    uint64_t            pending_touch_count        = 0;
+    batch_stats_map_t   batch_stats                = {};
 
     size_t get_event_id() { return ++event_id_counter; }
     size_t get_sample_id() { return ++sample_id_counter; }
+    size_t get_kernel_dispatch_id() { return ++kernel_dispatch_id_counter; }
+};
+
+// Maps one dispatch execution onto the rocpd event row that represents it.
+//
+// Outside kernel replay a dispatch_id names exactly one execution, so the flat vector below is
+// the whole map and lookups behave as they always have. Kernel replay re-executes a dispatch
+// once per counter group and every pass reports the same dispatch_id, so dispatch_id alone stops
+// identifying an execution and the pass index has to complete the key. Passes beyond the first
+// are rare enough to keep out of the vector.
+struct dispatch_event_map
+{
+    using key_type = std::pair<uint64_t, uint64_t>;
+
+    bool contains(uint64_t dispatch_id, uint64_t replay_pass) const
+    {
+        if(replay_pass == 0) return first_pass.size() > dispatch_id && first_pass[dispatch_id] != 0;
+        return later_passes.count(key_type{dispatch_id, replay_pass}) > 0;
+    }
+
+    uint64_t get(uint64_t dispatch_id, uint64_t replay_pass) const
+    {
+        if(replay_pass == 0) return first_pass.at(dispatch_id);
+        return later_passes.at(key_type{dispatch_id, replay_pass});
+    }
+
+    void set(uint64_t dispatch_id, uint64_t replay_pass, uint64_t event_id)
+    {
+        if(replay_pass == 0)
+        {
+            if(first_pass.size() < dispatch_id + 1)
+                common::container::resize(first_pass, dispatch_id + 1, 0UL);
+            first_pass.at(dispatch_id) = event_id;
+        }
+        else
+        {
+            later_passes.emplace(key_type{dispatch_id, replay_pass}, event_id);
+        }
+    }
+
+    common::container::stable_vector<uint64_t, 512> first_pass   = {};
+    std::map<key_type, uint64_t>                    later_passes = {};
 };
 
 void
@@ -1453,6 +1497,17 @@ write_rocpd(
         }
     };
 
+    // Kernel replay is the only service that runs one dispatch_id more than once, and the pass
+    // index the counter records carry is the only place that is visible from here. When nothing
+    // reports a non-zero pass -- every run without replay, and a replay that resolved to a single
+    // counter group -- the export keeps its original one-row-per-dispatch_id shape untouched.
+    const bool kernel_replay_active = [&counter_collection_gen]() {
+        for(auto pctr : counter_collection_gen)
+            for(const auto& record : counter_collection_gen.get(pctr))
+                if(record.replay_pass > 0) return true;
+        return false;
+    }();
+
     auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
         auto _deferred         = sql::deferred_transaction{db.conn};
@@ -1471,13 +1526,32 @@ write_rocpd(
                                     const auto& workgroup,
                                     uint64_t    graph_exec_id,
                                     uint64_t    graph_node_id,
-                                    bool        enable_duplicate_check) {
-            // Skip if we've already processed this dispatch_id
-            if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
-
+                                    bool        enable_duplicate_check,
+                                    uint64_t    replay_pass) {
             auto kern_name = (kernel_id > 0)
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
                                  : "unknown_kernel";
+
+            // A dispatch execution is identified by its dispatch_id and, under kernel replay, the
+            // pass that produced it. Reaching the same execution twice is the duplicate the
+            // export has always dropped; reaching a later pass of a replayed dispatch is a
+            // distinct execution and gets its own row.
+            if(dispatch_evt_ids.contains(dispatch_id, replay_pass))
+            {
+                // Warn rather than ROCP_CI_LOG here: the previous form of this check sat after an
+                // unconditional early return and so could never fire. Restoring it as a CI-fatal
+                // check would turn a condition that has been silently tolerated into an abort.
+                ROCP_WARNING_IF(enable_duplicate_check) << fmt::format(
+                    "duplicate kernel dispatch id {} :: pass={}, event_id={}, kernel_id={}, "
+                    "corr_id={}, name='{}'",
+                    dispatch_id,
+                    replay_pass,
+                    dispatch_evt_ids.get(dispatch_id, replay_pass),
+                    kernel_id,
+                    corr_id.internal,
+                    kern_name);
+                return;
+            }
 
             auto evt_id = create_event(db,
                                        {
@@ -1487,24 +1561,7 @@ write_rocpd(
                                            insert_value("correlation_id", corr_id.external.value),
                                        });
 
-            // Ensure dispatch_evt_ids is large enough
-            if(dispatch_evt_ids.size() < dispatch_id + 1)
-                common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
-
-            // Check for duplicates if requested
-            if(enable_duplicate_check && dispatch_evt_ids.at(dispatch_id) != 0)
-            {
-                ROCP_CI_LOG(WARNING)
-                    << fmt::format("duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
-                                   "corr_id={}, name='{}'",
-                                   dispatch_id,
-                                   evt_id,
-                                   kernel_id,
-                                   corr_id.internal,
-                                   kern_name);
-            }
-
-            dispatch_evt_ids.at(dispatch_id) = evt_id;
+            dispatch_evt_ids.set(dispatch_id, replay_pass, evt_id);
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
@@ -1516,18 +1573,28 @@ write_rocpd(
 
             get_thread_id(thread_id);
 
+            // Outside kernel replay dispatch_id is unique across the run and stays the row id.
+            // Under replay several rows share a dispatch_id, so it cannot also serve as the
+            // primary key and the rows get a surrogate id instead.
+            auto row_id = kernel_replay_active ? db.get_kernel_dispatch_id() : dispatch_id;
+
             // Insert into kernel dispatch table
             get_insert_statement(
                 db,
                 "rocpd_kernel_dispatch{{uuid}}",
                 {
-                    insert_value("id", dispatch_id),
+                    insert_value("id", row_id),
                     insert_value("nid", node_id),
                     insert_value("pid", this_pid),
                     insert_value("tid", thread_id),
                     insert_value("agent_id", agent_node_id),
                     insert_value("kernel_id", kernel_id),
                     insert_value("dispatch_id", dispatch_id),
+                    // Left NULL outside kernel replay, where a dispatch executes once and the
+                    // column would carry no information.
+                    insert_value("replay_pass",
+                                 kernel_replay_active ? std::make_optional(replay_pass)
+                                                      : std::optional<uint64_t>{}),
                     insert_value("queue_id", queue_id),
                     insert_value("stream_id", stream_id),
                     insert_value("start", start_timestamp),
@@ -1578,7 +1645,8 @@ write_rocpd(
                                      info.workgroup_size,              // workgroup
                                      0,                                // graph_exec_id
                                      0,                                // graph_node_id
-                                     false                             // enable_duplicate_check
+                                     false,                            // enable_duplicate_check
+                                     record.replay_pass                // replay_pass
                     );
                 }
             }
@@ -1612,19 +1680,29 @@ write_rocpd(
                                      info.workgroup_size,  // workgroup
                                      0,                    // graph_exec_id
                                      0,                    // graph_node_id
-                                     false                 // enable_duplicate_check
+                                     false,                // enable_duplicate_check
+                                     0                     // replay_pass (SPM excludes replay)
                     );
                 }
             }
         }
         else
         {
+            // The kernel dispatch buffer records carry no pass index; the SDK reports the pass
+            // through the counter records instead. Replay executes the passes of a dispatch one
+            // after another and the buffer preserves completion order, so the n-th record seen
+            // for a dispatch_id is its n-th pass.
+            auto passes_seen = std::unordered_map<uint64_t, uint64_t>{};
+
             for(auto pitr : kernel_dispatch_gen)
             {
                 for(auto itr : kernel_dispatch_gen.get(pitr))
                 {
                     // Register thread ID
                     get_thread_id(itr.thread_id);
+
+                    auto replay_pass =
+                        kernel_replay_active ? passes_seen[itr.dispatch_info.dispatch_id]++ : 0;
 
                     // Process this dispatch
                     process_dispatch(itr.dispatch_info.dispatch_id,             // dispatch_id
@@ -1641,7 +1719,8 @@ write_rocpd(
                                      itr.dispatch_info.workgroup_size,          // workgroup
                                      itr.graph_exec_id.handle,                  // graph_exec_id
                                      itr.graph_node_id.handle,                  // graph_node_id
-                                     true  // enable_duplicate_check
+                                     true,        // enable_duplicate_check
+                                     replay_pass  // replay_pass
                     );
                 }
             }
@@ -1665,7 +1744,9 @@ write_rocpd(
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
 
-                auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                // Every pass of a replayed dispatch reports the same dispatch_id, so the pass
+                // index is what routes these counters to the execution that produced them.
+                auto evt_id = dispatch_evt_ids.get(dispatch_id, record.replay_pass);
                 for(const auto& count : record.read())
                 {
                     get_insert_statement(db,
@@ -1688,7 +1769,7 @@ write_rocpd(
             {
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
-                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
+                auto        evt_id      = dispatch_evt_ids.get(dispatch_id, 0);
 
                 auto track_id =
                     get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
@@ -2200,7 +2281,7 @@ write_rocpd(
             }
         };
 
-    auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
+    auto dispatch_to_evt_id = dispatch_event_map{};
 
     insert_node_data();
     insert_process_data();
