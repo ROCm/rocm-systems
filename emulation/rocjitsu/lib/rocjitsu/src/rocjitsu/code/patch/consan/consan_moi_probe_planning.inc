@@ -45,8 +45,8 @@ plan_moi_probe_resources(ConSanTransformArtifacts &result, ResolvedMoiScratchPla
   std::optional<VgprSpillSequence> spill;
   if (resources.source == ConSanRegisterAllocationSource::SpillRequired ||
       moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
-    spill = build_moi_spill_sequence(result, resources, options, spill_managers, arch,
-                                     result.warnings, private_layout_base);
+    spill = build_moi_spill_sequence(result.program_inventory, resources, options, options, options,
+                                     spill_managers, arch, result.warnings, private_layout_base);
     if (!spill)
       return std::nullopt;
   }

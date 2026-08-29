@@ -132,7 +132,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
   std::optional<MoiPrivateEpochLayout> private_layout;
   if (event_options.automatic_moi_private_epoch) {
     private_layout = build_moi_private_epoch_layout(
-        result, resources, arch, result.warnings,
+        result.program_inventory, resources, arch, result.warnings,
         /*include_owner=*/event_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
         /*include_workgroup_key=*/false,
         /*include_record_replay_workgroup=*/true);
@@ -159,7 +159,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
 
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   if (!event_options.moi_owner_vgpr && !event_options.moi_persistent_sgprs.owner) {
-    if (moi_record_uses_private_owner(event_options)) {
+    if (moi_record_uses_private_owner(event_options, event_options)) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)
         owner_resources.original_private_segment_size = *active_private_segment_size;

@@ -559,14 +559,16 @@ void try_apply_first_light_access_record_patch(
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+          cached->second = build_moi_private_epoch_layout(result.program_inventory, *resources,
+                                                          arch, result.warnings,
                                                           /*include_owner=*/persist_workitem_owner,
                                                           /*include_workgroup_key=*/false,
                                                           /*include_record_replay_workgroup=*/true);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+        private_layout = build_moi_private_epoch_layout(result.program_inventory, *resources, arch,
+                                                        result.warnings,
                                                         /*include_owner=*/persist_workitem_owner,
                                                         /*include_workgroup_key=*/false,
                                                         /*include_record_replay_workgroup=*/true);

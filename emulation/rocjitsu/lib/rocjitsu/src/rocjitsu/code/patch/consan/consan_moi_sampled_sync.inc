@@ -967,8 +967,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     candidate_options.scratch_vgpr = resources->base;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (candidate_options.automatic_moi_private_epoch) {
-      private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
-                                                          arch, result.warnings);
+      private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
+                                                          candidate_options, arch, result.warnings);
       if (!private_layout)
         continue;
     }
@@ -2057,8 +2057,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
-      private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
-                                                          arch, result.warnings);
+      private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
+                                                          candidate_options, arch, result.warnings);
       if (!private_layout)
         continue;
     }

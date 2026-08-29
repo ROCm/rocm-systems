@@ -378,7 +378,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+          cached->second = build_moi_private_epoch_layout(result.program_inventory, *resources,
+                                                          arch, result.warnings,
                                                           /*include_owner=*/persist_workitem_owner,
                                                           /*include_workgroup_key=*/
                                                           persist_workgroup_key,
@@ -388,7 +389,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+        private_layout = build_moi_private_epoch_layout(result.program_inventory, *resources, arch,
+                                                        result.warnings,
                                                         /*include_owner=*/persist_workitem_owner,
                                                         /*include_workgroup_key=*/
                                                         persist_workgroup_key,
@@ -500,7 +502,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         spill = borrowed->as_vgpr_spill_sequence();
       } else {
         spill = build_moi_spill_sequence(
-            result, *resources, candidate_options, spill_managers, arch, result.warnings,
+            result.program_inventory, *resources, candidate_options, candidate_options,
+            candidate_options, spill_managers, arch, result.warnings,
             private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base)
                            : std::nullopt);
       }

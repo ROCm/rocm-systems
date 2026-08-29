@@ -49,10 +49,11 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
   return common_shift;
 }
 
-[[nodiscard]] bool moi_record_uses_private_owner(const MoiOptions &options) {
-  return moi_initializes_owner_epoch(options, options) && options.automatic_moi_private_epoch &&
-         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
-         !options.moi_persistent_sgprs.owner;
+[[nodiscard]] bool moi_record_uses_private_owner(const ConSanRequest &request,
+                                                 const ConSanMoiOperatingPoint &point) {
+  return moi_initializes_owner_epoch(request, point) && point.automatic_moi_private_epoch &&
+         request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !point.moi_owner_vgpr &&
+         !point.moi_persistent_sgprs.owner;
 }
 
 [[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan> resolve_moi_private_workitem_owner(
@@ -132,12 +133,11 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return representative;
 }
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout>
-common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
-                                   const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-                                   const MoiOptions &options, std::vector<std::string> &warnings) {
+[[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
+    std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+    const RuntimeCapabilities &capabilities, std::vector<std::string> &warnings) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
-  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
+  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(capabilities, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     const auto descriptor = read_kernel_descriptor(image, descriptor_offset);
     if (!descriptor) {
@@ -188,7 +188,7 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
 }
 
 [[nodiscard]] std::optional<MoiPrivateEpochLayout> build_moi_private_epoch_layout(
-    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
+    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
     rj_code_arch_t arch, std::vector<std::string> &warnings, bool include_owner = false,
     bool include_workgroup_key = false, bool include_record_replay_workgroup = false,
     bool include_dispatch_id = false) {
@@ -197,8 +197,7 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
     return std::nullopt;
   }
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel =
-        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanKernelInfo *kernel = program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI private epoch references an unknown kernel descriptor");
       return std::nullopt;
@@ -229,12 +228,12 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
   if (include_record_replay_workgroup) {
     const bool include_cluster_workgroup_id =
         consan_arch_has_cluster_facilities(arch) &&
-        std::ranges::any_of(
-            resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-              const ConSanKernelInfo *kernel =
-                  result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
-              return kernel != nullptr && kernel->uses_cluster_workgroup_id;
-            });
+        std::ranges::any_of(resources.owner_descriptor_file_offsets,
+                            [&](uint64_t descriptor_offset) {
+                              const ConSanKernelInfo *kernel =
+                                  program_inventory.find_kernel_by_descriptor(descriptor_offset);
+                              return kernel != nullptr && kernel->uses_cluster_workgroup_id;
+                            });
     record_replay_workgroup_offset_values = std::array<uint64_t, 4>{
         persistent_end,
         persistent_end + SpillManager::kSlotBytes,
@@ -287,35 +286,35 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
 }
 
 [[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
-    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-    const MoiOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
+    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
+    const ConSanRequest &request, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   return build_moi_private_epoch_layout(
-      result, resources, arch, warnings,
-      /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+      program_inventory, resources, arch, warnings,
+      /*include_owner=*/request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
       /*include_workgroup_key=*/false,
       /*include_record_replay_workgroup=*/
-      record_replay_requires_entry_workgroup_capture(options.moi_engine));
+      record_replay_requires_entry_workgroup_capture(request.moi_engine));
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
-    const MoiOptions &options, const MoiPrivateEpochLayout &layout, rj_code_arch_t arch,
+    const ConSanMoiOperatingPoint &point, const MoiPrivateEpochLayout &layout, rj_code_arch_t arch,
     std::vector<std::string> &errors) {
-  if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !options.moi_epoch_vgpr ||
+  if (!point.automatic_moi_private_epoch || !point.moi_owner_vgpr || !point.moi_epoch_vgpr ||
       !layout.owner_offset) {
     errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
     return false;
   }
   const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, arch, errors);
   const auto load_epoch =
-      instrumentation::build_private_load_b32(*options.moi_epoch_vgpr, layout.epoch_offset, arch);
+      instrumentation::build_private_load_b32(*point.moi_epoch_vgpr, layout.epoch_offset, arch);
   const auto load_owner =
-      instrumentation::build_private_load_b32(*options.moi_owner_vgpr, *layout.owner_offset, arch);
+      instrumentation::build_private_load_b32(*point.moi_owner_vgpr, *layout.owner_offset, arch);
   const auto wait = instrumentation::build_s_wait_private_load0(arch);
   const auto owner =
-      owner_shift ? instrumentation::build_v_lshrrev_b32(*options.moi_owner_vgpr,
+      owner_shift ? instrumentation::build_v_lshrrev_b32(*point.moi_owner_vgpr,
                                                          scalar_positive_inline_u32(*owner_shift),
-                                                         *options.moi_owner_vgpr, arch)
+                                                         *point.moi_owner_vgpr, arch)
                   : std::nullopt;
   if (!owner_shift || !load_epoch || !load_owner || !wait || !owner) {
     errors.emplace_back("ConSan MOI sampled sync could not load private owner/epoch state");
@@ -329,10 +328,11 @@ common_moi_workgroup_shadow_layout(std::span<const uint8_t> image,
 }
 
 [[nodiscard]] std::optional<VgprSpillSequence>
-build_moi_spill_sequence(const ConSanTransformArtifacts &result,
-                         const ResolvedMoiScratchPlan &resources, const MoiOptions &options,
-                         MoiSpillManagers &managers, rj_code_arch_t arch,
-                         std::vector<std::string> &warnings,
+build_moi_spill_sequence(const ProgramInventory &program_inventory,
+                         const ResolvedMoiScratchPlan &resources, const ConSanRequest &request,
+                         const BoundRuntimeResources &bound_resources,
+                         const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers,
+                         rj_code_arch_t arch, std::vector<std::string> &warnings,
                          std::optional<uint32_t> private_layout_base = std::nullopt) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
@@ -348,8 +348,7 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
   bool has_dynamic_owner = false;
   bool has_fixed_owner = false;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const ConSanKernelInfo *kernel =
-        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
+    const ConSanKernelInfo *kernel = program_inventory.find_kernel_by_descriptor(descriptor_offset);
     if (kernel == nullptr) {
       warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
       return std::nullopt;
@@ -361,15 +360,15 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
   }
   const bool needs_dynamic_scalar_frame =
       has_dynamic_owner &&
-      (options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill);
+      (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill);
   if (resources.source != ConSanRegisterAllocationSource::SpillRequired &&
       !needs_dynamic_scalar_frame) {
     return std::nullopt;
   }
 
   const bool fixed_lane_scalar_reservoir =
-      !has_dynamic_owner && options.moi_exec_save_sgpr &&
-      (options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill);
+      !has_dynamic_owner && point.moi_exec_save_sgpr &&
+      (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill);
   const uint16_t spill_vgpr_count =
       static_cast<uint16_t>(resources.count + static_cast<uint16_t>(fixed_lane_scalar_reservoir));
   if (spill_vgpr_count < resources.count ||
@@ -386,47 +385,47 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result,
           "ConSan MOI spill cannot share one frame recipe across dynamic and fixed owners");
       return std::nullopt;
     }
-    if (!moi_supports_dynamic_stack_spill(arch, options.moi_engine)) {
+    if (!moi_supports_dynamic_stack_spill(arch, request.moi_engine)) {
       warnings.emplace_back(
           "ConSan MOI dynamic-stack spill has no backend for this target and engine");
       return std::nullopt;
     }
-    if (!options.moi_dynamic_stack_spill) {
+    if (!point.moi_dynamic_stack_spill) {
       warnings.emplace_back(
           "ConSan MOI dynamic-stack spill was not included in scalar-state planning");
       return std::nullopt;
     }
-    if (!options.moi_exec_save_sgpr) {
+    if (!point.moi_exec_save_sgpr) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no EXEC-save scalar window");
       return std::nullopt;
     }
     const bool spill_backed_scalar_window =
-        options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill;
-    const auto special_state = moi_special_state_sgprs(options, options);
-    const auto indirect_state = moi_indirect_jump_sgprs(options, options);
+        point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill;
+    const auto special_state = moi_special_state_sgprs(request, point);
+    const auto indirect_state = moi_indirect_jump_sgprs(request, point);
     if (!special_state || (spill_backed_scalar_window && !indirect_state)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
     }
     const uint16_t saved_scc_sgpr =
         spill_backed_scalar_window ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
-    const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine);
+    const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(request.moi_engine);
     if (!spill_backed_scalar_window &&
         (!saved_frame_offset ||
          *saved_frame_offset >=
-             moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(options, options, options),
-                                      arch))) {
+             moi_exec_save_sgpr_count(
+                 resolve_moi_exec_save_requirement(request, bound_resources, point), arch))) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
       return std::nullopt;
     }
     const uint16_t saved_frame_base_sgpr =
         spill_backed_scalar_window
             ? indirect_state->pc_sgpr
-            : static_cast<uint16_t>(*options.moi_exec_save_sgpr + *saved_frame_offset);
+            : static_cast<uint16_t>(*point.moi_exec_save_sgpr + *saved_frame_offset);
     const uint32_t additional_frame_bytes =
         spill_backed_scalar_window
             ? static_cast<uint32_t>(moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(options, options, options), arch)) *
+                  resolve_moi_exec_save_requirement(request, bound_resources, point), arch)) *
                   SpillManager::kSlotBytes
             : 0u;
     auto spill = build_dynamic_stack_vgpr_spill_sequence(

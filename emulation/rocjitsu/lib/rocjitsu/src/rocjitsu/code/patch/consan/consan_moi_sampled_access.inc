@@ -338,13 +338,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_sampled_private_epoch_layout(result, *resources, candidate_options,
-                                                              arch, result.warnings);
+          cached->second = build_sampled_private_epoch_layout(
+              result.program_inventory, *resources, candidate_options, arch, result.warnings);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
-                                                            arch, result.warnings);
+        private_layout = build_sampled_private_epoch_layout(
+            result.program_inventory, *resources, candidate_options, arch, result.warnings);
       }
       if (private_layout && private_layout->owner_offset) {
         const auto owner_shift =

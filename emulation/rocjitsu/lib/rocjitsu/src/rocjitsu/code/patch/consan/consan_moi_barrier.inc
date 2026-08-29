@@ -911,7 +911,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::optional<VgprSpillSequence> spill;
         if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
             moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-          spill = build_moi_spill_sequence(result, *resources, candidate_options,
+          spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
+                                           candidate_options, candidate_options,
                                            visible_evidence_spill_managers, arch, result.warnings,
                                            persistent_end);
           if (!spill)
@@ -1066,7 +1067,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       owners = resources->owner_descriptor_file_offsets;
       if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
           moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-        spill = build_moi_spill_sequence(result, *resources, candidate_options,
+        spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
+                                         candidate_options, candidate_options,
                                          visible_evidence_spill_managers, arch, result.warnings);
         if (!spill)
           continue;

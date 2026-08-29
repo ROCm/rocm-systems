@@ -181,7 +181,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (candidate_options.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(
-          result, *resources, arch, result.warnings,
+          result.program_inventory, *resources, arch, result.warnings,
           /*include_owner=*/candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
           /*include_workgroup_key=*/true,
           /*include_record_replay_workgroup=*/false,
