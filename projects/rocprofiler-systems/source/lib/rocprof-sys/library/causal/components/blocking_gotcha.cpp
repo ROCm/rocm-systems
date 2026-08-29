@@ -122,12 +122,12 @@ blocking_gotcha::configure()
 // blocking_gotcha_t::disable() only sets a timemory runtime_enabled flag
 // which the fast_func dispatch path does not check, so we need our own
 // guard to prevent any causal delay logic from running after shutdown.
-static std::atomic<bool> s_shutdown{ false };
+static std::atomic<bool> g_shutdown{ false };
 
 void
 blocking_gotcha::shutdown()
 {
-    s_shutdown.store(true, std::memory_order_release);
+    g_shutdown.store(true, std::memory_order_release);
     blocking_gotcha_t::disable();
 }
 
@@ -142,7 +142,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
     // hook remains installed so this wrapper is still called, but we make
     // it a zero-overhead passthrough to unblock any threads that would
     // otherwise be stuck in block_backtrace_samples() or postblock().
-    if(s_shutdown.load(std::memory_order_relaxed))
+    if(g_shutdown.load(std::memory_order_relaxed))
     {
         return (*_func)(_args...);
     }
@@ -151,7 +151,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         causal::delay::get_global().load(std::memory_order_relaxed);
 
     causal::sampling::block_backtrace_samples();
-    auto _ret = (*_func)(_args...);
+    auto ret = (*_func)(_args...);
     causal::sampling::unblock_backtrace_samples();
 
     if(state::thread::get() < ::rocprofsys::state::thread::Internal)
@@ -163,7 +163,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         else if constexpr(Idx >= maybe_post_block_min_idx &&
                           Idx <= maybe_post_block_max_idx)
         {
-            if(_ret == 0) causal::delay::postblock(_delay_value);
+            if(ret == 0) causal::delay::postblock(_delay_value);
         }
         else
         {
@@ -171,7 +171,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         }
     }
 
-    return _ret;
+    return ret;
 }
 
 int
@@ -179,15 +179,15 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_
                             const sigset_t* set_v, int* sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed))
+    if(g_shutdown.load(std::memory_order_relaxed))
     {
         return (*func)(set_v, sig);
     }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    sigset_t _set = *set_v;
-    causal_gotcha::remove_signals(&_set);
+    sigset_t set = *set_v;
+    causal_gotcha::remove_signals(&set);
     siginfo_t _info;
 
     const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
@@ -196,17 +196,17 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_
     auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
 
     causal::sampling::block_backtrace_samples();
-    auto _ret = (*f_sigwaitinfo)(&_set, &_info);
+    auto ret = (*f_sigwaitinfo)(&set, &_info);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
-    if(_active && _ret != -1 && _info.si_pid == process::get_id())
+    if(_active && ret != -1 && _info.si_pid == process::get_id())
         causal::delay::postblock(_delay_value);
 
-    if(_ret == -1)
+    if(ret == -1)
         return errno;  // If there was an error, return the error code
     else
-        *sig = _ret;  // sig is declared as non-null so skip check
+        *sig = ret;  // sig is declared as non-null so skip check
 
     return 0;
 }
@@ -217,30 +217,30 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
                             const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed))
+    if(g_shutdown.load(std::memory_order_relaxed))
     {
         return (*_func)(_set_v, _info_v);
     }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    sigset_t _set = *_set_v;
-    causal_gotcha::remove_signals(&_set);
+    sigset_t set = *_set_v;
+    causal_gotcha::remove_signals(&set);
     siginfo_t _info;
 
     const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
-    auto _ret = (*_func)(&_set, &_info);
+    auto ret = (*_func)(&set, &_info);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
-    if(_active && _ret > 0 && _info.si_pid == process::get_id())
+    if(_active && ret > 0 && _info.si_pid == process::get_id())
         causal::delay::postblock(_delay_value);
 
-    if(_ret > 0 && _info_v) *_info_v = _info;
+    if(ret > 0 && _info_v) *_info_v = _info;
 
-    return _ret;
+    return ret;
 }
 
 int
@@ -251,30 +251,30 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
                             const struct timespec* _wait_v) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed))
+    if(g_shutdown.load(std::memory_order_relaxed))
     {
         return (*_func)(_set_v, _info_v, _wait_v);
     }
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    sigset_t _set = *_set_v;
-    causal_gotcha::remove_signals(&_set);
+    sigset_t set = *_set_v;
+    causal_gotcha::remove_signals(&set);
     siginfo_t _info;
 
     const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
-    auto _ret = (*_func)(&_set, &_info, _wait_v);
+    auto ret = (*_func)(&set, &_info, _wait_v);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
-    if(_active && _ret > 0 && _info.si_pid == process::get_id())
+    if(_active && ret > 0 && _info.si_pid == process::get_id())
         causal::delay::postblock(_delay_value);
 
-    if(_ret > 0 && _info_v) *_info_v = _info;
+    if(ret > 0 && _info_v) *_info_v = _info;
 
-    return _ret;
+    return ret;
 }
 
 int
@@ -282,7 +282,7 @@ blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigs
                             const sigset_t* _set_v) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed))
+    if(g_shutdown.load(std::memory_order_relaxed))
     {
         return (*func)(_set_v);
     }
@@ -291,10 +291,10 @@ blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigs
     int  _sig     = 0;
     ::sigprocmask(SIG_SETMASK, _set_v, &_old_set);
     // sigwait is wrapped so no need to block/unblock signals
-    auto _ret = ::sigwait(_set_v, &_sig);
+    auto ret = ::sigwait(_set_v, &_sig);
     ::sigprocmask(SIG_SETMASK, &_old_set, nullptr);
 
-    return _ret;
+    return ret;
 }
 }  // namespace component
 }  // namespace causal

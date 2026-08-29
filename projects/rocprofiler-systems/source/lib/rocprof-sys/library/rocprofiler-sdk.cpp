@@ -61,7 +61,6 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <chrono>
 #include <timemory/defines.h>
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
