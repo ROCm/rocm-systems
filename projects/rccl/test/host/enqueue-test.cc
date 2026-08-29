@@ -41,24 +41,7 @@
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
   int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
-// The NVTX3 range macros expand to NOTHING in this binary, so any guard around
-// them shows partial coverage by design.
-#if !defined(NVTX_NO_IMPL) && !defined(NVTX_DISABLE)
-#include "nvtx.h"  // guarded; enqueue.cc's re-include is a no-op
-#undef NCCL_NVTX3_FUNC_RANGE
-#define NCCL_NVTX3_FUNC_RANGE
-#undef NVTX3_RANGE
-#define NVTX3_RANGE(...)
-#undef NVTX3_RANGE_ADD_PAYLOAD
-#define NVTX3_RANGE_ADD_PAYLOAD(...)
-#undef NVTX3_FUNC_WITH_PARAMS
-#define NVTX3_FUNC_WITH_PARAMS(...)
-#else
-#define NCCL_NVTX_H_
-#ifndef NCCL_NVTX3_FUNC_RANGE
-#define NCCL_NVTX3_FUNC_RANGE
-#endif
-#endif
+#include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before enqueue.cc includes it
 
 // ---------------------------------------------------------------------------
 // enqueue.cc:28 includes "common.h", which resolves to src/device/common.h -- a
