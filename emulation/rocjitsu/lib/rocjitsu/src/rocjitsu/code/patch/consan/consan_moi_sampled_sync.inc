@@ -2099,9 +2099,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
   const uint64_t reserved_barrier_island_count =
-      sampled_reserved_barrier_island_count(result, options);
+      sampled_reserved_barrier_island_count(result.observation_plan, options, options);
   const uint64_t reserved_atomic_island_count =
-      sampled_reserved_atomic_island_count(result, options);
+      sampled_reserved_atomic_island_count(result.observation_plan, options, options, options);
   const uint64_t reserved_atomic_island_begin =
       original_text_size +
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);

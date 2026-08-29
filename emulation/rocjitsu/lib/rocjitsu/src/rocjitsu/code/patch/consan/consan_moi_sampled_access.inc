@@ -1,23 +1,25 @@
-[[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
-                                                             const MoiOptions &options) {
-  if (!options.moi_track_barriers)
+[[nodiscard]] uint64_t
+sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_plan,
+                                      const ConSanRequest &request, const TransformPolicy &policy) {
+  if (!request.moi_track_barriers)
     return 0u;
   const uint64_t count =
-      std::ranges::count(result.observation_plan.probe_intents,
-                         ConSanProbeIntentKind::SampledBarrierEpoch, &ConSanProbeIntent::kind);
-  return std::min<uint64_t>(count, options.max_patches);
+      std::ranges::count(observation_plan.probe_intents, ConSanProbeIntentKind::SampledBarrierEpoch,
+                         &ConSanProbeIntent::kind);
+  return std::min<uint64_t>(count, policy.max_patches);
 }
 
-[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanTransformArtifacts &result,
-                                                            const MoiOptions &options) {
-  if (!options.moi_track_atomics)
+[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(
+    const ConSanObservationPlan &observation_plan, const ConSanRequest &request,
+    const BoundRuntimeResources &resources, const TransformPolicy &policy) {
+  if (!request.moi_track_atomics)
     return 0u;
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
-  const uint32_t patch_budget = options.max_patches_is_expert_limit
-                                    ? options.max_patches
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(request, resources);
+  const uint32_t patch_budget = policy.max_patches_is_expert_limit
+                                    ? policy.max_patches
                                     : std::numeric_limits<uint32_t>::max();
   const size_t planned =
-      std::ranges::count(result.observation_plan.probe_intents,
+      std::ranges::count(observation_plan.probe_intents,
                          ConSanProbeIntentKind::SampledAtomicOrdering, &ConSanProbeIntent::kind);
   return static_cast<uint32_t>(
       std::min({static_cast<size_t>(patch_budget),
@@ -44,7 +46,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   };
 
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
-  const uint32_t reserved_atomic_slots = sampled_reserved_atomic_island_count(result, options);
+  const uint32_t reserved_atomic_slots =
+      sampled_reserved_atomic_island_count(result.observation_plan, options, options, options);
   const uint32_t max_access_record_slots =
       layout.sampled_watchpoint_capacity - reserved_atomic_slots;
   if (max_access_record_slots == 0) {
@@ -182,7 +185,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       (candidates.size() > 8u || has_function_candidate || has_spill_backed_scalar_assignment ||
        has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended ? sampled_reserved_barrier_island_count(result, options) : 0u;
+      use_indirect_appended
+          ? sampled_reserved_barrier_island_count(result.observation_plan, options, options)
+          : 0u;
   const uint64_t reserved_atomic_island_count = use_indirect_appended ? reserved_atomic_slots : 0u;
   const uint64_t reserved_sync_island_bytes =
       reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
