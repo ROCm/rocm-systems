@@ -30,6 +30,7 @@
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_perturbation.h"
 #include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"

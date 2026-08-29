@@ -379,6 +379,32 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return std::nullopt;
 }
 
+bool is_relocatable_consan_barrier_destination(const Instruction &instruction, uint64_t offset,
+                                               std::span<const uint8_t> text, rj_code_arch_t arch,
+                                               std::string *error_out) {
+  const int size = instruction.size();
+  if (size == 4 || size == 8)
+    return is_relocatable_anchor(instruction, offset, text, arch, error_out);
+  if (offset % sizeof(uint32_t) != 0 || size <= 0 || size % sizeof(uint32_t) != 0) {
+    *error_out = "wide destination must have a positive dword-aligned size and offset";
+    return false;
+  }
+  const uint64_t size_u = static_cast<uint64_t>(size);
+  if (offset > text.size() || size_u > text.size() - offset ||
+      instruction.raw_encoding() == nullptr) {
+    *error_out = "wide destination encoding is unavailable or exceeds .text";
+    return false;
+  }
+  constexpr uint64_t kControlFlowFlags =
+      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+  if ((instruction.flags() & kControlFlowFlags) || instruction.branch_offset_bytes() ||
+      is_s_clause(instruction)) {
+    *error_out = "wide destination has control-flow or clause semantics";
+    return false;
+  }
+  return true;
+}
+
 [[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access) {
   if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
     return std::nullopt;

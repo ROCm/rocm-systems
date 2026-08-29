@@ -48,6 +48,7 @@ target_sources(
         consan_moi_sync_emission.cpp
         consan_moi_target_address.cpp
         consan_observation_policy.cpp
+        consan_perturbation.cpp
         consan_perturbation_policy.cpp
         consan_pipeline.cpp
         consan_placement.cpp

@@ -78,6 +78,11 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &code_object, rj
 [[nodiscard]] std::optional<uint64_t>
 find_first_relocatable_anchor(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                               std::string *error_out);
+[[nodiscard]] bool is_relocatable_consan_barrier_destination(const Instruction &instruction,
+                                                             uint64_t offset,
+                                                             std::span<const uint8_t> text,
+                                                             rj_code_arch_t arch,
+                                                             std::string *error_out);
 
 [[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access);
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
