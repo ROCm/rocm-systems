@@ -166,6 +166,75 @@ public:
   void dma_unmap(const simdojo::DmaRegion &region) override;
   void reset(simdojo::ResetKind kind) override;
 
+  /// @brief Which address space an interrupt ring's addresses are in.
+  ///
+  /// @details The driver puts this in the same register as the ring's size and
+  /// its enable bit, and it decides what the addresses beside it *mean*. It
+  /// follows how firmware is loaded: a driver loading firmware through the
+  /// security processor allocates the ring through the translation tables and
+  /// programs virtual addresses, and every other way of loading gets a bus
+  /// address. So identical register values denote different memory depending on
+  /// a module parameter, and an address used in the wrong space does not fail --
+  /// it points somewhere real and wrong.
+  enum class InterruptRingSpace : uint8_t {
+    /// @brief Not one of the two values the driver writes; in practice, a ring
+    /// it has not programmed yet.
+    Unset = 0,
+    BusAddress = 2, ///< Guest physical, reachable through a shared window.
+    GpuVirtual = 4  ///< Behind translation tables this device does not walk.
+  };
+
+  /// @brief The interrupt ring as the driver has programmed it so far.
+  ///
+  /// @details The ring is the device's side of the interrupt path: the device
+  /// writes an entry into it, publishes a write pointer, and raises a message.
+  /// All of that needs to know where the driver put the ring, which the driver
+  /// says only by writing these registers -- so this is read back out of them
+  /// rather than tracked as they are written, because the driver writes them in
+  /// its own order and rewrites them on reset.
+  struct InterruptRing {
+    /// @brief Address of the ring in @ref space, or zero if it is not set.
+    uint64_t base = 0;
+    uint64_t bytes = 0;        ///< Its size, decoded from the size field.
+    uint64_t wptr_address = 0; ///< Where the device publishes the write pointer.
+    /// @brief What @ref base and @ref wptr_address are addresses in.
+    InterruptRingSpace space = InterruptRingSpace::Unset;
+    bool enabled = false;         ///< Whether the driver has switched the ring on.
+    bool raises_messages = false; ///< Whether it wants an interrupt per entry.
+
+    /// @brief Whether the driver has said anything at all about the ring.
+    ///
+    /// @details Every field, rather than the address and the enable bit alone:
+    /// a driver that sized a ring and named a write-pointer address but had not
+    /// switched it on yet has said a great deal, and reporting that as nothing
+    /// programmed would hide exactly the partial state worth seeing. These read
+    /// back as their defaults only while the registers are untouched.
+    /// @retval false Every field still holds what a reset left.
+    [[nodiscard]] bool programmed() const {
+      return base != 0 || bytes != 0 || wptr_address != 0 || space != InterruptRingSpace::Unset ||
+             enabled || raises_messages;
+    }
+  };
+
+  /// @brief Read the interrupt ring out of the registers the driver wrote.
+  ///
+  /// @details Reads register state without a lock of its own, so it must be
+  /// called either from the thread servicing register access or after that
+  /// thread has been joined.
+  ///
+  /// @returns What the driver has said about the ring so far.
+  [[nodiscard]] InterruptRing interrupt_ring() const;
+
+  /// @brief Render a ring for a diagnostic.
+  ///
+  /// @details A sentence fragment beginning "its interrupt ring at ...", meant
+  /// to follow a subject and verb naming who did what -- "the driver enabled",
+  /// "the driver left". Logged on its own it reads as though it lost a word.
+  ///
+  /// @param[in] ring The ring to describe.
+  /// @returns Where it is, how big, and in which address space.
+  [[nodiscard]] static std::string describe(const InterruptRing &ring);
+
   /// @brief Whether the device is usable.
   /// @retval false The configuration was rejected or its memory could not be
   ///               backed; the reason has been logged and it must not be served.
@@ -213,6 +282,13 @@ private:
   /// @details Returns instance 0. The version matters as much as the segment:
   /// register offsets within a block move between versions of it.
   [[nodiscard]] const IpBlock *published_block(IpHardwareId id) const;
+
+  /// @brief Whether a published segment can be turned into a byte address.
+  /// @details One place rather than each caller: every caller computes
+  /// `(segment + register) * 4`, which a large enough segment wraps into a
+  /// small address that would pass a bounds test and land on an unrelated
+  /// register.
+  [[nodiscard]] bool segment_within_aperture(uint64_t segment) const;
 
   /// @brief Whether every named hub's flush handshakes can be answered.
   bool flushes_answerable_ = false;
@@ -269,6 +345,14 @@ private:
 
   /// @brief Which of the modelled registers ignore writes.
   std::vector<bool> read_only_;
+
+  /// @brief Byte offset of the interrupt ring's control register, or nothing
+  /// when the published table names no block that has one. Not zero for that:
+  /// byte zero is the indirect window's own index register.
+  std::optional<uint64_t> ih_control_offset_;
+
+  /// @brief Whether the ring being switched on has already been reported.
+  bool announced_interrupt_ring_ = false;
   int vram_fd_ = -1;
   std::byte *vram_ = nullptr;
 

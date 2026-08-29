@@ -146,6 +146,65 @@ constexpr HubInvalidationLayout kHubInvalidationLayouts[] = {
     {IpHardwareId::MmHub, 4, 1, 0x0575, 0x0587, 0x0599},
 };
 
+/// @brief The interrupt ring's registers within OSSSYS, in dwords.
+///
+/// @details `regIH_RB_{CNTL,RPTR,WPTR,BASE,BASE_HI,WPTR_ADDR_HI,WPTR_ADDR_LO}`
+/// and `regIH_DOORBELL_RPTR` of `osssys_7_1_0_offset.h`, all `_BASE_IDX 0`.
+/// The last matters more than it looks: the ring is created with doorbells
+/// unconditionally on, so the driver acknowledges entries by writing a doorbell
+/// rather than the read-pointer register. The driver programs them in
+/// `ih_v7_0_enable_ring` and reads the pointers back on every interrupt, so
+/// they are ordinary storage rather than answers fixed at reset.
+constexpr uint32_t kIhRingControl = 0x0080;
+constexpr uint32_t kIhRingReadPointer = 0x0081;
+constexpr uint32_t kIhRingWritePointer = 0x0082;
+constexpr uint32_t kIhRingBase = 0x0083;
+constexpr uint32_t kIhRingBaseHigh = 0x0084;
+constexpr uint32_t kIhRingWritePointerAddressHigh = 0x0085;
+constexpr uint32_t kIhRingWritePointerAddressLow = 0x0086;
+constexpr uint32_t kIhRingDoorbell = 0x0087;
+
+/// @brief Bits the driver shifts the ring's address down by before writing it.
+///
+/// @details The base register holds bits 39:8, so the low eight are implied
+/// zero and the ring is at least 256-byte aligned. The address itself does not
+/// stop at 39: the high register below continues it from bit 40, and the two
+/// together carry 48 bits.
+constexpr unsigned kIhRingBaseShift = 8;
+
+/// @brief Address bit at which the high half of the base register continues.
+constexpr unsigned kIhRingBaseHighShift = 40;
+
+/// @brief Bits of the write-pointer address carried by its high register.
+constexpr uint64_t kIhWritePointerAddressHighMask = 0xffff;
+
+/// @brief Bit selecting the ring within the control register.
+constexpr uint32_t kIhRingEnableMask = 1U << 0;
+
+/// @brief Bit asking for an interrupt per entry.
+constexpr uint32_t kIhRingInterruptEnableMask = 1U << 17;
+
+/// @brief Where the size field sits within the control register.
+///
+/// @details The driver stores the base-two logarithm of the ring's size in
+/// dwords, so a size of `4 << field` bytes.
+constexpr unsigned kIhRingSizeShift = 1;
+
+/// @brief Its width, once shifted down: the field mask is `0x3e`.
+constexpr uint32_t kIhRingSizeMask = 0x1f;
+
+/// @brief Where the address-space field sits within the control register.
+constexpr unsigned kIhRingSpaceShift = 28;
+
+/// @brief Its width, once shifted down: the field mask is `0x70000000`.
+constexpr uint32_t kIhRingSpaceMask = 0x7;
+
+/// @brief Bits of the ring's base carried by its high register.
+///
+/// @details Narrower than the register's own field, which is seventeen bits,
+/// because the driver only ever writes eight of them.
+constexpr uint64_t kIhRingBaseHighMask = 0xff;
+
 /// @brief Acknowledge value reporting every VMID's flush already complete.
 ///
 /// @details The driver polls for `1 << vmid` and this device has no translation
@@ -459,6 +518,33 @@ void GpuPciDevice::reset_registers() {
       flushes_answerable_ = false;
     }
   }
+
+  // The interrupt ring's registers answer as plain storage: the driver writes
+  // where it put the ring and reads its own pointers back, so anything the
+  // device invented here would be a fact the driver did not state.
+  ih_control_offset_.reset();
+  if (const IpBlock *osssys = published_block(IpHardwareId::OssSys);
+      osssys != nullptr && segment_within_aperture(osssys->register_bases.front())) {
+    const uint64_t segment = osssys->register_bases.front();
+    for (const uint32_t reg :
+         {kIhRingControl, kIhRingReadPointer, kIhRingWritePointer, kIhRingBase, kIhRingBaseHigh,
+          kIhRingWritePointerAddressHigh, kIhRingWritePointerAddressLow, kIhRingDoorbell}) {
+      const uint64_t at = (segment + reg) * 4;
+      if (at + 4 <= spec_.register_aperture_bytes) {
+        define_register(at, 0);
+      }
+    }
+    // Recorded only when the dword it names was actually modelled. Recording it
+    // for a control register that fell outside the aperture would have every
+    // later read of it answer out of an index this device never defined.
+    const uint64_t control_at = (segment + kIhRingControl) * 4;
+    if (control_at + 4 <= spec_.register_aperture_bytes) {
+      ih_control_offset_ = control_at;
+    }
+    // Cleared with the registers it describes: a reset discards what the driver
+    // said, so the next programming has to be reported as freshly as the first.
+    announced_interrupt_ring_ = false;
+  }
 }
 
 const IpBlock *GpuPciDevice::published_block(IpHardwareId id) const {
@@ -468,6 +554,98 @@ const IpBlock *GpuPciDevice::published_block(IpHardwareId id) const {
     }
   }
   return nullptr;
+}
+
+bool GpuPciDevice::segment_within_aperture(uint64_t segment) const {
+  // Checked at the one place a segment becomes an address rather than by each
+  // caller: every one turns it into `(segment + register) * 4`, and a large
+  // enough segment wraps that multiply into a small address that passes an
+  // aperture bounds test and lands on an unrelated register.
+  //
+  // A segment equal to the aperture's dword count already names the dword one
+  // past the end, so this is not a `>`.
+  if (segment >= spec_.register_aperture_bytes / 4) {
+    util::Logger::warn(
+        std::format("{}: the block at segment {:#x} is not within a {}-byte register aperture, "
+                    "so its registers cannot be answered",
+                    name(), segment, spec_.register_aperture_bytes));
+    return false;
+  }
+  return true;
+}
+
+std::string GpuPciDevice::describe(const InterruptRing &ring) {
+  // Initialised to the fallback and switched without a default: a fourth space
+  // added later is a compiler warning here, while a value cast in from outside
+  // the enumerators still renders as something rather than as a null pointer.
+  const char *space = "an unstated address space";
+  switch (ring.space) {
+  case InterruptRingSpace::BusAddress:
+    space = "a bus address";
+    break;
+  case InterruptRingSpace::GpuVirtual:
+    space = "a translated address";
+    break;
+  case InterruptRingSpace::Unset:
+    space = "an unstated address space";
+    break;
+  }
+  // Whether it was switched on is part of the state, not a detail: a sized and
+  // addressed ring that the driver never enabled is a different situation from
+  // a running one, and reading the two the same way sends whoever is
+  // diagnosing a silent guest looking in the wrong place.
+  return std::format("its interrupt ring at {:#x}, {} bytes, {}, publishing its write pointer to "
+                     "{:#x}; it {} an interrupt per entry, and it is {}",
+                     ring.base, ring.bytes, space, ring.wptr_address,
+                     ring.raises_messages ? "asks for" : "does not ask for",
+                     ring.enabled ? "enabled" : "not yet enabled");
+}
+
+GpuPciDevice::InterruptRing GpuPciDevice::interrupt_ring() const {
+  InterruptRing ring;
+  const IpBlock *osssys = published_block(IpHardwareId::OssSys);
+  if (osssys == nullptr || !segment_within_aperture(osssys->register_bases.front())) {
+    return ring;
+  }
+  const auto value = [this, base = osssys->register_bases.front()](uint32_t reg) -> uint32_t {
+    const uint64_t at = (base + reg) * 4;
+    if (at + 4 > spec_.register_aperture_bytes) {
+      return 0;
+    }
+    return registers_[static_cast<uint32_t>(at / 4)];
+  };
+
+  ring.base =
+      (static_cast<uint64_t>(value(kIhRingBase)) << kIhRingBaseShift) |
+      (static_cast<uint64_t>(value(kIhRingBaseHigh) & kIhRingBaseHighMask) << kIhRingBaseHighShift);
+  ring.wptr_address = static_cast<uint64_t>(value(kIhRingWritePointerAddressLow)) |
+                      ((static_cast<uint64_t>(value(kIhRingWritePointerAddressHigh)) &
+                        kIhWritePointerAddressHighMask)
+                       << 32);
+
+  const uint32_t control = value(kIhRingControl);
+  ring.enabled = (control & kIhRingEnableMask) != 0;
+  ring.raises_messages = (control & kIhRingInterruptEnableMask) != 0;
+  // The field beside them saying what the addresses above are addresses in.
+  // Anything the driver has not written yet reads as zero, which is neither of
+  // the two values it uses and is reported as such rather than guessed at.
+  switch ((control >> kIhRingSpaceShift) & kIhRingSpaceMask) {
+  case static_cast<uint32_t>(InterruptRingSpace::BusAddress):
+    ring.space = InterruptRingSpace::BusAddress;
+    break;
+  case static_cast<uint32_t>(InterruptRingSpace::GpuVirtual):
+    ring.space = InterruptRingSpace::GpuVirtual;
+    break;
+  default:
+    ring.space = InterruptRingSpace::Unset;
+    break;
+  }
+  // The field is the logarithm of the size in dwords, so the size is four bytes
+  // shifted up by it. A ring the driver has not sized yet reads as zero rather
+  // than as the four bytes that shift would otherwise imply.
+  const uint32_t size_log = (control >> kIhRingSizeShift) & kIhRingSizeMask;
+  ring.bytes = size_log == 0 ? 0 : uint64_t{4} << size_log;
+  return ring;
 }
 
 bool GpuPciDevice::define_invalidation_engines(uint64_t segment,
@@ -481,16 +659,6 @@ bool GpuPciDevice::define_invalidation_engines(uint64_t segment,
         std::format("{}: {} invalidation engines do not fit between the semaphore, request and "
                     "acknowledge blocks of the hub at register segment {:#x} (byte {:#x})",
                     name(), kInvalidationEngines, segment, segment * 4));
-    return false;
-  }
-  // The segment comes from a published table, so it is checked rather than
-  // trusted: a large enough one would wrap the byte address and land the
-  // register somewhere unrelated inside the aperture.
-  if (segment > spec_.register_aperture_bytes / 4) {
-    util::Logger::warn(
-        std::format("{}: the hub at register segment {:#x} (byte {:#x}) is not within a {}-byte "
-                    "register aperture",
-                    name(), segment, segment * 4, spec_.register_aperture_bytes));
     return false;
   }
 
@@ -601,6 +769,28 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
       uint32_t value = 0;
       std::memcpy(&value, buf.data(), sizeof(value));
       registers_[index] = value;
+      // Switching the interrupt ring on is the moment the device learns where
+      // to deliver, and it is worth saying once rather than being read back
+      // later: a reset clears these registers, so anything asked afterwards
+      // finds a device that was never told.
+      if (ih_control_offset_ && offset == *ih_control_offset_ && (value & kIhRingEnableMask) != 0 &&
+          !announced_interrupt_ring_) {
+        announced_interrupt_ring_ = true;
+        const InterruptRing ring = interrupt_ring();
+        util::Logger::warn(std::format("{}: the driver enabled {}", name(), describe(ring)));
+        // An address the device cannot translate is worth saying plainly now
+        // rather than leaving for whoever wonders why no interrupt arrived.
+        if (ring.space == InterruptRingSpace::GpuVirtual) {
+          util::Logger::warn(
+              std::format("{}: that ring is behind translation tables this device does not walk, "
+                          "so it cannot be reached; the driver places it there whenever firmware "
+                          "is loaded through the security processor",
+                          name()));
+        } else if (ring.space != InterruptRingSpace::BusAddress) {
+          util::Logger::warn(std::format(
+              "{}: that ring names no address space, so where it is cannot be acted on", name()));
+        }
+      }
     }
     return 4;
   }
