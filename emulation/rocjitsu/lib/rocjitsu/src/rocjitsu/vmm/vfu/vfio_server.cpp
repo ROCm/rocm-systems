@@ -118,6 +118,19 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
   }
   pthread_sigmask(SIG_SETMASK, &previous_signals, nullptr);
 
+  // What the driver said about its interrupt ring. Reported next to the
+  // unmodelled registers because it answers the same question -- how far the
+  // driver got before it stopped telling us anything -- and because the ring is
+  // the one thing the device now knows that it cannot yet act on.
+  const GpuPciDevice::InterruptRing ring = device.interrupt_ring();
+  // Only when there is something to say. A reset or a disconnect clears these
+  // registers, so a guest that detached cleanly has already taken the ring with
+  // it, and warning about its absence would make an ordinary shutdown look like
+  // a fault. What the driver said while attached is reported when it says it.
+  if (ring.programmed()) {
+    util::Logger::warn(std::format("vfu: the driver left {}", GpuPciDevice::describe(ring)));
+  }
+
   const std::string report = trace.unmodeled_report();
   if (!report.empty()) {
     util::Logger::warn(report);

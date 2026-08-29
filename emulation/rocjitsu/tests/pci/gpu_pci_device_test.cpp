@@ -14,6 +14,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -133,6 +134,124 @@ TEST_F(GpuDevice, KeepsGrantingTheInvalidationSemaphoreAfterItIsReleased) {
 
   EXPECT_EQ(read_register_at(kMmHubSemaphore17) & 0x1u, 0x1u)
       << "releasing the semaphore latched it low, so the next flush would stall";
+}
+
+// The driver says where it put the interrupt ring only by writing these
+// registers, and it says it in pieces: the address arrives shifted down by
+// eight across two registers, the size as the logarithm of a dword count, and
+// the write-pointer address split across two more. Reading that back wrongly
+// would point the device at the wrong guest memory, which is indistinguishable
+// from the driver never being interrupted.
+//   OSSSYS segment 0x10a0, all _BASE_IDX 0, so byte offset (0x10a0 + reg) * 4:
+//     IH_RB_CNTL 0x0080 -> 0x4480      IH_RB_BASE 0x0083 -> 0x448c
+//     IH_RB_BASE_HI 0x0084 -> 0x4490   WPTR_ADDR_HI 0x0085 -> 0x4494
+//     WPTR_ADDR_LO 0x0086 -> 0x4498
+TEST_F(GpuDevice, ReadsBackTheInterruptRingTheDriverProgrammed) {
+  ASSERT_TRUE(device_.usable());
+  EXPECT_EQ(device_.interrupt_ring().base, 0u) << "nothing has been programmed yet";
+  EXPECT_FALSE(device_.interrupt_ring().enabled);
+
+  // A ring at 0x1234_5678_9A00 of 256 KiB, its write pointer at 0xABCD_1000,
+  // switched on and asking for an interrupt per entry. 256 KiB is 65536 dwords,
+  // so the size field is 16.
+  constexpr uint64_t kRingBase = 0x123456789a00;
+  // Above four gigabytes on purpose: a guest with that much memory routinely
+  // puts the write pointer there, and a 32-bit value would leave the high half
+  // of the decode unproven -- deleting it entirely would still pass.
+  constexpr uint64_t kWptrAddress = 0x5abcd1000;
+  write_register_at(0x448c, static_cast<uint32_t>(kRingBase >> 8));
+  write_register_at(0x4490, static_cast<uint32_t>(kRingBase >> 40) & 0xff);
+  write_register_at(0x4498, static_cast<uint32_t>(kWptrAddress));
+  write_register_at(0x4494, static_cast<uint32_t>(kWptrAddress >> 32) & 0xffff);
+  // Size 16, enabled, interrupt per entry, and the address-space field saying
+  // these are bus addresses (2 at bit 28).
+  write_register_at(0x4480, (16u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+
+  const rocjitsu::GpuPciDevice::InterruptRing ring = device_.interrupt_ring();
+  EXPECT_EQ(ring.base, kRingBase);
+  EXPECT_EQ(ring.wptr_address, kWptrAddress);
+  EXPECT_EQ(ring.bytes, 256u * 1024) << "the size field is a logarithm of a dword count";
+  EXPECT_TRUE(ring.enabled);
+  EXPECT_TRUE(ring.raises_messages);
+  EXPECT_EQ(ring.space, rocjitsu::GpuPciDevice::InterruptRingSpace::BusAddress);
+
+  // The same registers with the space the driver uses when it loads firmware
+  // through the security processor: the addresses are then translated, and
+  // acting on them as if they were bus addresses would write somewhere real
+  // and wrong.
+  write_register_at(0x4480, (16u << 1) | (1u << 0) | (1u << 17) | (4u << 28));
+  EXPECT_EQ(device_.interrupt_ring().space, rocjitsu::GpuPciDevice::InterruptRingSpace::GpuVirtual);
+}
+
+// programmed() is what decides whether the shutdown diagnostic says anything,
+// so the states it must recognise are the partial ones: a driver that sized a
+// ring, or named a write-pointer address, and then stopped has said a great
+// deal, and reporting that as nothing programmed hides exactly the state worth
+// seeing. The test above jumps from reset defaults straight to a fully enabled
+// ring and would not notice any of these being dropped.
+TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
+  ASSERT_TRUE(device_.usable());
+  ASSERT_FALSE(device_.interrupt_ring().programmed()) << "a reset ring has said nothing";
+
+  // Each of these on its own, from reset, with the base and the enable bit
+  // still clear -- the two fields a narrower predicate would have keyed on.
+  struct Case {
+    const char *what;
+    uint64_t reg;
+    uint32_t value;
+  };
+  for (const Case &partial :
+       {Case{"a size alone", 0x4480, 16u << 1}, Case{"an address space alone", 0x4480, 2u << 28},
+        Case{"a request for messages alone", 0x4480, 1u << 17},
+        Case{"a write-pointer address alone", 0x4498, 0xabcd1000u}}) {
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    ASSERT_FALSE(device_.interrupt_ring().programmed()) << "reset did not clear the ring";
+
+    write_register_at(partial.reg, partial.value);
+    const rocjitsu::GpuPciDevice::InterruptRing ring = device_.interrupt_ring();
+    EXPECT_TRUE(ring.programmed()) << partial.what << " was reported as nothing programmed";
+    EXPECT_EQ(ring.base, 0u) << partial.what;
+    EXPECT_FALSE(ring.enabled) << partial.what;
+  }
+
+  // And back to nothing, so the diagnostic does not keep reporting a ring the
+  // guest has already taken away.
+  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_FALSE(device_.interrupt_ring().programmed());
+}
+
+// A segment that wraps when turned into a byte address would otherwise pass an
+// aperture bounds test and land on an unrelated register -- the ring's control
+// dword resolving on top of something the driver depends on.
+TEST(GpuDeviceFlushes, RefusesASegmentThatWrapsIntoTheAperture) {
+  rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
+  device.local_mem_size = 8ULL * 1024 * 1024 * 1024;
+
+  rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
+  for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+    if (block.hardware_id == rocjitsu::IpHardwareId::OssSys) {
+      block.register_bases.front() = std::numeric_limits<uint64_t>::max() - 0x7f;
+    }
+  }
+
+  rocjitsu::RegisterSymbols symbols;
+  rocjitsu::BarAccessTrace trace(symbols);
+  rocjitsu::GpuPciDevice wrapped("wrapped", spec, &trace);
+  ASSERT_TRUE(wrapped.usable()) << "the hubs are untouched, so the device still comes up";
+
+  // This segment puts the ring's control dword at byte zero: the control
+  // register sits 0x80 dwords into the block, and 0x80 past this base is
+  // exactly 2^64. Unchecked, the multiply lands it inside the aperture and the
+  // device both defines it there and reads the ring back out of it.
+  std::array<std::byte, 4> raw{};
+  const auto enabled = std::bit_cast<std::array<std::byte, 4>>(uint32_t{1});
+  ASSERT_EQ(wrapped.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, raw, 0, /*write=*/false), 4);
+  raw = enabled;
+  (void)wrapped.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, raw, 0, /*write=*/true);
+
+  EXPECT_FALSE(wrapped.interrupt_ring().programmed())
+      << "a wrapped segment resolved the ring's control register onto byte zero";
 }
 
 // The HDP flush is a write to a hole the bus reserves rather than to any block's
