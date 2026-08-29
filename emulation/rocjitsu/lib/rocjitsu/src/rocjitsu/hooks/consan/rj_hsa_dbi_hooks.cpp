@@ -4467,9 +4467,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
-      const rocjitsu::ConSanResourcePlanSummary resource_summary =
-          rocjitsu::summarize_consan_resource_plans(transform_debug.resource_plans,
-                                                    transform_debug.patches);
+      const rocjitsu::ConSanResourcePlanSummary &resource_summary =
+          transform_debug.resource_summary;
       log_message(kLogInfo,
                   "ConSan MOI resources reader=%llu explicit=%zu dead=%zu "
                   "descriptor_growth=%zu spill=%zu unsupported=%zu "
@@ -4815,7 +4814,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                              [](rocjitsu::ConSanFencePolicyReason reason) {
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
-    for (const rocjitsu::ConSanPatchInfo &patch : transform_debug.patches) {
+    for (const rocjitsu::ConSanPatchDebugRecord &patch : transform_debug.patches) {
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
       const std::string private_epoch_offset =

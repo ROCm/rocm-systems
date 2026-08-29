@@ -5,6 +5,7 @@
 #include "rocjitsu/code/patch/consan/consan_transform_debug.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_resource.h"
 
 #include <algorithm>
 #include <map>
@@ -279,14 +280,41 @@ const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value
 }
 
 ConSanTransformDebugReport consan_transform_debug_report(const TransformResult &result) {
-  return {
+  ConSanTransformDebugReport report{
       .fault_sites = result.private_lowering_.fault_sites,
       .barrier_move_destinations = result.private_lowering_.barrier_move_destinations,
       .fault_plans = result.private_lowering_.fault_plans,
       .resource_plans = result.private_lowering_.resource_plans,
       .committed_lowerings = result.private_lowering_.committed_lowerings,
-      .patches = result.private_lowering_.patches,
+      .resource_summary = summarize_consan_resource_plans(result.private_lowering_.resource_plans,
+                                                          result.private_lowering_.patches),
+      .patches = {},
   };
+  report.patches.reserve(result.private_lowering_.patches.size());
+  for (const ConSanPatchInfo &patch : result.private_lowering_.patches) {
+    report.patches.push_back({
+        .kind = patch.kind,
+        .anchor_offset = patch.anchor_offset,
+        .trampoline_offset = patch.trampoline_offset,
+        .original_size = patch.original_size,
+        .trampoline_size = patch.trampoline_size,
+        .scratch_vgpr = patch.scratch_vgpr,
+        .scalar_vcc_spill_sgpr = patch.scalar_vcc_spill_sgpr,
+        .scalar_vcc_spill_vgpr = patch.scalar_vcc_spill_vgpr,
+        .scalar_vcc_spill_vgpr_count = patch.scalar_vcc_spill_vgpr_count,
+        .persistent_epoch_private_offset = patch.persistent_epoch_private_offset,
+        .spilled_vgpr_count = patch.spilled_vgpr_count,
+        .required_private_segment_size = patch.required_private_segment_size,
+        .dynamic_private_segment_addend = patch.dynamic_private_segment_addend,
+        .workgroup_shadow_base = patch.workgroup_shadow_base,
+        .workgroup_shadow_size = patch.workgroup_shadow_size,
+        .required_group_segment_size = patch.required_group_segment_size,
+        .sampled_first_slot = patch.sampled_first_slot,
+        .sampled_window_bank_count = patch.sampled_window_bank_count,
+        .sampled_access_kind = patch.sampled_access_kind,
+    });
+  }
+  return report;
 }
 
 void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts lowering) {

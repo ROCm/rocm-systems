@@ -25,6 +25,16 @@ concept HasPublicTransformDebugReport = requires(const T &result) { result.debug
 
 static_assert(!HasPublicTransformDebugReport<TransformResult>);
 
+template <typename T>
+concept HasPatchValidationProof = requires(const T &patch) {
+  patch.branch_relay_offsets;
+  patch.owner_descriptor_file_offsets;
+  patch.fault_sequence_identity;
+};
+
+static_assert(HasPatchValidationProof<ConSanPatchInfo>);
+static_assert(!HasPatchValidationProof<ConSanPatchDebugRecord>);
+
 [[nodiscard]] RuntimeCapabilities complete_runtime_capabilities() {
   return {
       .backend = ConSanRuntimeBackend::PhysicalHsa,
@@ -378,6 +388,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
             (ConSanMutationTally{.requested = 1u, .planned = 1u, .applied = 1u}));
   EXPECT_EQ(published.warnings, std::vector<std::string>{"published-warning"});
   ASSERT_EQ(published_debug.patches.size(), 3u);
+  EXPECT_EQ(published_debug.patches.front().kind, ConSanPatchKind::InlineNopRewrite);
+  EXPECT_EQ(published_debug.patches[1].required_private_segment_size, 64u);
+  EXPECT_EQ(published_debug.patches[1].dynamic_private_segment_addend, 16u);
+  EXPECT_EQ(published_debug.patches[2].anchor_offset, 12u);
+  EXPECT_EQ(published_debug.resource_summary.emitted_spill_patches, 0u);
   ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
   EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
                                                             .kernel_name = "kernel_a",
