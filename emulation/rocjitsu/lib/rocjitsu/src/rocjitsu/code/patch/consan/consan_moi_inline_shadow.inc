@@ -473,7 +473,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
 
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+        moi_scalar_spill_requires_dynamic_vgpr_frame(
+            result.program_inventory, *resources,
+            static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
       if (candidate_options.moi_inline_dynamic_stack_borrowed_sgpr) {
         constexpr uint16_t reservoir_count =
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
@@ -513,7 +515,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     std::optional<SgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_inline_sgpr_spill) {
       scalar_spill = build_moi_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          result.program_inventory, *resources,
+          static_cast<const ConSanRequest &>(candidate_options),
+          static_cast<const BoundRuntimeResources &>(candidate_options),
+          static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+          result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
       if (!scalar_spill)

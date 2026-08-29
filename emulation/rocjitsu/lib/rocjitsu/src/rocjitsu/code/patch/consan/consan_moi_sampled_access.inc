@@ -364,9 +364,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           private_layout->record_replay_workgroup_offsets;
     }
     candidate_options.scratch_vgpr = resources->base;
-    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
-                                          arch, private_layout,
-                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+        private_layout, candidate_options.automatic_moi_record_replay_sgpr_spill, result.warnings);
     if (!probe)
       continue;
     auto &spill = probe->spill;

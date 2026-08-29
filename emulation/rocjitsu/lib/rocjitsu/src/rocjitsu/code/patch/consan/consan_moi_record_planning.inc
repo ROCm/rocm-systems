@@ -178,8 +178,11 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
       return std::nullopt;
   }
   auto probe = plan_moi_probe_resources(
-      result, resources, event_options, spill_managers, arch, std::move(private_layout),
-      event_options.automatic_moi_record_replay_sgpr_spill, active_private_segment_size);
+      result.program_inventory, resources, static_cast<const ConSanRequest &>(event_options),
+      static_cast<const BoundRuntimeResources &>(event_options),
+      static_cast<const ConSanMoiOperatingPoint &>(event_options), spill_managers, arch,
+      std::move(private_layout), event_options.automatic_moi_record_replay_sgpr_spill,
+      result.warnings, active_private_segment_size);
   if (!probe)
     return std::nullopt;
 

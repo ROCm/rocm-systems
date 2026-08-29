@@ -216,9 +216,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         continue;
       }
     }
-    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
-                                          arch, std::move(private_layout),
-                                          candidate_options.automatic_moi_inline_sgpr_spill);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+        std::move(private_layout), candidate_options.automatic_moi_inline_sgpr_spill,
+        result.warnings);
     if (!probe)
       continue;
     planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,

@@ -912,7 +912,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const uint32_t persistent_end = access_patch->persistent_private_state_end.value_or(0u);
         std::optional<VgprSpillSequence> spill;
         if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-            moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+            moi_scalar_spill_requires_dynamic_vgpr_frame(
+                result.program_inventory, *resources,
+                static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
           spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
                                            candidate_options, candidate_options,
                                            visible_evidence_spill_managers, arch, result.warnings,
@@ -923,8 +925,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::optional<SgprSpillSequence> scalar_spill;
         if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
           scalar_spill = build_moi_sgpr_spill_sequence(
-              result, *resources, candidate_options, visible_evidence_spill_managers, arch,
-              result.warnings, persistent_end, spill ? &*spill : nullptr);
+              result.program_inventory, *resources,
+              static_cast<const ConSanRequest &>(candidate_options),
+              static_cast<const BoundRuntimeResources &>(candidate_options),
+              static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
+              visible_evidence_spill_managers, arch, result.warnings, persistent_end,
+              spill ? &*spill : nullptr);
           if (!scalar_spill)
             continue;
         }
@@ -1071,7 +1077,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         scratch_vgpr = resources->base;
       owners = resources->owner_descriptor_file_offsets;
       if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-          moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+          moi_scalar_spill_requires_dynamic_vgpr_frame(
+              result.program_inventory, *resources,
+              static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
         spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
                                          candidate_options, candidate_options,
                                          visible_evidence_spill_managers, arch, result.warnings);
@@ -1083,8 +1091,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       if (needs_scalar_spill) {
         scalar_spill = build_moi_sgpr_spill_sequence(
-            result, *resources, candidate_options, visible_evidence_spill_managers, arch,
-            result.warnings, std::nullopt, spill ? &*spill : nullptr);
+            result.program_inventory, *resources,
+            static_cast<const ConSanRequest &>(candidate_options),
+            static_cast<const BoundRuntimeResources &>(candidate_options),
+            static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
+            visible_evidence_spill_managers, arch, result.warnings, std::nullopt,
+            spill ? &*spill : nullptr);
         if (!scalar_spill)
           continue;
         required_private_bytes =

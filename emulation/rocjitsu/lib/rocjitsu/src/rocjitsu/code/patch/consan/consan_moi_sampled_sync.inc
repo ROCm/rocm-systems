@@ -974,9 +974,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       if (!private_layout)
         continue;
     }
-    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
-                                          arch, std::move(private_layout),
-                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+        std::move(private_layout), candidate_options.automatic_moi_record_replay_sgpr_spill,
+        result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
@@ -2066,9 +2069,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       if (!private_layout)
         continue;
     }
-    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
-                                          arch, std::move(private_layout),
-                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+        std::move(private_layout), candidate_options.automatic_moi_record_replay_sgpr_spill,
+        result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);

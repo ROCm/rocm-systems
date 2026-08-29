@@ -27,10 +27,11 @@ struct MoiPlannedProbeResources {
 /// inferred here: Record/Replay and Sampled currently use their record-spill
 /// policy, while InlineShadow uses a distinct policy.
 [[nodiscard]] std::optional<MoiPlannedProbeResources>
-plan_moi_probe_resources(ConSanTransformArtifacts &result, ResolvedMoiScratchPlan resources,
-                         const MoiOptions &options, MoiSpillManagers &spill_managers,
+plan_moi_probe_resources(const ProgramInventory &inventory, ResolvedMoiScratchPlan resources,
+                         const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+                         const ConSanMoiOperatingPoint &point, MoiSpillManagers &spill_managers,
                          rj_code_arch_t arch, std::optional<MoiPrivateEpochLayout> private_layout,
-                         bool scalar_spill_required,
+                         bool scalar_spill_required, std::vector<std::string> &warnings,
                          std::optional<uint32_t> active_private_segment_size = std::nullopt) {
   if (active_private_segment_size)
     resources.original_private_segment_size = *active_private_segment_size;
@@ -44,17 +45,17 @@ plan_moi_probe_resources(ConSanTransformArtifacts &result, ResolvedMoiScratchPla
 
   std::optional<VgprSpillSequence> spill;
   if (resources.source == ConSanRegisterAllocationSource::SpillRequired ||
-      moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
-    spill = build_moi_spill_sequence(result.program_inventory, resources, options, options, options,
-                                     spill_managers, arch, result.warnings, private_layout_base);
+      moi_scalar_spill_requires_dynamic_vgpr_frame(inventory, resources, point)) {
+    spill = build_moi_spill_sequence(inventory, resources, request, bound_resources, point,
+                                     spill_managers, arch, warnings, private_layout_base);
     if (!spill)
       return std::nullopt;
   }
   std::optional<SgprSpillSequence> scalar_spill;
   if (scalar_spill_required) {
-    scalar_spill = build_moi_sgpr_spill_sequence(result, resources, options, spill_managers, arch,
-                                                 result.warnings, private_layout_base,
-                                                 spill ? &*spill : nullptr);
+    scalar_spill = build_moi_sgpr_spill_sequence(inventory, resources, request, bound_resources,
+                                                 point, spill_managers, arch, warnings,
+                                                 private_layout_base, spill ? &*spill : nullptr);
     if (!scalar_spill)
       return std::nullopt;
   }

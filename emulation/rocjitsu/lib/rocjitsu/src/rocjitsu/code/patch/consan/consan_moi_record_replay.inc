@@ -611,10 +611,14 @@ void try_apply_first_light_access_record_patch(
         moi_has_probe_entry_runtime_workgroup_gate(*runtime_workgroup_sources);
     const bool needs_vgpr_spill =
         resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options);
-    auto probe = plan_moi_probe_resources(result, *resources, candidate_options, spill_managers,
-                                          arch, private_layout,
-                                          candidate_options.automatic_moi_record_replay_sgpr_spill);
+        moi_scalar_spill_requires_dynamic_vgpr_frame(
+            result.program_inventory, *resources,
+            static_cast<const ConSanMoiOperatingPoint &>(candidate_options));
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
+        private_layout, candidate_options.automatic_moi_record_replay_sgpr_spill, result.warnings);
     if (!probe) {
       if (needs_vgpr_spill) {
         result.warnings.emplace_back(
