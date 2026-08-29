@@ -452,10 +452,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t probe_guest_instruction_offset = 0;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_direct_sampled_watchpoint_words(
-        bytes, lowered_candidate, candidate_options, arch, next_record_index,
-        prior_first_record_index, prior_access_range_count, window_bank_count,
-        layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
-        layout.sampled_pending_acquires_offset,
+        bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
+        resources->base, arch, next_record_index, prior_first_record_index,
+        prior_access_range_count, window_bank_count, layout.sampled_causal_windows_offset,
+        layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
         consan_moi_sampled_pending_acquire_owner_bank_count(layout.sampled_pending_acquire_capacity,
                                                             layout.sampled_causal_window_capacity),
         spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
@@ -744,7 +744,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       lowered_candidate.kernel_descriptor_file_offset =
           planned_patch.workgroup_descriptor_file_offset;
       auto words = build_direct_sampled_watchpoint_words(
-          bytes, lowered_candidate, candidate_options, arch, planned_patch.first_record_index,
+          bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
+          planned_patch.resources.base, arch, planned_patch.first_record_index,
           planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
           window_bank_count, layout.sampled_causal_windows_offset,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
@@ -1121,7 +1122,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             lowered_candidate.kernel_descriptor_file_offset =
                 planned_patch.workgroup_descriptor_file_offset;
             auto words = build_direct_sampled_watchpoint_words(
-                bytes, lowered_candidate, candidate_options, arch, planned_patch.first_record_index,
+                bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
+                planned_patch.resources.base, arch, planned_patch.first_record_index,
                 planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
                 window_bank_count, layout.sampled_causal_windows_offset,
                 layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
