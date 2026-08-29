@@ -174,7 +174,6 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     ConSanAccessInventorySite site;
     site.origin = ConSanAccessOrigin::NativeLds;
     site.kind = ConSanLdsAccessKind::Write;
-    site.supported_mvp = true;
     site.physical_id.original_text_offset = 16;
     site.file_offset = 0;
     site.instruction_size = 8;

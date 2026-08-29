@@ -3,10 +3,6 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
-#include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
-
 #include <algorithm>
 #include <map>
 #include <ranges>
@@ -101,104 +97,56 @@ namespace {
 [[nodiscard]] bool access_alias_semantics_equal(const ConSanAccessInventorySite &lhs,
                                                 const ConSanAccessInventorySite &rhs) {
   return std::tie(lhs.container.kind, lhs.container.entry_text_offset, lhs.origin, lhs.kind,
-                  lhs.address_space, lhs.provenance, lhs.confidence, lhs.supported_mvp,
-                  lhs.file_offset, lhs.instruction_size, lhs.decoded_width_bits, lhs.mnemonic,
+                  lhs.address_space, lhs.provenance, lhs.confidence, lhs.lowering, lhs.file_offset,
+                  lhs.instruction_size, lhs.decoded_width_bits, lhs.mnemonic,
                   lhs.flat_address_space_hint, lhs.operands, lhs.ranges, lhs.exclusions) ==
          std::tie(rhs.container.kind, rhs.container.entry_text_offset, rhs.origin, rhs.kind,
-                  rhs.address_space, rhs.provenance, rhs.confidence, rhs.supported_mvp,
-                  rhs.file_offset, rhs.instruction_size, rhs.decoded_width_bits, rhs.mnemonic,
+                  rhs.address_space, rhs.provenance, rhs.confidence, rhs.lowering, rhs.file_offset,
+                  rhs.instruction_size, rhs.decoded_width_bits, rhs.mnemonic,
                   rhs.flat_address_space_hint, rhs.operands, rhs.ranges, rhs.exclusions);
 }
 
-[[nodiscard]] ConSanAccessPolicyReason
-inventory_exclusion_reason(const ConSanAccessInventorySite &access) {
-  if (access.exclusions.empty() && !access.ranges.empty())
+[[nodiscard]] ConSanAccessPolicyReason access_classifier_reason(ConSanAccessClassifierReason reason,
+                                                                ConSanAccessOrigin origin) {
+  switch (reason) {
+  case ConSanAccessClassifierReason::None:
     return ConSanAccessPolicyReason::None;
-  if (access.exclusions.empty())
-    return ConSanAccessPolicyReason::RangeEncodingUnavailable;
-  switch (access.exclusions.front().reason) {
-  case ConSanInventoryExclusionReason::NonAccessInstruction:
+  case ConSanAccessClassifierReason::NonAccessInstruction:
     return ConSanAccessPolicyReason::NonAccessInstruction;
-  case ConSanInventoryExclusionReason::InvalidInstructionSize:
+  case ConSanAccessClassifierReason::InvalidInstructionSize:
     return ConSanAccessPolicyReason::InvalidInstructionSize;
-  case ConSanInventoryExclusionReason::InvalidAccessWidth:
+  case ConSanAccessClassifierReason::InvalidAccessWidth:
     return ConSanAccessPolicyReason::InvalidAccessWidth;
-  case ConSanInventoryExclusionReason::MissingAddressOperand:
+  case ConSanAccessClassifierReason::MissingAddressOperand:
     return ConSanAccessPolicyReason::MissingAddressOperand;
-  case ConSanInventoryExclusionReason::RangeEncodingUnavailable:
+  case ConSanAccessClassifierReason::RangeEncodingUnavailable:
     return ConSanAccessPolicyReason::RangeEncodingUnavailable;
-  case ConSanInventoryExclusionReason::Count:
+  case ConSanAccessClassifierReason::InstructionOutOfBounds:
+    return ConSanAccessPolicyReason::InstructionOutOfBounds;
+  case ConSanAccessClassifierReason::UnsupportedMnemonic:
+  case ConSanAccessClassifierReason::MissingResultOperand:
+  case ConSanAccessClassifierReason::MissingDataOperand:
+  case ConSanAccessClassifierReason::OperandRegisterRange:
+    return ConSanAccessPolicyReason::UnsupportedMnemonic;
+  case ConSanAccessClassifierReason::UnsupportedEncoding:
+    return origin == ConSanAccessOrigin::Flat ? ConSanAccessPolicyReason::UnsupportedFlatEncoding
+                                              : ConSanAccessPolicyReason::UnsupportedMnemonic;
+  case ConSanAccessClassifierReason::NonzeroImmediateOffset:
+    return ConSanAccessPolicyReason::NonzeroFlatOffset;
+  case ConSanAccessClassifierReason::ReservedAddressRegister:
+    return ConSanAccessPolicyReason::ReservedFlatAddressRegister;
+  case ConSanAccessClassifierReason::TargetUnavailable:
+    return ConSanAccessPolicyReason::TargetCapabilityUnavailable;
+  case ConSanAccessClassifierReason::Count:
     break;
   }
-  return ConSanAccessPolicyReason::RangeEncodingUnavailable;
-}
-
-[[nodiscard]] bool is_supported_relaxed_lds_atomic(std::string_view mnemonic) {
-  return mnemonic == "ds_add_f32" || mnemonic == "ds_add_f64" || mnemonic == "ds_add_u32" ||
-         mnemonic == "ds_add_u64" || mnemonic == "ds_cmpstore_rtn_b32" ||
-         mnemonic == "ds_cmpst_rtn_b32";
-}
-[[nodiscard]] uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return 0u;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
-  return static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
+  return ConSanAccessPolicyReason::TargetCapabilityUnavailable;
 }
 
 [[nodiscard]] ConSanAccessPolicyReason
-classify_moi_access_support(const ConSanAccessInventorySite &access, rj_code_arch_t arch) {
-  const ConSanAccessPolicyReason inventory_reason = inventory_exclusion_reason(access);
-  if (inventory_reason != ConSanAccessPolicyReason::None)
-    return inventory_reason;
-  if (access.file_offset > access.physical_id.code_object.byte_size ||
-      access.instruction_size > access.physical_id.code_object.byte_size - access.file_offset)
-    return ConSanAccessPolicyReason::InstructionOutOfBounds;
-
-  if (access.origin != ConSanAccessOrigin::Flat) {
-    if (access.origin == ConSanAccessOrigin::DirectToLds)
-      return ConSanAccessPolicyReason::None;
-    return consan_detail::is_single_range_native_lds_mnemonic(access.mnemonic, arch) ||
-                   consan_detail::two_address_native_lds_offset_scale(access.mnemonic)
-               ? ConSanAccessPolicyReason::None
-               : ConSanAccessPolicyReason::UnsupportedMnemonic;
-  }
-
-  const bool gfx12_encoding = access.instruction_size == 3u * sizeof(uint32_t);
-  const bool cdna4_encoding =
-      access.instruction_size == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
-  if (!gfx12_encoding && !cdna4_encoding)
-    return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
-  if (!access.operands.raw_ioffset)
-    return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
-  if (*access.operands.raw_ioffset != 0 && !consan_uses_gfx12_encoding(arch))
-    return ConSanAccessPolicyReason::NonzeroFlatOffset;
-  if (consan_uses_gfx12_encoding(arch) &&
-      (!access.operands.raw_saddr || !access.operands.raw_scale_offset))
-    return ConSanAccessPolicyReason::UnsupportedFlatEncoding;
-  const bool scalar_vector_address = consan_uses_gfx12_encoding(arch) &&
-                                     access.operands.raw_saddr &&
-                                     *access.operands.raw_saddr != vector_flat_no_saddr(arch);
-  if (access.operands.address_vgpr && *access.operands.address_vgpr >= 255u &&
-      !scalar_vector_address)
-    return ConSanAccessPolicyReason::ReservedFlatAddressRegister;
-  return consan_detail::is_supported_moi_flat_access_mnemonic(access.mnemonic)
-             ? ConSanAccessPolicyReason::None
-             : ConSanAccessPolicyReason::UnsupportedMnemonic;
-}
-
-[[nodiscard]] ConSanAccessPolicyReason
-classify_supercollider_access_support(const ConSanAccessInventorySite &access,
-                                      ConSanFlatProvenanceMode provenance_mode,
-                                      rj_code_arch_t arch) {
-  const ConSanAccessPolicyReason inventory_reason = inventory_exclusion_reason(access);
-  if (inventory_reason != ConSanAccessPolicyReason::None)
-    return inventory_reason;
-  if (access.file_offset > access.physical_id.code_object.byte_size ||
-      access.instruction_size > access.physical_id.code_object.byte_size - access.file_offset)
-    return ConSanAccessPolicyReason::InstructionOutOfBounds;
-  const bool supported = consan_supercollider_supports_access(access, provenance_mode, arch);
-  return supported ? ConSanAccessPolicyReason::None : ConSanAccessPolicyReason::UnsupportedMnemonic;
+classified_operation_reason(const ConSanAccessInventorySite &access,
+                            ConSanAccessLoweringOperation operation) {
+  return access_classifier_reason(access.lowering.operation(operation).reason, access.origin);
 }
 
 [[nodiscard]] ConSanProbeIntentKind intent_kind(ConSanCapabilityEngine engine) {
@@ -685,7 +633,8 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
                  access.kind == ConSanLdsAccessKind::Atomic &&
                  consan_arch_supports_capability_form(
                      inventory.arch(), ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
-                 is_supported_relaxed_lds_atomic(access.mnemonic))) {
+                 access.lowering.operation(ConSanAccessLoweringOperation::ReplayGuestAccess)
+                     .available())) {
       reason = ConSanAccessPolicyReason::OperationKindExcluded;
     } else if (flat && access.address_space == ConSanAccessAddressSpace::NonGroup) {
       reason = ConSanAccessPolicyReason::NonGroupAddressSpace;
@@ -699,10 +648,11 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
       reason = ConSanAccessPolicyReason::ConflictingPhysicalAliases;
       result.errors.push_back(reason);
     } else {
-      reason = request.engine == ConSanCapabilityEngine::SuperCollider
-                   ? classify_supercollider_access_support(access, request.flat_provenance_mode,
-                                                           inventory.arch())
-                   : classify_moi_access_support(access, inventory.arch());
+      const ConSanAccessLoweringOperation operation =
+          request.engine == ConSanCapabilityEngine::SuperCollider
+              ? ConSanAccessLoweringOperation::CompareObservedValue
+              : ConSanAccessLoweringOperation::ReplayGuestAccess;
+      reason = classified_operation_reason(access, operation);
       decision_kind = reason == ConSanAccessPolicyReason::None
                           ? ConSanSiteDecisionKind::Admitted
                           : ConSanSiteDecisionKind::Unsupported;

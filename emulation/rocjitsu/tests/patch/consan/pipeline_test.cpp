@@ -221,7 +221,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ConSanAccessInventorySite shared_access;
   shared_access.origin = ConSanAccessOrigin::NativeLds;
   shared_access.kind = ConSanLdsAccessKind::Read;
-  shared_access.supported_mvp = true;
   shared_access.physical_id.original_text_offset = 0u;
   shared_access.file_offset = 0u;
   shared_access.instruction_size = sizeof(uint32_t);

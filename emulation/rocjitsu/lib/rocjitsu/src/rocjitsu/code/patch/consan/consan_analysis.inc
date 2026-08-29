@@ -217,24 +217,6 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   return 0;
 }
 
-[[nodiscard]] bool is_supported_mvp_lds_site(ConSanLdsAccessKind kind, uint32_t width_bits,
-                                             std::string_view mnemonic) {
-  if (kind != ConSanLdsAccessKind::Read && kind != ConSanLdsAccessKind::Write)
-    return false;
-  if (width_bits == 8)
-    return true;
-  if (kind == ConSanLdsAccessKind::Read && width_bits == 16)
-    return true;
-  if (kind == ConSanLdsAccessKind::Write && width_bits == 16)
-    return mnemonic == "ds_store_b16" || mnemonic == "ds_store_b16_d16_hi" ||
-           mnemonic == "ds_write_b16";
-  if (kind == ConSanLdsAccessKind::Read && width_bits == 96)
-    return mnemonic == "ds_load_b96" || mnemonic == "ds_read_b96";
-  if (kind == ConSanLdsAccessKind::Write && width_bits == 96)
-    return mnemonic == "ds_store_b96" || mnemonic == "ds_write_b96";
-  return width_bits == 32 || width_bits == 64 || width_bits == 128;
-}
-
 [[nodiscard]] std::optional<uint16_t> vgpr_index(const Operand *operand) {
   if (operand == nullptr || !operand->is_vgpr())
     return std::nullopt;
@@ -1489,7 +1471,6 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.instruction_size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
-  site.supported_mvp = is_supported_mvp_lds_site(site.kind, site.decoded_width_bits, mnemonic);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.operands.destination_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
@@ -1541,7 +1522,6 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
     // CDNA5 names the LDS byte address explicitly: the async-load destination
     // is its first source operand, while the async-store source is its second.
     site.operands.address_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
-    site.supported_mvp = site.operands.address_vgpr.has_value();
     site.mnemonic = std::string(mnemonic);
     site.container = consan_program_container_ref(kernel);
     accesses.push_back(std::move(site));
@@ -1567,7 +1547,6 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   ConSanAccessInventorySite site;
   site.kind = ConSanLdsAccessKind::Write;
   site.origin = ConSanAccessOrigin::DirectToLds;
-  site.supported_mvp = true;
   site.physical_id.original_text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.instruction_size = static_cast<uint32_t>(inst.size());

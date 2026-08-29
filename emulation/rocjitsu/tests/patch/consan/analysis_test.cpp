@@ -57,7 +57,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
     const ConSanAccessInventorySite &site = result.program_inventory.access_sites()[index];
     EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
     EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
-    EXPECT_TRUE(site.supported_mvp);
+    EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
     const ConSanAccessInventorySite candidate = test_admitted_accesses(result)[index];
@@ -115,7 +115,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
     const ConSanAccessInventorySite &site = result.program_inventory.access_sites()[index];
     EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
     EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
-    EXPECT_TRUE(site.supported_mvp);
+    EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
     const ConSanAccessInventorySite candidate = test_admitted_accesses(result)[index];
@@ -347,7 +347,9 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
     EXPECT_EQ(std::ranges::count(sites, width, &ConSanAccessInventorySite::decoded_width_bits), 2u)
         << width;
   }
-  EXPECT_TRUE(std::ranges::all_of(sites, &ConSanAccessInventorySite::supported_mvp));
+  EXPECT_TRUE(std::ranges::all_of(sites, [](const ConSanAccessInventorySite &site) {
+    return site.lowering.replay_guest_access.available();
+  }));
 }
 
 TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
@@ -1292,7 +1294,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(kernel.stats.decode_error_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 3u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_TRUE(result.program_inventory.access_sites()[0].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[0].mnemonic, "ds_store_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].file_offset, 0x100u);
@@ -1304,7 +1306,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.address_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.data_vgpr, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
-  EXPECT_TRUE(result.program_inventory.access_sites()[1].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[1].mnemonic, "ds_load_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].file_offset, 0x108u);
@@ -1316,7 +1318,9 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.address_vgpr, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[2].kind, ConSanLdsAccessKind::Atomic);
-  EXPECT_FALSE(result.program_inventory.access_sites()[2].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[2].lowering.replay_guest_access.available());
+  EXPECT_FALSE(
+      result.program_inventory.access_sites()[2].lowering.compare_observed_value.available());
   EXPECT_EQ(result.program_inventory.access_sites()[2].mnemonic, "ds_add_u32");
   EXPECT_EQ(result.program_inventory.access_sites()[2].physical_id.original_text_offset, 16u);
   EXPECT_EQ(result.program_inventory.access_sites()[2].file_offset, 0x110u);
@@ -1521,7 +1525,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   ASSERT_TRUE(result.program_inventory.access_sites()[0].operands.data_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.address_vgpr, 2u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.data_vgpr, 3u);
-  EXPECT_TRUE(result.program_inventory.access_sites()[0].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(result.program_inventory.access_sites()[1].mnemonic, "ds_read_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
@@ -1530,7 +1534,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   ASSERT_TRUE(result.program_inventory.access_sites()[1].operands.destination_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.address_vgpr, 2u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 4u);
-  EXPECT_TRUE(result.program_inventory.access_sites()[1].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_FALSE(result.modified());
 }
@@ -2167,9 +2171,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      EXPECT_TRUE(consan_supercollider_supports_access(
-          result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
-          result.program_inventory.arch()));
+      EXPECT_TRUE(site.lowering.compare_observed_value.available());
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
@@ -2297,9 +2299,7 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      EXPECT_TRUE(consan_supercollider_supports_access(
-          result.program_inventory.access_sites().front(), ConSanFlatProvenanceMode::Strict,
-          result.program_inventory.arch()));
+      EXPECT_TRUE(site.lowering.compare_observed_value.available());
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       const auto patch = std::ranges::find(
@@ -4784,11 +4784,11 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_EQ(kernel.stats.fence_like_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_TRUE(result.program_inventory.access_sites()[0].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].decoded_width_bits, 32u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
-  EXPECT_TRUE(result.program_inventory.access_sites()[1].supported_mvp);
+  EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 32u);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);

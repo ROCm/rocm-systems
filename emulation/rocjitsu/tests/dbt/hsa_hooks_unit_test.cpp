@@ -5346,7 +5346,6 @@ rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() 
   rocjitsu::ConSanAccessInventorySite access;
   access.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
   access.kind = rocjitsu::ConSanLdsAccessKind::Write;
-  access.supported_mvp = true;
   access.physical_id.original_text_offset = 0u;
   access.file_offset = 0u;
   access.instruction_size = sizeof(uint32_t);

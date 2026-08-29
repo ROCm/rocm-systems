@@ -107,7 +107,7 @@ struct ConSanAccessInventorySite {
   ConSanAccessAddressSpace address_space = ConSanAccessAddressSpace::Unresolved;
   ConSanAccessProvenance provenance = ConSanAccessProvenance::Count;
   ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  bool supported_mvp = false;
+  ConSanAccessLoweringClassification lowering;
   uint64_t file_offset = 0;
   uint32_t instruction_size = 0;
   uint32_t decoded_width_bits = 0;
@@ -620,6 +620,7 @@ private:
                                  .static_byte_offset = site.operands.raw_ioffset,
                                  .byte_width = site.decoded_width_bits / 8u});
       }
+      result.lowering = classify_consan_access_lowering(result, storage_->arch);
       return result;
     }
 
@@ -648,6 +649,7 @@ private:
            .static_byte_offset = single_range_native_static_byte_offset(site, bytes),
            .byte_width = site.decoded_width_bits / 8u});
     }
+    result.lowering = classify_consan_access_lowering(result, storage_->arch);
     return result;
   }
 

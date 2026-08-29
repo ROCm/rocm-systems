@@ -45,7 +45,6 @@ ConSanAccessInventorySite make_policy_lds_site(std::string mnemonic = "ds_store_
   ConSanAccessInventorySite site;
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
-  site.supported_mvp = true;
   site.physical_id.original_text_offset = text_offset;
   site.file_offset = file_offset;
   site.instruction_size = 8;

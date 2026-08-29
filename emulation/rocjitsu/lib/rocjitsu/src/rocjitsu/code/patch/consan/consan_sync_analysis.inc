@@ -46,7 +46,7 @@ enum class AtomicFaultEncoding : uint8_t {
 [[nodiscard]] bool lds_address_fault_site_supported(const ConSanAccessInventorySite &site,
                                                     rj_code_arch_t arch) {
   if (site.origin != ConSanAccessOrigin::NativeLds || !lds_address_fault_arch_supported(arch) ||
-      !site.supported_mvp || !site.operands.address_vgpr ||
+      !site.lowering.replay_guest_access.available() || !site.operands.address_vgpr ||
       site.instruction_size != 2u * sizeof(uint32_t) ||
       (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
     return false;

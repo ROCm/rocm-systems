@@ -4634,7 +4634,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         if (function)
           ++function_lds_site_count;
-        if (site.supported_mvp)
+        if (site.lowering.replay_guest_access.available())
           ++(function ? function_supported_lds_site_count : supported_lds_site_count);
       }
     }

@@ -273,21 +273,6 @@ validate_consan_input_layout(const AmdGpuCodeObject &code_object,
 
 #include "rocjitsu/code/patch/consan/consan_validation.inc"
 
-bool consan_supercollider_supports_access(const ConSanAccessInventorySite &access,
-                                          ConSanFlatProvenanceMode mode, rj_code_arch_t arch) {
-  if (access.origin == ConSanAccessOrigin::Flat) {
-    return is_supported_flat_check_trap_access(
-        access.kind, access.instruction_size, access.decoded_width_bits, access.mnemonic,
-        access.operands.destination_vgpr, access.operands.address_vgpr, access.operands.data_vgpr,
-        access.flat_address_space_hint, mode);
-  }
-  return is_supported_lds_check_trap_access(
-      access.kind, access.instruction_size, access.decoded_width_bits, access.mnemonic,
-      access.operands.destination_vgpr, access.operands.destination_accvgpr,
-      access.operands.address_vgpr, access.operands.data_vgpr, access.operands.second_data_vgpr,
-      arch);
-}
-
 ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,
     std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution,

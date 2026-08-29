@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "rocjitsu/code/patch/consan/consan_access_classifier.h"
 #include "rocjitsu/code/patch/consan/consan_access_shape.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/planning_work.h"
@@ -75,13 +76,5 @@ consan_capability_engine(ConSanFlavor flavor, ConSanMoiEngine moi_engine) {
 [[nodiscard]] std::optional<uint16_t>
 consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes, uint64_t text_file_offset,
                                 uint64_t container_entry_text_offset, uint64_t site_file_offset);
-
-/// Return whether SuperCollider's current lowerer can implement one normalized
-/// access selected from the shared program inventory. This is a lowering
-/// capability query, not semantic policy: callers still decide address-space
-/// provenance, aliasing, and whether the access family was requested.
-[[nodiscard]] bool consan_supercollider_supports_access(const ConSanAccessInventorySite &access,
-                                                        ConSanFlatProvenanceMode mode,
-                                                        rj_code_arch_t arch);
 
 } // namespace rocjitsu

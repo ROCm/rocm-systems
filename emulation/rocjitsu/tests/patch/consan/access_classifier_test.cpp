@@ -1,0 +1,150 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "consan_test_support.h"
+
+namespace rocjitsu {
+namespace {
+
+struct TargetCase {
+  rj_code_arch_t arch;
+  rj_code_target_id_t target;
+  std::string_view native_store;
+};
+
+constexpr std::array kTargets = {
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, "ds_write_b32"},
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, "ds_write_b32"},
+    TargetCase{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100, "ds_store_b32"},
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250, "ds_store_b32"},
+    TargetCase{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201, "ds_store_b32"},
+};
+
+ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::NativeLds;
+  site.kind = ConSanLdsAccessKind::Write;
+  site.physical_id.original_text_offset = 8;
+  site.file_offset = 8;
+  site.instruction_size = 8;
+  site.decoded_width_bits = 32;
+  site.operands.address_vgpr = 3;
+  site.operands.data_vgpr = 7;
+  site.mnemonic = std::string(mnemonic);
+  return site;
+}
+
+ConSanAccessInventorySite flat_store_site(uint32_t instruction_size) {
+  ConSanAccessInventorySite site;
+  site.origin = ConSanAccessOrigin::Flat;
+  site.kind = ConSanLdsAccessKind::Write;
+  site.physical_id.original_text_offset = 8;
+  site.file_offset = 8;
+  site.instruction_size = instruction_size;
+  site.decoded_width_bits = 32;
+  site.operands.address_vgpr = 3;
+  site.operands.data_vgpr = 7;
+  site.operands.raw_segment = 0;
+  site.operands.raw_ioffset = 0;
+  site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Group;
+  site.mnemonic = "flat_store_b32";
+  return site;
+}
+
+ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_arch_t arch,
+                                        rj_code_target_id_t target) {
+  const std::array<uint8_t, 64> bytes = {};
+  ProgramInventoryBuilder builder(bytes);
+  builder.set_code_object_facts(true, 0, arch, target);
+  ConSanKernelInfo kernel;
+  kernel.name = "classifier_kernel";
+  kernel.descriptor_file_offset = 48;
+  kernel.entry_text_offset = 0;
+  site.container = consan_program_container_ref(kernel);
+  builder.kernels().push_back(kernel);
+  builder.access_sites().push_back(std::move(site));
+  builder.publish_decoded_accesses(bytes);
+  return builder.view().access_sites().front();
+}
+
+TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTargets) {
+  for (const TargetCase &target : kTargets) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const ConSanAccessInventorySite site =
+        complete_site(native_store_site(target.native_store), target.arch, target.target);
+    ASSERT_TRUE(site.lowering.normalized());
+    ASSERT_TRUE(site.lowering.form);
+    EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::NativeSingleRange);
+    EXPECT_EQ(site.lowering.form->range_count, 1u);
+    EXPECT_EQ(site.lowering.form->element_width_bits, 32u);
+    EXPECT_EQ(site.lowering.form->data_register_count, 1u);
+    EXPECT_TRUE(site.lowering.replay_guest_access.available());
+    EXPECT_TRUE(site.lowering.compare_observed_value.available());
+    EXPECT_EQ(site.lowering, classify_consan_access_lowering(site, target.arch));
+  }
+}
+
+TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabulary) {
+  for (const TargetCase &target : kTargets) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const bool gfx12 = consan_uses_gfx12_encoding(target.arch);
+    ConSanAccessInventorySite input = flat_store_site(gfx12 ? 12u : 8u);
+    if (gfx12) {
+      input.operands.raw_saddr = 124;
+      input.operands.raw_scale_offset = true;
+    }
+    const ConSanAccessInventorySite site =
+        complete_site(std::move(input), target.arch, target.target);
+    ASSERT_TRUE(site.lowering.normalized());
+    ASSERT_TRUE(site.lowering.form);
+    EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::FlatVectorAddress);
+    EXPECT_TRUE(site.lowering.replay_guest_access.available());
+    EXPECT_TRUE(site.lowering.compare_observed_value.available());
+  }
+}
+
+TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependent) {
+  ConSanAccessInventorySite cdna4_flat = flat_store_site(8);
+  cdna4_flat.operands.raw_ioffset = 4;
+  const ConSanAccessInventorySite nonzero =
+      complete_site(std::move(cdna4_flat), ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(nonzero.lowering.replay_guest_access.reason,
+            ConSanAccessClassifierReason::NonzeroImmediateOffset);
+  EXPECT_TRUE(nonzero.lowering.compare_observed_value.available());
+
+  ConSanAccessInventorySite rdna4_flat = flat_store_site(12);
+  rdna4_flat.operands.address_vgpr = 255;
+  rdna4_flat.operands.raw_saddr = 124;
+  rdna4_flat.operands.raw_scale_offset = true;
+  const ConSanAccessInventorySite reserved =
+      complete_site(std::move(rdna4_flat), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_EQ(reserved.lowering.replay_guest_access.reason,
+            ConSanAccessClassifierReason::ReservedAddressRegister);
+  EXPECT_TRUE(reserved.lowering.compare_observed_value.available());
+
+  ConSanAccessInventorySite missing_result = native_store_site("ds_load_b32");
+  missing_result.kind = ConSanLdsAccessKind::Read;
+  missing_result.operands.data_vgpr.reset();
+  const ConSanAccessInventorySite load = complete_site(
+      std::move(missing_result), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_TRUE(load.lowering.replay_guest_access.available());
+  EXPECT_EQ(load.lowering.compare_observed_value.reason,
+            ConSanAccessClassifierReason::MissingResultOperand);
+}
+
+TEST(ConSanAccessClassifier, CommonNormalizationFailuresRejectEveryMechanism) {
+  ConSanAccessInventorySite site = native_store_site("ds_store_b32");
+  site.operands.address_vgpr.reset();
+  const ConSanAccessInventorySite missing_address =
+      complete_site(std::move(site), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_FALSE(missing_address.lowering.form);
+  EXPECT_EQ(missing_address.lowering.normalization_reason,
+            ConSanAccessClassifierReason::MissingAddressOperand);
+  EXPECT_EQ(missing_address.lowering.replay_guest_access.reason,
+            ConSanAccessClassifierReason::MissingAddressOperand);
+  EXPECT_EQ(missing_address.lowering.compare_observed_value.reason,
+            ConSanAccessClassifierReason::MissingAddressOperand);
+}
+
+} // namespace
+} // namespace rocjitsu

@@ -7,6 +7,7 @@ target_sources(
     rocjitsu_code
     PRIVATE
         consan.cpp
+        consan_access_classifier.cpp
         consan_access_policy.cpp
         consan_atomic_fence_policy.cpp
         consan_barrier_policy.cpp

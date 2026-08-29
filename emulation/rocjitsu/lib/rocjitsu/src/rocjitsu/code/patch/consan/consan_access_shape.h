@@ -30,6 +30,110 @@ enum class ConSanLdsAccessKind : uint8_t {
   Other,
 };
 
+/// Target operation that may consume one normalized access form.
+///
+/// These names describe mechanisms rather than ConSan engines. All MOI
+/// engines replay the guest access, while SuperCollider compares the value
+/// observed by a redundant access. Keeping those operations distinct lets one
+/// target classifier publish both exact contracts without introducing an
+/// engine-by-target matrix.
+enum class ConSanAccessLoweringOperation : uint8_t {
+  ReplayGuestAccess,
+  CompareObservedValue,
+  Count,
+};
+
+/// Architecture-normalized encoding family for one decoded access.
+enum class ConSanAccessLoweringFormKind : uint8_t {
+  NativeSingleRange,
+  NativeTwoRange,
+  FlatVectorAddress,
+  FlatScalarVectorAddress,
+  DirectToLdsExplicitAddress,
+  DirectToLdsLaneAddressed,
+  Count,
+};
+
+/// Typed reason why the target classifier could not provide an operation.
+///
+/// Semantic relevance, provenance policy, resource pressure, and placement do
+/// not belong here. This enum is solely about exact decoded form and operand
+/// lowerability.
+enum class ConSanAccessClassifierReason : uint8_t {
+  None,
+  NonAccessInstruction,
+  InvalidInstructionSize,
+  InvalidAccessWidth,
+  MissingAddressOperand,
+  RangeEncodingUnavailable,
+  InstructionOutOfBounds,
+  UnsupportedMnemonic,
+  UnsupportedEncoding,
+  NonzeroImmediateOffset,
+  ReservedAddressRegister,
+  MissingResultOperand,
+  MissingDataOperand,
+  OperandRegisterRange,
+  TargetUnavailable,
+  Count,
+};
+
+/// Exact target-normalized form consumed by access lowering mechanisms.
+///
+/// Raw instruction spellings remain in semantic inventory for diagnostics,
+/// but consumers should use this value for range geometry, operand shape, and
+/// target-address form instead of classifying the mnemonic again.
+struct ConSanAccessLoweringForm {
+  ConSanAccessLoweringFormKind kind = ConSanAccessLoweringFormKind::Count;
+  ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
+  uint32_t instruction_size = 0;
+  uint32_t element_width_bits = 0;
+  uint32_t range_count = 0;
+  uint32_t encoded_offset_scale_bytes = 0;
+  uint16_t data_register_count = 0;
+  std::optional<uint16_t> address_vgpr;
+  std::optional<uint16_t> destination_vgpr;
+  std::optional<uint16_t> destination_accvgpr;
+  std::optional<uint16_t> data_vgpr;
+  std::optional<uint16_t> second_data_vgpr;
+  std::optional<uint16_t> scalar_address_sgpr;
+  std::optional<int32_t> immediate_byte_offset;
+  bool scale_immediate = false;
+
+  bool operator==(const ConSanAccessLoweringForm &) const = default;
+};
+
+/// Exact classifier result for one target access operation.
+struct ConSanAccessOperationSupport {
+  ConSanAccessClassifierReason reason = ConSanAccessClassifierReason::TargetUnavailable;
+
+  [[nodiscard]] bool available() const { return reason == ConSanAccessClassifierReason::None; }
+
+  bool operator==(const ConSanAccessOperationSupport &) const = default;
+};
+
+/// One authoritative classification of a decoded access for every current
+/// access-lowering mechanism.
+struct ConSanAccessLoweringClassification {
+  std::optional<ConSanAccessLoweringForm> form;
+  ConSanAccessClassifierReason normalization_reason =
+      ConSanAccessClassifierReason::TargetUnavailable;
+  ConSanAccessOperationSupport replay_guest_access;
+  ConSanAccessOperationSupport compare_observed_value;
+
+  [[nodiscard]] const ConSanAccessOperationSupport &
+  operation(ConSanAccessLoweringOperation value) const {
+    return value == ConSanAccessLoweringOperation::CompareObservedValue ? compare_observed_value
+                                                                        : replay_guest_access;
+  }
+
+  [[nodiscard]] bool normalized() const {
+    return form.has_value() && normalization_reason == ConSanAccessClassifierReason::None;
+  }
+
+  bool operator==(const ConSanAccessLoweringClassification &) const = default;
+};
+
 namespace consan_detail {
 
 /// Complete static shape of one native LDS instruction carrying two addresses.

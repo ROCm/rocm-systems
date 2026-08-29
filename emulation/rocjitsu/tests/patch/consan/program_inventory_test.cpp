@@ -31,7 +31,6 @@ ConSanAccessInventorySite make_inventory_lds_site(std::string mnemonic, uint64_t
   ConSanAccessInventorySite site;
   site.origin = ConSanAccessOrigin::NativeLds;
   site.kind = ConSanLdsAccessKind::Write;
-  site.supported_mvp = true;
   site.physical_id.original_text_offset = text_offset;
   site.file_offset = file_offset;
   site.instruction_size = 8;
@@ -614,6 +613,7 @@ TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
 TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutPolicy) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
+  builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
   ConSanKernelInfo kernel = make_inventory_kernel();
   ConSanAccessInventorySite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
   byte_site.operands.destination_vgpr = 2;
@@ -638,7 +638,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.address_space, ConSanAccessAddressSpace::Group);
   EXPECT_EQ(byte.provenance, ConSanAccessProvenance::NativeLdsOpcode);
   EXPECT_EQ(byte.confidence, ConSanSemanticConfidence::Exact);
-  EXPECT_TRUE(byte.supported_mvp);
+  EXPECT_TRUE(byte.lowering.replay_guest_access.available());
   EXPECT_EQ(byte.container.kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(byte.container.kernel_descriptor_file_offset, 512u);
   EXPECT_EQ(byte.container.text_file_offset, 1024u);
