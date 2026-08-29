@@ -1510,12 +1510,14 @@ component and line category has a clear owner and purpose.
 
 #### F9 implementation and final accounting checkpoint (2026-08-29)
 
-The F9 implementation is complete through commit `cf1761c67d`. Its reviewable
-cuts remove obsolete patch-owner indexing, publish typed resource rejection
-and diagnostic products, move selectable-bank, SuperCollider, fault, and MOI
-target recipes into their target or family owners, and replace common-code
-target rediscovery with explicit target operations. The last implementation
-cut also adds the checked-in `ConSan.ArchitectureBoundaries` test. That test
+The F9 implementation is complete through commit `cf1761c67d`; final
+accounting is recorded by `c71ec0aab9`, and the comment-only boundary wording
+correction is `529e7a0701`. The reviewable implementation cuts remove obsolete
+patch-owner indexing, publish typed resource rejection and diagnostic products,
+move selectable-bank, SuperCollider, fault, and MOI target recipes into their
+target or family owners, and replace common-code target rediscovery with
+explicit target operations. The last implementation cut also adds the
+checked-in `ConSan.ArchitectureBoundaries` test. That test
 mechanically enforces every rule listed in F9, checks that every active
 implementation fragment has exactly one textual owner, permits only the exact
 three-region SuperCollider wrapper, and keeps retained filename tombstones
@@ -1706,6 +1708,22 @@ operations and does not copy target identity, addressing, relay, or register
 bank mechanisms. The remaining solver and validation interactions are
 intentional cross-dimensional composition, not unowned `N * M` duplication.
 
+##### Final F9 gate
+
+The final inventory contains **4,710 nonphysical tests** and **635 physical
+tests**, compared with 4,707 and 635 at F8. The three added nonphysical tests
+are two target-boundary regressions and the architecture-boundary checker; no
+test disappeared. The device-emulation portion remains **2,908 tests across
+all five target profiles**.
+
+The final `-j16` build was already up to date. The complete nonphysical gate
+passed **4,710/4,710** tests at `-j16` in 242.91 seconds. Only after that gate
+finished, the serialized physical `gfx1201` gate passed **635/635** tests at
+`-j1` in 109.05 seconds. Thus the physical gate did not overlap another GPU
+test workload. The source change after those gates, `529e7a0701`, changes only
+a comment describing the already-enforced hook boundary; the final build and
+`ConSan.ArchitectureBoundaries` check were repeated after it.
+
 ## 6. Test and commit discipline
 
 Each stage should be a sequence of small local commits. A useful commit changes
@@ -1803,6 +1821,46 @@ The fourth refactoring is complete when all of the following are true:
   require editing each engine for an already-normalized operation;
 - shared-MOI and other subset-shared implementations have declared contracts
   and enforced visibility rather than relying on textual inclusion.
+
+### Completion audit (2026-08-29)
+
+The following is the final requirement-by-requirement audit. “Checked” means
+that the cited current-state source, direct regression, durable checker, or
+full gate supplies positive evidence for the requirement; it does not mean
+only that a forbidden spelling was not found.
+
+| Success requirement | Current evidence | Result |
+| --- | --- | --- |
+| Short, stable production component map and directed build graph | The F9 component table above maps every production responsibility to an authority and forward product. CMake compiles 77 core plus 9 hook/report translation units; the checked implementation-fragment ownership graph has no cross-component nesting except the exact SuperCollider wrapper. | Checked |
+| One authority and typed forward product for cross-component semantic facts | F1 introduced intent-bound commit/rejection products; F2 introduced `ConSanRuntimeStaticMapping`; F3 introduced the observation product and executable transaction; F4 introduced normalized access and atomic forms. Their focused tests exercise publication and rejection, not textual structure alone. | Checked |
+| Direct coverage with no patch-shape reconstruction | Coverage is driven by intent-bound commit/rejection events. `ConSan.ArchitectureBoundaries` rejects `ConSanPatchInfo`, patch kinds, and patch geometry in coverage authorities; the F1 regressions cover coalesced intents, multi-patch sequences, synchronization, rejection, and unknown patch kinds. | Checked |
+| Runtime registration, replay, and analysis use validated semantic mapping | Hook and report analysis consume the typed static mapping. The checker rejects private patch/artifact types and geometry there, while the F2 negative regression proves legacy-looking telemetry alone cannot create attribution. | Checked |
+| One exact instruction-lowerability classifier authority | Access and atomic classifier components publish the normalized forms consumed by policy and lowering. Target goldens and common fixtures cover `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. | Checked |
+| Target-neutral semantic policy | The durable checker prohibits generated ISA headers, product constants, and member namespaces in every semantic-policy source; it passes on the final tree. | Checked |
+| One executable pipeline with typed deferred binding and real stage records | `ConSanTransformTransaction` executes the stages; `ConSanDeferredBinding` owns the immutable pre-binding identity and resume strategy. Pipeline tests cover preparation, valid and invalid resume, input mismatch, cancellation, and executed-stage accounting. | Checked |
+| One observation-policy and ledger-assembly authority | Both the ordinary and composition paths call `assemble_consan_observation_product`, whose implementation and ledger initialization live in `consan_observation_policy.cpp`; policy and pipeline tests cover the product. | Checked |
+| No unnamed downstream semantic-inventory eligibility | The `supported_mvp` field and equivalent generic eligibility bit were removed in F4. Exact eligibility is a typed classifier result, and lowerer rejection remains distinct from classifier rejection. | Checked |
+| Public result hides private lowerer artifacts | `TransformResult` uses composition rather than inheriting the lowerer aggregate. Patch/resource/placement proof is private and friend-limited; `ConSanPipeline.ProductionResultOwnsAllPublishedTransformArtifacts` verifies owned public projection and publication. | Checked |
+| Immutable MOI solver problem and explicit attempt/acceptance products | `MoiResourceProblem` binds immutable inputs; the solver returns `ConSanMoiOperatingPointAttempt` or `ConSanMoiResourcePlanningResult` with typed fallback. `ConSan.MoiResourceProblemBindsImmutableSolverInputs` and neighboring solver tests exercise the contract. | Checked |
+| No general-purpose `MoiOptions` bus in native emission or placement | F5 removed it from placement and native emission. The final checker scans native-emission and target-operation sources and rejects any `MoiOptions` use. Remaining references are confined to reviewed top-level orchestration. | Checked |
+| Five separately testable host-report responsibilities | Lifecycle snapshot, decoder, analyzer, trust evaluator, and renderer are separate compiled libraries with direct host tests; the remaining report pipeline is a narrow typed coordinator. | Checked |
+| Independent final proof | `consan_final_validation.cpp` retains the complete private proof and independently decodes/verifies emitted routing, ABI, mutation, and runtime-mapping relationships. At 4,580 lines it remains deliberately separate from construction. | Checked |
+| Mega translation units replaced by declared compiled interfaces | The former two 57,129-line implementation closures are now zero lines. The largest compiled textual body is 6,703 lines, and the checker proves one owner for every active fragment and forbids nested implementation closure. | Checked |
+| Raw architecture implementation contained by target/family owners | The checker allowlists every generated-ISA dependency and raw instruction word, and rejects member namespaces or product constants in engine sources. F9 moved fault, MOI, selectable-bank, and SuperCollider recipes to named member/family owners. | Checked |
+| Mode and exact-subset implementation contained | Each engine has named compiled owners; shared MOI, exact-shadow, Record/Replay-plus-Sampled workgroup gating, and Sampled-plus-InlineShadow exact-field operations have named contracts. Reviewed common mode-switch budgets prevent silent growth of deep switches. | Checked |
+| Complete emulated and serialized physical gates with stable inventory | 4,710/4,710 nonphysical tests passed at `-j16`, including 2,908 device tests over five targets; 635/635 physical `gfx1201` tests then passed at `-j1`. Inventory grew by three since F8 and lost none. | Checked |
+| Regression for every bug discovered during the work | The two existing bugs discovered during the work are both pinned: the physical overflow-capacity bug has `DbiOverflowIsVisible` and owner fix `becd961599`; the F7 malformed-evidence accumulation bug has a decoder regression and decoder-level fix. | Checked |
+| Final implementation and coupling accounting | The physical/source/dependency tables above recompute the original scope and counter: 91,450 comment-excluded production lines, test code excluded, plus all baseline coupling signals. | Checked |
+| Every surviving mode/target interaction justified | The deep-read ledger accounts for all 6,578 interaction lines: 1,229 named target operations, 1,775 independent proof, and 3,574 typed capability selection. Named extraction debt is zero. | Checked |
+| Additive engine and target extension | Engines select normalized target operations without owning identity, addressing, relay, bank, or encoding recipes. Target owners implement those capabilities without deciding engine semantic relevance; the boundary checker enforces both directions. | Checked |
+| Declared contracts and visibility for subset-shared implementation | Named shared/subset components compile through headers. Every active `.inc` has exactly one owner, and no fragment includes another except the exact checked three-region SuperCollider body. | Checked |
+
+All completion criteria are therefore satisfied on the final tree. The audit
+does not claim that the present 91,450-line implementation is minimal. It
+claims the narrower and testable result required by this refactoring: every
+component and surviving variability region has a named owner, the formerly
+muddy dependency directions are mechanically constrained, and all functional
+gates pass without lost coverage.
 
 There is deliberately no success condition tied to an 80,000-line threshold.
 The final accounting should reveal whether clarified ownership unlocked
