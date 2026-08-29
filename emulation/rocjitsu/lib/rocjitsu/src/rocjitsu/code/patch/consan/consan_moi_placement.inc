@@ -3064,6 +3064,22 @@ bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state, uin
   return first != nullptr && block_for_offset(state.block_index, second_offset) == first;
 }
 
+bool moi_resource_scc_is_dead_before(const MoiResourcePlanningState &state, uint64_t text_offset) {
+  BasicBlock *block = block_for_offset(state.block_index, text_offset);
+  const Instruction *instruction = instruction_at(block, text_offset);
+  if (block == nullptr || instruction == nullptr)
+    return false;
+  bool found_owner = false;
+  for (const MoiKernelResourceContext &context : state.contexts) {
+    if (!context.block_set.contains(block))
+      continue;
+    found_owner = true;
+    if (context.liveness->live_before(*instruction).contains({RegClass::SCC, 0u, 1u}))
+      return false;
+  }
+  return found_owner;
+}
+
 bool moi_resource_owner_anchors_admit_sgpr_ranges(MoiResourcePlanningState &state,
                                                   std::span<const uint64_t> owners,
                                                   std::span<const uint64_t> anchors,

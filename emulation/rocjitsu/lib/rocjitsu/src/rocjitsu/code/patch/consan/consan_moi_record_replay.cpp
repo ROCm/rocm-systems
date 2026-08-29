@@ -39,6 +39,7 @@
 namespace rocjitsu {
 
 using consan_detail::MoiAtomicEvidenceSitePlan;
+using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::count_nop_padding;
@@ -52,6 +53,8 @@ namespace consan_moi_impl {
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_atomic.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_record_fence.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

@@ -34,4 +34,7 @@ void try_apply_first_light_access_record_patch(
 void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                    rj_code_arch_t arch, ConSanTransformArtifacts &result);
 
+void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                  rj_code_arch_t arch, ConSanTransformArtifacts &result);
+
 } // namespace rocjitsu::consan_moi_impl

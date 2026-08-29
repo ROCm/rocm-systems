@@ -249,6 +249,11 @@ moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
 [[nodiscard]] bool moi_resource_offsets_share_block(const MoiResourcePlanningState &state,
                                                     uint64_t first_offset, uint64_t second_offset);
 
+/// True only when placement can associate the instruction with at least one
+/// owner context and SCC is dead before it in every such owner.
+[[nodiscard]] bool moi_resource_scc_is_dead_before(const MoiResourcePlanningState &state,
+                                                   uint64_t text_offset);
+
 [[nodiscard]] bool moi_resource_is_valid(const MoiResourcePlanningState &state);
 
 [[nodiscard]] bool moi_resource_has_owner_context(const MoiResourcePlanningState &state,
