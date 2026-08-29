@@ -8,8 +8,14 @@
 ///   rocjitsu --config foo.json -- ./app           (local mode: in-process simulation)
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
+///
+/// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
+///   rocjitsu --config foo.json --vfio-socket <path>  (serve a PCI device to a VMM)
 
 #include "rocjitsu/daemon/rj_daemon.h"
+#if defined(RJ_ENABLE_VFIO_USER)
+#include "rocjitsu/vmm/vfu/vfio_server.h"
+#endif
 
 #include "rocjitsu/base/rj_version.h"
 #include "rocjitsu/config/config_loader.h"
@@ -381,9 +387,21 @@ void print_usage() {
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "  rocjitsu --config foo.json --vfio-socket <path>\n"
+         "                                               Serve a PCI device to a VMM\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
+         "  --vfio-socket <path>\n"
+         "                    Serve the configured GPU as a PCI function to a VMM over\n"
+         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
+         "                    launching an application. Requires a build with\n"
+         "                    ROCJITSU_ENABLE_VFIO.\n"
+         "                    The VMM must share guest RAM through an mmap-able\n"
+         "                    descriptor or the device cannot reach it; with QEMU that\n"
+         "                    means -object\n"
+         "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
+         "                    with -machine memory-backend=mem.\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -394,6 +412,7 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   const char *config_path = nullptr;
+  const char *vfio_socket = nullptr;
   bool daemon_mode = false;
   bool attach_mode = false;
   int separator_idx = -1;
@@ -406,6 +425,8 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
+    } else if (arg == "--vfio-socket" && i + 1 < argc) {
+      vfio_socket = argv[++i];
     } else if (arg == "--daemon") {
       daemon_mode = true;
     } else if (arg == "--attach") {
@@ -433,6 +454,23 @@ int main(int argc, char *argv[]) {
   if (!std::filesystem::exists(abs_config)) {
     std::cerr << std::format("rocjitsu: config file not found: {}\n", abs_config);
     return 1;
+  }
+
+  // Serving a VMM needs the device's identity, not a simulated machine, so this
+  // is dispatched before the parse that builds one.
+  if (vfio_socket != nullptr) {
+    if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
+      std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
+                   "--daemon, --attach, or an application\n";
+      return 1;
+    }
+#if defined(RJ_ENABLE_VFIO_USER)
+    return rocjitsu::run_vfio_server(abs_config, vfio_socket);
+#else
+    std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                 "-DROCJITSU_ENABLE_VFIO=ON\n";
+    return 1;
+#endif
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;

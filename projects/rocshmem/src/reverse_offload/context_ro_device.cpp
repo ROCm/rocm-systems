@@ -59,12 +59,8 @@ __host__ ROContext::ROContext(Backend *b,
   }
   ro_net_win_id = block_id % backend->ro_window_proxy_->get_num_MPI_windows();
 
-  ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
-  ipcImpl_.shm_size = b->ipcImpl.shm_size;
-  ipcImpl_.shm_rank = b->ipcImpl.shm_rank;
-  ipcImpl_.pes_with_ipc_avail = b->ipcImpl.pes_with_ipc_avail;
-  ipcImpl_.ipc_first_pe = b->ipcImpl.ipc_first_pe;
-  ipcImpl_.ipc_stride = b->ipcImpl.ipc_stride;
+  ipcImpl_.initFrom(b->ipcImpl);
+  ipcImpl_.assignSdmaChannel(block_id);
 
 }
 
