@@ -768,22 +768,6 @@ TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
 }
 
 // ===========================================================================
-// GroupDepth_InitializerMatchesProductionSource -- same run-time drift check
-// as ParamDefaults_MatchProductionSource, for a different unguardable value:
-// wrap_stubs.cc's `thread_local int ncclGroupDepth = 0;` copies the real
-// thread_local variable's initializer (group.cc:31), but it's a plain
-// variable definition, not a named constant -- nothing for a static_assert
-// to check. Reads the real group.cc source at run time and confirms the
-// exact initializer text is still there.
-// ===========================================================================
-
-TEST(WrapMicrotest, GroupDepth_InitializerMatchesProductionSource) {
-  const std::string groupCc = ReadFileOrDie(GROUP_CC_PATH);
-  EXPECT_NE(std::string::npos, groupCc.find("thread_local int ncclGroupDepth = 0;"))
-      << "group.cc's ncclGroupDepth initializer changed -- update the copy in wrap_stubs.cc";
-}
-
-// ===========================================================================
 // symkHostRedOpToDev -- rccl_wrap.cc:527-541. Pure switch, no comm/topology
 // setup needed at all.
 // ===========================================================================
@@ -1909,8 +1893,9 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
 
 // ===========================================================================
 // rcclDdaEnabled -- rccl_wrap.cc:648-667. rcclParamDdaEnable's real default
-// (1) and ncclGroupDepth's stub (0) both favor the "enabled" path, so most
-// branches are reachable without the seam; not cached, no isolation needed.
+// (1) and ncclGroupDepth's real default (0) both favor the "enabled" path,
+// so most branches are reachable without the seam; not cached, no isolation
+// needed.
 // ===========================================================================
 
 TEST(WrapMicrotest, DdaEnabled_DisabledByParamReturnsFalse) {

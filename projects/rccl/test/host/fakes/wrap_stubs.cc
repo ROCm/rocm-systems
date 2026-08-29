@@ -164,15 +164,11 @@ void ClearMicroEnv() { microEnvMap().clear(); }
 // through the same settable map as the bare-getenv() override above.
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
 
-// ncclGroupDepth: real thread_local int, group.cc:31, depth of
-// ncclGroupStart nesting. rccl_wrap.cc reads it (never writes it) to check
-// "not inside a group" before some eligibility checks; 0 -- the real
-// default -- means "not grouped", which is what every test so far assumes.
-// Like the RCCL_PARAM defaults above, this initializer has no importable
-// constant to static_assert against; wrap-test.cc's
-// GroupDepth_InitializerMatchesProductionSource reads the real group.cc
-// source at run time instead.
-thread_local int ncclGroupDepth = 0;
+// ncclGroupDepth is NOT faked here: group-test.cc (also part of this binary
+// since the rccl-UnitTestsMicro merge) compiles the real group.cc, which
+// defines it -- a second copy here would be a duplicate-symbol error. Its
+// real default (0, "not grouped") is what every rccl_wrap.cc test so far
+// assumes, same as when this was a hand-copied stub.
 
 // rcclUseAinic: real definition (transport/net.cc:343) does hardware NIC
 // detection via std::call_once; not linked here (pulls in the IB/net
