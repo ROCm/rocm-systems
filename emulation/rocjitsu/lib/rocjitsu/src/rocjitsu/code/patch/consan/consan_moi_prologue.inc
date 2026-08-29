@@ -2317,82 +2317,82 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
 }
 
 [[nodiscard]] uint32_t moi_owner_epoch_prologue_required_vgpr_count(
-    const MoiOptions &options,
+    const ConSanMoiOperatingPoint &point,
     const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, rj_code_arch_t arch) {
-  if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr)
+  if (!point.moi_owner_vgpr || !point.moi_epoch_vgpr)
     return 0u;
-  uint32_t required = std::max<uint32_t>(*options.moi_owner_vgpr, *options.moi_epoch_vgpr) + 1u;
+  uint32_t required = std::max<uint32_t>(*point.moi_owner_vgpr, *point.moi_epoch_vgpr) + 1u;
   if (workgroup_shadow) {
     const ConSanTargetProfile *target = consan_target_profile(arch);
     const uint32_t shadow_zero_tuple_count =
-        options.automatic_moi_persistent_vgprs && target != nullptr
+        point.automatic_moi_persistent_vgprs && target != nullptr
             ? moi_workgroup_shadow_preferred_zero_vgpr_count(*target)
             : 2u;
-    required = std::max<uint32_t>(required, *options.moi_epoch_vgpr + shadow_zero_tuple_count);
+    required = std::max<uint32_t>(required, *point.moi_epoch_vgpr + shadow_zero_tuple_count);
   }
-  if (options.moi_workgroup_key_vgpr)
-    required = std::max<uint32_t>(required, *options.moi_workgroup_key_vgpr + 1u);
-  if (options.moi_dispatch_id_vgpr)
-    required = std::max<uint32_t>(required, *options.moi_dispatch_id_vgpr + 2u);
+  if (point.moi_workgroup_key_vgpr)
+    required = std::max<uint32_t>(required, *point.moi_workgroup_key_vgpr + 1u);
+  if (point.moi_dispatch_id_vgpr)
+    required = std::max<uint32_t>(required, *point.moi_dispatch_id_vgpr + 2u);
   for (const std::optional<uint16_t> reg :
-       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-        options.moi_record_replay_workgroup_vgprs.z,
-        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
+        point.moi_record_replay_workgroup_vgprs.z,
+        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
     if (reg)
       required = std::max<uint32_t>(required, *reg + 1u);
   }
   return required;
 }
 
-[[nodiscard]] bool moi_entry_scalar_backup_preserves_persistent_outputs(const MoiOptions &options,
-                                                                        uint16_t sgpr_base,
-                                                                        uint16_t sgpr_count) {
+[[nodiscard]] bool
+moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoint &point,
+                                                     uint16_t sgpr_base, uint16_t sgpr_count) {
   const auto overlaps = [&](std::optional<uint16_t> reg, uint16_t width = 1u) {
     return reg && range_overlaps(sgpr_base, sgpr_count, *reg, width);
   };
-  const bool backs_up_only_automatic_owner =
-      options.automatic_moi_owner_sgpr && options.moi_owner_sgpr &&
-      sgpr_base == *options.moi_owner_sgpr && sgpr_count == 1u;
-  bool conflict = (options.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
-                  overlaps(options.moi_persistent_sgprs.owner) ||
-                  overlaps(options.moi_persistent_sgprs.epoch) ||
-                  overlaps(options.moi_persistent_sgprs.workgroup_key) ||
-                  overlaps(options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
-                  overlaps(options.moi_inline_visible_evidence_sgpr);
+  const bool backs_up_only_automatic_owner = point.automatic_moi_owner_sgpr &&
+                                             point.moi_owner_sgpr &&
+                                             sgpr_base == *point.moi_owner_sgpr && sgpr_count == 1u;
+  bool conflict = (point.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
+                  overlaps(point.moi_persistent_sgprs.owner) ||
+                  overlaps(point.moi_persistent_sgprs.epoch) ||
+                  overlaps(point.moi_persistent_sgprs.workgroup_key) ||
+                  overlaps(point.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
+                  overlaps(point.moi_inline_visible_evidence_sgpr);
   for (const std::optional<uint16_t> reg :
-       {options.moi_persistent_sgprs.record_replay_workgroup.x,
-        options.moi_persistent_sgprs.record_replay_workgroup.y,
-        options.moi_persistent_sgprs.record_replay_workgroup.z,
-        options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
+       {point.moi_persistent_sgprs.record_replay_workgroup.x,
+        point.moi_persistent_sgprs.record_replay_workgroup.y,
+        point.moi_persistent_sgprs.record_replay_workgroup.z,
+        point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
     conflict |= overlaps(reg);
   }
   return !conflict;
 }
 
 [[nodiscard]] bool moi_owner_epoch_prologue_uses_vgpr(
-    const MoiOptions &options,
+    const ConSanMoiOperatingPoint &point,
     const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, uint16_t vgpr,
     rj_code_arch_t arch) {
   const auto overlaps = [vgpr](std::optional<uint16_t> base, uint16_t width = 1u) {
     return base && range_overlaps(vgpr, 1u, *base, width);
   };
-  if (overlaps(options.moi_owner_vgpr))
+  if (overlaps(point.moi_owner_vgpr))
     return true;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const uint16_t epoch_width =
       workgroup_shadow
-          ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs && target != nullptr
+          ? static_cast<uint16_t>(point.automatic_moi_persistent_vgprs && target != nullptr
                                       ? moi_workgroup_shadow_preferred_zero_vgpr_count(*target)
                                       : 2u)
           : 1u;
-  if (overlaps(options.moi_epoch_vgpr, epoch_width) || overlaps(options.moi_workgroup_key_vgpr) ||
-      overlaps(options.moi_dispatch_id_vgpr, 2u)) {
+  if (overlaps(point.moi_epoch_vgpr, epoch_width) || overlaps(point.moi_workgroup_key_vgpr) ||
+      overlaps(point.moi_dispatch_id_vgpr, 2u)) {
     return true;
   }
   for (const std::optional<uint16_t> reg :
-       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-        options.moi_record_replay_workgroup_vgprs.z,
-        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
+        point.moi_record_replay_workgroup_vgprs.z,
+        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
     if (overlaps(reg))
       return true;
   }
@@ -2736,7 +2736,8 @@ void try_apply_owner_epoch_prologue_patch(
       // if the prologue's VALU lane transfers are still retiring. Preserve
       // only the initialized intersection of the borrowed scalar window.
       if (sgpr_count != 0u && !moi_entry_scalar_backup_preserves_persistent_outputs(
-                                  kernel_options, sgpr_base, sgpr_count)) {
+                                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options),
+                                  sgpr_base, sgpr_count)) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup overlaps persistent output state");
         return;
@@ -2759,8 +2760,9 @@ void try_apply_owner_epoch_prologue_patch(
         const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
         std::optional<uint16_t> backup_vgpr;
         for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
-                                                  static_cast<uint16_t>(candidate), arch)) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(
+                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options), workgroup_shadow,
+                  static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
             break;
           }
@@ -2772,8 +2774,9 @@ void try_apply_owner_epoch_prologue_patch(
         // window is restored before the displaced guest entry executes.
         for (uint32_t candidate = entry_abi_vgpr_count;
              !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
-                                                  static_cast<uint16_t>(candidate), arch)) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(
+                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options), workgroup_shadow,
+                  static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
           }
         }
@@ -2822,7 +2825,8 @@ void try_apply_owner_epoch_prologue_patch(
         .workgroup_sources = std::move(workgroup_sources),
     };
     uint32_t required_vgpr_count = moi_owner_epoch_prologue_required_vgpr_count(
-        kernel_options, emission.workgroup_shadow, arch);
+        static_cast<const ConSanMoiOperatingPoint &>(kernel_options), emission.workgroup_shadow,
+        arch);
     if (entry_scalar_backup) {
       required_vgpr_count = std::max<uint32_t>(required_vgpr_count, entry_scalar_backup->vgpr + 1u);
     }
