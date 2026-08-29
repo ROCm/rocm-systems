@@ -939,6 +939,46 @@ TEST(ConSanPipeline, AutomaticMoiResumeRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried_debug.fault_plans.size(), direct_debug.fault_plans.size());
 }
 
+TEST(ConSanPipeline, AutomaticDynamicReplayTreatsExplicitCapAsRuntimeRingCapacity) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  request.moi_dynamic_access_records = true;
+  request.moi_auto_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(/*access_count=*/1u, /*diagnostic_count=*/0u,
+                                         /*barrier_count=*/0u, /*atomic_count=*/0u);
+  TransformPolicy transform_policy;
+  transform_policy.max_patches = 2u;
+  transform_policy.max_patches_is_expert_limit = true;
+
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
+      MutationRequest{}, complete_runtime_capabilities());
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+  const ConSanDeferredBinding &deferred = std::get<ConSanDeferredBinding>(preparation);
+  ASSERT_TRUE(deferred.well_formed());
+  ASSERT_TRUE(deferred.evidence_requirements());
+  const auto &requirements =
+      std::get<ConSanRecordReplayEvidenceRequirements>(*deferred.evidence_requirements());
+  EXPECT_TRUE(requirements.complete());
+  EXPECT_GT(requirements.abi_plan.required_bytes, request.moi_auto_report_buffer_size);
+
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = request.moi_auto_report_buffer_size;
+  const TransformResult resumed = resume_consan_automatic_transform(
+      bytes, resources, std::move(std::get<ConSanDeferredBinding>(preparation)));
+
+  ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
+  EXPECT_EQ(resumed.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(resumed.warnings);
+  EXPECT_EQ(resumed.install_action(false), ConSanInstallAction::LoadReplacement);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->status,
+            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+            ConSanPipelineStageStatus::Completed);
+}
+
 TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedResume) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);

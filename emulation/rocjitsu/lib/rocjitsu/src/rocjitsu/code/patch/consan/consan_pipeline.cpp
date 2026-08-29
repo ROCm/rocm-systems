@@ -822,9 +822,13 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     } else if (flavor == ConSanFlavor::Moi) {
       switch (request.moi_engine) {
       case ConSanMoiEngine::RecordReplay:
+        // Dynamic append reports intentionally expose bounded-ring overflow.
+        // Their explicit byte cap chooses runtime ring capacity; it must not
+        // make the address-free semantic evidence contract incomplete.
         result.evidence_requirements = plan_consan_record_replay_evidence(
             *result.evidence_intent_plan,
-            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+            {.caller_ceiling_bytes =
+                 request.moi_dynamic_access_records ? 0u : request.moi_auto_report_buffer_size,
              .maximum_access_probe_count = maximum_access_probe_count});
         break;
       case ConSanMoiEngine::Sampled:
