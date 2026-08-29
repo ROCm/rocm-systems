@@ -98,20 +98,6 @@ ConSanPipelineStageState &stage_record(TransformResult &result, ConSanPipelineSt
   return result.stages[static_cast<size_t>(stage)];
 }
 
-[[nodiscard]] ConSanLoweringExecution lowering_execution_prefix(const TransformResult &result) {
-  ConSanLoweringExecution execution;
-  execution.program_inventory_passes =
-      result.stages[static_cast<size_t>(ConSanPipelineStage::ProgramInventory)].execution_count;
-  execution.observation_plan_passes =
-      result.stages[static_cast<size_t>(ConSanPipelineStage::ObservationPlan)].execution_count;
-  execution.resource_solving_and_lowering_passes =
-      result.stages[static_cast<size_t>(ConSanPipelineStage::ResourceSolvingAndLowering)]
-          .execution_count;
-  execution.final_validation_passes =
-      result.stages[static_cast<size_t>(ConSanPipelineStage::FinalValidation)].execution_count;
-  return execution;
-}
-
 void block_pipeline_after(TransformResult &result, ConSanPipelineStage completed_or_failed) {
   const size_t first_blocked = static_cast<size_t>(completed_or_failed) + 1u;
   const size_t publication = static_cast<size_t>(ConSanPipelineStage::ResultPublication);
@@ -591,41 +577,81 @@ TransformResult resume_consan_automatic_transform(std::span<const uint8_t> code_
   if (deferred.code_object() != make_consan_code_object_id(code_object_bytes))
     return invalid_resume("ConSan automatic resume does not match the prepared input image");
 
+  const ConSanEvidenceRequirements &evidence = *deferred.inventory_result_.evidence_requirements;
+  const ConSanContractIssue capability_issue =
+      validate_runtime_capabilities(deferred.capabilities_, runtime_requirements(evidence));
+  const ConSanContractIssue resource_contract_issue = validate_bound_runtime_resources(resources);
+  const ConSanContractIssue evidence_binding_issue = validate_evidence_binding(evidence, resources);
+  const ConSanContractIssue binding_issue =
+      capability_issue != ConSanContractIssue::None          ? capability_issue
+      : resource_contract_issue != ConSanContractIssue::None ? resource_contract_issue
+                                                             : evidence_binding_issue;
+  if (binding_issue != ConSanContractIssue::None) {
+    TransformResult rejected = std::move(deferred.inventory_result_);
+    ConSanPipelineStageState &binding = stage_record(rejected, ConSanPipelineStage::RuntimeBinding);
+    ++binding.execution_count;
+    rejected.discard_replacement(
+        "ConSan automatic resume rejected runtime evidence binding: issue=" +
+        std::string(consan_contract_issue_name(binding_issue)));
+    binding.contract_issue = binding_issue;
+    ++stage_record(rejected, ConSanPipelineStage::ResultPublication).execution_count;
+    return rejected;
+  }
+
+  TransformResult result = std::move(deferred.inventory_result_);
+  ConSanPipelineStageState &binding = stage_record(result, ConSanPipelineStage::RuntimeBinding);
+  ++binding.execution_count;
+  binding.status = ConSanPipelineStageStatus::Completed;
+  const ConSanLoweringObservation observation = {
+      .plan = result.observation_plan,
+      .initial_coverage = result.coverage_ledger,
+  };
+  ConSanLoweringExecution execution;
+  ConSanTransformArtifacts completed;
+
   switch (deferred.strategy_) {
   case ConSanDeferredBinding::ResumeStrategy::RetryMoiInventory: {
     ConSanOptions retry_options(deferred.request_, deferred.transform_policy_, deferred.debug_,
                                 deferred.requested_mutation_, deferred.capabilities_, resources);
-    ConSanTransformArtifacts retry_inventory = deferred.inventory_result_.take_lowering_artifacts();
-    ConSanLoweringExecution execution = lowering_execution_prefix(deferred.inventory_result_);
-    const ConSanLoweringObservation observation = {
-        .plan = retry_inventory.observation_plan,
-        .initial_coverage = retry_inventory.coverage_ledger,
-    };
-    ConSanTransformArtifacts retried =
+    ConSanTransformArtifacts retry_inventory = result.take_lowering_artifacts();
+    completed =
         retry_patch_consan_moi_from_inventory(std::move(retry_inventory), std::move(retry_options),
                                               code_object_bytes, &execution, &observation);
-    return execute_consan_transaction(
-        code_object_bytes, deferred.request_, deferred.transform_policy_, deferred.runtime_policy_,
-        deferred.debug_, deferred.requested_mutation_, deferred.capabilities_, resources,
-        std::move(retried), execution);
+    break;
   }
   case ConSanDeferredBinding::ResumeStrategy::RelowerFromInput: {
-    ConSanLoweringExecution execution = lowering_execution_prefix(deferred.inventory_result_);
-    ConSanLoweringObservation observation = {
-        .plan = deferred.inventory_result_.observation_plan,
-        .initial_coverage = deferred.inventory_result_.coverage_ledger,
-    };
-    return execute_consan_transaction(
-        code_object_bytes, deferred.request_, deferred.transform_policy_, deferred.runtime_policy_,
-        deferred.debug_, deferred.requested_mutation_, deferred.capabilities_, resources,
-        std::nullopt, execution, ConSanLoweringExtent::Complete, std::move(observation));
+    const ConSanOptions options(deferred.request_, deferred.transform_policy_, deferred.debug_,
+                                deferred.requested_mutation_, deferred.capabilities_, resources);
+    completed = lower_consan(code_object_bytes, options, &execution, ConSanLoweringExtent::Complete,
+                             &observation);
+    break;
   }
   case ConSanDeferredBinding::ResumeStrategy::InvokeExecutor:
     return deferred.executor_(code_object_bytes, deferred.request_, deferred.transform_policy_,
                               deferred.runtime_policy_, deferred.debug_,
                               deferred.requested_mutation_, deferred.capabilities_, resources);
   }
-  return invalid_resume("ConSan automatic resume has an invalid library strategy");
+
+  result.publish_lowering_artifacts(std::move(completed));
+  stage_record(result, ConSanPipelineStage::ProgramInventory).execution_count +=
+      execution.program_inventory_passes;
+  stage_record(result, ConSanPipelineStage::ObservationPlan).execution_count +=
+      execution.observation_plan_passes;
+  ConSanPipelineStageState &lowering =
+      stage_record(result, ConSanPipelineStage::ResourceSolvingAndLowering);
+  ConSanPipelineStageState &validation = stage_record(result, ConSanPipelineStage::FinalValidation);
+  lowering.execution_count += execution.resource_solving_and_lowering_passes;
+  validation.execution_count += execution.final_validation_passes;
+  lowering.status = lowering.execution_count == 0u ? ConSanPipelineStageStatus::Blocked
+                                                   : terminal_stage_status(result.outcome);
+  validation.status = validation.execution_count == 0u ? ConSanPipelineStageStatus::Blocked
+                                                       : terminal_stage_status(result.outcome);
+  if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
+    result.dispatch_requirements = build_dispatch_requirements(
+        result.program_inventory, result.coverage_ledger, result.private_lowering_.patches);
+  }
+  ++stage_record(result, ConSanPipelineStage::ResultPublication).execution_count;
+  return result;
 }
 
 TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding deferred,
@@ -706,9 +732,9 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
 
   ConSanLoweringExecution execution = supplied_execution.value_or(ConSanLoweringExecution{});
   ConSanTransformArtifacts lowering;
-  const bool staged_native_lowering =
-      !supplied_artifacts && !supplied_observation && extent == ConSanLoweringExtent::Complete &&
-      !mutation.has_mutation();
+  const bool staged_native_lowering = !supplied_artifacts && !supplied_observation &&
+                                      extent == ConSanLoweringExtent::Complete &&
+                                      !mutation.has_mutation();
   const ConSanLoweringExtent initial_extent =
       staged_native_lowering ? ConSanLoweringExtent::ThroughProgramInventory : extent;
   if (supplied_artifacts) {

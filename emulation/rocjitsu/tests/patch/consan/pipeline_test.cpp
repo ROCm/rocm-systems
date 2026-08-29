@@ -988,8 +988,10 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
@@ -1038,12 +1040,45 @@ TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
+  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(resumed.replacement, direct.replacement);
+}
+
+TEST(ConSanPipeline, AutomaticResumeRejectsBindingBeforeNativeLowering) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanAutomaticTransformPreparation preparation = prepare_consan_automatic_transform(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
+      complete_runtime_capabilities());
+  ASSERT_TRUE(std::holds_alternative<ConSanDeferredBinding>(preparation));
+
+  BoundRuntimeResources invalid;
+  invalid.scope = ConSanRuntimeResourceScope::Dispatch;
+  invalid.moi_report_buffer_address = 0x123456780000ull;
+  invalid.moi_report_buffer_size = sizeof(ConSanMoiReportHeader);
+  const TransformResult rejected = resume_consan_automatic_transform(
+      bytes, invalid, std::move(std::get<ConSanDeferredBinding>(preparation)));
+
+  ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
+  EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->status,
+            ConSanPipelineStageStatus::Unsupported);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
+            ConSanContractIssue::InvalidResourceScope);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
+            ConSanPipelineStageStatus::Blocked);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 0u);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::FinalValidation)->status,
+            ConSanPipelineStageStatus::Blocked);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::FinalValidation)->execution_count, 0u);
+  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
 }
 
 TEST(ConSanPipeline, AutomaticResumeRejectsDifferentInputIdentity) {
