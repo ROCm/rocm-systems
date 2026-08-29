@@ -10,14 +10,20 @@ struct TargetCase {
   rj_code_arch_t arch;
   rj_code_target_id_t target;
   std::string_view native_store;
+  std::string_view native_b96_store;
 };
 
 constexpr std::array kTargets = {
-    TargetCase{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, "ds_write_b32"},
-    TargetCase{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, "ds_write_b32"},
-    TargetCase{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100, "ds_store_b32"},
-    TargetCase{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250, "ds_store_b32"},
-    TargetCase{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201, "ds_store_b32"},
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942, "ds_write_b32",
+               "ds_write_b96"},
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950, "ds_write_b32",
+               "ds_write_b96"},
+    TargetCase{ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100, "ds_store_b32",
+               "ds_store_b96"},
+    TargetCase{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250, "ds_store_b32",
+               "ds_store_b96"},
+    TargetCase{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201, "ds_store_b32",
+               "ds_store_b96"},
 };
 
 ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
@@ -32,6 +38,29 @@ ConSanAccessInventorySite native_store_site(std::string_view mnemonic) {
   site.operands.data_vgpr = 7;
   site.mnemonic = std::string(mnemonic);
   return site;
+}
+
+ConSanAccessInventorySite complete_site(ConSanAccessInventorySite site, rj_code_arch_t arch,
+                                        rj_code_target_id_t target);
+
+TEST(ConSanAccessClassifier, NativeB96SpellingIsOwnedByTheTargetClassifier) {
+  for (const TargetCase &target : kTargets) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    ConSanAccessInventorySite expected = native_store_site(target.native_b96_store);
+    expected.decoded_width_bits = 96;
+    const ConSanAccessInventorySite admitted =
+        complete_site(std::move(expected), target.arch, target.target);
+    EXPECT_TRUE(admitted.lowering.replay_guest_access.available());
+
+    const std::string_view other_spelling =
+        target.native_b96_store == "ds_write_b96" ? "ds_store_b96" : "ds_write_b96";
+    ConSanAccessInventorySite mismatched = native_store_site(other_spelling);
+    mismatched.decoded_width_bits = 96;
+    const ConSanAccessInventorySite rejected =
+        complete_site(std::move(mismatched), target.arch, target.target);
+    EXPECT_EQ(rejected.lowering.replay_guest_access.reason,
+              ConSanAccessClassifierReason::UnsupportedMnemonic);
+  }
 }
 
 ConSanAccessInventorySite flat_store_site(uint32_t instruction_size) {

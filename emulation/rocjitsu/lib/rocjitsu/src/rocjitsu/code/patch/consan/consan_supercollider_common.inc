@@ -228,19 +228,18 @@ struct SplitTwoAddressLdsExpansionPlan {
 split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
                                      const ConSanAccessInventorySite &access,
                                      const ConSanTargetProfile &target) {
-  if (!target.requires_split_two_address_lds_relocation ||
-      (!is_two_address_lds_load(access.mnemonic) && !is_two_address_lds_store(access.mnemonic)))
+  if (!target.requires_split_two_address_lds_relocation || !access.lowering.form ||
+      access.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange)
     return std::nullopt;
-  const auto width_bits = two_address_lds_element_width_bits(access.mnemonic);
   std::array<uint32_t, 1> words{};
-  if (!width_bits || !read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
+  if (!read_words_at(original_bytes, access.file_offset, std::span<uint32_t>(words)))
     return std::nullopt;
-  const auto offsets = two_address_lds_byte_offsets(access.mnemonic, words.front());
+  const auto offsets = two_address_lds_byte_offsets(*access.lowering.form, words.front());
   if (!offsets)
     return std::nullopt;
   return SplitTwoAddressLdsExpansionPlan{
       .offsets = *offsets,
-      .element_dwords = static_cast<uint16_t>(*width_bits / 32u),
+      .element_dwords = static_cast<uint16_t>(access.lowering.form->element_width_bits / 32u),
   };
 }
 
@@ -694,10 +693,9 @@ build_split_single_address_lds_pair(const SplitTwoAddressLdsExpansionPlan &plan,
     if (preserve_address)
       duplicate_load[1] = (duplicate_load[1] & 0xFFFFFF00u) | saved_address_vgpr;
   } else if (site.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address = is_two_address_lds_store(site.mnemonic);
-    const uint32_t element_width =
-        two_address ? two_address_lds_element_width_bits(site.mnemonic).value_or(0u)
-                    : site.decoded_width_bits;
+    const bool two_address = site.lowering.form && site.lowering.form->kind ==
+                                                       ConSanAccessLoweringFormKind::NativeTwoRange;
+    const uint32_t element_width = site.lowering.form->element_width_bits;
     auto word0 =
         build_ds_load_word0_from_vds_word0(original_access[0], element_width, two_address, arch);
     if (!word0) {

@@ -882,8 +882,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
       const auto split_two_address =
           split_two_address_lds_expansion_plan(original_bytes, site, target);
-      if (target.requires_split_two_address_lds_relocation &&
-          (is_two_address_lds_load(site.mnemonic) || is_two_address_lds_store(site.mnemonic)) &&
+      if (target.requires_split_two_address_lds_relocation && site.lowering.form &&
+          site.lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange &&
           !split_two_address) {
         ++missing_width_plan_site_count;
         continue;
@@ -995,9 +995,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           request.forbidden.expand(
               {RegClass::VGPR, *site.operands.data_vgpr, static_cast<uint8_t>(data_vgprs)});
         if (site.operands.second_data_vgpr) {
-          const uint16_t per_address = static_cast<uint16_t>(
-              two_address_lds_element_width_bits(site.mnemonic).value_or(site.decoded_width_bits) /
-              32u);
+          const uint16_t per_address =
+              static_cast<uint16_t>(site.lowering.form->element_width_bits / 32u);
           request.forbidden.expand(
               {RegClass::VGPR, *site.operands.second_data_vgpr, static_cast<uint8_t>(per_address)});
         }

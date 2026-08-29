@@ -69,15 +69,7 @@ template <typename Range>
 [[nodiscard]] std::optional<uint16_t> native_data_register_count(
     const ConSanAccessInventorySite &access,
     const std::optional<consan_detail::NativeLdsTwoAddressForm> &two_address) {
-  constexpr std::array subdword = {
-      "ds_load_i8",      "ds_load_u8",          "ds_load_i16",     "ds_load_u16",
-      "ds_load_u8_d16",  "ds_load_u8_d16_hi",   "ds_load_i8_d16",  "ds_load_i8_d16_hi",
-      "ds_load_u16_d16", "ds_load_u16_d16_hi",  "ds_read_u8_d16",  "ds_read_u8_d16_hi",
-      "ds_read_i8_d16",  "ds_read_i8_d16_hi",   "ds_read_u16_d16", "ds_read_u16_d16_hi",
-      "ds_read_i16",     "ds_read_u16",         "ds_store_b8",     "ds_store_b8_d16_hi",
-      "ds_store_b16",    "ds_store_b16_d16_hi", "ds_write_b16",
-  };
-  if (named(access.mnemonic, subdword))
+  if (access.decoded_width_bits == 8u || access.decoded_width_bits == 16u)
     return 1u;
   if (two_address)
     return static_cast<uint16_t>(2u * two_address->element_width_bits / 32u);

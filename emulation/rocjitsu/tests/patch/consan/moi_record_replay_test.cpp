@@ -12162,7 +12162,7 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
   const ConSanTransformArtifacts result =
-      try_patch_consan_moi(std::move(inventory), options, bytes, ROCJITSU_CODE_ARCH_RDNA4);
+      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
@@ -12172,11 +12172,10 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
                                &ConSanCandidateResourcePlan::site_kind),
             0);
   ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(
-      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
-        return decision.kind == ConSanSiteDecisionKind::Unsupported &&
-               decision.reason == ConSanFencePolicyReason::MissingCommunicationEvent;
-      }));
+  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
+    EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(decision.reason, ConSanFencePolicyReason::MissingCommunicationEvent);
+  }
   EXPECT_NE(std::ranges::find(result.warnings,
                               "ConSan MOI fence record patch rejected all qualified "
                               "communication events"),
@@ -12214,7 +12213,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
   const ConSanTransformArtifacts result =
-      try_patch_consan_moi(std::move(inventory), options, bytes, ROCJITSU_CODE_ARCH_RDNA4);
+      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
@@ -12224,11 +12223,10 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
                                &ConSanCandidateResourcePlan::site_kind),
             0);
   ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(
-      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
-        return decision.kind == ConSanSiteDecisionKind::NotApplicable &&
-               decision.reason == ConSanFencePolicyReason::MissingExecutionOwner;
-      }));
+  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
+    EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::NotApplicable);
+    EXPECT_EQ(decision.reason, ConSanFencePolicyReason::MissingExecutionOwner);
+  }
 }
 
 TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured) {

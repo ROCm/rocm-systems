@@ -568,66 +568,26 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return static_cast<uint32_t>(addr_vgpr) | (static_cast<uint32_t>(dst_vgpr) << 24u);
 }
 
-[[nodiscard]] bool is_two_address_lds_store(std::string_view mnemonic) {
-  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
-  return form && form->kind == ConSanLdsAccessKind::Write;
-}
-
-[[nodiscard]] bool is_two_address_lds_load(std::string_view mnemonic) {
-  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
-  return form && form->kind == ConSanLdsAccessKind::Read;
-}
-
-[[nodiscard]] std::optional<uint32_t>
-two_address_lds_element_width_bits(std::string_view mnemonic) {
-  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
-  return form ? std::optional<uint32_t>(form->element_width_bits) : std::nullopt;
-}
-
 struct TwoAddressLdsByteOffsets {
   uint32_t first = 0;
   uint32_t second = 0;
 };
 
 [[nodiscard]] std::optional<TwoAddressLdsByteOffsets>
-two_address_lds_byte_offsets(std::string_view mnemonic, uint32_t word0) {
-  const auto scale = consan_detail::two_address_native_lds_offset_scale(mnemonic);
-  if (!scale)
+two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uint32_t word0) {
+  if (form.kind != ConSanAccessLoweringFormKind::NativeTwoRange ||
+      form.encoded_offset_scale_bytes == 0u)
     return std::nullopt;
   return TwoAddressLdsByteOffsets{
-      .first = (word0 & 0xffu) * *scale,
-      .second = ((word0 >> 8u) & 0xffu) * *scale,
+      .first = (word0 & 0xffu) * form.encoded_offset_scale_bytes,
+      .second = ((word0 >> 8u) & 0xffu) * form.encoded_offset_scale_bytes,
   };
 }
 
-[[nodiscard]] std::optional<uint16_t> lds_dword_count(std::string_view mnemonic,
-                                                      uint32_t width_bits) {
-  const bool is_two_addr_load = is_two_address_lds_load(mnemonic);
-  const bool is_two_addr_store = is_two_address_lds_store(mnemonic);
-  if (mnemonic == "ds_load_i8" || mnemonic == "ds_load_u8" || mnemonic == "ds_load_i16" ||
-      mnemonic == "ds_load_u16" || mnemonic == "ds_load_u8_d16" ||
-      mnemonic == "ds_load_u8_d16_hi" || mnemonic == "ds_load_i8_d16" ||
-      mnemonic == "ds_load_i8_d16_hi" || mnemonic == "ds_load_u16_d16" ||
-      mnemonic == "ds_load_u16_d16_hi" || mnemonic == "ds_read_u8_d16" ||
-      mnemonic == "ds_read_u8_d16_hi" || mnemonic == "ds_read_i8_d16" ||
-      mnemonic == "ds_read_i8_d16_hi" || mnemonic == "ds_read_u16_d16" ||
-      mnemonic == "ds_read_u16_d16_hi" || mnemonic == "ds_read_i16" || mnemonic == "ds_read_u16" ||
-      mnemonic == "ds_store_b8" || mnemonic == "ds_store_b8_d16_hi" || mnemonic == "ds_store_b16" ||
-      mnemonic == "ds_store_b16_d16_hi" || mnemonic == "ds_write_b16")
-    return 1;
-  if (is_two_addr_load || is_two_addr_store) {
-    const auto element_width = two_address_lds_element_width_bits(mnemonic);
-    if (!element_width)
-      return std::nullopt;
-    return static_cast<uint16_t>(2u * *element_width / 32u);
-  }
-  if (width_bits == 32 || width_bits == 64 || width_bits == 96 || width_bits == 128)
-    return static_cast<uint16_t>(width_bits / 32u);
-  return std::nullopt;
-}
-
 [[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access) {
-  return lds_dword_count(access.mnemonic, access.decoded_width_bits);
+  if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
+    return std::nullopt;
+  return access.lowering.form->data_register_count;
 }
 
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
@@ -682,9 +642,7 @@ two_address_lds_byte_offsets(std::string_view mnemonic, uint32_t word0) {
     return true;
   const uint16_t data_vgprs_per_address =
       access.operands.second_data_vgpr
-          ? static_cast<uint16_t>(two_address_lds_element_width_bits(access.mnemonic)
-                                      .value_or(access.decoded_width_bits) /
-                                  32u)
+          ? static_cast<uint16_t>(access.lowering.form->element_width_bits / 32u)
           : data_vgprs;
   if (access.operands.second_data_vgpr &&
       vgpr_ranges_overlap(candidate, required_vgprs, *access.operands.second_data_vgpr,
@@ -709,9 +667,7 @@ two_address_lds_byte_offsets(std::string_view mnemonic, uint32_t word0) {
   note_range(access.operands.data_vgpr, data_vgprs);
   note_range(access.operands.second_data_vgpr,
              access.operands.second_data_vgpr
-                 ? static_cast<uint16_t>(two_address_lds_element_width_bits(access.mnemonic)
-                                             .value_or(access.decoded_width_bits) /
-                                         32u)
+                 ? static_cast<uint16_t>(access.lowering.form->element_width_bits / 32u)
                  : data_vgprs);
   if (!first_after_operands)
     return 0;

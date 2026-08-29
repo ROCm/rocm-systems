@@ -2257,7 +2257,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
         EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
-        EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
+        EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
         ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
                   1u);
@@ -2397,7 +2397,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         const auto semantics = consan_flat_store_subword_semantics(candidate.mnemonic);
         ASSERT_TRUE(semantics);
         EXPECT_EQ(semantics->placement, form.placement);
-        EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
+        EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
         ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
                   1u);
@@ -2425,7 +2425,9 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(test_admitted_accesses(result).empty());
-  EXPECT_FALSE(consan_moi_supports_flat_access_mnemonic("flat_load_dwordx3"));
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  EXPECT_EQ(result.program_inventory.access_sites().front().lowering.replay_guest_access.reason,
+            ConSanAccessClassifierReason::UnsupportedMnemonic);
   ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
   EXPECT_EQ(result.observation_plan.site_decisions.front().kind,
             ConSanSiteDecisionKind::Unsupported);

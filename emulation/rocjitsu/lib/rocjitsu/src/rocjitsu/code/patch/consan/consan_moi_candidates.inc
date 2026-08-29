@@ -279,6 +279,10 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
       errors.emplace_back("ConSan MOI access intent lost its inventory site");
       return {};
     }
+    if (!access->lowering.normalized() || !access->lowering.replay_guest_access.available()) {
+      errors.emplace_back("ConSan MOI access intent was not backed by a replay lowering form");
+      return {};
+    }
     const auto [position, inserted] = candidate_index_by_offset.try_emplace(
         access->physical_id.original_text_offset, candidates.size());
     if (inserted) {

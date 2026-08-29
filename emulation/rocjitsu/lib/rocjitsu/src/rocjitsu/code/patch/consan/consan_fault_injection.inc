@@ -2422,10 +2422,12 @@ check_trap_compare_vgpr(const ConSanAccessInventorySite &access, uint16_t chunk_
                : std::nullopt;
   }
   if (access.kind == ConSanLdsAccessKind::Write) {
-    const bool two_address = is_two_address_lds_store(access.mnemonic);
-    const uint16_t dwords_per_address = static_cast<uint16_t>(
-        two_address ? two_address_lds_element_width_bits(access.mnemonic).value_or(0u) / 32u
-                    : access.decoded_width_bits / 32u);
+    const bool two_address =
+        access.lowering.form &&
+        access.lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
+    const uint16_t dwords_per_address =
+        static_cast<uint16_t>(two_address ? access.lowering.form->element_width_bits / 32u
+                                          : access.decoded_width_bits / 32u);
     const std::optional<uint16_t> base = two_address && chunk_index >= dwords_per_address
                                              ? access.operands.second_data_vgpr
                                              : access.operands.data_vgpr;

@@ -96,8 +96,8 @@ bool consan_detail::append_moi_resident_wave_owner(std::vector<uint32_t> &words,
 
 bool consan_detail::moi_guest_access_relocation_requires_adjusted_address(
     const ConSanMoiCandidate &candidate, const ConSanTargetProfile &target) {
-  return target.requires_split_two_address_lds_relocation &&
-         two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+  return target.requires_split_two_address_lds_relocation && candidate.is_native_two_range() &&
+         candidate.encoded_offset_scale_bytes() > 8u;
 }
 
 std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_access_words(
@@ -120,8 +120,7 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
     return words;
   };
 
-  const auto two_address_scale = two_address_native_lds_offset_scale(candidate.mnemonic);
-  if (!target.requires_split_two_address_lds_relocation || !two_address_scale)
+  if (!target.requires_split_two_address_lds_relocation || !candidate.is_native_two_range())
     return copy_original();
 
   const auto &ranges = candidate.ranges;
@@ -442,8 +441,6 @@ namespace {
 using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::ConSanMoiDispatchIdCapture;
-using consan_detail::is_single_range_native_lds_mnemonic;
-using consan_detail::is_supported_moi_flat_access_mnemonic;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
@@ -458,7 +455,6 @@ using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
-using consan_detail::two_address_native_lds_offset_scale;
 
 [[nodiscard]] std::optional<uint16_t>
 scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
@@ -676,15 +672,6 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.inc"
-
-bool consan_moi_supports_flat_access_mnemonic(std::string_view mnemonic) {
-  return is_supported_moi_flat_access_mnemonic(mnemonic);
-}
-
-bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_arch_t arch) {
-  return is_single_range_native_lds_mnemonic(mnemonic, arch) ||
-         two_address_native_lds_offset_scale(mnemonic).has_value();
-}
 
 ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                               const MoiOptions &options,

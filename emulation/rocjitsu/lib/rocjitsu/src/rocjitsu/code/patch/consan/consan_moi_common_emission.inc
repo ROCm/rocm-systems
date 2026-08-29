@@ -823,8 +823,7 @@ private:
     errors.emplace_back("ConSan MOI flat-address probe requires one normalized access range");
     return std::nullopt;
   }
-  if (capture_high_bank_address && load_clobbers_address &&
-      two_address_native_lds_offset_scale(candidate.mnemonic)) {
+  if (capture_high_bank_address && load_clobbers_address && candidate.is_native_two_range()) {
     errors.emplace_back("ConSan MOI first-light probe cannot yet preserve a clobbered high-bank "
                         "gfx1250 two-address LDS operand");
     return std::nullopt;

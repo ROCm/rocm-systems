@@ -17,13 +17,26 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   /// a larger replacement body, but that does not change this displaced span.
   [[nodiscard]] uint32_t size() const { return instruction_size; }
   /// Return the normalized width in bits of each semantic access range.
-  [[nodiscard]] uint32_t width_bits() const { return decoded_width_bits; }
+  [[nodiscard]] uint32_t width_bits() const {
+    return lowering.form ? lowering.form->element_width_bits : 0u;
+  }
+  /// Return whether the classifier normalized this as a two-range native
+  /// operation. Lowering must not recover this fact from the mnemonic.
+  [[nodiscard]] bool is_native_two_range() const {
+    return lowering.form && lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
+  }
+  /// Return the classifier-owned encoded offset scale.
+  [[nodiscard]] uint32_t encoded_offset_scale_bytes() const {
+    return lowering.form ? lowering.form->encoded_offset_scale_bytes : 0u;
+  }
   /// Return the nonnegative displacement consumed by native emission. FLAT
   /// lowering first materializes its complete effective address, so its
   /// inventory displacement must not be applied a second time. Admitted
   /// native sites always carry a representable decoded displacement.
   [[nodiscard]] uint32_t lowering_offset(const ConSanAccessRange &range) const {
-    return origin == ConSanAccessOrigin::Flat
+    return lowering.form &&
+                   (lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
+                    lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress)
                ? 0u
                : static_cast<uint32_t>(range.static_byte_offset.value());
   }

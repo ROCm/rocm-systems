@@ -1191,11 +1191,11 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
       consan_uses_gfx12_encoding(arch) && options.moi_dynamic_stack_spill
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
           : 0u;
-  const uint16_t two_address_replay_count =
-      consan_uses_gfx12_cdna_execution(arch) &&
-              two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
-          ? 1u
-          : 0u;
+  const uint16_t two_address_replay_count = consan_uses_gfx12_cdna_execution(arch) &&
+                                                    candidate.is_native_two_range() &&
+                                                    candidate.encoded_offset_scale_bytes() > 8u
+                                                ? 1u
+                                                : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       ((candidate.origin == ConSanAccessOrigin::DirectToLds ||
@@ -1226,11 +1226,11 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
                                                     const ConSanMoiCandidate &candidate,
                                                     rj_code_arch_t arch) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
-  const uint16_t two_address_replay_count =
-      consan_uses_gfx12_cdna_execution(arch) &&
-              two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
-          ? 1u
-          : 0u;
+  const uint16_t two_address_replay_count = consan_uses_gfx12_cdna_execution(arch) &&
+                                                    candidate.is_native_two_range() &&
+                                                    candidate.encoded_offset_scale_bytes() > 8u
+                                                ? 1u
+                                                : 0u;
   return static_cast<uint16_t>(
       // Reserve the identity-bank register even when address sampling is
       // disabled. Auto-sized reports use multiple workgroup banks in that
@@ -1784,8 +1784,8 @@ struct MoiOwnerRegisterReferenceSummary {
                  moi_access_requires_high_bank_address_capture(candidate, arch)
              ? 1u
              : 0u) +
-        (consan_uses_gfx12_cdna_execution(arch) &&
-                 two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
+        (consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
+                 candidate.encoded_offset_scale_bytes() > 8u
              ? 1u
              : 0u));
   case ConSanMoiEngine::InlineShadow:
@@ -3304,7 +3304,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
   }
   const bool guest_replay_needs_disjoint_address_scratch =
       access_candidate != nullptr && consan_arch_has_selectable_vgpr_bank(state.arch) &&
-      two_address_native_lds_offset_scale(access_candidate->mnemonic).value_or(0u) > 8u;
+      access_candidate->is_native_two_range() &&
+      access_candidate->encoded_offset_scale_bytes() > 8u;
   const bool supports_access_operand_overlap_spill =
       (options.moi_engine == ConSanMoiEngine::InlineShadow &&
        !guest_replay_needs_disjoint_address_scratch) ||

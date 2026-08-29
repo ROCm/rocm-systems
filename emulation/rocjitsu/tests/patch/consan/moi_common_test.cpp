@@ -1895,9 +1895,12 @@ TEST(ConSanMoi, LoweringOffsetsPreserveNativeRangesAndDoNotReapplyFlatImmediate)
   ConSanMoiCandidate candidate;
   ConSanAccessRange range{.id = {}, .static_byte_offset = -8, .byte_width = 4u};
   candidate.origin = ConSanAccessOrigin::Flat;
+  candidate.lowering.form.emplace();
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::FlatVectorAddress;
   EXPECT_EQ(candidate.lowering_offset(range), 0u);
 
   candidate.origin = ConSanAccessOrigin::NativeLds;
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
   range.static_byte_offset = 3u * 256u;
   EXPECT_EQ(candidate.lowering_offset(range), 3u * 256u);
 }
@@ -3103,27 +3106,6 @@ TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
       result.program_inventory.arch(), ROCJITSU_CODE_TARGET_GFX942);
   result.program_inventory = display_target_revision.view();
   EXPECT_EQ(plan_test_moi_evidence_inventory(result, options).access_range_count, 1u);
-}
-
-TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
-  for (std::string_view mnemonic : {"ds_load_b96", "ds_store_b96"}) {
-    SCOPED_TRACE(mnemonic);
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA5));
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
-  }
-  for (std::string_view mnemonic : {"ds_read_b96", "ds_write_b96"}) {
-    SCOPED_TRACE(mnemonic);
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA5));
-  }
 }
 
 TEST(ConSanMoi, SharedAccessShapeContractOwnsTwoRangeAndFlatVocabulary) {
