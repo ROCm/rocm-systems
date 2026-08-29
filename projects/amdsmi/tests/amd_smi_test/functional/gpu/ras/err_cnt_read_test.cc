@@ -81,7 +81,7 @@ void TestErrCntRead::Run(void) {
           std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask << std::endl;
         }
       }
-      for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+      for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "gpu=" + std::to_string(i), VERB(STANDARD));
         err = amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                         &err_state);
