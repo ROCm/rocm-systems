@@ -175,9 +175,8 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
-                            int (*func)(const sigset_t*, int*), const sigset_t* set_v,
-                            int* sig) const noexcept
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_t*, int*),
+                            const sigset_t* set_v, int* sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
     if(s_shutdown.load(std::memory_order_relaxed))
