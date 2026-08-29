@@ -63,6 +63,8 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
     } \
   } while (0)
 
+#include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before group.cc includes it
+
 // Pull in the unit under test so its file-static helpers (groupLaunch,
 // asyncJobLaunch, groupLaunchNonBlocking, ...) are visible. Must come after the
 // headers / fakes it depends on are in scope.

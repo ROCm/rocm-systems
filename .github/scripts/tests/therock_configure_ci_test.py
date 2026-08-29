@@ -531,7 +531,7 @@ class ConfigureCITest(unittest.TestCase):
             "sanity", "hip-tests", "hipfile", "rocblas", "rocroller",
             "tensilelite", "origami", "hipblas", "amdsmi", "hipblaslt",
             "hipsolver", "rocsolver", "rocprim", "hipcub", "rocgdb-cpu",
-            "rocgdb-gpu", "rocr-debug-agent", "rocthrust", "hipsparse",
+            "rocgdb-gpu", "rocgdb-corefile", "rocr-debug-agent", "rocthrust", "hipsparse",
             "rocsparse", "hipsparselt", "rocrand", "hiprand", "rocfft",
             "hipfft", "miopen", "rccl", "rocshmem", "rocprofiler-sdk",
             "hipdnn", "hipdnn_install", "hipdnn-integration-tests",
