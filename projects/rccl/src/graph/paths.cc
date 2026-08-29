@@ -1238,7 +1238,11 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
   // gfx1250 full pool on single node only; the NET path stays at the historical bound.
   bool gfx1250SingleNode =
     comm->nNodes == 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
-  int defaultMax = gfx1250SingleNode ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
+  // Clamp by CU count; pow2Down since ncclP2pChannelForPart masks with (n - 1).
+  // cu <= 0 means the topology never reported it: leave the pool unclamped.
+  int cu = comm->topo->nodes[GPU].nodes[0].gpu.cu;
+  int cuBound = (cu > 0) ? pow2Down(std::min(cu, (int)MAXCHANNELS)) : (int)MAXCHANNELS;
+  int defaultMax = gfx1250SingleNode ? cuBound : 4 * CHANNEL_LIMIT;
   bool userOptedHigher = (userMaxP2pParam != -2 && userMaxP2pParam > defaultMax);
   if (userOptedHigherOut != nullptr) *userOptedHigherOut = userOptedHigher;
   // pow2Down: ncclP2pChannelForPart masks with (nP2pChannels - 1). defaultMax is pow2.
