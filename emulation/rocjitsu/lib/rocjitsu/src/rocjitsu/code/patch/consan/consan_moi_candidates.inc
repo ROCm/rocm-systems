@@ -134,15 +134,6 @@ void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const MoiOptions &op
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
-[[nodiscard]] bool equals_any(std::string_view value,
-                              std::initializer_list<std::string_view> candidates) {
-  for (std::string_view candidate : candidates) {
-    if (value == candidate)
-      return true;
-  }
-  return false;
-}
-
 [[nodiscard]] std::optional<uint32_t> read_u32(std::span<const uint8_t> bytes, uint64_t offset) {
   if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
     return std::nullopt;

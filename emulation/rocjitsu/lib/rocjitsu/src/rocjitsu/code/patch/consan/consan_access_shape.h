@@ -90,7 +90,10 @@ struct ConSanAccessLoweringForm {
   uint32_t element_width_bits = 0;
   uint32_t range_count = 0;
   uint32_t encoded_offset_scale_bytes = 0;
+  uint16_t element_register_count = 0;
   uint16_t data_register_count = 0;
+  uint16_t destination_register_count = 0;
+  uint16_t address_vgpr_count = 0;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> destination_accvgpr;

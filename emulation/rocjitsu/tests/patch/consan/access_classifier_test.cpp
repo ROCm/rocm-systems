@@ -106,7 +106,10 @@ TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTar
     EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::NativeSingleRange);
     EXPECT_EQ(site.lowering.form->range_count, 1u);
     EXPECT_EQ(site.lowering.form->element_width_bits, 32u);
+    EXPECT_EQ(site.lowering.form->element_register_count, 1u);
     EXPECT_EQ(site.lowering.form->data_register_count, 1u);
+    EXPECT_EQ(site.lowering.form->destination_register_count, 0u);
+    EXPECT_EQ(site.lowering.form->address_vgpr_count, 1u);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_TRUE(site.lowering.compare_observed_value.available());
     EXPECT_EQ(site.lowering, classify_consan_access_lowering(site, target.arch));
@@ -127,6 +130,9 @@ TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabula
     ASSERT_TRUE(site.lowering.normalized());
     ASSERT_TRUE(site.lowering.form);
     EXPECT_EQ(site.lowering.form->kind, ConSanAccessLoweringFormKind::FlatVectorAddress);
+    EXPECT_EQ(site.lowering.form->address_vgpr_count, 2u);
+    EXPECT_EQ(site.lowering.form->element_register_count, 1u);
+    EXPECT_EQ(site.lowering.form->destination_register_count, 0u);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_TRUE(site.lowering.compare_observed_value.available());
   }
@@ -165,6 +171,11 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
       const ConSanAccessInventorySite site =
           complete_site(std::move(input), target.arch, target.target);
       EXPECT_EQ(site.lowering.replay_guest_access.available(), test.supported);
+      if (test.supported && test.kind == ConSanLdsAccessKind::Read) {
+        ASSERT_TRUE(site.lowering.form);
+        EXPECT_EQ(site.lowering.form->destination_register_count,
+                  site.lowering.form->data_register_count);
+      }
       if (!test.supported) {
         EXPECT_EQ(site.lowering.replay_guest_access.reason,
                   ConSanAccessClassifierReason::UnsupportedMnemonic);

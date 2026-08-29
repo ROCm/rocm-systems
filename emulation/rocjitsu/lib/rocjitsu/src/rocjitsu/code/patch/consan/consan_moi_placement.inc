@@ -947,15 +947,22 @@ struct MoiSgprRange {
 [[nodiscard]] std::optional<uint16_t>
 candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors) {
-  // Direct-to-LDS candidates materialize their implicit physical-lane address
-  // into dedicated scratch before this placeholder can be consumed.
-  if (candidate.origin == ConSanAccessOrigin::DirectToLds)
+  if (!candidate.lowering.form) {
+    errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
+    return std::nullopt;
+  }
+  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  // Direct-to-LDS candidates materialize their lane or explicit target
+  // address into dedicated scratch before this placeholder is consumed.
+  if (form.kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed ||
+      form.kind == ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress) {
     return 0u;
-  if (!candidate.operands.address_vgpr) {
+  }
+  if (!form.address_vgpr || form.address_vgpr_count == 0u) {
     errors.emplace_back("ConSan MOI probe requires an LDS address VGPR");
     return std::nullopt;
   }
-  return *candidate.operands.address_vgpr;
+  return *form.address_vgpr;
 }
 
 [[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
@@ -1091,30 +1098,16 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
 }
 
 [[nodiscard]] uint16_t candidate_payload_vgpr_count(const ConSanMoiCandidate &candidate) {
-  if (candidate.width_bits() == 0)
-    return 1;
-  const bool two_address = equals_any(
-      candidate.mnemonic, {"ds_load_2addr_b32", "ds_load_2addr_b64", "ds_load_2addr_stride64_b32",
-                           "ds_load_2addr_stride64_b64", "ds_store_2addr_b32", "ds_store_2addr_b64",
-                           "ds_store_2addr_stride64_b32", "ds_store_2addr_stride64_b64"});
-  const uint32_t per_address = std::max<uint32_t>((candidate.width_bits() + 31u) / 32u, 1u);
-  return static_cast<uint16_t>(per_address * (two_address ? 2u : 1u));
-}
-
-[[nodiscard]] uint16_t
-candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
-  if (candidate.width_bits() == 0)
-    return 1;
-  return static_cast<uint16_t>(std::max<uint32_t>((candidate.width_bits() + 31u) / 32u, 1u));
+  return candidate.lowering.form ? candidate.lowering.form->data_register_count : 0u;
 }
 
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
-  if (!candidate.operands.address_vgpr || !candidate.operands.destination_vgpr)
+  const ConSanAccessLoweringForm *form =
+      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+  if (form == nullptr || !form->address_vgpr || !form->destination_vgpr)
     return false;
-  const uint16_t address_vgpr_count = candidate.origin == ConSanAccessOrigin::Flat ? 2u : 1u;
-  return range_overlaps(*candidate.operands.address_vgpr, address_vgpr_count,
-                        *candidate.operands.destination_vgpr,
-                        candidate_payload_vgpr_count(candidate));
+  return range_overlaps(*form->address_vgpr, form->address_vgpr_count, *form->destination_vgpr,
+                        form->destination_register_count);
 }
 
 [[nodiscard]] bool
@@ -1125,9 +1118,12 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
   // SRC0 bank must be copied while that bank is still selected. The appended
   // probe subsequently selects bank zero for its own scratch registers.
-  return consan_arch_has_selectable_vgpr_bank(arch) &&
-         candidate.origin != ConSanAccessOrigin::Flat && candidate.operands.address_vgpr &&
-         (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;
+  const ConSanAccessLoweringForm *form =
+      candidate.lowering.form ? &*candidate.lowering.form : nullptr;
+  return consan_arch_has_selectable_vgpr_bank(arch) && form != nullptr &&
+         form->kind != ConSanAccessLoweringFormKind::FlatVectorAddress &&
+         form->kind != ConSanAccessLoweringFormKind::FlatScalarVectorAddress &&
+         form->address_vgpr && (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;
 }
 
 // A Sampled store executes its displaced guest instruction before the probe
@@ -1284,32 +1280,31 @@ struct SampledAtomicScratchLayout {
                                                           uint16_t scratch_vgpr,
                                                           uint16_t scratch_count,
                                                           std::vector<std::string> &errors) {
-  auto address_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
-  if (!address_vgpr)
+  if (!candidate.lowering.form) {
+    errors.emplace_back("ConSan MOI probe requires a normalized access lowering form");
     return true;
-  const uint16_t address_vgpr_count = candidate.origin == ConSanAccessOrigin::Flat ? 2u : 1u;
-  if (range_overlaps(*address_vgpr, address_vgpr_count, scratch_vgpr, scratch_count)) {
+  }
+  const ConSanAccessLoweringForm &form = *candidate.lowering.form;
+  if (form.address_vgpr && form.address_vgpr_count != 0u &&
+      range_overlaps(*form.address_vgpr, form.address_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the LDS address VGPRs");
     return true;
   }
-  const uint16_t payload_vgpr_count = candidate_payload_vgpr_count(candidate);
-  if (candidate.operands.destination_vgpr &&
-      range_overlaps(*candidate.operands.destination_vgpr, payload_vgpr_count, scratch_vgpr,
+  if (form.destination_vgpr && form.destination_register_count != 0u &&
+      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
                      scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the destination VGPRs");
     return true;
   }
-  const uint16_t data_vgpr_count = candidate.operands.second_data_vgpr
-                                       ? candidate_payload_vgpr_count_per_address(candidate)
-                                       : payload_vgpr_count;
-  if (candidate.operands.data_vgpr &&
-      range_overlaps(*candidate.operands.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
+  const uint16_t data_vgpr_count =
+      form.second_data_vgpr ? form.element_register_count : form.data_register_count;
+  if (form.data_vgpr &&
+      range_overlaps(*form.data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the data VGPRs");
     return true;
   }
-  if (candidate.operands.second_data_vgpr &&
-      range_overlaps(*candidate.operands.second_data_vgpr, data_vgpr_count, scratch_vgpr,
-                     scratch_count)) {
+  if (form.second_data_vgpr &&
+      range_overlaps(*form.second_data_vgpr, data_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the second data VGPRs");
     return true;
   }
@@ -3197,25 +3192,24 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
   // expose the first destination register, so supplement them before choosing
   // a liveness-dead window rather than rejecting the chosen window later.
   if (access_candidate != nullptr) {
-    if (access_candidate->operands.address_vgpr) {
-      const uint8_t address_count = access_candidate->origin == ConSanAccessOrigin::Flat ? 2u : 1u;
-      request.forbidden.expand(
-          {RegClass::VGPR, *access_candidate->operands.address_vgpr, address_count});
-    }
-    const uint8_t payload_count =
-        static_cast<uint8_t>(candidate_payload_vgpr_count(*access_candidate));
-    if (access_candidate->operands.destination_vgpr)
-      request.forbidden.expand(
-          {RegClass::VGPR, *access_candidate->operands.destination_vgpr, payload_count});
-    const uint8_t data_count =
-        access_candidate->operands.second_data_vgpr
-            ? static_cast<uint8_t>(candidate_payload_vgpr_count_per_address(*access_candidate))
-            : payload_count;
-    if (access_candidate->operands.data_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *access_candidate->operands.data_vgpr, data_count});
-    if (access_candidate->operands.second_data_vgpr) {
-      request.forbidden.expand(
-          {RegClass::VGPR, *access_candidate->operands.second_data_vgpr, data_count});
+    const ConSanAccessLoweringForm *form =
+        access_candidate->lowering.form ? &*access_candidate->lowering.form : nullptr;
+    if (form != nullptr) {
+      if (form->address_vgpr && form->address_vgpr_count != 0u) {
+        request.forbidden.expand(
+            {RegClass::VGPR, *form->address_vgpr, static_cast<uint8_t>(form->address_vgpr_count)});
+      }
+      if (form->destination_vgpr && form->destination_register_count != 0u) {
+        request.forbidden.expand({RegClass::VGPR, *form->destination_vgpr,
+                                  static_cast<uint8_t>(form->destination_register_count)});
+      }
+      const uint8_t data_count = static_cast<uint8_t>(
+          form->second_data_vgpr ? form->element_register_count : form->data_register_count);
+      if (form->data_vgpr)
+        request.forbidden.expand({RegClass::VGPR, *form->data_vgpr, data_count});
+      if (form->second_data_vgpr) {
+        request.forbidden.expand({RegClass::VGPR, *form->second_data_vgpr, data_count});
+      }
     }
   }
   // Atomic address/payload widths come from the classifier-owned lowering form.

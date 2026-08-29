@@ -307,6 +307,7 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     form.kind = access.operands.address_vgpr
                     ? ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress
                     : ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+    form.address_vgpr_count = access.operands.address_vgpr ? 1u : 0u;
     form.data_register_count = static_cast<uint16_t>((access.decoded_width_bits + 31u) / 32u);
     replay = Reason::None;
   } else if (access.origin == ConSanAccessOrigin::NativeLds) {
@@ -319,6 +320,7 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     const auto register_count = native_data_register_count(access, two_address);
     if (!register_count)
       return reject(Reason::UnsupportedMnemonic);
+    form.address_vgpr_count = 1u;
     form.data_register_count = *register_count;
     replay = is_replayable_single_range_native_lds(access.mnemonic, arch) || two_address ||
                      is_relaxed_lds_atomic(access.mnemonic)
@@ -340,6 +342,7 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
                                        *access.operands.raw_saddr != vector_flat_no_saddr(arch);
     form.kind = scalar_vector_address ? ConSanAccessLoweringFormKind::FlatScalarVectorAddress
                                       : ConSanAccessLoweringFormKind::FlatVectorAddress;
+    form.address_vgpr_count = scalar_vector_address ? 1u : 2u;
     if (scalar_vector_address)
       form.scalar_address_sgpr = static_cast<uint16_t>(*access.operands.raw_saddr);
 
@@ -367,6 +370,9 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
   } else {
     return reject(Reason::UnsupportedEncoding);
   }
+
+  form.element_register_count = static_cast<uint16_t>((form.element_width_bits + 31u) / 32u);
+  form.destination_register_count = form.destination_vgpr ? form.data_register_count : 0u;
 
   return {
       .form = form,
