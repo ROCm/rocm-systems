@@ -4,7 +4,7 @@
 #include "hsa/hsa_api_trace_minimal.h"
 
 #include "rocjitsu/checked_byte_budget.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_pipeline.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"

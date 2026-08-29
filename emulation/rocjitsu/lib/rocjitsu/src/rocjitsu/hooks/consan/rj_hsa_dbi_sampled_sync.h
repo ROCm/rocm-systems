@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_HOOKS_RJ_HSA_DBI_SAMPLED_SYNC_H_
 #define ROCJITSU_HOOKS_RJ_HSA_DBI_SAMPLED_SYNC_H_
 
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 
 #include <cstdint>
 #include <limits>

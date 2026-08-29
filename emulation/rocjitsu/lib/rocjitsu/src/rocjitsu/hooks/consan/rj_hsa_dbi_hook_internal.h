@@ -6,7 +6,7 @@
 #include "hsa/hsa_api_trace_minimal.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_analyzer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"

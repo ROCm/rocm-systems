@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_transform_debug.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
