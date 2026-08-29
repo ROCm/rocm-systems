@@ -1327,11 +1327,13 @@ private:
         inaccessible_passthrough_pages_.fetch_add(1, std::memory_order_relaxed) + 1;
     // Loud for the first few, then counted: a workload that runs off the end of
     // an allocation can do it in every wave of every dispatch.
+    // Logger::warn, not Logger::vm: the VM group is compiled out unless the
+    // build sets RJ_LOG_GROUPS, and this is a fault the user needs to see in a
+    // default build. It used to end the process, so silence is not an option.
     if (count <= kInaccessiblePassthroughReports)
-      util::Logger::vm("GPU memory passthrough page is not accessible: page=0x", std::hex,
-                       page_addr, std::dec, " count=", count,
-                       " (access dropped; reads return zero)");
-    return;
+      util::Logger::warn("GPU memory passthrough page is not accessible: page=0x", std::hex,
+                         page_addr, std::dec, " count=", count,
+                         " (access dropped; reads return zero)");
   }
 
   template <typename F> bool with_page_mapping(uint64_t addr, uint32_t vmid, F &&fn) const {
