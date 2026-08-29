@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_analyzer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_trust.h"
 
@@ -548,36 +549,6 @@ flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
 [[nodiscard]] inline const char *hook_policy_name(HookPolicy policy) {
   return policy == HookPolicy::Default ? "default" : "strict";
 }
-
-[[nodiscard]] constexpr uint64_t
-record_replay_bank_saturation_count(const ConSanMoiReportHeader &header, ConSanMoiEngine engine) {
-  return engine == ConSanMoiEngine::RecordReplay &&
-                 (header.flags & kConSanMoiReportFlagRecordReplayBankSaturated) != 0u
-             ? 1u
-             : 0u;
-}
-
-struct RecordReplayPressureTelemetry {
-  bool available = false;
-  bool saturated = false;
-  enum class UnavailableReason : uint8_t {
-    None,
-    NotRecordReplay,
-    NoDispatchDirectory,
-    NoAccessTable,
-    NoLogicalAccessRanges,
-  } unavailable_reason = UnavailableReason::None;
-  uint64_t occupied_access_record_count = 0;
-  uint64_t access_record_capacity = 0;
-  uint64_t observed_site_count = 0;
-  uint64_t maximum_site_owner_address_group_count = 0;
-  uint32_t address_group_headroom = 0;
-  uint32_t logical_access_range_count = 0;
-  // Meaningful only when maximum_site_owner_address_group_count is nonzero.
-  uint32_t maximum_site_token = 0;
-  uint64_t invalid_site_token_count = 0;
-};
-
 struct CompactRecordReplayAccessRecords {
   uint32_t committed_record_count = 0;
   std::vector<ConSanMoiAccessRecord> replay_records;
@@ -598,116 +569,6 @@ compact_record_replay_access_records(std::span<const ConSanMoiAccessRecord> reco
     // unsupported instead of hiding malformed publication evidence.
     if (!consan_moi_access_record_is_unpublished(record))
       result.replay_records.push_back(record);
-  }
-  return result;
-}
-
-[[nodiscard]] constexpr std::string_view record_replay_pressure_unavailable_reason_name(
-    RecordReplayPressureTelemetry::UnavailableReason reason) {
-  using Reason = RecordReplayPressureTelemetry::UnavailableReason;
-  switch (reason) {
-  case Reason::None:
-    return "none";
-  case Reason::NotRecordReplay:
-    return "not_record_replay";
-  case Reason::NoDispatchDirectory:
-    return "no_dispatch_directory";
-  case Reason::NoAccessTable:
-    return "no_access_table";
-  case Reason::NoLogicalAccessRanges:
-    return "no_logical_access_ranges";
-  }
-  return "unknown";
-}
-
-/// Summarizes the bounded automatic Record/Replay access table. Dynamic
-/// address-group fanout is counted for each static-site, dispatch, workgroup,
-/// and wave identity, so launch size does not masquerade as divergence. A
-/// false available bit distinguishes a named non-automatic layout reason from
-/// a valid automatic table with zero occupancy.
-[[nodiscard]] inline RecordReplayPressureTelemetry
-record_replay_pressure_telemetry(const ConSanMoiReportHeader &header, ConSanMoiEngine engine,
-                                 std::span<const ConSanMoiAccessRecord> records,
-                                 uint32_t logical_access_range_count,
-                                 uint32_t address_group_headroom) {
-  RecordReplayPressureTelemetry result;
-  result.saturated = record_replay_bank_saturation_count(header, engine) != 0;
-  if (engine != ConSanMoiEngine::RecordReplay) {
-    result.unavailable_reason = RecordReplayPressureTelemetry::UnavailableReason::NotRecordReplay;
-    return result;
-  }
-  if (header.record_replay_dispatch_token_capacity == 0) {
-    result.unavailable_reason =
-        RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory;
-    return result;
-  }
-  if (header.access_record_capacity == 0) {
-    result.unavailable_reason = RecordReplayPressureTelemetry::UnavailableReason::NoAccessTable;
-    return result;
-  }
-  if (logical_access_range_count == 0) {
-    result.unavailable_reason =
-        RecordReplayPressureTelemetry::UnavailableReason::NoLogicalAccessRanges;
-    return result;
-  }
-
-  result.available = true;
-  result.access_record_capacity = header.access_record_capacity;
-  result.address_group_headroom = address_group_headroom;
-  result.logical_access_range_count = logical_access_range_count;
-  std::vector<uint32_t> committed_record_indices(records.size());
-  size_t committed_record_count = 0;
-  for (size_t index = 0; index < records.size(); ++index) {
-    const ConSanMoiAccessRecord &record = records[index];
-    if (record.access_kind == static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty))
-      continue;
-    ++result.occupied_access_record_count;
-    if (record.site_token >= logical_access_range_count) {
-      ++result.invalid_site_token_count;
-      continue;
-    }
-    committed_record_indices[committed_record_count++] = static_cast<uint32_t>(index);
-  }
-
-  const auto owner_key = [&](uint32_t index) {
-    const ConSanMoiAccessRecord &record = records[index];
-    return std::tuple{record.site_token,  record.generation,  record.workgroup_x,
-                      record.workgroup_y, record.workgroup_z, record.wave_id};
-  };
-  const auto address_group_key = [&](uint32_t index) {
-    const ConSanMoiAccessRecord &record = records[index];
-    return std::tuple{record.site_token,     record.generation,  record.workgroup_x,
-                      record.workgroup_y,    record.workgroup_z, record.wave_id,
-                      record.lds_byte_offset};
-  };
-  std::sort(committed_record_indices.begin(),
-            committed_record_indices.begin() + committed_record_count,
-            [&](uint32_t left, uint32_t right) {
-              return address_group_key(left) < address_group_key(right);
-            });
-  std::optional<decltype(owner_key(0u))> prior_owner;
-  std::optional<uint32_t> prior_site;
-  std::optional<uint32_t> prior_address;
-  uint64_t owner_address_group_count = 0;
-  for (size_t index = 0; index < committed_record_count; ++index) {
-    const uint32_t record_index = committed_record_indices[index];
-    const ConSanMoiAccessRecord &record = records[record_index];
-    const auto current_owner = owner_key(record_index);
-    if (!prior_site || *prior_site != record.site_token) {
-      ++result.observed_site_count;
-      prior_site = record.site_token;
-    }
-    if (!prior_owner || *prior_owner != current_owner) {
-      owner_address_group_count = 1;
-    } else if (!prior_address || *prior_address != record.lds_byte_offset) {
-      ++owner_address_group_count;
-    }
-    prior_owner = current_owner;
-    prior_address = record.lds_byte_offset;
-    if (owner_address_group_count > result.maximum_site_owner_address_group_count) {
-      result.maximum_site_owner_address_group_count = owner_address_group_count;
-      result.maximum_site_token = record.site_token;
-    }
   }
   return result;
 }

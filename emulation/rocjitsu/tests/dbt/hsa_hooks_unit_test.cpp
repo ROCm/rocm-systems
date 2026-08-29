@@ -3429,6 +3429,87 @@ TEST(HsaHooksUnitTest, RecordReplayPressureKeysFanoutByFullDynamicIdentity) {
   EXPECT_EQ(telemetry.logical_access_range_count, 3u);
 }
 
+TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  std::array<rocjitsu::consan_hook::AutoMoiSampledEvidence, 2> sampled{};
+  for (uint32_t index = 0; index < sampled.size(); ++index) {
+    sampled[index].index = index;
+    sampled[index].generation = 7;
+    sampled[index].dispatch_id = 11;
+    sampled[index].epoch = 3;
+    sampled[index].entry = {
+        .valid = true,
+        .kind = AccessKind::Write,
+        .owner_id = index + 1u,
+        .epoch = 3,
+        .generation = 7,
+        .start_byte = 16,
+        .byte_count = 4,
+    };
+  }
+  const auto sampled_conflict =
+      rocjitsu::consan_hook::analyze_auto_moi_sampled_conflicts(sampled, false);
+  EXPECT_EQ(sampled_conflict.conflict_count, 1u);
+  ASSERT_TRUE(sampled_conflict.first_conflict);
+  EXPECT_EQ(sampled_conflict.first_conflict->first.index, 0u);
+  EXPECT_EQ(sampled_conflict.first_conflict->second.index, 1u);
+
+  std::array<rocjitsu::consan_hook::AutoMoiSampledStaticMapping, 2> mappings{};
+  mappings[0].owner_descriptor_file_offsets = {0x100};
+  mappings[1].owner_descriptor_file_offsets = {0x200};
+  mappings[0].owner_provenance_complete = true;
+  mappings[1].owner_provenance_complete = true;
+  sampled[0].static_mapping = &mappings[0];
+  sampled[1].static_mapping = &mappings[1];
+  EXPECT_EQ(
+      rocjitsu::consan_hook::analyze_auto_moi_sampled_conflicts(sampled, false).conflict_count, 0u);
+
+  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/4,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+  const std::array records = {
+      rocjitsu::ConSanMoiAccessRecord{
+          .generation = 7,
+          .workgroup_x = 2,
+          .wave_id = 1,
+          .lane_mask = 0x1,
+          .instruction_offset = 0x10,
+          .access_kind = static_cast<uint32_t>(AccessKind::Write),
+          .lds_byte_offset = 12,
+          .lds_byte_count = 4,
+          .start_cell = 3,
+          .cell_count = 1,
+          .epoch = 4,
+          .event_index = 41,
+      },
+      rocjitsu::ConSanMoiAccessRecord{
+          .generation = 7,
+          .workgroup_x = 2,
+          .wave_id = 2,
+          .lane_mask = 0x2,
+          .instruction_offset = 0x20,
+          .access_kind = static_cast<uint32_t>(AccessKind::Write),
+          .lds_byte_offset = 12,
+          .lds_byte_count = 4,
+          .start_cell = 3,
+          .cell_count = 1,
+          .epoch = 4,
+          .event_index = 57,
+      },
+  };
+  const auto replay = rocjitsu::consan_hook::analyze_auto_moi_record_replay(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records, {}, {}, {}, {}, false,
+      /*logical_access_range_count=*/0, /*address_group_headroom=*/0);
+  EXPECT_TRUE(replay.replay_performed);
+  EXPECT_TRUE(replay.effective_conflict);
+  EXPECT_EQ(replay.effective_diagnostic_count, 1u);
+  ASSERT_EQ(replay.diagnostics.size(), 1u);
+  EXPECT_EQ(replay.diagnostics.front().first_instruction_offset, 0x10u);
+  EXPECT_EQ(replay.diagnostics.front().second_instruction_offset, 0x20u);
+}
+
 TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRegions) {
   rocjitsu::ConSanMoiAutoReportInventory inventory;
   inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;

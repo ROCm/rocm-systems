@@ -1461,6 +1461,7 @@ target_link_libraries(
         # Test-only hook variant: same objects as rocjitsu_hooks plus the
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
+        rocjitsu_consan_report_analyzer
         rocjitsu_consan_report_snapshot
         rocjitsu_consan_report_trust
         ${RJ_OBJECT_LIBS}
