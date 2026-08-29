@@ -75,6 +75,8 @@ set(COMMON_FILES
   common.cu
   gin_sdma_allgather_policy.h
   gin_sdma_broadcast_policy.h
+  gin_sdma_reducescatter_policy.h
+  gin_sdma_reduce.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h
   nccl1_compat.h
@@ -201,6 +203,7 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
         broadcast_perf
         gather_perf
         reduce_perf
+        reduce_scatter_perf
         scatter_perf
         sendrecv_perf)
       _rccl_tests_link_rocshmem_gin_rdc(${_gin_rdc_bin})

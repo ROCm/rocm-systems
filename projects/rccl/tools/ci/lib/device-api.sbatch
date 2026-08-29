@@ -159,7 +159,7 @@ rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 )
 required_perf_bins=(
   all_gather_perf alltoall_perf broadcast_perf
-  gather_perf reduce_perf scatter_perf sendrecv_perf
+  gather_perf reduce_perf reduce_scatter_perf scatter_perf sendrecv_perf
 )
 for perf_bin in "${required_perf_bins[@]}"; do
   if [[ ! -x "${rccl_tests_build}/${perf_bin}" ]]; then
