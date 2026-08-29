@@ -30,6 +30,7 @@ add_library(
     SHARED
     rj_hsa_dbi_hook_config.cpp
     rj_hsa_dbi_hook_moi_report.cpp
+    rj_hsa_dbi_moi_report_pipeline.cpp
     rj_hsa_dbi_hooks.cpp
 )
 set_target_properties(
