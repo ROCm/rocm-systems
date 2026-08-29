@@ -157,11 +157,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
-    const MoiOptions &options, const VgprSpillSequence *spill,
-    const SgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
-    rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
-    std::span<const uint32_t> trailing_guest_words) {
+    const ConSanRequest &request, const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
+    bool defer_guest, SampledAtomicPreludeState &state, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset, std::span<const uint32_t> trailing_guest_words) {
   const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas) {
     assert(candidate.site.data_vgpr && candidate.site.dst_vgpr);
@@ -188,7 +188,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
-    const auto special = moi_special_state_sgprs(options, options);
+    const auto special = moi_special_state_sgprs(request, point);
     if (!special)
       return false;
     const auto materialize = build_consan_moi_atomic_address_materialization(
@@ -214,9 +214,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     // Address materialization/snapshot must precede CAS evidence because the
     // evidence destinations may overlap the live guest address pair.
     const uint16_t saved_compare =
-        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::kCasCompare);
+        static_cast<uint16_t>(scratch_vgpr + SampledAtomicScratchLayout::kCasCompare);
     const uint16_t saved_result =
-        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::kCasResult);
+        static_cast<uint16_t>(scratch_vgpr + SampledAtomicScratchLayout::kCasResult);
     if (!append_sampled_atomic_cas_snapshot(words, *spill, *state.cas_compare_vgpr,
                                             *state.cas_result_vgpr, saved_compare, saved_result,
                                             arch, errors))
@@ -225,17 +225,16 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     state.cas_result_vgpr = saved_result;
   }
   if (private_layout && !append_sampled_private_owner_epoch_load(
-                            words, bytes, *candidate.kernel_descriptor_file_offset, options,
+                            words, bytes, *candidate.kernel_descriptor_file_offset, point,
                             *private_layout, arch, errors))
     return false;
-  if (options.moi_persistent_sgprs.complete()) {
-    if (!consan_detail::validate_scalar_state_temporaries(options, "sampled atomic prelude",
-                                                          errors))
+  if (point.moi_persistent_sgprs.complete()) {
+    if (!consan_detail::validate_scalar_state_temporaries(point, "sampled atomic prelude", errors))
       return false;
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_sgprs.owner, arch));
+        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner, arch));
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
+        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch, arch));
   }
   if (!guest_first && !guest_preserves_address) {
     // Compiler-emitted ordinary acquire loads may reuse the low address VGPR
@@ -340,8 +339,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   std::vector<uint32_t> words;
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
-                                     scalar_spill, private_layout, arch, saved_address,
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, options, base,
+                                     spill, scalar_spill, private_layout, arch, saved_address,
                                      /*defer_guest=*/false, prelude, errors,
                                      guest_instruction_offset, trailing_guest_words))
     return std::nullopt;
@@ -673,9 +672,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   std::vector<uint32_t> words(leading_guest_words.begin(), leading_guest_words.end());
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
-                                     scalar_spill, private_layout, arch, saved_address, defer_guest,
-                                     prelude, errors, guest_instruction_offset,
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, options, base,
+                                     spill, scalar_spill, private_layout, arch, saved_address,
+                                     defer_guest, prelude, errors, guest_instruction_offset,
                                      trailing_guest_words))
     return std::nullopt;
   if (!append_sampled_window_bank_index(
