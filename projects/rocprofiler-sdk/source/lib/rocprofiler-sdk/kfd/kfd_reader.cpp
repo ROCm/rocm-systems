@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/poll_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/stream_geometry.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -543,18 +544,51 @@ session_has_pending(const dlog_session& s)
     return false;
 }
 
-// STAGE 2, processor thread: pairs start/eop. The hub handoff and the watermark
-// eviction are wired in at the reader-hub-glue layer; here it only drains the
-// pairing state so the reader/processor plumbing is exercisable in isolation.
+// STAGE 2, processor thread: pairs start/eop and drives the hub's time-as-
+// generation resolution. All the lock-taking work lives here, off
+// the ring-reading path. It runs no client callback itself; hand_off_proven()
+// submits to the task group. Exactly one hub lock per record, no map, no clock.
 uint64_t
 process_batch(processor_state& proc, const record_batch& batch)
 {
-    auto& _pairing = proc.for_gpu(batch.gpu_id);
-    return pair_records(batch.records.data(),
-                        batch.records.size(),
-                        _pairing,
-                        batch.now_ns,
-                        [](const drained_record&) {});
+    const uint32_t _gpu     = batch.gpu_id;
+    auto&          _pairing = proc.for_gpu(_gpu);
+
+    // evict stale retained STARTs BEFORE pairing, watermarked by THIS
+    // batch's own copy time (never the wall clock), throttled per GPU.
+    // Ordering it ahead of pairing keeps a START the watermark has condemned from
+    // binding this batch's recycled EOP first; watermarking by batch.now_ns means a
+    // backlogged processor ages nothing. starts_evicted is an R1 source counter.
+    if(batch.now_ns - _pairing.last_evict_ns >= kProcessorEvictIntervalNs)
+    {
+        _pairing.starts_evicted += _pairing.evict_stale(batch.now_ns, kStartMaxAgeNs);
+        _pairing.last_evict_ns = batch.now_ns;
+    }
+
+    return pair_records(
+        batch.records.data(),
+        batch.records.size(),
+        _pairing,
+        batch.now_ns,
+        [_gpu](const drained_record& rec) {
+            // Torn records were dropped at the top of pair_records, so
+            // every record here is trusted; no drain_loss_free gate remains.
+            // gpu_id stamped from the ring this record came from: a record can only
+            // ever match a dispatch enqueued on the same GPU. No generation.
+            auto key =
+                correlation_key{doorbell_off_to_page_slot(rec.doorbell_off), rec.dispatch_id, _gpu};
+            auto _start = rec.start_known ? std::optional<uint64_t>{rec.start_ticks} : std::nullopt;
+
+            // Signal-less: this EOP IS the completion event. The hub selects the
+            // entry whose window contains the START tick.
+            if(auto _proven = signal_less_hub().record_kernel_end(key, _start, rec.end_ticks))
+            {
+                note_signal_less(signal_less_counter::eop_proven);
+                hand_off_proven(std::move(*_proven));
+                return;
+            }
+            note_signal_less(signal_less_counter::eop_unmatched);
+        });
 }
 
 // Two distinct conditions, reported separately so a growing processor backlog is
@@ -678,6 +712,8 @@ disable_reader_in_child()
     // the DoorbellMap lock a vanished thread may have been holding.
     disable_kfd_dispatch_log();
 
+    signal_less_abandon_in_child();
+
     auto& st = state();
     st.any_session_ready.store(false, std::memory_order_relaxed);
     // Latch unavailable: setup_mu may have been held by a thread that did not
@@ -715,10 +751,23 @@ processor_loop()
     auto& st   = state();
     auto  proc = processor_state{};
 
+    uint64_t last_gc_ns = common::timestamp_ns();
+
     while(true)
     {
-        // The periodic closed-window GC tick is wired in at the reader-hub-glue
-        // layer (it needs the hub); here the processor only drains the pipe.
+        // GC closed-window entries on the periodic tick, ABOVE the
+        // pipe-empty continue -- an idle GPU (a queue destroyed after its work
+        // finished, the dominant case) never delivers another batch, so a GC placed
+        // after process_batch would never run and the close_grace_ns bound would be
+        // vacuous. Leaked payloads are ledgered; dropping them here is off the lock.
+        const uint64_t _gc_now = common::timestamp_ns();
+        if(_gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
+        {
+            last_gc_ns = _gc_now;
+            auto _gc   = signal_less_hub().gc_closed_windows(steady_now_ns());
+            if(_gc.second.dispatches > 0) note_signal_less_losses();
+        }
+
         auto* _batch = st.pipe.peek();
         if(!_batch)
         {
@@ -1076,14 +1125,16 @@ reader_loop()
         _ring_untrusted += st.sessions[i].cursors.untrusted_records;
     }
 
-    ROCP_WARNING_IF(_ring_overruns > 0 || _ring_lost > 0 || _ring_untrusted > 0) << fmt::format(
-        "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} record(s) "
-        "untrusted (dropped), processor backlog peaked at {} batch(es) -- a lost or "
-        "untrusted record is a lost START, which shows up as a start-unknown no-timing",
-        _ring_overruns,
-        _ring_lost,
-        _ring_untrusted,
-        st.overflow_peak.load(std::memory_order_relaxed));
+    ROCP_WARNING_IF(signal_less_feature_enabled() &&
+                    (_ring_overruns > 0 || _ring_lost > 0 || _ring_untrusted > 0))
+        << fmt::format(
+               "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} record(s) "
+               "untrusted (dropped), processor backlog peaked at {} batch(es) -- a lost or "
+               "untrusted record is a lost START, which shows up as a start-unknown no-timing",
+               _ring_overruns,
+               _ring_lost,
+               _ring_untrusted,
+               st.overflow_peak.load(std::memory_order_relaxed));
 }
 }  // namespace
 
