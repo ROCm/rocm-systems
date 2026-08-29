@@ -12,7 +12,7 @@
                                                             const MoiOptions &options) {
   if (!options.moi_track_atomics)
     return 0u;
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   const uint32_t patch_budget = options.max_patches_is_expert_limit
                                     ? options.max_patches
                                     : std::numeric_limits<uint32_t>::max();
@@ -43,7 +43,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       result.warnings.emplace_back(warning);
   };
 
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   const uint32_t reserved_atomic_slots = sampled_reserved_atomic_island_count(result, options);
   const uint32_t max_access_record_slots =
       layout.sampled_watchpoint_capacity - reserved_atomic_slots;

@@ -56,20 +56,23 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 /// Automatic runtime binding supplies its canonical planned layout; explicit
 /// raw buffers retain their engine-specific compatibility geometry. No engine
 /// planner may independently reinterpret capacities after this boundary.
-[[nodiscard]] ConSanMoiReportBufferLayout resolve_moi_report_layout(const MoiOptions &options) {
-  if (options.moi_report_layout) {
-    return revalidate_consan_moi_report_layout(*options.moi_report_layout, options.moi_engine,
-                                               options.moi_report_buffer_size);
+[[nodiscard]] ConSanMoiReportBufferLayout
+resolve_moi_report_layout(const ConSanRequest &request, const BoundRuntimeResources &resources) {
+  if (resources.moi_report_layout) {
+    return revalidate_consan_moi_report_layout(*resources.moi_report_layout, request.moi_engine,
+                                               resources.moi_report_buffer_size);
   }
-  switch (options.moi_engine) {
+  switch (request.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return consan_moi_report_buffer_layout_for_bytes(
-        options.moi_report_buffer_size, options.moi_track_barriers, options.moi_track_atomics,
-        options.moi_track_atomics);
+        resources.moi_report_buffer_size, request.moi_track_barriers, request.moi_track_atomics,
+        request.moi_track_atomics);
   case ConSanMoiEngine::Sampled:
-    return consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
+    return consan_moi_direct_sampled_report_buffer_layout_for_bytes(
+        resources.moi_report_buffer_size);
   case ConSanMoiEngine::InlineShadow:
-    return consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
+    return consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+        resources.moi_report_buffer_size);
   }
   return {};
 }
@@ -78,16 +81,18 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 /// wave identity. Placement, scratch sizing, and emission must use this single
 /// predicate so a probe can never require persistent identity that placement
 /// did not reserve.
-[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const MoiOptions &options,
+[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
                                                                uint32_t dispatch_token_capacity) {
-  return options.moi_engine == ConSanMoiEngine::RecordReplay &&
-         !options.moi_dynamic_access_records && dispatch_token_capacity != 0u;
+  return request.moi_engine == ConSanMoiEngine::RecordReplay &&
+         !request.moi_dynamic_access_records && dispatch_token_capacity != 0u;
 }
 
-[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const MoiOptions &options) {
-  return options.moi_report_layout &&
+[[nodiscard]] bool
+record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
+                                            const BoundRuntimeResources &resources) {
+  return resources.moi_report_layout &&
          record_replay_uses_automatic_banked_capture(
-             options, options.moi_report_layout->record_replay_dispatch_token_capacity);
+             request, resources.moi_report_layout->record_replay_dispatch_token_capacity);
 }
 
 /// Every Record/Replay record and Sampled watchpoint is interpreted outside

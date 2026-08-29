@@ -1746,7 +1746,7 @@ struct MoiOwnerRegisterReferenceSummary {
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return static_cast<uint16_t>(
-        (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
+        (record_replay_uses_automatic_banked_capture(options, options) ? 10u : 6u) +
         (flat_access_address_scratch_count(candidate) != 0u
              ? flat_access_address_scratch_count(candidate)
          : candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
@@ -5678,7 +5678,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     // descriptor-grown VGPRs during the later owner-state placement pass.
     // Sampled instead records the stable reader identity literal when no
     // persistent hardware pair survives every owner.
-    if (record_replay_uses_automatic_banked_capture(options))
+    if (record_replay_uses_automatic_banked_capture(options, options))
       return false;
     result.warnings.emplace_back(
         "ConSan MOI is using a literal report dispatch ID because no persistent hardware "
@@ -6114,7 +6114,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       });
   const bool needs_persistent_dispatch_vgprs =
       (is_rdna_dispatch_vgpr_arch && has_supported_record_replay_access &&
-       record_replay_uses_automatic_banked_capture(options) &&
+       record_replay_uses_automatic_banked_capture(options, options) &&
        !moi_has_runtime_hardware_dispatch_id(options)) ||
       private_inline_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = needs_inline_workgroup_key;
@@ -6947,7 +6947,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // a remapped tail VGPR as a different owner while retaining the same exact
   // shadow semantics.
   const bool record_replay_private_tuple_supported =
-      needs_record_replay_workgroup_tuple && !record_replay_uses_automatic_banked_capture(options);
+      needs_record_replay_workgroup_tuple &&
+      !record_replay_uses_automatic_banked_capture(options, options);
   const bool prefer_private_epoch =
       !has_dynamic_stack_owner && !prefer_compact_record_replay_barriers && !needs_workgroup_key &&
       !has_explicit_owner_epoch &&
