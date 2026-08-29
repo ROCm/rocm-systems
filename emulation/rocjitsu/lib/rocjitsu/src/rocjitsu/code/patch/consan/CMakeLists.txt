@@ -23,6 +23,7 @@ target_sources(
         consan_moi.cpp
         consan_moi_model.cpp
         consan_moi_report_plan.cpp
+        consan_moi_target_address.cpp
         consan_observation_policy.cpp
         consan_perturbation_policy.cpp
         consan_pipeline.cpp
