@@ -21,13 +21,13 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -224,39 +224,17 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
     return std::nullopt;
   }
 
-  const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
-                           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
-  std::vector<uint32_t> words;
-  const auto append_access = [&](const ConSanAccessRange &range, uint16_t data_vgpr) {
-    uint16_t address_vgpr = request.replay_address_vgpr;
-    uint16_t immediate = 0u;
-    if (candidate.lowering_offset(range) > UINT16_MAX) {
-      if (!request.adjusted_address_vgpr || *request.adjusted_address_vgpr > 255u)
-        return false;
-      const auto adjust = instrumentation::build_v_add_u32_literal(
-          *request.adjusted_address_vgpr, *request.adjusted_address_vgpr,
-          candidate.lowering_offset(range), request.replay_address_vgpr, target.arch);
-      if (!adjust)
-        return false;
-      words.insert(words.end(), adjust->begin(), adjust->end());
-      address_vgpr = *request.adjusted_address_vgpr;
-    } else {
-      immediate = static_cast<uint16_t>(candidate.lowering_offset(range));
-    }
-    cdna5::VdsBuilderFields fields{
-        .offset0 = static_cast<uint8_t>(immediate),
-        .offset1 = static_cast<uint8_t>(immediate >> 8u),
-        .addr = static_cast<uint8_t>(address_vgpr),
-    };
-    if (load)
-      fields.vdst = static_cast<uint8_t>(data_vgpr);
-    else
-      fields.data0 = static_cast<uint8_t>(data_vgpr);
-    const auto access = cdna5::build_vds(op, fields);
-    words.insert(words.end(), access.begin(), access.end());
-    return true;
-  };
-  if (!append_access(ranges[0], *first_data_vgpr) || !append_access(ranges[1], *second_data_vgpr)) {
+  const auto words = consan_build_split_two_address_lds_pair(
+      {.first_byte_offset = candidate.lowering_offset(ranges[0]),
+       .second_byte_offset = candidate.lowering_offset(ranges[1]),
+       .element_dwords = element_dwords,
+       .address_vgpr = request.replay_address_vgpr,
+       .first_data_vgpr = *first_data_vgpr,
+       .second_data_vgpr = *second_data_vgpr,
+       .adjusted_address_vgpr = request.adjusted_address_vgpr,
+       .load = load},
+      target.arch);
+  if (!words) {
     errors.emplace_back("ConSan MOI could not split a two-address guest access");
     return std::nullopt;
   }

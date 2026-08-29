@@ -20,6 +20,7 @@ target_sources(
         consan_fault_selection.cpp
         consan_fault_target_ops.cpp
         consan_final_validation.cpp
+        consan_gfx1250_lds_target_ops.cpp
         consan_gfx1250_vgpr_bank_state.cpp
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
@@ -72,6 +73,11 @@ target_sources(
         consan_sync_analysis.cpp
         consan_sync_metadata.cpp
         consan_supercollider.cpp
+        consan_supercollider_gfx11_gfx12_target_ops.cpp
+        consan_supercollider_gfx1250_target_ops.cpp
+        consan_supercollider_gfx9_target_ops.cpp
+        consan_supercollider_rdna3_target_ops.cpp
+        consan_supercollider_rdna4_target_ops.cpp
         consan_supercollider_target_ops.cpp
         consan_supercollider_support.cpp
         consan_types.cpp

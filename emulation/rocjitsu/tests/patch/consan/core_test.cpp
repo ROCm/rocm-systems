@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
 
 namespace rocjitsu {
 namespace {
@@ -49,6 +50,33 @@ TEST(ConSan, SelectableVgprBankStateDispatchesOnlyToOwningTarget) {
       consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, 0u, bytes.size()));
   EXPECT_FALSE(consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 1u,
                                                    bytes.size(), bytes.size()));
+}
+
+TEST(ConSan, SplitTwoAddressLdsRecipeDispatchesOnlyToOwningTarget) {
+  const ConSanSplitTwoAddressLdsRequest request{
+      .first_byte_offset = 4u,
+      .second_byte_offset = 8u,
+      .element_dwords = 1u,
+      .address_vgpr = 2u,
+      .first_data_vgpr = 3u,
+      .second_data_vgpr = 4u,
+      .adjusted_address_vgpr = std::nullopt,
+      .load = true,
+  };
+
+  const auto gfx1250 = consan_build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(gfx1250);
+  EXPECT_EQ(gfx1250->size(), 4u);
+  EXPECT_FALSE(consan_build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanSplitTwoAddressLdsRequest large_offset = request;
+  large_offset.second_byte_offset = UINT16_MAX + 1u;
+  EXPECT_FALSE(consan_build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5));
+  large_offset.adjusted_address_vgpr = 5u;
+  const auto adjusted =
+      consan_build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(adjusted);
+  EXPECT_EQ(adjusted->size(), 6u);
 }
 
 TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
