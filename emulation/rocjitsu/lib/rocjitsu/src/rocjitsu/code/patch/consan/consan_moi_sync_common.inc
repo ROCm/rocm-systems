@@ -671,14 +671,14 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
   return false;
 }
 
-[[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const MoiOptions &options,
+[[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const ConSanMoiOperatingPoint &point,
                                                          std::vector<std::string> &errors) {
-  if (!options.moi_exec_save_sgpr) {
+  if (!point.moi_exec_save_sgpr) {
     errors.emplace_back(
         "ConSan MOI inline atomic acquire patch requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
     return false;
   }
-  if (*options.moi_exec_save_sgpr > 86u || *options.moi_exec_save_sgpr % 2u != 0u) {
+  if (*point.moi_exec_save_sgpr > 86u || *point.moi_exec_save_sgpr % 2u != 0u) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch requires an even "
                         "RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0..86");
     return false;
@@ -3181,7 +3181,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                         "RJ_CONSAN_MOI_EPOCH_VGPR");
     return std::nullopt;
   }
-  if (!validate_inline_atomic_exec_save_sgpr(options, errors))
+  if (!validate_inline_atomic_exec_save_sgpr(static_cast<const ConSanMoiOperatingPoint &>(options),
+                                             errors))
     return std::nullopt;
   if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
                                             scratch_count, "MOI owner", errors) ||

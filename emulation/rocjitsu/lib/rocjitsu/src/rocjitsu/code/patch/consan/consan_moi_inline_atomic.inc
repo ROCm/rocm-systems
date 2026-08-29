@@ -27,7 +27,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");
     return;
   }
-  if (!validate_inline_atomic_exec_save_sgpr(options, result.warnings))
+  if (!validate_inline_atomic_exec_save_sgpr(static_cast<const ConSanMoiOperatingPoint &>(options),
+                                             result.warnings))
     return;
 
   std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(

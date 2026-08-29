@@ -143,16 +143,18 @@ private:
   std::vector<std::pair<uint64_t, uint64_t>> ranges_;
 };
 
-[[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const MoiOptions &options) {
-  if (options.moi_engine == ConSanMoiEngine::RecordReplay)
+[[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanRequest &request,
+                                                           const BoundRuntimeResources &resources,
+                                                           const ConSanMoiOperatingPoint &point) {
+  if (request.moi_engine == ConSanMoiEngine::RecordReplay)
     return 6u;
   // An object with no Inline access probes has no other way to prove that its
   // epoch-only barrier probe executed. Reserve a result/rank VGPR plus an
   // address pair for one aggregate event-counter publication. Ordinary
   // access-bearing objects publish through their access probes and retain the
   // single-register epoch-only barrier plan.
-  return options.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_report_buffer_address &&
-                 !options.moi_inline_access_present
+  return request.moi_engine == ConSanMoiEngine::InlineShadow &&
+                 resources.moi_report_buffer_address && !point.moi_inline_access_present
              ? 3u
              : 1u;
 }
@@ -1037,7 +1039,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::optional<SgprSpillSequence> scalar_spill;
     std::optional<MoiRecordEventEmissionPlan> record_emission;
     uint32_t required_private_bytes = 0u;
-    const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
+    const uint16_t scratch_count = inline_shadow_barrier_scratch_count(
+        static_cast<const ConSanRequest &>(candidate_options),
+        static_cast<const BoundRuntimeResources &>(candidate_options),
+        static_cast<const ConSanMoiOperatingPoint &>(candidate_options));
     const bool needs_record_replay_scalar_spill =
         candidate_options.automatic_moi_record_replay_sgpr_spill;
     const bool needs_scalar_spill =

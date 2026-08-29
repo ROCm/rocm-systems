@@ -549,14 +549,18 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiBarrierEvidenceSitePlan &candidate = candidates[index];
       const auto scratch_count_for = [](const MoiOptions &site_options) {
-        return static_cast<uint16_t>(site_options.moi_engine == ConSanMoiEngine::Sampled
-                                         ? (site_options.automatic_moi_private_epoch ||
-                                                    site_options.moi_persistent_sgprs.complete()
-                                                ? 9u
-                                                : 7u)
-                                     : site_options.moi_engine == ConSanMoiEngine::InlineShadow
-                                         ? inline_shadow_barrier_scratch_count(site_options)
-                                         : 6u);
+        return static_cast<uint16_t>(
+            site_options.moi_engine == ConSanMoiEngine::Sampled
+                ? (site_options.automatic_moi_private_epoch ||
+                           site_options.moi_persistent_sgprs.complete()
+                       ? 9u
+                       : 7u)
+            : site_options.moi_engine == ConSanMoiEngine::InlineShadow
+                ? inline_shadow_barrier_scratch_count(
+                      static_cast<const ConSanRequest &>(site_options),
+                      static_cast<const BoundRuntimeResources &>(site_options),
+                      static_cast<const ConSanMoiOperatingPoint &>(site_options))
+                : 6u);
       };
       MoiOptions site_options = options;
       uint16_t scratch_count = scratch_count_for(site_options);
