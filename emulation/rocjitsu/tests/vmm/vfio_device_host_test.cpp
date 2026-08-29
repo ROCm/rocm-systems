@@ -30,15 +30,20 @@
 extern "C" {
 #include <libvfio-user.h>
 }
+
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -291,12 +296,18 @@ TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
     // What the guest actually sees, rather than what the device asked for. The
     // capability only reaches it if vfu_setup_device_nr_irqs() ran for the kind
     // the plan chose, and nothing else covers that path: the device-side tests
-    // stop at interrupts() and plan_interrupts().
+    // stop at interrupts() and plan_interrupts(). The device advertises
+    // messages now, so the pin it used to offer must be gone as well -- a guest
+    // that finds both would be free to choose the one this device cannot raise.
+    uint32_t msix_vectors = 0;
+    ASSERT_TRUE(client.irq_info(VFIO_PCI_MSIX_IRQ_INDEX, msix_vectors));
+    EXPECT_EQ(msix_vectors, 1u)
+        << "the guest is offered no message vector, so its driver's pci_alloc_irq_vectors() "
+           "fails and the probe fails with it";
+
     uint32_t intx_vectors = 0;
     ASSERT_TRUE(client.irq_info(VFIO_PCI_INTX_IRQ_INDEX, intx_vectors));
-    EXPECT_EQ(intx_vectors, 1u)
-        << "the guest is offered no legacy pin, so its driver's pci_alloc_irq_vectors() fails "
-           "and the probe fails with it";
+    EXPECT_EQ(intx_vectors, 0u) << "the legacy pin outlived the switch to messages";
   }
 
   // No stop is requested: the disconnect alone must end serving.
@@ -333,6 +344,192 @@ TEST(VfioDeviceHostLifecycle, BuildsTheSmallestBusShapeTheDeviceAccepts) {
 
   rocjitsu::VfioDeviceHost host(socket_path, gpu);
   EXPECT_TRUE(host.build()) << "and to the transport, or the two disagree";
+  host.detach();
+  std::filesystem::remove(socket_path);
+}
+
+/// @brief A minimal MSI-X device that raises on demand.
+///
+/// @details The GPU device has nothing that triggers an interrupt yet -- that
+/// is a later commit -- so the delivery path is exercised through a device
+/// whose only job is to raise one. It advertises the same capability the GPU
+/// does, so the transport sets up the same way.
+class RaisingDevice : public simdojo::PciDevice {
+public:
+  RaisingDevice() : simdojo::PciDevice("raiser", kTestId) {}
+
+  [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override {
+    simdojo::BarSpec msix;
+    msix.index = 0;
+    msix.size = 8 * 1024;
+    msix.mem = true;
+    return {msix};
+  }
+
+  [[nodiscard]] simdojo::InterruptSpec interrupts() const override {
+    return {.kind = simdojo::InterruptKind::MsiX,
+            .vectors = 1,
+            .table_bar = 0,
+            .table_offset = 0,
+            .pending_offset = 4 * 1024};
+  }
+
+  [[nodiscard]] int64_t bar_access(int, std::span<std::byte> buf, uint64_t, bool write) override {
+    if (!write) {
+      std::ranges::fill(buf, std::byte{0});
+    }
+    return static_cast<int64_t>(buf.size());
+  }
+
+  void dma_map(const simdojo::DmaRegion &) override {}
+  void dma_unmap(const simdojo::DmaRegion &) override {}
+  void reset(simdojo::ResetKind) override {}
+
+  /// @brief Raise vector zero, as an interrupt source eventually will.
+  [[nodiscard]] bool raise() { return irq_ != nullptr && irq_->trigger(0); }
+};
+
+// The capability bytes only say the device *can* be signalled. This checks that
+// it actually is: the client arms a vector with an eventfd, the device raises,
+// and the descriptor the client handed over is what moves. Without it the test
+// above still passes if vfu_setup_device_nr_irqs() and VfioDeviceHost::trigger()
+// stop being connected to each other.
+TEST(VfioDeviceHostLifecycle, DeliversAMessageToTheVectorTheClientArmed) {
+  const std::string socket_path =
+      std::format("/tmp/rj-vfu-test-raise-{}.sock", static_cast<int>(::getpid()));
+  std::filesystem::remove(socket_path);
+
+  RaisingDevice device;
+  rocjitsu::VfioDeviceHost host(socket_path, device);
+  ASSERT_TRUE(host.build());
+  std::jthread serving([&host](std::stop_token stop) { (void)host.run(stop); });
+
+  rocjitsu::test::VfioUserClient client;
+  bool attached = false;
+  for (int attempt = 0; attempt < 200 && !attached; ++attempt) {
+    attached = client.connect(socket_path);
+    if (!attached) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ASSERT_TRUE(attached);
+
+  const int signalled = ::eventfd(0, EFD_NONBLOCK);
+  ASSERT_GE(signalled, 0);
+  ASSERT_TRUE(client.arm_irq(VFIO_PCI_MSIX_IRQ_INDEX, signalled))
+      << "the server refused to arm the vector, so nothing could be delivered";
+
+  ASSERT_TRUE(device.raise());
+
+  uint64_t count = 0;
+  bool delivered = false;
+  for (int attempt = 0; attempt < 200 && !delivered; ++attempt) {
+    delivered = ::read(signalled, &count, sizeof(count)) == sizeof(count);
+    if (!delivered) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  EXPECT_TRUE(delivered) << "the device raised and the client's eventfd never moved";
+  EXPECT_EQ(count, 1u);
+
+  ::close(signalled);
+  serving.request_stop();
+  serving.join();
+  host.detach();
+  std::filesystem::remove(socket_path);
+}
+
+// The message capability is three little-endian dwords and every field in it is
+// packed: the vector count is stored one less than it is, and the two offsets
+// are stored in units of eight bytes with the BAR index tucked into the three
+// bits below them. Nothing downstream rejects a bad packing -- a guest simply
+// looks for its table at whatever address comes out -- so the encoding is
+// checked here rather than by booting one and reading dmesg.
+TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
+  const std::string socket_path =
+      std::format("/tmp/rj-vfu-test-msix-{}.sock", static_cast<int>(::getpid()));
+  std::filesystem::remove(socket_path);
+
+  rocjitsu::config::KfdDeviceConfig identity;
+  identity.gfx_target_version = 120500;
+  identity.local_mem_size = 64 * 1024 * 1024;
+  rocjitsu::GpuPciDevice gpu("msix", rocjitsu::gpu_pci_spec_from_config(identity, {}), nullptr);
+  ASSERT_TRUE(gpu.usable());
+
+  rocjitsu::VfioDeviceHost host(socket_path, gpu);
+  ASSERT_TRUE(host.build());
+  std::jthread serving([&host](std::stop_token stop) { (void)host.run(stop); });
+  rocjitsu::test::VfioUserClient client;
+  bool attached = false;
+  for (int attempt = 0; attempt < 200 && !attached; ++attempt) {
+    attached = client.connect(socket_path);
+    if (!attached) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ASSERT_TRUE(attached);
+
+  // A failed read throws rather than recording a non-fatal expectation: these
+  // return a value, so ASSERT_ is unavailable here, and continuing would walk
+  // the capability list through zeros and report a wrong pointer rather than
+  // the read that never happened.
+  const auto read_byte = [&client](uint64_t at) {
+    std::array<std::byte, 1> one{};
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, one)) {
+      throw std::runtime_error(std::format("cannot read config byte at {:#x}", at));
+    }
+    return std::to_integer<uint8_t>(one[0]);
+  };
+  const auto read_dword = [&client](uint64_t at) {
+    std::array<std::byte, 4> four{};
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, four)) {
+      throw std::runtime_error(std::format("cannot read config dword at {:#x}", at));
+    }
+    return std::bit_cast<uint32_t>(four);
+  };
+
+  // A capability added after the device is realized still writes itself and
+  // still writes the pointer at 0x34; the one thing left clear is this bit, and
+  // a guest reads it before it reads the pointer. So this, rather than finding
+  // the capability, is what says the ordering in build() held.
+  std::array<std::byte, 2> status{};
+  ASSERT_TRUE(client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0x06, status));
+  ASSERT_NE(std::bit_cast<uint16_t>(status) & 0x10u, 0u)
+      << "the capability list is not advertised, so a guest never walks it";
+
+  // The point of the whole capability is to avoid a pin, whose delivery costs
+  // the guest every BAR mapping it holds. Nothing else asserts what actually
+  // reaches configuration space.
+  EXPECT_EQ(read_byte(0x3d), 0u)
+      << "a pin as well would put the client's mmap-disabling path back in reach";
+
+  // Walk the capability list the way a guest does, from the pointer at 0x34.
+  uint64_t at = read_byte(0x34);
+  uint64_t found = 0;
+  for (int hop = 0; hop < 48 && at >= 0x40; ++hop) {
+    if (read_byte(at) == PCI_CAP_ID_MSIX) {
+      found = at;
+      break;
+    }
+    at = read_byte(at + 1);
+  }
+  ASSERT_NE(found, 0u) << "no message capability is published for a guest to find";
+
+  const auto control = static_cast<uint16_t>(read_dword(found) >> 16);
+  const uint32_t table = read_dword(found + 4);
+  const uint32_t pending = read_dword(found + 8);
+
+  EXPECT_EQ((control & 0x7ffu) + 1, rocjitsu::GpuPciDevice::kMsixVectors)
+      << "the table size is stored one less than the count";
+  EXPECT_EQ(table & 0x7u, static_cast<uint32_t>(rocjitsu::GpuPciDevice::kMsixBar));
+  EXPECT_EQ(table & ~0x7u, rocjitsu::GpuPciDevice::kMsixTableOffset);
+  EXPECT_EQ(pending & 0x7u, static_cast<uint32_t>(rocjitsu::GpuPciDevice::kMsixBar));
+  EXPECT_EQ(pending & ~0x7u, rocjitsu::GpuPciDevice::kMsixPendingOffset);
+
+  serving.request_stop();
+  if (serving.joinable()) {
+    serving.join();
+  }
   host.detach();
   std::filesystem::remove(socket_path);
 }

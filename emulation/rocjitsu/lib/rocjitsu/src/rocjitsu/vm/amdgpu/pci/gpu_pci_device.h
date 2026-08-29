@@ -60,6 +60,38 @@ public:
   /// @brief BAR carrying the register aperture.
   static constexpr int kRegisterBar = 5;
 
+  /// @brief BAR carrying the message-signalled interrupt table.
+  ///
+  /// @details Its own BAR rather than a corner of the register aperture, so
+  /// that a table entry can never be mistaken for a register or land on one.
+  /// BARs 1 and 3 are the upper halves of the two 64-bit apertures, which
+  /// leaves this as the only free index.
+  static constexpr int kMsixBar = 4;
+
+  /// @brief Size of that BAR.
+  ///
+  /// @details The table and the pending bits get a 4 KiB page each. Nothing
+  /// requires it -- they may share a page with each other, and a client asks
+  /// only that they be eight-byte aligned and not overlap -- but a page apiece
+  /// means neither can ever share one with anything else, which is what the
+  /// specification does care about, and it costs 8 KiB of a BAR that holds
+  /// nothing else.
+  static constexpr uint64_t kMsixBarBytes = 8 * 1024;
+
+  /// @brief Where the table starts within that BAR.
+  static constexpr uint64_t kMsixTableOffset = 0;
+
+  /// @brief Where the pending bits start, one page after it.
+  static constexpr uint64_t kMsixPendingOffset = 4 * 1024;
+
+  /// @brief Message vectors advertised.
+  ///
+  /// @details One, because the driver asks the bus for exactly one and this
+  /// device has exactly one thing to report: that its interrupt ring has
+  /// something in it. Advertising more would be describing hardware that is
+  /// not there.
+  static constexpr uint32_t kMsixVectors = 1;
+
   /// @brief Smallest memory BAR the PCI specification allows.
   ///
   /// @details Checked here so a device reports its own configuration unusable
@@ -95,36 +127,37 @@ public:
 
   [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override;
 
-  /// @brief Advertise a single legacy interrupt pin.
+  /// @brief Advertise message-signalled interrupts.
   ///
   /// @details The driver asks the bus for one vector of any kind at all and
   /// refuses the device outright when it cannot have one, so a function with no
   /// interrupt capability whatsoever does not merely lose interrupts: its
-  /// interrupt-handling block fails to initialize and the probe ends there. A
-  /// pin is the smallest capability that satisfies that, and the only one this
-  /// transport can currently advertise.
+  /// interrupt-handling block fails to initialize and the probe ends there.
   ///
-  /// Nothing built against it is wasted when this becomes MSI-X, because the
-  /// driver decides how to program the interrupt ring from a module parameter
-  /// rather than from what the bus actually gave it, and so programs the ring
-  /// identically either way.
+  /// A legacy pin would satisfy that too, and is cheaper, but it cannot be what
+  /// raises the interrupt: a client disables every mmap of every BAR while a
+  /// legacy interrupt is pending and restores them only after a quiet period,
+  /// and this device's largest BAR is the memory aperture the guest maps to
+  /// avoid trapping. Raising pins at the rate an interrupt ring produces them
+  /// would cost the guest its direct view of memory for as long as they kept
+  /// arriving, and would present as a collapse of the memory path rather than
+  /// as anything to do with interrupts. Messages carry no such penalty, and
+  /// they are what the parts being modelled use.
   ///
-  /// **A pin must not be what finally raises an interrupt, though.** A client
-  /// disables every mmap of every BAR while a legacy interrupt is pending, and
-  /// restores them only after a quiet period; this device's largest BAR is the
-  /// memory aperture the guest maps to avoid trapping. Raising pins at the rate
-  /// an interrupt ring produces them would therefore cost the guest its direct
-  /// view of memory for as long as they keep arriving, and would present as a
-  /// collapse of the memory path rather than as anything to do with interrupts.
+  /// The cost of offering no pin at all is that a driver *forced* to legacy
+  /// interrupts -- by the module parameter that turns messages off -- asks the
+  /// bus for a pin, is refused, and fails the same probe this capability
+  /// exists to get through. That is a debugging option rather than a
+  /// configuration anyone runs, and restoring the pin would reintroduce the
+  /// mapping penalty above the moment anything raised one.
   ///
-  /// @returns A single legacy pin. The vectors field is NOT APPLICABLE here
-  ///          rather than meaningful: it counts message-signalled vectors, so
-  ///          the zero reported alongside IntxPin is not a count of anything
-  ///          this device declines to raise. What is advertised is a capability
-  ///          the guest driver checks for before it will keep the device; this
-  ///          device raises nothing through it yet.
+  /// @returns One vector, and where its table lives.
   [[nodiscard]] simdojo::InterruptSpec interrupts() const override {
-    return {.kind = simdojo::InterruptKind::IntxPin, .vectors = 0};
+    return {.kind = simdojo::InterruptKind::MsiX,
+            .vectors = kMsixVectors,
+            .table_bar = kMsixBar,
+            .table_offset = kMsixTableOffset,
+            .pending_offset = kMsixPendingOffset};
   }
 
   [[nodiscard]] int64_t bar_access(int bar, std::span<std::byte> buf, uint64_t offset,
@@ -240,6 +273,13 @@ private:
   std::byte *vram_ = nullptr;
 
   std::vector<std::byte> doorbells_;
+
+  /// @brief Backing for the message table and its pending bits.
+  ///
+  /// @details Plain storage. A client of this transport emulates the table's
+  /// meaning itself and delivers the message, so what the device has to do is
+  /// hold the bytes and not lose them.
+  std::vector<std::byte> msix_table_;
   bool usable_ = false;
 };
 
