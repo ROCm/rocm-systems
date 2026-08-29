@@ -41,6 +41,7 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
@@ -3105,68 +3106,79 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
     return result;
 }
 
+/**
+ * Get the Perfetto output filename with a suffix.
+ *
+ * @param suffix The suffix to add to the Perfetto output filename.
+ * @return The Perfetto output filename with the suffix.
+ */
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
-    static auto _v   = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    static auto s_setting = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
+    auto        val = static_cast<tim::tsettings<std::string>&>(*s_setting->second).get();
 
-    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/')
+    if(!val.empty() && val.at(0) == '/')
     {
-        LOG_DEBUG("Absolute path, returning: '{}'", _val);
-        return _val;
+        LOG_DEBUG("Absolute path, returning: '{}'", val);
+        return val;
     }
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "pftrace" };
+    // Parse the filename into directory, basename, and extension
+    auto pos_dir = val.find_last_of('/');
+    auto dir     = std::string{};
+    auto ext     = std::string{ "pftrace" };
 
-    if(_pos_dir != std::string::npos)
+    // If the filename contains a directory, extract it
+    if(pos_dir != std::string::npos)
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
+        dir = val.substr(0, pos_dir + 1);
+        val = val.substr(pos_dir + 1);
     }
 
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
+    // Extract the extension
+    auto pos_ext = val.find_last_of('.');
+    if(pos_ext + 1 < val.length())
     {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        ext = val.substr(pos_ext + 1);
+        val = val.substr(0, pos_ext);
     }
 
     // Check if explicitly set via environment OR config file
     // If explicitly set, don't add suffix; otherwise use provided suffix
-    bool _explicitly_set =
-        (_v->second->get_environ_updated() || _v->second->get_config_updated());
+    bool explicitly_set = (s_setting->second->get_environ_updated() ||
+                           s_setting->second->get_config_updated());
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
-              _ext, _explicitly_set);
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", dir, val,
+              ext, explicitly_set);
     LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
 
-    auto _cfg = settings::compose_filename_config{
-        !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
-        suffix,                               // suffix value
-        false,                                // make_dir
-        _dir                                  // explicit_path
+    auto cfg = settings::compose_filename_config{
+        !explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
+        suffix,                              // suffix value
+        false,                               // make_dir
+        dir                                  // explicit_path
     };
 
-    _val = settings::compose_output_filename(_val, _ext, _cfg);
+    val = settings::compose_output_filename(val, ext, cfg);
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+    LOG_DEBUG("After compose_output_filename: '{}'", val);
 
-    if(!_val.empty() && _val.at(0) != '/')
+    // If the path is relative, prepend the current working directory
+    if(!val.empty() && val.at(0) != '/')
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        auto result = settings::format(fmt::format("{}/{}", getenv("PWD"), val),
+                                       get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", result);
+        return result;
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    // If the path is absolute, return it as-is
+    LOG_DEBUG("Path is absolute, returning: '{}'", val);
+    return val;
 }
 
 std::string
