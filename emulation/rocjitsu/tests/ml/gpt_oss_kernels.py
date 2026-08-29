@@ -498,6 +498,81 @@ if HAVE_TRITON:
             tl.store(out_ptr + elem, val.to(out_ptr.dtype.element_ty), mask=mask)
 
     @triton.jit
+    def _attention_paged_kernel(
+        out_ptr,
+        q_ptr,
+        k_cache_ptr,
+        v_cache_ptr,
+        block_table_ptr,
+        sink_ptr,
+        stride_qt,
+        stride_qh,
+        stride_blk,
+        stride_slot,
+        stride_kvh,
+        stride_ot,
+        stride_oh,
+        scale,
+        num_q,
+        context_len,
+        first_pos,
+        group,
+        sliding_window,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_SIZE: tl.constexpr,
+        USE_SWA: tl.constexpr,
+    ):
+        """Attention over a paged KV cache, one KV block per iteration.
+
+        vLLM never reads a contiguous K/V; it walks a block table and gathers
+        each page. The indirection is a different addressing pattern from the
+        contiguous cases -- a scalar load feeds a vector address -- so it gets
+        its own case.
+        """
+        t = tl.program_id(0)
+        h = tl.program_id(1)
+        kv_h = h // group
+
+        d = tl.arange(0, HEAD_DIM)
+        q = tl.load(q_ptr + t * stride_qt + h * stride_qh + d).to(tl.float32)
+
+        m_i = tl.load(sink_ptr + h).to(tl.float32)
+        l_i = 1.0
+        acc = tl.zeros([HEAD_DIM], dtype=tl.float32)
+        qpos = first_pos + t
+
+        num_blocks = (context_len + BLOCK_SIZE - 1) // BLOCK_SIZE
+        for b in range(0, num_blocks):
+            phys = tl.load(block_table_ptr + b)
+            offs = tl.arange(0, BLOCK_SIZE)
+            pos = b * BLOCK_SIZE + offs
+            kmask = pos < context_len
+            base = phys * stride_blk + offs[:, None] * stride_slot + kv_h * stride_kvh
+            k = tl.load(
+                k_cache_ptr + base + d[None, :], mask=kmask[:, None], other=0.0
+            ).to(tl.float32)
+            v = tl.load(
+                v_cache_ptr + base + d[None, :], mask=kmask[:, None], other=0.0
+            ).to(tl.float32)
+            s = tl.sum(q[None, :] * k, axis=1) * scale
+            valid = kmask & (pos <= qpos)
+            if USE_SWA:
+                valid = valid & (pos > qpos - sliding_window)
+            s = tl.where(valid, s, float("-inf"))
+
+            m_new = tl.maximum(m_i, tl.max(s, axis=0))
+            alpha = tl.exp(m_i - m_new)
+            p = tl.where(valid, tl.exp(s - m_new), 0.0)
+            acc = acc * alpha + tl.sum(p[:, None] * v, axis=0)
+            l_i = l_i * alpha + tl.sum(p, axis=0)
+            m_i = m_new
+
+        tl.store(
+            out_ptr + t * stride_ot + h * stride_oh + d,
+            (acc / l_i).to(out_ptr.dtype.element_ty),
+        )
+
+    @triton.jit
     def _dot_gemm_kernel(
         out_ptr,
         a_ptr,
@@ -1295,6 +1370,67 @@ def _attn_full_dot(s: Shape, gen: torch.Generator):
 @case("attention_prefill_swa", "attention", "triton_dot", torch.bfloat16, 3e-2)
 def _attn_swa_dot(s: Shape, gen: torch.Generator):
     return _attn_dot(s, gen, s.sliding_window)
+
+
+@case(
+    "attention_paged",
+    "attention",
+    "triton",
+    torch.bfloat16,
+    3e-2,
+    "attention over a paged KV cache walked through a block table, as vLLM does",
+)
+def _attn_paged(s: Shape, gen: torch.Generator):
+    require_triton()
+    q, k, v, sinks = _attention_inputs(s, gen)
+    block_size = 16
+    num_blocks = (s.context_len + block_size - 1) // block_size
+    # Shuffle the physical blocks so a kernel that ignores the table and reads
+    # the cache contiguously gets a different answer.
+    perm = torch.randperm(num_blocks, generator=gen)
+    k_cache = torch.zeros(
+        num_blocks, block_size, s.num_kv_heads, s.head_dim, dtype=torch.bfloat16
+    )
+    v_cache = torch.zeros_like(k_cache)
+    for logical in range(num_blocks):
+        phys = int(perm[logical])
+        lo = logical * block_size
+        hi = min(lo + block_size, s.context_len)
+        k_cache[phys, : hi - lo] = k[lo:hi]
+        v_cache[phys, : hi - lo] = v[lo:hi]
+
+    kd, vd = k_cache.to(DEV).contiguous(), v_cache.to(DEV).contiguous()
+    qd, sd = q.to(DEV).contiguous(), sinks.to(DEV).contiguous()
+    table = perm.to(torch.int32).to(DEV).contiguous()
+    out = torch.empty_like(qd)
+    _attention_paged_kernel[(s.num_tokens, s.num_heads)](
+        out,
+        qd,
+        kd,
+        vd,
+        table,
+        sd,
+        qd.stride(0),
+        qd.stride(1),
+        kd.stride(0),
+        kd.stride(1),
+        kd.stride(2),
+        out.stride(0),
+        out.stride(1),
+        s.head_dim**-0.5,
+        s.num_tokens,
+        s.context_len,
+        s.context_len - s.num_tokens,
+        s.num_heads // s.num_kv_heads,
+        s.sliding_window,
+        HEAD_DIM=s.head_dim,
+        BLOCK_SIZE=block_size,
+        USE_SWA=True,
+    )
+    ref = ref_attention_sinks(
+        q, k, v, sinks, s.head_dim**-0.5, s.context_len, s.sliding_window
+    )
+    return out, ref
 
 
 @case(
