@@ -2167,6 +2167,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     return planned.candidate.deferred_acquire
                ? build_sampled_pending_acquire_cave_words(
                      bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                     candidate_options, candidate_options, planned.resources.base,
                      planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
@@ -2176,6 +2177,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                      planned.trailing_guest_words)
                : build_sampled_atomic_sync_cave_words(
                      bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                     candidate_options, candidate_options, planned.resources.base,
                      planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,

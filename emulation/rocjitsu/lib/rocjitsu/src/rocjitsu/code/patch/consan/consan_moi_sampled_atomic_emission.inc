@@ -266,8 +266,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
+    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
+    uint16_t scratch_vgpr, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
@@ -276,9 +277,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::span<const uint32_t> trailing_guest_words = {}) {
   const uint32_t pending_owner_bank_count = consan_moi_sampled_pending_acquire_owner_bank_count(
       layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
-  if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
-      !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
-      static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
+  if (!bound_resources.moi_report_buffer_address || !point.moi_owner_vgpr ||
+      !point.moi_epoch_vgpr || !point.moi_exec_save_sgpr ||
+      static_cast<uint32_t>(scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
       bank_count == 0u || !std::has_single_bit(bank_count) || pending_owner_bank_count == 0u ||
       selected_slot > layout.sampled_causal_window_capacity ||
       bank_count > layout.sampled_causal_window_capacity - selected_slot ||
@@ -292,7 +293,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
           0u)
     return std::nullopt;
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.kernel_descriptor_file_offset, options.moi_engine, options, arch, errors,
+      bytes, *candidate.kernel_descriptor_file_offset, request.moi_engine, point, arch, errors,
       candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources || candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset)
@@ -326,28 +327,26 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!success_descriptor || !failure_descriptor)
     return std::nullopt;
 
-  const uint16_t base = *options.scratch_vgpr;
+  const uint16_t base = scratch_vgpr;
   const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kValue);
   const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
       static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
   const uint16_t bank = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kBank);
-  const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
-  const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
-  const uint64_t report_base = *options.moi_report_buffer_address;
+  const uint16_t original_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 6u);
+  const uint16_t temporary_exec = *point.moi_exec_save_sgpr;
+  const uint64_t report_base = *bound_resources.moi_report_buffer_address;
   const uint64_t first_pending_address = report_base + layout.sampled_pending_acquires_offset;
 
   std::vector<uint32_t> words;
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, options, base,
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, request, point, base,
                                      spill, scalar_spill, private_layout, arch, saved_address,
                                      /*defer_guest=*/false, prelude, errors,
                                      guest_instruction_offset, trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(
-          words, static_cast<const ConSanMoiOperatingPoint &>(options),
-          static_cast<const BoundRuntimeResources &>(options), *workgroup_sources, bank_count, bank,
-          expected, *options.moi_owner_vgpr, arch)) {
+  if (!append_sampled_window_bank_index(words, point, bound_resources, *workgroup_sources,
+                                        bank_count, bank, expected, *point.moi_owner_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled pending acquire failed at bank selection");
     return std::nullopt;
   }
@@ -363,7 +362,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto contention_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -392,7 +391,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       const auto scale_window = instrumentation::build_v_mul_lo_u32_literal(
           value, expected, pending_owner_bank_count, bank, arch);
       const auto owner_bank = instrumentation::build_v_and_b32_literal(
-          expected, pending_owner_bank_count - 1u, *options.moi_owner_vgpr, arch);
+          expected, pending_owner_bank_count - 1u, *point.moi_owner_vgpr, arch);
       const auto combine =
           instrumentation::build_v_add_u32(value, vector_source_vgpr(value), expected, arch);
       if (!scale_window || !owner_bank || !combine)
@@ -434,12 +433,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   if (!record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, selected_slot), bank) ||
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation),
-                            static_cast<uint32_t>(options.moi_report_generation)) ||
+                            static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
-                            static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
+                            static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, options, options, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id), arch,
-          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          record, point, bound_resources, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id),
+          arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
                               workgroup_sources->x) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
@@ -447,9 +446,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_z),
                               workgroup_sources->z) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, owner_id),
-                         *options.moi_owner_vgpr) ||
+                         *point.moi_owner_vgpr) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, source_epoch),
-                         *options.moi_epoch_vgpr) ||
+                         *point.moi_epoch_vgpr) ||
       !(release_selected_slot
             ? record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), expected)
             : record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), 0u)) ||
@@ -464,10 +463,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             4u) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
                              offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                         *options.moi_epoch_vgpr) ||
+                         *point.moi_epoch_vgpr) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
                              offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-                         *options.moi_epoch_vgpr))
+                         *point.moi_epoch_vgpr))
     return std::nullopt;
 
   if (is_cas) {
@@ -547,16 +546,15 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
-  if (!append_moi_direct_or_indirect_return(
-          words, cave_text_offset, return_text_offset, static_cast<const ConSanRequest &>(options),
-          static_cast<const ConSanMoiOperatingPoint &>(options), arch))
+  if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                            point, arch))
     return std::nullopt;
 
   if (!sequence.resolve_branches(arch))
@@ -565,17 +563,18 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 }
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
+    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
+    uint16_t scratch_vgpr, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr,
     std::span<const uint32_t> trailing_guest_words = {}, bool preserve_guest_at_anchor = false,
     std::span<const uint32_t> leading_guest_words = {}) {
-  if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
-      !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
-      static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > 256u ||
+  if (!bound_resources.moi_report_buffer_address || !point.moi_owner_vgpr ||
+      !point.moi_epoch_vgpr || !point.moi_exec_save_sgpr ||
+      static_cast<uint32_t>(scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
       bank_count == 0u || !std::has_single_bit(bank_count) ||
       selected_slot > layout.sampled_sync_metadata_capacity ||
       bank_count > layout.sampled_sync_metadata_capacity - selected_slot ||
@@ -595,7 +594,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.kernel_descriptor_file_offset, options.moi_engine, options, arch, errors,
+      bytes, *candidate.kernel_descriptor_file_offset, request.moi_engine, point, arch, errors,
       candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
@@ -638,15 +637,15 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!success_descriptor || !failure_descriptor)
     return std::nullopt;
 
-  const uint16_t base = *options.scratch_vgpr;
+  const uint16_t base = scratch_vgpr;
   const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kValue);
   const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
       static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
   const uint16_t bank = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kBank);
-  const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
-  const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
-  const uint64_t report_base = *options.moi_report_buffer_address;
+  const uint16_t original_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 6u);
+  const uint16_t temporary_exec = *point.moi_exec_save_sgpr;
+  const uint64_t report_base = *bound_resources.moi_report_buffer_address;
   const uint64_t first_window_address = report_base + layout.sampled_causal_windows_offset;
   const uint64_t first_watchpoint_address = report_base + layout.sampled_watchpoints_offset;
   const uint64_t first_metadata_address = report_base + layout.sampled_sync_metadata_offset;
@@ -672,15 +671,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   std::vector<uint32_t> words(leading_guest_words.begin(), leading_guest_words.end());
   SampledAtomicPreludeState prelude;
-  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, options, base,
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, request, point, base,
                                      spill, scalar_spill, private_layout, arch, saved_address,
                                      defer_guest, prelude, errors, guest_instruction_offset,
                                      trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(
-          words, static_cast<const ConSanMoiOperatingPoint &>(options),
-          static_cast<const BoundRuntimeResources &>(options), *workgroup_sources, bank_count, bank,
-          expected, *options.moi_owner_vgpr, arch)) {
+  if (!append_sampled_window_bank_index(words, point, bound_resources, *workgroup_sources,
+                                        bank_count, bank, expected, *point.moi_owner_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled atomic metadata failed at bank selection");
     return std::nullopt;
   }
@@ -695,7 +692,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;
   const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
   if (!save_exec)
@@ -733,7 +730,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, options, options, value, expected, high_word, arch,
+            words, point, bound_resources, value, expected, high_word, arch,
             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }
@@ -752,9 +749,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return narrow_equal_vgpr(offset, expected);
   };
   if (!narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
-                            static_cast<uint32_t>(options.moi_report_generation)) ||
+                            static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
-                            static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
+                            static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
                                 /*high_word=*/false) ||
       !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
@@ -765,7 +762,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                               workgroup_sources->y) ||
       !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
                               workgroup_sources->z) ||
-      !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch), *options.moi_epoch_vgpr) ||
+      !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch), *point.moi_epoch_vgpr) ||
       !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), bank) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1u) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, publication_state),
@@ -826,7 +823,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto owner_mask = instrumentation::build_v_and_b32_literal(
       value, consan_moi_sampled_watchpoint::max_owner, value, arch);
   const auto owner_equal = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(*options.moi_owner_vgpr), value, arch);
+      vector_source_vgpr(*point.moi_owner_vgpr), value, arch);
   const auto narrow_owner =
       instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
   if (!sequence.emit_all(owner_shift, owner_mask, owner_equal, narrow_owner))
@@ -841,7 +838,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto epoch_mask = instrumentation::build_v_and_b32_literal(
       value, consan_moi_sampled_watchpoint::max_epoch, value, arch);
   const auto epoch_equal = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(*options.moi_epoch_vgpr), value, arch);
+      vector_source_vgpr(*point.moi_epoch_vgpr), value, arch);
   if (!sequence.emit_all(epoch_shift, epoch_mask, epoch_equal))
     return std::nullopt;
   if (!narrow_current_vcc() || !append_load_u32_vgpr_at_offset(words, base, 0u, value, arch) ||
@@ -859,7 +856,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       value, consan_moi_sampled_watchpoint::max_generation, value, arch);
   const auto expected_generation = instrumentation::build_v_mov_b32_literal(
       expected,
-      static_cast<uint32_t>(options.moi_report_generation) &
+      static_cast<uint32_t>(bound_resources.moi_report_generation) &
           consan_moi_sampled_watchpoint::max_generation,
       arch);
   if (!sequence.emit_all(generation_low, generation_high, combine_generation, mask_generation,
@@ -913,9 +910,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                            static_cast<uint16_t>(saved_address + 1u)) ||
         !record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u) ||
         !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                           *options.moi_epoch_vgpr) ||
+                           *point.moi_epoch_vgpr) ||
         !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-                           *options.moi_epoch_vgpr))
+                           *point.moi_epoch_vgpr))
       return false;
     const auto wait = instrumentation::build_s_wait_global_store0(arch);
     const auto final_value = instrumentation::build_v_mov_b32_literal(value, descriptor, arch);
@@ -986,7 +983,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, moi_special_state_sgprs(options, options), arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
@@ -994,10 +991,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (preserve_guest_at_anchor) {
-    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              static_cast<const ConSanRequest &>(options),
-                                              static_cast<const ConSanMoiOperatingPoint &>(options),
-                                              arch)) {
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, request,
+                                              point, arch)) {
       return std::nullopt;
     }
   } else if (defer_guest) {
@@ -1016,7 +1011,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_branch(*direct, arch));
     } else {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(options, options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
       if (!jump_sgprs || !append_moi_prepare_scc_preserving_indirect_jump(
                              words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                              jump_sgprs->scc_save_sgpr, arch)) {
@@ -1027,10 +1022,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
     }
-  } else if (!append_moi_direct_or_indirect_return(
-                 words, cave_text_offset, return_text_offset,
-                 static_cast<const ConSanRequest &>(options),
-                 static_cast<const ConSanMoiOperatingPoint &>(options), arch)) {
+  } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
+                                                   request, point, arch)) {
     return std::nullopt;
   }
 
