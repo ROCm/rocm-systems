@@ -1860,6 +1860,40 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
     """
     results: list[Result] = []
 
+    # vLLM's CustomOp subclasses resolve their dispatch (native versus the
+    # compiled `_C` op) from the ambient VllmConfig, and assert rather than
+    # guess when there is none. Constructing one outside an engine therefore
+    # needs the config context an engine would otherwise have entered.
+    try:
+        from vllm.config import CompilationConfig, VllmConfig, set_current_vllm_config
+
+        # `custom_ops=["all"]` selects the compiled `_C` kernels over the
+        # torch-native fallbacks. Those are what an engine dispatches, and the
+        # only ones that put anything on the GPU worth emulating; without this
+        # the cross-check silently compares two CPU-side torch expressions.
+        # `custom_ops=["all"]` selects the compiled `_C` kernels over the
+        # torch-native fallbacks, which is what an engine dispatches and the
+        # only form that puts anything on the GPU. It does not reach RMSNorm:
+        # that one is chosen from an IR op-priority list an engine populates
+        # from the platform defaults, and outside an engine it resolves to the
+        # native implementation. The rms_norm row therefore cross-checks this
+        # file's reference against vLLM's torch expression, not against the
+        # compiled kernel; the suite's own `rms_norm` cases cover the device.
+        config_ctx = set_current_vllm_config(
+            VllmConfig(compilation_config=CompilationConfig(custom_ops=["all"]))
+        )
+    except Exception as exc:  # noqa: BLE001
+        return [
+            Result(
+                "vllm_crosscheck",
+                "meta",
+                "vllm",
+                "n/a",
+                "skip",
+                detail=f"vLLM unavailable: {type(exc).__name__}: {exc}",
+            )
+        ]
+
     def record(name, role, fn, tol, dtype="bfloat16"):
         t0 = time.time()
         try:
@@ -1946,9 +1980,10 @@ def vllm_crosschecks(s: Shape, gen: torch.Generator) -> list[Result]:
             q, cos, sin
         )
 
-    record("rms_norm", "norm", rms, 6e-3)
-    record("swiglu_oai", "activation", swiglu, 6e-3)
-    record("rope_yarn_neox", "rope", rope, 3e-2)
+    with config_ctx:
+        record("rms_norm", "norm", rms, 6e-3)
+        record("swiglu_oai", "activation", swiglu, 6e-3)
+        record("rope_yarn_neox", "rope", rope, 3e-2)
     return results
 
 

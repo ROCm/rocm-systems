@@ -44,6 +44,14 @@ gpt-oss-20b's real widths and takes hours under functional emulation),
 and `--with-vllm` adds a cross-check against vLLM's own custom ops where vLLM
 is installed.
 
+`--with-vllm` is the check that validates this file's references against the
+real implementation rather than against itself. It covers `SwigluOAIAndMul`
+(the compiled `_C` kernel) and the YaRN rotary embedding. `RMSNorm` resolves to
+vLLM's torch-native path outside an engine -- its compiled form is selected from
+an IR op-priority list only an engine populates -- so that row compares two
+expressions rather than exercising a kernel; the suite's own `rms_norm` cases
+cover the device.
+
 ### Comparing two architectures
 
 Each case records a SHA-256 of its raw device output, and `--compare` diffs two
