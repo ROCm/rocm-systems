@@ -14,17 +14,72 @@ using Reason = ConSanAtomicClassifierReason;
   return {
       .form = std::nullopt,
       .normalization_reason = reason,
+      .address_reason = reason,
       .exact_ordering_reason = reason,
+      .causal_ordering_reason = reason,
   };
 }
 
 [[nodiscard]] ConSanAtomicLoweringClassification normalized(ConSanAtomicLoweringForm form,
-                                                            Reason exact_reason) {
+                                                            Reason address_reason,
+                                                            Reason exact_reason,
+                                                            Reason causal_reason) {
   return {
       .form = std::move(form),
       .normalization_reason = Reason::None,
+      .address_reason = address_reason,
       .exact_ordering_reason = exact_reason,
+      .causal_ordering_reason = causal_reason,
   };
+}
+
+[[nodiscard]] bool is_flat_family(const ConSanAtomicSite &site, bool is_rmw) {
+  return site.mnemonic.starts_with("flat_atomic") ||
+         (!is_rmw &&
+          (site.mnemonic.starts_with("flat_load") || site.mnemonic.starts_with("flat_store")));
+}
+
+[[nodiscard]] bool is_global_family(const ConSanAtomicSite &site, bool is_rmw) {
+  return site.mnemonic.starts_with("global_atomic") ||
+         (!is_rmw &&
+          (site.mnemonic.starts_with("global_load") || site.mnemonic.starts_with("global_store")));
+}
+
+[[nodiscard]] Reason causal_reason(const ConSanAtomicSite &site,
+                                   const ConSanAtomicLoweringForm &form) {
+  if (!site.raw_scope)
+    return Reason::MissingOrderingMetadata;
+  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+    return Reason::UnsupportedScope;
+  if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset && *site.raw_scope != 1u)
+    return Reason::UnsupportedScope;
+  if (form.compare_exchange && (!site.returns_old_value.value_or(false) || !site.dst_vgpr))
+    return Reason::CompareExchangeOutcomeUnavailable;
+  return Reason::None;
+}
+
+[[nodiscard]] Reason exact_reason(const ConSanAtomicSite &site,
+                                  const ConSanAtomicLoweringForm &form) {
+  if (form.kind != ConSanAtomicLoweringFormKind::FlatVectorAddress &&
+      form.kind != ConSanAtomicLoweringFormKind::FlatScalarVectorAddress &&
+      form.kind != ConSanAtomicLoweringFormKind::GlobalVectorAddress &&
+      form.kind != ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress)
+    return Reason::UnsupportedAddressSource;
+  if (form.value_width_bits != 32u)
+    return Reason::InvalidAccessWidth;
+  if ((form.kind == ConSanAtomicLoweringFormKind::FlatVectorAddress ||
+       form.kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress) &&
+      form.signed_byte_offset != 0)
+    return Reason::NonzeroImmediateOffset;
+  if (form.compare_exchange && site.returns_old_value && !*site.returns_old_value)
+    return Reason::CompareExchangeOutcomeUnavailable;
+  if (form.compare_exchange && !site.dst_vgpr)
+    return Reason::MissingOperands;
+  if (!site.raw_scope || !site.raw_th || !site.returns_old_value)
+    return Reason::MissingOrderingMetadata;
+  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+    return Reason::UnsupportedScope;
+  return Reason::None;
 }
 
 } // namespace
@@ -34,78 +89,188 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   if (!consan_is_capability_arch(arch))
     return reject(Reason::TargetUnavailable);
 
-  const bool is_flat = site.mnemonic.starts_with("flat_atomic") ||
-                       (!is_rmw && (site.mnemonic.starts_with("flat_load") ||
-                                    site.mnemonic.starts_with("flat_store")));
-  const bool is_vglobal = site.mnemonic.starts_with("global_atomic") ||
-                          (!is_rmw && (site.mnemonic.starts_with("global_load") ||
-                                       site.mnemonic.starts_with("global_store")));
-  if (!is_flat && !is_vglobal)
+  const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
+  const uint16_t value_register_count = static_cast<uint16_t>((site.width_bits + 31u) / 32u);
+  const uint16_t data_register_count =
+      static_cast<uint16_t>(value_register_count * (compare_exchange ? 2u : 1u));
+  const uint16_t destination_register_count =
+      site.returns_old_value.value_or(false) ? value_register_count : 0u;
+  if ((site.data_vgpr && static_cast<uint32_t>(*site.data_vgpr) + data_register_count > 256u) ||
+      (site.dst_vgpr && destination_register_count != 0u &&
+       static_cast<uint32_t>(*site.dst_vgpr) + destination_register_count > 256u)) {
+    return reject(Reason::UnsupportedInputWidth);
+  }
+  const auto finish = [&](ConSanAtomicLoweringForm form, Reason address_reason = Reason::None) {
+    return normalized(form, address_reason,
+                      address_reason == Reason::None ? exact_reason(site, form) : address_reason,
+                      address_reason == Reason::None ? causal_reason(site, form) : address_reason);
+  };
+
+  if (site.mnemonic.starts_with("ds_")) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+      return reject(Reason::UnsupportedAddressSource);
+    if (site.width_bits != 32u)
+      return reject(Reason::InvalidAccessWidth);
+    if (site.size != 2u * sizeof(uint32_t) || !site.raw_addr || !site.raw_data0 ||
+        !site.raw_ioffset)
+      return reject(Reason::UnsupportedEncoding);
+    if (!site.addr_vgpr || !site.data_vgpr || *site.raw_addr != *site.addr_vgpr ||
+        *site.raw_data0 != *site.data_vgpr)
+      return reject(Reason::MissingOperands);
+    if (*site.raw_ioffset < 0 || *site.raw_ioffset > 0xff)
+      return reject(Reason::UnsupportedOffset);
+    return finish({
+        .kind = ConSanAtomicLoweringFormKind::LdsVectorOffset,
+        .instruction_size = site.size,
+        .value_width_bits = site.width_bits,
+        .value_register_count = value_register_count,
+        .data_register_count = data_register_count,
+        .destination_register_count = destination_register_count,
+        .address_vgpr = *site.addr_vgpr,
+        .address_vgpr_count = 1u,
+        .data_vgpr = *site.data_vgpr,
+        .destination_vgpr = site.dst_vgpr,
+        .scalar_base_sgpr = std::nullopt,
+        .scalar_offset_sgpr = std::nullopt,
+        .signed_byte_offset = *site.raw_ioffset,
+        .scope = site.raw_scope.value_or(0u),
+        .is_rmw = is_rmw,
+        .compare_exchange = compare_exchange,
+        .returns_old_value = site.returns_old_value.value_or(false),
+    });
+  }
+
+  if (site.mnemonic.starts_with("buffer_")) {
+    constexpr uint32_t kNullScalarOffset = 0x7cu;
+    constexpr int32_t kSigned24Min = -(1 << 23);
+    constexpr int32_t kSigned24Max = (1 << 23) - 1;
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+      return reject(Reason::UnsupportedAddressSource);
+    if (site.width_bits == 0u || site.width_bits > 128u)
+      return reject(Reason::InvalidAccessWidth);
+    if (site.size != 3u * sizeof(uint32_t) || !site.raw_rsrc || !site.raw_soffset ||
+        !site.raw_vaddr || !site.raw_ioffset || !site.raw_offen || !site.raw_idxen ||
+        !*site.raw_offen || *site.raw_idxen)
+      return reject(Reason::UnsupportedEncoding);
+    if (!site.addr_vgpr || !site.saddr_sgpr || !site.data_vgpr ||
+        *site.raw_vaddr != *site.addr_vgpr || *site.raw_rsrc != *site.saddr_sgpr)
+      return reject(Reason::MissingOperands);
+    if ((*site.saddr_sgpr & 3u) != 0u || *site.saddr_sgpr > 124u ||
+        (*site.raw_soffset != kNullScalarOffset && *site.raw_soffset > 127u) ||
+        *site.addr_vgpr > 255u)
+      return reject(Reason::UnsupportedInputWidth);
+    if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
+      return reject(Reason::UnsupportedOffset);
+    return finish({
+        .kind = ConSanAtomicLoweringFormKind::BufferResourceVectorOffset,
+        .instruction_size = site.size,
+        .value_width_bits = site.width_bits,
+        .value_register_count = value_register_count,
+        .data_register_count = data_register_count,
+        .destination_register_count = destination_register_count,
+        .address_vgpr = *site.addr_vgpr,
+        .address_vgpr_count = 1u,
+        .data_vgpr = *site.data_vgpr,
+        .destination_vgpr = site.dst_vgpr,
+        .scalar_base_sgpr = site.saddr_sgpr,
+        .scalar_offset_sgpr = *site.raw_soffset == kNullScalarOffset
+                                  ? std::nullopt
+                                  : std::optional<uint16_t>(*site.raw_soffset),
+        .signed_byte_offset = *site.raw_ioffset,
+        .scope = site.raw_scope.value_or(0u),
+        .is_rmw = is_rmw,
+        .compare_exchange = compare_exchange,
+        .returns_old_value = site.returns_old_value.value_or(false),
+    });
+  }
+
+  const bool flat = is_flat_family(site, is_rmw);
+  const bool global = is_global_family(site, is_rmw);
+  if (!flat && !global)
     return reject(Reason::UnsupportedAddressSource);
-  if (site.width_bits != 32u)
+  if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(Reason::InvalidAccessWidth);
 
-  const bool is_cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const bool is_rdna3 = consan_uses_gfx11_encoding(arch);
-  const bool is_gfx12 = consan_uses_gfx12_encoding(arch);
-  const bool scalar_pair = site.raw_saddr && site.saddr_sgpr &&
-                           *site.raw_saddr == *site.saddr_sgpr && *site.saddr_sgpr <= 104u &&
-                           (*site.saddr_sgpr & 1u) == 0u;
-  const bool gfx12_flat_saddr = site.raw_saddr && (*site.raw_saddr == 0x7cu || scalar_pair);
-  const bool gfx12_flat_encoding =
-      is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) && gfx12_flat_saddr;
-  const bool cdna_flat_encoding = is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) &&
-                                  site.raw_saddr && *site.raw_saddr == 0u;
-  const bool rdna3_flat_encoding = is_flat && is_rdna3 && site.size == 2u * sizeof(uint32_t) &&
-                                   site.raw_saddr && *site.raw_saddr == 0x7cu;
-  const bool vglobal_saddr =
-      site.raw_saddr && (*site.raw_saddr == (is_cdna ? 0x7fu : 0x7cu) || scalar_pair);
-  const bool pre_gfx12_vglobal_encoding =
-      is_vglobal && (is_cdna || is_rdna3) && site.size == 2u * sizeof(uint32_t) && vglobal_saddr;
-  const bool gfx12_vglobal_encoding = is_vglobal && is_gfx12 && site.size == 3u * sizeof(uint32_t);
-  if (!gfx12_flat_encoding && !cdna_flat_encoding && !rdna3_flat_encoding &&
-      !pre_gfx12_vglobal_encoding && !gfx12_vglobal_encoding) {
+  const bool cdna_encoding = consan_uses_gfx9_cdna_encoding(arch);
+  const bool rdna3_encoding = arch == ROCJITSU_CODE_ARCH_RDNA3;
+  const bool two_word_encoding = cdna_encoding || rdna3_encoding;
+  const uint32_t expected_size = two_word_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
+  if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(Reason::UnsupportedEncoding);
-  }
-  if (!site.raw_ioffset || (is_flat && *site.raw_ioffset != 0))
-    return reject(is_flat && site.raw_ioffset ? Reason::NonzeroImmediateOffset
-                                              : Reason::UnsupportedEncoding);
-  if (!site.addr_vgpr || *site.addr_vgpr >= 255u || !site.data_vgpr)
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA5 && !site.raw_scale_offset) ||
+      (arch != ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false)))
+    return reject(Reason::UnsupportedEncoding);
+  if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(Reason::MissingOperands);
 
-  const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
+  constexpr uint32_t kCdnaGlobalNoSaddr = 0x7fu;
+  constexpr uint32_t kGfx11NoSaddr = 0x7cu;
+  const uint32_t vector_only_saddr = rdna3_encoding  ? kGfx11NoSaddr
+                                     : cdna_encoding ? (global ? kCdnaGlobalNoSaddr : 0u)
+                                                     : 0x7cu;
+  constexpr int32_t kSigned13Min = -(1 << 12);
+  constexpr int32_t kSigned13Max = (1 << 12) - 1;
+  constexpr int32_t kSigned24Min = -(1 << 23);
+  constexpr int32_t kSigned24Max = (1 << 23) - 1;
+  const int32_t offset_min = two_word_encoding ? kSigned13Min : kSigned24Min;
+  const int32_t offset_max = two_word_encoding ? kSigned13Max : kSigned24Max;
+
+  ConSanAtomicLoweringFormKind kind;
+  uint16_t address_register_count;
+  std::optional<uint16_t> scalar_base;
+  if (*site.raw_saddr == vector_only_saddr) {
+    if (*site.addr_vgpr >= 255u)
+      return reject(Reason::UnsupportedInputWidth);
+    if (flat && *site.raw_ioffset != 0)
+      return reject(Reason::UnsupportedOffset);
+    if (global && (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max))
+      return reject(Reason::UnsupportedOffset);
+    kind = flat ? ConSanAtomicLoweringFormKind::FlatVectorAddress
+                : ConSanAtomicLoweringFormKind::GlobalVectorAddress;
+    address_register_count = 2u;
+  } else {
+    if (!consan_uses_gfx12_encoding(arch) && flat)
+      return reject(Reason::UnsupportedEncoding);
+    if (!site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr)
+      return reject(Reason::UnsupportedInputWidth);
+    if (*site.saddr_sgpr > 104u || (*site.saddr_sgpr & 1u) != 0u)
+      return reject(Reason::UnsupportedEncoding);
+    if (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max)
+      return reject(Reason::UnsupportedOffset);
+    if (*site.addr_vgpr > 255u)
+      return reject(Reason::UnsupportedInputWidth);
+    kind = flat ? ConSanAtomicLoweringFormKind::FlatScalarVectorAddress
+                : ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress;
+    address_register_count = 1u;
+    scalar_base = site.saddr_sgpr;
+  }
+
   ConSanAtomicLoweringForm form{
-      .kind = is_flat ? (scalar_pair ? ConSanAtomicLoweringFormKind::FlatScalarVectorAddress
-                                     : ConSanAtomicLoweringFormKind::FlatVectorAddress)
-                      : (scalar_pair ? ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress
-                                     : ConSanAtomicLoweringFormKind::GlobalVectorAddress),
+      .kind = kind,
       .instruction_size = site.size,
       .value_width_bits = site.width_bits,
-      .value_register_count = 1u,
+      .value_register_count = value_register_count,
+      .data_register_count = data_register_count,
+      .destination_register_count = destination_register_count,
       .address_vgpr = *site.addr_vgpr,
-      .address_vgpr_count = static_cast<uint16_t>(scalar_pair ? 1u : 2u),
+      .address_vgpr_count = address_register_count,
       .data_vgpr = *site.data_vgpr,
       .destination_vgpr = site.dst_vgpr,
-      .scalar_base_sgpr = scalar_pair ? site.saddr_sgpr : std::nullopt,
+      .scalar_base_sgpr = scalar_base,
+      .scalar_offset_sgpr = std::nullopt,
       .signed_byte_offset = *site.raw_ioffset,
       .scope = site.raw_scope.value_or(0u),
       .scale_vector_offset = site.raw_scale_offset.value_or(false),
+      .sign_extend_vector_offset = cdna_encoding && arch != ROCJITSU_CODE_ARCH_CDNA5,
       .is_rmw = is_rmw,
       .compare_exchange = compare_exchange,
       .returns_old_value = site.returns_old_value.value_or(false),
   };
-
-  if (compare_exchange && *site.data_vgpr >= 255u)
-    return normalized(std::move(form), Reason::MissingOperands);
-  if (compare_exchange && site.returns_old_value && !*site.returns_old_value)
-    return normalized(std::move(form), Reason::CompareExchangeOutcomeUnavailable);
-  if (compare_exchange && !site.dst_vgpr)
-    return normalized(std::move(form), Reason::MissingOperands);
-  if (!site.raw_scope || !site.raw_th || !site.returns_old_value)
-    return normalized(std::move(form), Reason::MissingOrderingMetadata);
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
-    return normalized(std::move(form), Reason::UnsupportedScope);
-  return normalized(std::move(form), Reason::None);
+  const Reason address_reason = kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress &&
+                                        site.returns_old_value.value_or(false)
+                                    ? Reason::ResultAddressAlias
+                                    : Reason::None;
+  return finish(std::move(form), address_reason);
 }
 
 std::string_view consan_atomic_classifier_reason_name(ConSanAtomicClassifierReason reason) {
@@ -122,6 +287,12 @@ std::string_view consan_atomic_classifier_reason_name(ConSanAtomicClassifierReas
     return "nonzero-offset";
   case Reason::MissingOperands:
     return "missing-operands";
+  case Reason::UnsupportedInputWidth:
+    return "unsupported-input-width";
+  case Reason::UnsupportedOffset:
+    return "unsupported-offset";
+  case Reason::ResultAddressAlias:
+    return "result-address-alias";
   case Reason::CompareExchangeOutcomeUnavailable:
     return "compare-exchange-outcome-unavailable";
   case Reason::MissingOrderingMetadata:

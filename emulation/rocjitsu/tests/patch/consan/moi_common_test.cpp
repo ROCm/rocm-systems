@@ -348,6 +348,7 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   plan.site.text_offset = 16u;
   plan.site.size = 4u;
   plan.site.width_bits = 32u;
+  plan.lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
   plan.ordered_sequence_end_text_offset = 20u;
   EXPECT_TRUE(plan.is_well_formed());
 
@@ -363,6 +364,9 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   consan_detail::MoiAtomicEvidenceSitePlan missing_guest = plan;
   missing_guest.site.size = 0u;
   EXPECT_FALSE(missing_guest.is_well_formed());
+  consan_detail::MoiAtomicEvidenceSitePlan missing_lowering_form = plan;
+  missing_lowering_form.lowering_form.kind = ConSanAtomicLoweringFormKind::Count;
+  EXPECT_FALSE(missing_lowering_form.is_well_formed());
 }
 
 TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
@@ -378,6 +382,7 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   plan.container_name = "kernel:fence";
   plan.communication_site.size = 12u;
   plan.communication_site.width_bits = 32u;
+  plan.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
   plan.memory_role = ConSanSyncMemoryRole::Acquire;
   plan.patch_text_offset = 24u;
   plan.patch_size = 20u;
@@ -395,6 +400,9 @@ TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
   consan_detail::MoiFenceEvidenceSitePlan missing_communication = plan;
   missing_communication.communication_site.width_bits = 0u;
   EXPECT_FALSE(missing_communication.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan missing_lowering_form = plan;
+  missing_lowering_form.communication_lowering_form.kind = ConSanAtomicLoweringFormKind::Count;
+  EXPECT_FALSE(missing_lowering_form.is_well_formed());
   consan_detail::MoiFenceEvidenceSitePlan empty_patch = plan;
   empty_patch.patch_size = 0u;
   EXPECT_FALSE(empty_patch.is_well_formed());

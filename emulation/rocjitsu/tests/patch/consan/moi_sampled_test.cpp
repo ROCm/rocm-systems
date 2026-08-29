@@ -1836,6 +1836,7 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
   plan.support = ConSanMoiAtomicAddressSupport::Supported;
   plan.input_address_vgpr = 4u;
   plan.input_address_vgpr_count = 1u;
+  plan.sign_extend_vector_offset = true;
   plan.scalar_base_sgpr = 20u;
   plan.signed_byte_offset = 20;
   plan.result_address_vgpr = 7u;

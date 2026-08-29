@@ -34,13 +34,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       result, ConSanProbeIntentKind::ExactAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
-  if (std::ranges::any_of(candidates, [](const MoiAtomicEvidenceSitePlan &candidate) {
-        return !candidate.exact_ordering_form.has_value();
-      })) {
-    result.errors.emplace_back(
-        "ConSan MOI admitted exact atomic evidence lost its normalized target form");
-    return;
-  }
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
@@ -144,7 +137,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       continue;
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-        site, resources->base, resources->count, resources->source, arch);
+        candidate.lowering_form, resources->base, resources->count, resources->source);
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch has no usable address plan in " +

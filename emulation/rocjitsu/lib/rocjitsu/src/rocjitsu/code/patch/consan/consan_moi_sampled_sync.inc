@@ -2033,9 +2033,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == ConSanRegisterAllocationSource::SpillRequired &&
         sampled_atomic_guest_preserves_address(site, candidate.atomic.is_rmw);
-    const ConSanMoiAtomicAddressPlan address_plan =
-        plan_consan_moi_atomic_address(site, resources->base, resources->count, resources->source,
-                                       arch, allow_post_guest_spill_operand_overlap);
+    const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
+        candidate.atomic.lowering_form, resources->base, resources->count, resources->source,
+        allow_post_guest_spill_operand_overlap);
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync rejected exact address plan: " +

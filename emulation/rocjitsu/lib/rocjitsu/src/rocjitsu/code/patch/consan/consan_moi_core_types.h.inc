@@ -227,6 +227,7 @@ struct ConSanMoiAtomicAddressPlan {
   /// offset before zero/sign extension. This is one except for CDNA5's
   /// SCALE_OFFSET form, where it is the communication access width in bytes.
   uint16_t input_address_scale = 1;
+  bool sign_extend_vector_offset = false;
   std::optional<uint16_t> scalar_base_sgpr;
   std::optional<uint16_t> scalar_offset_sgpr;
   int32_t signed_byte_offset = 0;
@@ -265,8 +266,8 @@ inline constexpr uint32_t kRdna3GlobalNoSaddrEncoding = 0x7cu;
 [[nodiscard]] std::string_view
 consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 
-/// Build a typed effective-address plan from decoded atomic operands and an
-/// already resolved scratch-resource plan. FLAT aliases its guest 64-bit
+/// Build a typed effective-address plan from a classifier-owned normalized
+/// target form and an already resolved scratch-resource plan. FLAT aliases its guest 64-bit
 /// address unless a returned value aliases it, in which case it snapshots the
 /// pair into the scratch tail. VGLOBAL likewise reserves the last two VGPRs of
 /// a five-VGPR private window for an aliased pair or scalar-base address.
@@ -278,6 +279,14 @@ consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 /// valid for a spill consumer that executes the guest first and preserves its
 /// effective-address inputs until materialization. The CDNA rule matches
 /// `shared/addr_calc_flat.h`, the simulator's effective-address source of truth.
+[[nodiscard]] ConSanMoiAtomicAddressPlan
+plan_consan_moi_atomic_address(const ConSanAtomicLoweringForm &form, uint16_t scratch_vgpr,
+                               uint16_t scratch_vgpr_count,
+                               ConSanRegisterAllocationSource resource_source,
+                               bool allow_post_guest_spill_operand_overlap = false);
+
+/// Compatibility entry point for focused decoder/planner tests. Production
+/// lowering carries the normalized form and uses the overload above.
 [[nodiscard]] ConSanMoiAtomicAddressPlan
 plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
                                uint16_t scratch_vgpr_count,
@@ -311,7 +320,11 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
     return ConSanMoiInlineAtomicSupport::NonzeroOffset;
   case ConSanAtomicClassifierReason::MissingOperands:
+  case ConSanAtomicClassifierReason::UnsupportedInputWidth:
+  case ConSanAtomicClassifierReason::ResultAddressAlias:
     return ConSanMoiInlineAtomicSupport::MissingOperands;
+  case ConSanAtomicClassifierReason::UnsupportedOffset:
+    return ConSanMoiInlineAtomicSupport::NonzeroOffset;
   case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
     return ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable;
   case ConSanAtomicClassifierReason::MissingOrderingMetadata:

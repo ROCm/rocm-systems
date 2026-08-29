@@ -627,10 +627,9 @@ struct MoiAtomicEvidenceSitePlan {
   /// materialize its address. Semantic ordering does not come from this copy.
   ConSanAtomicSite site;
 
-  /// Classifier-owned exact target form for InlineShadow ordering. Other MOI
-  /// engines use different atomic operations and therefore leave this absent.
-  /// An InlineShadow emitter consumes this form and never re-admits `site`.
-  std::optional<ConSanAtomicLoweringForm> exact_ordering_form;
+  /// Classifier-owned target form shared by address planning and the selected
+  /// ordering mechanism. Native lowerers consume it and never re-admit `site`.
+  ConSanAtomicLoweringForm lowering_form;
 
   /// Unique dispatchable owner descriptor, when graph ownership proved one.
   std::optional<uint64_t> kernel_descriptor_file_offset;
@@ -656,6 +655,7 @@ struct MoiAtomicEvidenceSitePlan {
     return semantic_site.valid() && association.valid() && address_capture_intent.valid() &&
            evidence_intent.valid() && address_capture_intent != evidence_intent &&
            !container_name.empty() && site.size != 0u && site.width_bits != 0u &&
+           lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            ordered_sequence_end_text_offset >= site.text_offset + site.size;
   }
 };
@@ -693,6 +693,9 @@ struct MoiFenceEvidenceSitePlan {
   /// Ordering meaning remains owned by `association`, not this decode copy.
   ConSanAtomicSite communication_site;
 
+  /// Classifier-owned address form for the communication operation.
+  ConSanAtomicLoweringForm communication_lowering_form;
+
   /// Release or acquire role already established by the graph association.
   ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
 
@@ -728,6 +731,7 @@ struct MoiFenceEvidenceSitePlan {
            association.valid() && evidence_intent.valid() && address_capture_intent.valid() &&
            evidence_intent != address_capture_intent && !container_name.empty() &&
            communication_site.size != 0u && communication_site.width_bits != 0u &&
+           communication_lowering_form.kind != ConSanAtomicLoweringFormKind::Count &&
            (memory_role == ConSanSyncMemoryRole::Release ||
             memory_role == ConSanSyncMemoryRole::Acquire) &&
            patch_size != 0u &&

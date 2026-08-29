@@ -116,7 +116,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       continue;
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-        site, resources->base, resources->count, resources->source, arch);
+        candidate.lowering_form, resources->base, resources->count, resources->source);
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable address plan in " +

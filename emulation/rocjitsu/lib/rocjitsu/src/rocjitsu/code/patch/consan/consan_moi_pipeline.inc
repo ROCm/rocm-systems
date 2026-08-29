@@ -121,8 +121,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       if (active_descriptor_missing)
         continue;
     }
-    const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-        candidate.communication_site, resources->base, resources->count, resources->source, arch);
+    const ConSanMoiAtomicAddressPlan address_plan =
+        plan_consan_moi_atomic_address(candidate.communication_lowering_form, resources->base,
+                                       resources->count, resources->source);
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI fence record patch rejected communication address: " +

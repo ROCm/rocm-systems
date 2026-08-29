@@ -35,6 +35,8 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   site.data_vgpr = 2;
   site.saddr_sgpr = 4;
   site.raw_saddr = 4;
+  if (target.arch == ROCJITSU_CODE_ARCH_CDNA5)
+    site.raw_scale_offset = false;
   site.raw_vaddr = 0;
   site.raw_vdata = 2;
   site.raw_ioffset = 0;
@@ -56,6 +58,9 @@ ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
   site.addr_vgpr = 0;
   site.data_vgpr = 2;
   site.raw_scope = 1;
+  site.raw_addr = 0;
+  site.raw_data0 = 2;
+  site.raw_ioffset = 0;
   site.returns_old_value = true;
   site.mnemonic = "ds_add_u32";
   return site;
@@ -74,6 +79,8 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.address_sgpr = 4;
   site.value_vgpr = 2;
   site.raw_saddr = 4;
+  if (target.arch == ROCJITSU_CODE_ARCH_CDNA5)
+    site.raw_scale_offset = false;
   site.raw_vaddr = 0;
   site.raw_vsrc = 2;
   site.raw_ioffset = 0;

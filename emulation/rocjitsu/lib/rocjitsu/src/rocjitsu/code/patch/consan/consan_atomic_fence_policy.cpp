@@ -259,6 +259,11 @@ atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
     return ConSanAtomicPolicyReason::UnsupportedEncoding;
   case ConSanAtomicClassifierReason::MissingOperands:
     return ConSanAtomicPolicyReason::MissingOperands;
+  case ConSanAtomicClassifierReason::UnsupportedInputWidth:
+  case ConSanAtomicClassifierReason::ResultAddressAlias:
+    return ConSanAtomicPolicyReason::MissingOperands;
+  case ConSanAtomicClassifierReason::UnsupportedOffset:
+    return ConSanAtomicPolicyReason::UnsupportedEncoding;
   case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
     return ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable;
   case ConSanAtomicClassifierReason::MissingOrderingMetadata:
@@ -270,32 +275,6 @@ atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
     return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
   }
   return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
-}
-
-[[nodiscard]] ConSanAtomicPolicyReason
-classify_cdna5_buffer_ordinary_encoding(const ConSanAtomicSite &site, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !site.mnemonic.starts_with("buffer_"))
-    return ConSanAtomicPolicyReason::UnsupportedAddressSource;
-  if (site.width_bits == 0u || site.width_bits > 128u)
-    return ConSanAtomicPolicyReason::InvalidAccessWidth;
-  if (site.size != 3u * sizeof(uint32_t) || !site.raw_rsrc || !site.raw_soffset ||
-      !site.raw_vaddr || !site.raw_ioffset || !site.raw_scope || !site.raw_offen ||
-      !site.raw_idxen || !*site.raw_offen || *site.raw_idxen) {
-    return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  }
-  if (!site.addr_vgpr || !site.saddr_sgpr || !site.data_vgpr ||
-      *site.raw_vaddr != *site.addr_vgpr || *site.raw_rsrc != *site.saddr_sgpr ||
-      (*site.saddr_sgpr & 3u) != 0u || *site.saddr_sgpr > 124u ||
-      (*site.raw_soffset != 0x7cu && *site.raw_soffset > 127u) || *site.addr_vgpr > 255u) {
-    return ConSanAtomicPolicyReason::MissingOperands;
-  }
-  constexpr int32_t kSigned24Min = -(1 << 23);
-  constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
-    return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
-    return ConSanAtomicPolicyReason::UnsupportedScope;
-  return ConSanAtomicPolicyReason::None;
 }
 
 [[nodiscard]] ConSanAtomicPolicyReason classify_atomic_encoding(const ProgramInventory &inventory,
@@ -315,37 +294,16 @@ classify_cdna5_buffer_ordinary_encoding(const ConSanAtomicSite &site, rj_code_ar
   // and sequence association; policy always classifies that single contract.
   site.raw_scope = sequence.raw_scope;
 
-  // CDNA5 buffer ordinary communication is a Record/Replay-only address form.
-  // Its associated fence owns the after-operation evidence, while the common
-  // address planner materializes the resource descriptor and vector offset.
-  if (ordinary && engine == ConSanCapabilityEngine::RecordReplay &&
-      site.mnemonic.starts_with("buffer_")) {
-    return classify_cdna5_buffer_ordinary_encoding(site, inventory.arch());
-  }
-
-  if (engine == ConSanCapabilityEngine::InlineShadow || ordinary) {
-    return atomic_classifier_reason(
-        classify_consan_atomic_lowering(site, inventory.arch(), !ordinary).exact_ordering_reason);
-  }
-
-  const bool allowed_lds = site.mnemonic.starts_with("ds_") &&
-                           consan_arch_supports_capability_form(
-                               inventory.arch(), ConSanCapabilityForm::OrderedLdsAtomic);
-  if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
-      !allowed_lds) {
-    return ConSanAtomicPolicyReason::UnsupportedAddressSource;
-  }
-  if (!site.addr_vgpr || !site.data_vgpr || *site.addr_vgpr >= 255u)
-    return ConSanAtomicPolicyReason::MissingOperands;
-  if (!site.raw_scope)
-    return ConSanAtomicPolicyReason::MissingScope;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
-    return ConSanAtomicPolicyReason::UnsupportedScope;
-  if (consan_atomic_is_compare_exchange(site) &&
-      (!site.returns_old_value.value_or(false) || !site.dst_vgpr)) {
-    return ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable;
-  }
-  return ConSanAtomicPolicyReason::None;
+  const ConSanAtomicLoweringClassification classification =
+      classify_consan_atomic_lowering(site, inventory.arch(), !ordinary);
+  const bool record_buffer_ordinary =
+      ordinary && engine == ConSanCapabilityEngine::RecordReplay && classification.form &&
+      classification.form->kind == ConSanAtomicLoweringFormKind::BufferResourceVectorOffset;
+  const ConSanAtomicClassifierReason reason =
+      engine == ConSanCapabilityEngine::InlineShadow || (ordinary && !record_buffer_ordinary)
+          ? classification.exact_ordering_reason
+          : classification.causal_ordering_reason;
+  return atomic_classifier_reason(reason);
 }
 
 [[nodiscard]] bool sequence_is_atomic_contract(const ConSanSyncEvent &event,

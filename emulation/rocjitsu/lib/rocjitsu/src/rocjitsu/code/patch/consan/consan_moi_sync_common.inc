@@ -371,6 +371,18 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
       }
       if (sequence->raw_scope)
         plan.communication_site.raw_scope = sequence->raw_scope;
+      const ConSanAtomicLoweringClassification lowering =
+          classify_consan_atomic_lowering(plan.communication_site, result.program_inventory.arch(),
+                                          communication->kind == ConSanSyncEventKind::Atomic);
+      const bool exact_ordinary_form =
+          communication->kind == ConSanSyncEventKind::OrdinaryMemory && lowering.form &&
+          lowering.form->kind != ConSanAtomicLoweringFormKind::BufferResourceVectorOffset;
+      const bool mechanism_available = exact_ordinary_form ? lowering.exact_ordering_available()
+                                                           : lowering.causal_ordering_available();
+      if (!lowering.address_available() || !mechanism_available || !lowering.form) {
+        return false;
+      }
+      plan.communication_lowering_form = *lowering.form;
       if (descriptor_file_offset &&
           (communication->execution_owners.size() != 1u ||
            communication->execution_owners.front().descriptor_file_offset !=
@@ -560,14 +572,21 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
       }
       if (sequence->raw_scope)
         plan.site.raw_scope = sequence->raw_scope;
-      if (evidence_kind == ConSanProbeIntentKind::ExactAtomicOrdering) {
-        const ConSanAtomicLoweringClassification lowering =
-            classify_consan_atomic_lowering(plan.site, result.program_inventory.arch(),
-                                            plan.is_rmw);
-        if (!lowering.exact_ordering_available() || !lowering.form)
-          return false;
-        plan.exact_ordering_form = lowering.form;
-      }
+      const ConSanAtomicLoweringClassification lowering =
+          classify_consan_atomic_lowering(plan.site, result.program_inventory.arch(), plan.is_rmw);
+      const bool exact_ordinary_form =
+          !plan.is_rmw && lowering.form &&
+          lowering.form->kind != ConSanAtomicLoweringFormKind::BufferResourceVectorOffset;
+      const bool mechanism_available =
+          evidence_kind == ConSanProbeIntentKind::ExactAtomicOrdering || exact_ordinary_form
+              ? lowering.exact_ordering_available()
+          : (evidence_kind == ConSanProbeIntentKind::AtomicRecord ||
+             evidence_kind == ConSanProbeIntentKind::SampledAtomicOrdering)
+              ? lowering.causal_ordering_available()
+              : false;
+      if (!lowering.address_available() || !mechanism_available || !lowering.form)
+        return false;
+      plan.lowering_form = *lowering.form;
       if (descriptor_file_offset &&
           (event->execution_owners.size() != 1u ||
            event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {

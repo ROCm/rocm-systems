@@ -2701,6 +2701,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.addr_vgpr = 2;
   site.data_vgpr = 4;
   site.raw_saddr = rdna4::OPR_SREG_NULL;
+  site.raw_vaddr = 2;
   site.raw_ioffset = 0;
   site.raw_scope = 2;
   site.raw_th = 0;
@@ -2730,6 +2731,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   changed = site;
   changed.mnemonic = "global_atomic_add_u32";
   changed.raw_saddr = 4;
+  changed.saddr_sgpr = 4;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
@@ -2738,11 +2740,13 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
   changed.raw_saddr = kCdnaGlobalNoSaddrEncoding;
+  changed.saddr_sgpr.reset();
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_CDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.size = 3u * sizeof(uint32_t);
   changed.raw_saddr = 4;
+  changed.saddr_sgpr = 4;
   changed.mnemonic = "global_atomic_cmpswap_b32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;
@@ -2777,6 +2781,10 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
     representative.mnemonic = "global_atomic_add_u32";
     representative.size = contract_case.size;
     representative.raw_saddr = contract_case.raw_saddr;
+    representative.saddr_sgpr =
+        contract_case.raw_saddr == 4u ? std::optional<uint16_t>(4u) : std::nullopt;
+    representative.raw_scale_offset =
+        contract_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? std::optional<bool>(false) : std::nullopt;
     EXPECT_EQ(classify_consan_moi_inline_atomic_support(
                   representative, ConSanMoiAtomicEventKind::Release, contract_case.arch),
               ConSanMoiInlineAtomicSupport::Supported);
@@ -2816,7 +2824,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   changed.raw_saddr = 4;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
+            ConSanMoiInlineAtomicSupport::MissingOperands);
   changed = site;
   changed.addr_vgpr.reset();
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,

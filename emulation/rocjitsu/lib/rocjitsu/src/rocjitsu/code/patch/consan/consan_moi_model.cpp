@@ -2547,11 +2547,9 @@ std::string_view consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSu
   return "unknown";
 }
 
-ConSanMoiAtomicAddressPlan
-plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
-                               uint16_t scratch_vgpr_count,
-                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
-                               bool allow_post_guest_spill_operand_overlap) {
+ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
+    const ConSanAtomicLoweringForm &form, uint16_t scratch_vgpr, uint16_t scratch_vgpr_count,
+    ConSanRegisterAllocationSource resource_source, bool allow_post_guest_spill_operand_overlap) {
   ConSanMoiAtomicAddressPlan plan;
   plan.scratch_vgpr = scratch_vgpr;
   plan.scratch_vgpr_count = scratch_vgpr_count;
@@ -2572,288 +2570,223 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
            source == ConSanRegisterAllocationSource::DescriptorGrowth ||
            source == ConSanRegisterAllocationSource::SpillRequired;
   };
-  if (!consan_is_capability_arch(arch))
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
   if (!usable_resource_source(resource_source))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan);
-  if (site.mnemonic.starts_with("ds_")) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
-    if (site.width_bits != 32u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
-    if (site.size != 2u * sizeof(uint32_t) || !site.raw_addr || !site.raw_data0 ||
-        !site.raw_ioffset)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-    if (!site.raw_scope || *site.raw_scope != 1u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedScope);
-    if (!site.addr_vgpr || !site.data_vgpr || *site.raw_addr != *site.addr_vgpr ||
-        *site.raw_data0 != *site.data_vgpr)
-      return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
-    if (*site.raw_ioffset < 0 || *site.raw_ioffset > 0xff)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
+  if (form.kind == ConSanAtomicLoweringFormKind::Count || form.value_width_bits == 0u ||
+      form.value_register_count == 0u || form.data_register_count == 0u ||
+      form.address_vgpr_count == 0u)
+    return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+
+  const auto valid_scratch = [&](uint16_t compact_count) {
+    return (scratch_vgpr_count == compact_count || scratch_vgpr_count >= 7u) &&
+           static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count <= 256u;
+  };
+  const auto result_tail = [&] {
+    return static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
+  };
+  const auto overlaps_operands = [&](uint16_t checked_scratch_count, bool include_address) {
+    return (include_address && overlaps(scratch_vgpr, checked_scratch_count, form.address_vgpr,
+                                        form.address_vgpr_count)) ||
+           overlaps(scratch_vgpr, scratch_vgpr_count, form.data_vgpr, form.data_register_count) ||
+           (form.destination_vgpr && form.destination_register_count != 0u &&
+            overlaps(scratch_vgpr, scratch_vgpr_count, *form.destination_vgpr,
+                     form.destination_register_count));
+  };
+  const bool returned_value_aliases_address =
+      form.returns_old_value && form.destination_vgpr &&
+      overlaps(form.address_vgpr, form.address_vgpr_count, *form.destination_vgpr,
+               form.destination_register_count);
+
+  if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset) {
     if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
         static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
-    const uint16_t result_address_vgpr =
-        static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-    if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
     if (!allow_post_guest_spill_operand_overlap &&
-        (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u) ||
-         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
-         (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u))))
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::LdsByteOffsetToken;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
-    plan.input_address_vgpr = *site.addr_vgpr;
-    plan.input_address_vgpr_count = 1u;
-    plan.signed_byte_offset = *site.raw_ioffset;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.signed_byte_offset = form.signed_byte_offset;
     plan.result_address_vgpr = result_address_vgpr;
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  if (site.mnemonic.starts_with("buffer_")) {
-    constexpr uint32_t kNullScalarOffset = 0x7cu;
-    constexpr int32_t kSigned24Min = -(1 << 23);
-    constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
-    if (site.width_bits == 0u || site.width_bits > 128u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
-    if (site.size != 3u * sizeof(uint32_t) || !site.raw_rsrc || !site.raw_soffset ||
-        !site.raw_vaddr || !site.raw_ioffset || !site.raw_scope || !site.raw_offen ||
-        !site.raw_idxen || !*site.raw_offen || *site.raw_idxen)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-    if (!site.addr_vgpr || !site.saddr_sgpr || !site.data_vgpr ||
-        *site.raw_vaddr != *site.addr_vgpr || *site.raw_rsrc != *site.saddr_sgpr)
+  if (form.kind == ConSanAtomicLoweringFormKind::BufferResourceVectorOffset) {
+    if (!form.scalar_base_sgpr)
       return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
-    if ((*site.saddr_sgpr & 3u) != 0u || *site.saddr_sgpr > 124u ||
-        (*site.raw_soffset != kNullScalarOffset && *site.raw_soffset > 127u) ||
-        *site.addr_vgpr > 255u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-    if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
-    if (*site.raw_scope < 1u || *site.raw_scope > 3u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedScope);
-    if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
-        static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
+    if (!valid_scratch(5u))
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
-    const uint16_t result_address_vgpr =
-        static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-    if (!allow_post_guest_spill_operand_overlap &&
-        (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
-         (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u))))
+    const uint16_t result_address_vgpr = result_tail();
+    if (!allow_post_guest_spill_operand_overlap && overlaps_operands(0u, false))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
-    plan.input_address_vgpr = *site.addr_vgpr;
-    plan.input_address_vgpr_count = 1u;
-    plan.scalar_base_sgpr = *site.saddr_sgpr;
-    if (*site.raw_soffset != kNullScalarOffset)
-      plan.scalar_offset_sgpr = static_cast<uint16_t>(*site.raw_soffset);
-    plan.signed_byte_offset = *site.raw_ioffset;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.scalar_base_sgpr = form.scalar_base_sgpr;
+    plan.scalar_offset_sgpr = form.scalar_offset_sgpr;
+    plan.signed_byte_offset = form.signed_byte_offset;
     plan.result_address_vgpr = result_address_vgpr;
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  // Record/Replay only needs the communication operation's effective address
-  // and, for CAS, its dynamic success mask. Global/flat atomics and the
-  // ordinary load/store side of a qualified fence sequence use the same
-  // 64-bit address forms. Wider atomic values merely occupy more consecutive
-  // guest VGPRs. Other widths still need an explicit operand-layout proof.
-  if (site.width_bits != 32u && site.width_bits != 64u)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
-  const bool cdna_flat_encoding = consan_uses_gfx9_cdna_encoding(arch);
-  const bool rdna3_flat_encoding = arch == ROCJITSU_CODE_ARCH_RDNA3;
-  const bool two_word_flat_encoding = cdna_flat_encoding || rdna3_flat_encoding;
-  const uint32_t expected_size =
-      two_word_flat_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
-  if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-  // CDNA5 gives bit 48 address meaning; other admitted layouts reserve it.
-  // Require decoded CDNA5 sites to state the bit explicitly so a future
-  // decoder regression cannot silently reconstruct an unscaled address.
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA5 && !site.raw_scale_offset) ||
-      (arch != ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false)))
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-  // Scope does not affect effective-address reconstruction. Wave scope is not
-  // an inter-wave synchronization event, but workgroup, agent, and system
-  // atomics all have the same address operands and are valid record targets.
-  if (!site.raw_scope || *site.raw_scope < 1u || *site.raw_scope > 3u)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedScope);
-  if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
-    return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
-
-  const bool global_form = site.mnemonic.starts_with("global_");
-  const uint32_t flat_no_saddr =
-      rdna3_flat_encoding  ? (global_form ? kRdna3GlobalNoSaddrEncoding : kRdna3FlatNoSaddrEncoding)
-      : cdna_flat_encoding ? (global_form ? kCdnaGlobalNoSaddrEncoding : 0u)
-                           : flat_no_saddr_encoding(arch);
-  constexpr int32_t kSigned13Min = -(1 << 12);
-  constexpr int32_t kSigned13Max = (1 << 12) - 1;
-  constexpr int32_t kSigned24Min = -(1 << 23);
-  constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  const int32_t signed_vglobal_offset_min = two_word_flat_encoding ? kSigned13Min : kSigned24Min;
-  const int32_t signed_vglobal_offset_max = two_word_flat_encoding ? kSigned13Max : kSigned24Max;
-  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
-  const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
-  const uint16_t data_count =
-      static_cast<uint16_t>(value_word_count * (is_compare_exchange ? 2u : 1u));
-  const uint16_t destination_count = site.returns_old_value.value_or(false) ? value_word_count : 0u;
-  const bool returned_value_aliases_address =
-      site.returns_old_value.value_or(false) && site.dst_vgpr &&
-      overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, destination_count);
-
-  if (site.mnemonic.starts_with("flat_")) {
-    if (*site.raw_saddr != flat_no_saddr) {
-      // gfx12 VFLAT can encode a one-VGPR offset plus an even scalar base.
-      // Reuse the already shared scalar/vector materialization contract used
-      // by VGLOBAL: both targets calculate saddr + zero_extend(vaddr) +
-      // signed24(ioffset), with CDNA5's optional access-width scale.
-      if ((!consan_uses_gfx12_encoding(arch)) || !site.saddr_sgpr ||
-          *site.raw_saddr != *site.saddr_sgpr || *site.saddr_sgpr > 104u ||
-          (*site.saddr_sgpr & 1u) != 0u)
-        return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-      if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
-        return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
-      if (*site.addr_vgpr > 255u)
-        return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-      if (site.returns_old_value.value_or(false))
-        return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-      if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
-          static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
-        return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
-      const uint16_t result_address_vgpr =
-          static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-      if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
-        return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-      if (!allow_post_guest_spill_operand_overlap &&
-          (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-           overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u)))
-        return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
-      plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
-      plan.support = ConSanMoiAtomicAddressSupport::Supported;
-      plan.input_address_vgpr = *site.addr_vgpr;
-      plan.input_address_vgpr_count = 1u;
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false))
-        plan.input_address_scale = static_cast<uint16_t>(site.width_bits / 8u);
-      plan.scalar_base_sgpr = *site.saddr_sgpr;
-      plan.signed_byte_offset = *site.raw_ioffset;
-      plan.result_address_vgpr = result_address_vgpr;
-      plan.result_address_vgpr_count = 2u;
-      return plan;
-    }
-    if (*site.addr_vgpr >= 255u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-    if (*site.raw_ioffset != 0)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
-    const uint16_t minimum_scratch_count = returned_value_aliases_address ? 5u : 3u;
-    if ((scratch_vgpr_count != minimum_scratch_count && scratch_vgpr_count < 7u) ||
-        static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
+  if (form.kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress ||
+      form.kind == ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress) {
+    if (!form.scalar_base_sgpr)
+      return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
+    if (form.kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress &&
+        form.returns_old_value)
+      return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
+    if (!valid_scratch(5u))
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
+      return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
     if (!allow_post_guest_spill_operand_overlap &&
-        (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
-         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-         (site.dst_vgpr &&
-          overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
+      return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
+    plan.support = ConSanMoiAtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    if (form.scale_vector_offset)
+      plan.input_address_scale = static_cast<uint16_t>(form.value_width_bits / 8u);
+    plan.sign_extend_vector_offset = form.sign_extend_vector_offset;
+    plan.scalar_base_sgpr = form.scalar_base_sgpr;
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = result_address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+
+  if (form.kind == ConSanAtomicLoweringFormKind::FlatVectorAddress) {
+    const uint16_t minimum_scratch_count = returned_value_aliases_address ? 5u : 3u;
+    if (!valid_scratch(minimum_scratch_count))
+      return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
+    if (!allow_post_guest_spill_operand_overlap && overlaps_operands(scratch_vgpr_count, true))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = returned_value_aliases_address
                     ? ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized
                     : ConSanMoiAtomicAddressKind::FlatGuestPair;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
-    plan.input_address_vgpr = *site.addr_vgpr;
-    plan.input_address_vgpr_count = 2u;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
     plan.signed_byte_offset = 0;
     plan.result_address_vgpr = returned_value_aliases_address
                                    ? static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u)
-                                   : *site.addr_vgpr;
+                                   : form.address_vgpr;
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
 
-  if (!site.mnemonic.starts_with("global_"))
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedAddressKind);
-  if (*site.raw_saddr == flat_no_saddr) {
-    if (*site.addr_vgpr >= 255u)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-    if (*site.raw_ioffset < signed_vglobal_offset_min ||
-        *site.raw_ioffset > signed_vglobal_offset_max)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
-    const bool requires_materialization = *site.raw_ioffset != 0 || returned_value_aliases_address;
+  if (form.kind == ConSanAtomicLoweringFormKind::GlobalVectorAddress) {
+    const bool requires_materialization =
+        form.signed_byte_offset != 0 || returned_value_aliases_address;
     const uint16_t minimum_scratch_count = requires_materialization ? 5u : 3u;
-    if ((scratch_vgpr_count != minimum_scratch_count && scratch_vgpr_count < 7u) ||
-        static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
+    if (!valid_scratch(minimum_scratch_count))
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
     if (!requires_materialization) {
-      if (!allow_post_guest_spill_operand_overlap &&
-          (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
-           overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-           (site.dst_vgpr &&
-            overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
+      if (!allow_post_guest_spill_operand_overlap && overlaps_operands(scratch_vgpr_count, true))
         return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
       plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPair;
       plan.support = ConSanMoiAtomicAddressSupport::Supported;
-      plan.input_address_vgpr = *site.addr_vgpr;
-      plan.input_address_vgpr_count = 2u;
+      plan.input_address_vgpr = form.address_vgpr;
+      plan.input_address_vgpr_count = form.address_vgpr_count;
       plan.signed_byte_offset = 0;
-      plan.result_address_vgpr = *site.addr_vgpr;
+      plan.result_address_vgpr = form.address_vgpr;
       plan.result_address_vgpr_count = 2u;
       return plan;
     }
-    const uint16_t result_address_vgpr =
-        static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-    if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 2u))
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
     if (!allow_post_guest_spill_operand_overlap &&
-        (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 2u) ||
-         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-         (site.dst_vgpr &&
-          overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
-    plan.input_address_vgpr = *site.addr_vgpr;
-    plan.input_address_vgpr_count = 2u;
-    plan.signed_byte_offset = *site.raw_ioffset;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.signed_byte_offset = form.signed_byte_offset;
     plan.result_address_vgpr = result_address_vgpr;
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  if (!site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-  if (*site.saddr_sgpr > 104u || (*site.saddr_sgpr & 1u) != 0u)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-  if (*site.raw_ioffset < signed_vglobal_offset_min ||
-      *site.raw_ioffset > signed_vglobal_offset_max)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
-  if (*site.addr_vgpr > 255u)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-  if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
-      static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
-    return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
+  return reject(ConSanMoiAtomicAddressSupport::UnsupportedAddressKind);
+}
 
-  const uint16_t result_address_vgpr =
-      static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-  if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
-    return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-  if (!allow_post_guest_spill_operand_overlap &&
-      (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-       (site.dst_vgpr &&
-        overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)) ||
-       overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u)))
-    return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
+ConSanMoiAtomicAddressPlan
+plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
+                               uint16_t scratch_vgpr_count,
+                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
+                               bool allow_post_guest_spill_operand_overlap) {
+  const auto rejected = [&](ConSanMoiAtomicAddressSupport support) {
+    ConSanMoiAtomicAddressPlan result;
+    result.kind = ConSanMoiAtomicAddressKind::Unsupported;
+    result.support = support;
+    result.scratch_vgpr = scratch_vgpr;
+    result.scratch_vgpr_count = scratch_vgpr_count;
+    result.resource_source = resource_source;
+    return result;
+  };
+  const auto map_reason = [](ConSanAtomicClassifierReason reason) {
+    switch (reason) {
+    case ConSanAtomicClassifierReason::None:
+      return ConSanMoiAtomicAddressSupport::Supported;
+    case ConSanAtomicClassifierReason::UnsupportedAddressSource:
+      return ConSanMoiAtomicAddressSupport::UnsupportedAddressKind;
+    case ConSanAtomicClassifierReason::InvalidAccessWidth:
+      return ConSanMoiAtomicAddressSupport::UnsupportedWidth;
+    case ConSanAtomicClassifierReason::UnsupportedEncoding:
+      return ConSanMoiAtomicAddressSupport::UnsupportedEncoding;
+    case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
+    case ConSanAtomicClassifierReason::UnsupportedOffset:
+      return ConSanMoiAtomicAddressSupport::UnsupportedOffset;
+    case ConSanAtomicClassifierReason::MissingOperands:
+    case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
+      return ConSanMoiAtomicAddressSupport::MissingAddressOperands;
+    case ConSanAtomicClassifierReason::UnsupportedInputWidth:
+      return ConSanMoiAtomicAddressSupport::UnsupportedInputWidth;
+    case ConSanAtomicClassifierReason::ResultAddressAlias:
+      return ConSanMoiAtomicAddressSupport::ResultAddressAlias;
+    case ConSanAtomicClassifierReason::MissingOrderingMetadata:
+    case ConSanAtomicClassifierReason::UnsupportedScope:
+      return ConSanMoiAtomicAddressSupport::UnsupportedScope;
+    case ConSanAtomicClassifierReason::TargetUnavailable:
+      return ConSanMoiAtomicAddressSupport::UnsupportedArchitecture;
+    case ConSanAtomicClassifierReason::Count:
+      break;
+    }
+    return ConSanMoiAtomicAddressSupport::UnsupportedEncoding;
+  };
 
-  plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
-  plan.support = ConSanMoiAtomicAddressSupport::Supported;
-  plan.input_address_vgpr = *site.addr_vgpr;
-  plan.input_address_vgpr_count = 1u;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false))
-    plan.input_address_scale = static_cast<uint16_t>(site.width_bits / 8u);
-  plan.scalar_base_sgpr = *site.saddr_sgpr;
-  plan.signed_byte_offset = *site.raw_ioffset;
-  plan.result_address_vgpr = result_address_vgpr;
-  plan.result_address_vgpr_count = 2u;
-  return plan;
+  const bool ordinary =
+      site.mnemonic.find("atomic") == std::string::npos && !site.mnemonic.starts_with("ds_");
+  const ConSanAtomicLoweringClassification classification =
+      classify_consan_atomic_lowering(site, arch, !ordinary);
+  if (!classification.normalized()) {
+    if (classification.normalization_reason ==
+            ConSanAtomicClassifierReason::UnsupportedAddressSource &&
+        ((site.mnemonic.starts_with("ds_") && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+         (site.mnemonic.starts_with("buffer_") && arch != ROCJITSU_CODE_ARCH_CDNA5))) {
+      return rejected(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
+    }
+    return rejected(map_reason(classification.normalization_reason));
+  }
+  if (!classification.address_available())
+    return rejected(map_reason(classification.address_reason));
+  if (classification.causal_ordering_reason ==
+          ConSanAtomicClassifierReason::MissingOrderingMetadata ||
+      classification.causal_ordering_reason == ConSanAtomicClassifierReason::UnsupportedScope) {
+    return rejected(map_reason(classification.causal_ordering_reason));
+  }
+  return plan_consan_moi_atomic_address(*classification.form, scratch_vgpr, scratch_vgpr_count,
+                                        resource_source, allow_post_guest_spill_operand_overlap);
 }
 
 std::optional<std::vector<uint32_t>>
@@ -2970,8 +2903,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
                                         static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
     std::optional<std::vector<uint32_t>> add_vaddr;
-    if (consan_uses_gfx9_cdna_encoding(arch) &&
-        plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized) {
+    if (plan.sign_extend_vector_offset) {
       // The sign scratch needs two scratch words before the result pair. Keep
       // a defensive check for externally constructed plans.
       if (plan.result_address_vgpr <= plan.scratch_vgpr + 1u)
