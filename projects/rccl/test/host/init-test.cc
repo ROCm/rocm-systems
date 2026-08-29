@@ -51,24 +51,7 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 #undef ncclCalloc
 #define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
-// The NVTX3 range macros expand to NOTHING in this binary, so any guard around them shows partial coverage by design.
-#if !defined(NVTX_NO_IMPL) && !defined(NVTX_DISABLE)
-#include "nvtx.h"  // guarded; init.cc's re-include is a no-op
-#undef NCCL_NVTX3_FUNC_RANGE
-#define NCCL_NVTX3_FUNC_RANGE
-#undef NVTX3_RANGE
-#define NVTX3_RANGE(...)
-#undef NVTX3_RANGE_ADD_PAYLOAD
-#define NVTX3_RANGE_ADD_PAYLOAD(...)
-#undef NVTX3_FUNC_WITH_PARAMS
-#define NVTX3_FUNC_WITH_PARAMS(...)
-#else
-// nvtx_stub.h already defines nccl_domain; pre-set nvtx.h's guard so init.cc's direct include cannot redefine it.
-#define NCCL_NVTX_H_
-#ifndef NCCL_NVTX3_FUNC_RANGE
-#define NCCL_NVTX3_FUNC_RANGE
-#endif
-#endif
+#include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
