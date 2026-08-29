@@ -27,6 +27,7 @@ target_sources(
         consan_moi_model.cpp
         consan_moi_report_plan.cpp
         consan_moi_relocation.cpp
+        consan_moi_report_emission.cpp
         consan_moi_support.cpp
         consan_moi_target_address.cpp
         consan_observation_policy.cpp
