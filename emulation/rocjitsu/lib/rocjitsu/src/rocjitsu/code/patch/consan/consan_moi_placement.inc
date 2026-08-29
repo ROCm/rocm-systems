@@ -4914,10 +4914,10 @@ append_restore_moi_special_state(std::vector<uint32_t> &words,
 }
 
 [[nodiscard]] bool
-configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArtifacts &result,
-                                        const MoiResourceProblem &problem,
+configure_automatic_moi_exec_save_sgprs(MoiOptions &options, const MoiResourceProblem &problem,
+                                        std::span<const ConSanCandidateResourcePlan> site_plans,
+                                        std::vector<std::string> &warnings,
                                         const MoiResourcePlanningState &planning_state) {
-  std::vector<std::string> &warnings = result.warnings;
   const std::span<const uint8_t> bytes = problem.image();
   const rj_code_arch_t arch = problem.arch();
   const std::span<const ConSanMoiCandidate> candidates = problem.candidates();
@@ -4929,7 +4929,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
     return false;
 
   const auto plan_contexts =
-      resolve_moi_resource_plan_scalar_owner_contexts(planning_state, result.resource_plans);
+      resolve_moi_resource_plan_scalar_owner_contexts(planning_state, site_plans);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
     std::string warning = "ConSan MOI could not resolve an owner context for automatic EXEC-save "
                           "SGPR placement";
@@ -5094,7 +5094,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
       options.moi_exec_save_sgprs_persistent = true;
       options.moi_dispatch_id_sgpr = component_dispatch_sgpr;
       const bool assigned_component_local = configure_automatic_moi_transient_sgpr_assignments(
-          options, problem, result.resource_plans, warnings, planning_state);
+          options, problem, site_plans, warnings, planning_state);
       const bool can_exclude_incompatible_component = consan_uses_gfx9_cdna_encoding(arch);
       // Relocating persistent dispatch state is worthwhile only when the new
       // owner-wide window actually recovers an incompatible component.  If
@@ -5140,7 +5140,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   RegisterSet unavailable;
   bool saw_site = false;
   std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(result.resource_plans.size() +
+  included_site_offsets.reserve(site_plans.size() +
                                 problem.observation_plan().probe_intents.size() +
                                 problem.inventory().kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
@@ -5162,11 +5162,11 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
       saw_site = true;
     }
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+  for (const ConSanCandidateResourcePlan &plan : site_plans)
     include_site(plan.text_offset);
   for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
     include_site(intent.physical_site.original_text_offset);
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const ConSanCandidateResourcePlan &plan : site_plans) {
     if (!plan.owner_descriptor_file_offsets.empty())
       include_site(plan.text_offset);
   }
@@ -5223,7 +5223,7 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
                                                       candidate.kind == ConSanLdsAccessKind::Write);
         });
     uint32_t initialized_end = 0;
-    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    for (const ConSanCandidateResourcePlan &plan : site_plans) {
       for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
         const auto descriptor = read_kernel_descriptor(bytes, descriptor_offset);
         if (!descriptor)
@@ -5375,8 +5375,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
       options.moi_exec_save_sgprs_persistent = true;
       warnings.emplace_back("ConSan MOI reserved a high EXEC-save SGPR window and excluded only "
                             "incompatible full-pressure owner groups");
-      (void)configure_automatic_moi_transient_sgpr_assignments(
-          options, problem, result.resource_plans, warnings, state);
+      (void)configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans,
+                                                               warnings, state);
       return true;
     }
   }
@@ -5388,8 +5388,8 @@ configure_automatic_moi_exec_save_sgprs(MoiOptions &options, ConSanTransformArti
   if (moi_supports_full_pressure_component_state(arch, options.moi_engine)) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_partial_exec_save_sgprs = true;
-    if (configure_automatic_moi_transient_sgpr_assignments(options, problem, result.resource_plans,
-                                                           warnings, state)) {
+    if (configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans, warnings,
+                                                           state)) {
       warnings.emplace_back(
           "ConSan MOI admitted full-pressure owners with component-local scalar state");
       return true;

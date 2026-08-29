@@ -950,9 +950,10 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   const ConSanMoiOperatingPoint exec_planning_base = capture_moi_operating_point(effective_options);
-  const size_t warnings_before_exec_planning = result.warnings.size();
+  std::vector<std::string> exec_planning_warnings;
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
-      effective_options, result, resource_problem, resource_planning_state);
+      effective_options, resource_problem, result.resource_plans, exec_planning_warnings,
+      resource_planning_state);
   if (!effective_options.moi_dynamic_stack_spill &&
       automatic_moi_scalar_spill_needs_dynamic_stack_planning(effective_options, result)) {
     // Scalar spilling is selected only after the first transient-window
@@ -961,11 +962,15 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // demand participate in the same resource proof.
     restore_moi_operating_point(effective_options, exec_planning_base);
     effective_options.moi_dynamic_stack_spill = true;
-    result.warnings.resize(warnings_before_exec_planning);
+    exec_planning_warnings.clear();
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
     exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
-        effective_options, result, resource_problem, resource_planning_state);
+        effective_options, resource_problem, result.resource_plans, exec_planning_warnings,
+        resource_planning_state);
   }
+  result.warnings.insert(result.warnings.end(),
+                         std::make_move_iterator(exec_planning_warnings.begin()),
+                         std::make_move_iterator(exec_planning_warnings.end()));
   if (exec_planning_changed)
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (configure_inline_moi_owner_sgpr(effective_options, result))
