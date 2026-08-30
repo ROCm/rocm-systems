@@ -50,7 +50,7 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
     uint16_t scalar_src, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanMoiReportDispatchIdSources &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,
+    const ConSanMoiReportDispatchIdSource &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,
     rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_record_store_workgroup_source(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,

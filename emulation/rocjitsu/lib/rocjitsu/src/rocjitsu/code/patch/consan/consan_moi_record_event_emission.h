@@ -33,7 +33,7 @@ struct MoiRecordEventEmissionPlan {
   std::optional<uint16_t> moi_record_replay_call_return_sgpr;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
-  consan_moi_detail::ConSanMoiReportDispatchIdSources dispatch_id_sources;
+  consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   std::optional<MoiIndirectJumpSgprs> indirect_jump;
   uint16_t required_sgpr_count = 0;

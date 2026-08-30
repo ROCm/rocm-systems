@@ -215,8 +215,8 @@ file(
 foreach(_file IN LISTS _consan_sources)
     _consan_assert_no_match(
         "${_file}"
-        "ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_sources|moi_report_dispatch_id_source_permitted"
-        "dispatch identity must be authorized once in its source-planning product"
+        "ConSanMoiLiteralDispatchIdPolicy|ConSanMoiReportDispatchIdWordSource|ConSanMoiReportDispatchIdSources|moi_report_dispatch_id_sources|moi_report_dispatch_id_source_permitted"
+        "dispatch identity must be authorized once as one inseparable source-planning product"
     )
 endforeach()
 foreach(_file IN LISTS _consan_sources)

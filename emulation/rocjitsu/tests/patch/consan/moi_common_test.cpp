@@ -27,29 +27,25 @@ TEST(ConSanMoi, DispatchIdSourcePlanningAuthorizesLiteralsAtTheModeBoundary) {
   resources.moi_report_dispatch_id = 0x1234567887654321ull;
 
   const auto bound = consan_moi_detail::moi_bound_dispatch_id_sources({point, resources});
-  ASSERT_TRUE(bound[0].is_well_formed());
-  ASSERT_TRUE(bound[1].is_well_formed());
-  EXPECT_EQ(bound[0].literal, 0x87654321u);
-  EXPECT_EQ(bound[1].literal, 0x12345678u);
+  ASSERT_TRUE(bound.is_well_formed());
+  EXPECT_EQ(bound.literal, resources.moi_report_dispatch_id);
 
   const auto target_literal = consan_moi_detail::moi_target_dispatch_id_sources(
       {point, resources}, ROCJITSU_CODE_ARCH_RDNA4);
-  EXPECT_TRUE(target_literal[0].is_well_formed());
-  EXPECT_EQ(target_literal[0].literal, bound[0].literal);
+  EXPECT_TRUE(target_literal.is_well_formed());
+  EXPECT_EQ(target_literal.literal, bound.literal);
 
   const auto target_without_literal = consan_moi_detail::moi_target_dispatch_id_sources(
       {point, resources}, ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_FALSE(target_without_literal[0].is_well_formed());
-  EXPECT_FALSE(target_without_literal[1].is_well_formed());
+  EXPECT_FALSE(target_without_literal.is_well_formed());
 
   point.moi_dispatch_id_sgpr = 40u;
   const auto scalar = consan_moi_detail::moi_target_dispatch_id_sources({point, resources},
                                                                         ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_EQ(scalar[0].sgpr, 40u);
-  EXPECT_EQ(scalar[1].sgpr, 41u);
-  EXPECT_FALSE(scalar[0].literal);
+  EXPECT_EQ(scalar.sgpr, 40u);
+  EXPECT_FALSE(scalar.literal);
 
-  auto malformed = scalar[0];
+  auto malformed = scalar;
   malformed.literal = 1u;
   EXPECT_FALSE(malformed.is_well_formed());
 }

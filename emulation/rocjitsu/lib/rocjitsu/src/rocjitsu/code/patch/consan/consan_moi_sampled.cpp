@@ -102,7 +102,6 @@ using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::ConSanMoiRecordEmitter;
-using consan_moi_detail::ConSanMoiReportDispatchIdWordSource;
 using consan_moi_detail::count_nop_padding;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::DynamicRecordLayout;
