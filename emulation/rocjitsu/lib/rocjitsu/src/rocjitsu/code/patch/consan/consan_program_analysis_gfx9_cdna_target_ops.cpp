@@ -6,8 +6,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
 
-#include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_program_analysis_pregfx12_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 
 #include <cstring>
@@ -73,69 +72,12 @@ decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool wri
 }
 
 ConSanVectorMemoryDecode decode_gfx9_cdna_flat_memory(std::span<const uint8_t> instruction) {
-  if (instruction.size() < sizeof(cdna4::FlatMachineInst))
-    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
-  cdna4::FlatMachineInst raw{};
-  std::memcpy(&raw, instruction.data(), sizeof(raw));
-  ConSanEncodedFlatSegment segment = ConSanEncodedFlatSegment::Unspecified;
-  if (raw.seg == 1u)
-    segment = ConSanEncodedFlatSegment::Private;
-  else if (raw.seg == 2u)
-    segment = ConSanEncodedFlatSegment::Global;
-  return {
-      .status = ConSanTargetDecodeStatus::Decoded,
-      .encoding =
-          {
-              .raw_op = static_cast<uint32_t>(raw.op),
-              .raw_saddr = static_cast<uint32_t>(raw.saddr),
-              .raw_scale_offset = false,
-              .raw_vaddr = static_cast<uint32_t>(raw.addr),
-              .raw_vsrc = static_cast<uint32_t>(raw.data),
-              .raw_vdst = static_cast<uint32_t>(raw.vdst),
-              .raw_ioffset = static_cast<int32_t>(raw.offset),
-              .raw_segment = static_cast<uint32_t>(raw.seg),
-              .raw_scope = 0u,
-              .raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u),
-              .encoded_segment = segment,
-              .scalar_provenance_sgpr = std::nullopt,
-              .scope_follows_address_space = true,
-              .exact_size = instruction.size() == sizeof(raw),
-              .ordinary_well_formed =
-                  instruction.size() == sizeof(raw) && raw.encoding == 0x37u && raw.seg == 0u,
-              .ordinary_requires_complete_registers = false,
-              .ordinary_mutation_supported = false,
-          },
-  };
+  return decode_pregfx12_vector_memory<cdna4::FlatMachineInst>(instruction, false, 0u);
 }
 
 ConSanVectorMemoryDecode decode_gfx9_cdna_global_memory(std::span<const uint8_t> instruction) {
-  if (instruction.size() < sizeof(cdna4::FlatGlblMachineInst))
-    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
-  cdna4::FlatGlblMachineInst raw{};
-  std::memcpy(&raw, instruction.data(), sizeof(raw));
-  return {
-      .status = ConSanTargetDecodeStatus::Decoded,
-      .encoding =
-          {
-              .raw_op = static_cast<uint32_t>(raw.op),
-              .raw_saddr = static_cast<uint32_t>(raw.saddr),
-              .raw_sve = static_cast<uint32_t>(raw.sve),
-              .raw_vaddr = static_cast<uint32_t>(raw.addr),
-              .raw_vsrc = static_cast<uint32_t>(raw.data),
-              .raw_vdst = static_cast<uint32_t>(raw.vdst),
-              .raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset)),
-              .raw_scope = 2u,
-              .raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u),
-              .scalar_provenance_sgpr =
-                  raw.saddr == kCdnaGlobalNoSaddrEncoding
-                      ? std::nullopt
-                      : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr)),
-              .exact_size = instruction.size() == sizeof(raw),
-              .ordinary_well_formed =
-                  instruction.size() == sizeof(raw) && raw.encoding == 0x37u && raw.seg == 2u,
-              .ordinary_mutation_supported = false,
-          },
-  };
+  return decode_pregfx12_vector_memory<cdna4::FlatGlblMachineInst>(instruction, true,
+                                                                   kCdnaGlobalNoSaddrEncoding);
 }
 
 std::optional<ConSanDirectLdsTransferEncoding>
@@ -156,36 +98,10 @@ decode_gfx9_cdna_direct_lds_transfer(std::string_view mnemonic,
                                          .address_source_operand = std::nullopt};
 }
 
-template <typename Raw>
-void fill_gfx9_cdna_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
-  site.raw_op = static_cast<uint32_t>(raw.op);
-  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-  site.raw_vaddr = static_cast<uint32_t>(raw.addr);
-  site.raw_vsrc = static_cast<uint32_t>(raw.data);
-  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  site.raw_scope = 2u;
-  site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
-  site.returns_old_value = raw.sc0 != 0u;
-}
-
 bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                   std::span<const uint8_t> instruction) {
-  if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(cdna4::FlatMachineInst)) {
-    cdna4::FlatMachineInst raw{};
-    std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx9_cdna_flat_atomic_site(site, raw);
-    site.raw_ioffset = static_cast<int32_t>(raw.offset);
-    return true;
-  }
-  if (mnemonic.starts_with("global_atomic") &&
-      instruction.size() >= sizeof(cdna4::FlatGlblMachineInst)) {
-    cdna4::FlatGlblMachineInst raw{};
-    std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx9_cdna_flat_atomic_site(site, raw);
-    site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
-    return true;
-  }
-  return false;
+  return decode_pregfx12_atomic_site<cdna4::FlatMachineInst, cdna4::FlatGlblMachineInst>(
+      site, mnemonic, instruction);
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
