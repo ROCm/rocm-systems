@@ -274,6 +274,15 @@ build_sgpr_spill_sequence(SpillManager &manager, uint16_t sgpr_base, uint16_t sg
 build_lane_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count, uint16_t reservoir_vgpr,
                                uint32_t total_private_bytes, rj_code_arch_t arch);
 
+/// Encode one 32-bit scratch transfer relative to an explicit scalar frame
+/// base using the selected target's native instruction form.
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_dynamic_stack_vgpr_store(uint16_t source_vgpr, uint16_t frame_base_sgpr, uint32_t byte_offset,
+                               rj_code_arch_t arch);
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_dynamic_stack_vgpr_load(uint16_t destination_vgpr, uint16_t frame_base_sgpr,
+                              uint32_t byte_offset, rj_code_arch_t arch);
+
 /// @brief Replace one logical SGPR backup slot with a different entry SGPR.
 ///
 /// @details This is used when instrumentation expands a hardware entry ABI:

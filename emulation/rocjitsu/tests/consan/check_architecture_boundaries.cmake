@@ -86,6 +86,11 @@ _consan_assert_no_match(
     "program analysis must consume target-normalized decodes and profile facts"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_support.cpp"
+    "ROCJITSU_CODE_ARCH_"
+    "shared MOI support must consume target-neutral mechanism operations"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_program_analysis_target_ops.cpp"
     "consan_program_analysis_target_detail::"
     "common program-analysis dispatch must consume the target-owned operations product"

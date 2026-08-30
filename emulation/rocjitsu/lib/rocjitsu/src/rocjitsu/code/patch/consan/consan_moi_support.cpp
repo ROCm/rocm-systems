@@ -644,27 +644,9 @@ consan_detail::append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words,
   InstructionSequence sequence(words);
   bool encoded = false;
   if (spill.uses_dynamic_stack_frame) {
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-      encoded =
-          sequence.emit_all(build_rdna3_scratch_load_b32_saddr(
-                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
-                            wait);
-    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
-      encoded =
-          sequence.emit_all(build_cdna3_scratch_load_b32_saddr(
-                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
-                            wait);
-    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
-      encoded =
-          sequence.emit_all(build_cdna4_scratch_load_b32_saddr(
-                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
-                            wait);
-    } else {
-      encoded =
-          sequence.emit_all(build_scratch_load_b32_saddr(destination, spill.dynamic_frame_base_sgpr,
-                                                         slot_offset, arch),
-                            wait);
-    }
+    encoded = sequence.emit_all(build_dynamic_stack_vgpr_load(
+                                    destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
+                                wait);
   } else {
     encoded = sequence.emit_all(
         instrumentation::build_private_load_b32(destination, slot_offset, arch), wait);
