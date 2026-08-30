@@ -115,6 +115,24 @@ public:
     */
    RocJpegStatus DecodeSync(RocJpegImage *destination);
 
+   /**
+    * @brief Submits a batch of JPEG decode operations and stores pending state for all images.
+    * @param jpeg_streams Array of handles to JPEG streams.
+    * @param batch_size Number of images in the batch.
+    * @param decode_params Array of decoding parameters, one per image.
+    * @param destinations Array of output images, one per image.
+    * @return The status of the submit operation.
+    */
+   RocJpegStatus DecodeBatchedAsync(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+
+   /**
+    * @brief Synchronizes all pending asynchronous decodes for a batch and copies/converts the output.
+    * @param destinations Array of destination images identifying the pending batch.
+    * @param batch_size Number of images in the batch.
+    * @return The status of the sync operation.
+    */
+   RocJpegStatus DecodeBatchedSync(RocJpegImage *destinations, int batch_size);
+
 private:
    struct AsyncDecodeState {
       VASurfaceID surface_id;
@@ -133,6 +151,7 @@ private:
     * @brief Waits for a submitted surface and copies/converts the decoded output.
     */
    RocJpegStatus FinalizeDecode(VASurfaceID surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+   RocJpegStatus FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size);
 
    /**
     * @brief Retrieves the height of the chroma channel.

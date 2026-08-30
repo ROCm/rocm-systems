@@ -7,6 +7,7 @@
 #include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "util/bit.h"
@@ -84,14 +85,17 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
-                                               std::span<const uint8_t> text) {
+                                               std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
   // TODO: Move indirect-VGPR access properties into decoded instruction
   // metadata so future ISA variants cannot bypass this completeness gate.
-  if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel") ||
-      mnemonic == "s_set_gpr_idx_on") {
+  if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
+  if (!isa_properties(arch).mode_has_gpr_idx_en)
+    return false;
+  if (mnemonic == "s_set_gpr_idx_on")
+    return true;
 
   // GPR indexing can also be enabled by writing MODE.GPR_IDX_EN through a
   // generic S_SETREG form. Dynamic writes covering bit 27 fail closed; immediate
@@ -172,11 +176,12 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
   deferred_restrict_live_before_to_instructions_ = options.restrict_live_before_to_instructions;
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
-  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
+  if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
-        deferred_scope, options.entry_block, deferred_extra_edges_, options.text);
+        deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
+        options.additional_entry_blocks);
   }
-  collect_global_register_usage(deferred_scope, options.text);
+  collect_global_register_usage(deferred_scope, options.text, options.arch);
 }
 
 LivenessAnalysis::~LivenessAnalysis() = default;
@@ -199,12 +204,13 @@ void LivenessAnalysis::ensure_analyzed() const {
 }
 
 void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
-                                                     std::span<const uint8_t> text) {
+                                                     std::span<const uint8_t> text,
+                                                     rj_code_arch_t arch) {
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
-      if (may_access_vgprs_indirectly(inst, text))
+      if (may_access_vgprs_indirectly(inst, text, arch))
         global_vgpr_usage_is_complete_ = false;
 
       const InstDefUse accesses(inst, gfx1250_vgpr_msb_.get(), UnknownVgprDefPolicy::ExpandAll);

@@ -91,6 +91,17 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
                                 hsa::inst_pkt_t&                            inst_pkt,
                                 kernel_dispatch::profiling_time             dispatch_time)
 {
+    bool has_counter_packets = false;
+    for(const auto& tagged_pkt : inst_pkt)
+    {
+        if(tagged_pkt.second == hsa::queue_hooks::COUNTERS_CLIENT_ID)
+        {
+            has_counter_packets = true;
+            break;
+        }
+    }
+    if(!has_counter_packets) return;
+
     // Route by packet provenance, not current activeness: completed_cb self-filters via
     // packet_return_map, so in-flight dispatches still complete after stop_context removes the
     // context from the active list. This is what guarantees a completion that arrives is delivered;

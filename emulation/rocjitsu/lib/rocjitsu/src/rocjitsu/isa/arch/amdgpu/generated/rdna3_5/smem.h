@@ -21,6 +21,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB64Smem : public Smem {
@@ -30,6 +31,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB128Smem : public Smem {
@@ -39,6 +41,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB256Smem : public Smem {
@@ -48,6 +51,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadB512Smem : public Smem {
@@ -57,6 +61,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB32Smem : public Smem {
@@ -66,6 +71,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB64Smem : public Smem {
@@ -75,6 +81,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB128Smem : public Smem {
@@ -84,6 +91,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB256Smem : public Smem {
@@ -93,6 +101,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadB512Smem : public Smem {
@@ -102,6 +111,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SGl1InvSmem : public Smem {

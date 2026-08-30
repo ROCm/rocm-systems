@@ -2,7 +2,8 @@ name: TheRock CI for rccl
 
 on:
   schedule:
-    - cron: '17 6 * * 0'  # Weekly, Sunday 06:17 UTC
+    - cron: '17 6 * * *'    # Nightly 06:17 UTC (smoke)
+    - cron: '17 6 * * 6'    # Weekly, Saturday 06:17 UTC (all tests)
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -21,6 +22,10 @@ on:
         description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
+      madengine_nodes:
+        description: 'Number of SLURM nodes for MADEngine workloads'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -38,8 +43,20 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       run_linux_ci: ${{ steps.rccl_check.outputs.run_linux_ci }}
+      test_scope: ${{ steps.scope.outputs.test_scope }}
 
     steps:
+      - name: "Determine test scope"
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" = "6" ]; then
+            echo "test_scope=all" >> "$GITHUB_OUTPUT"
+            echo "Saturday scheduled run — full test suite"
+          else
+            echo "test_scope=${{ inputs.test_scope || 'smoke' }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: "Checking out repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -79,15 +96,18 @@ jobs:
       matrix:
         amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       event_name: ${{ github.event_name }}
       package_version: ADHOCBUILD
       artifact_run_id: ${{ inputs.artifact_run_id }}
-      test_scope: ${{ inputs.test_scope || 'smoke' }}
+      test_scope: ${{ needs.setup.outputs.test_scope }}
       notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
       notify_webhook: ${{ inputs.notify_webhook }}
+      madengine_nodes: ${{ inputs.madengine_nodes || '2' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

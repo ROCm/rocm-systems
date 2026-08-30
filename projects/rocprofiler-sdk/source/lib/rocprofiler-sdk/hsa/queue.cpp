@@ -187,26 +187,29 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
-        // Services migrated off the callback registry (see WriteInterceptor); invoke them
-        // explicitly here, in client-id order.
+        // Counter collection, thread trace, PC sampling and SPM completion are migrated off the
+        // callback registry (see WriteInterceptor); invoke their hooks explicitly here.
         counters::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
                                                   packet.kernel_packet,
                                                   _session,
                                                   packet,
                                                   packet.instrumentation_packets,
                                                   dispatch_time);
+
         thread_trace::signal_completion_hook(queue_info_session.queue,
                                              packet.kernel_packet,
                                              _session,
                                              packet,
                                              packet.instrumentation_packets,
                                              dispatch_time);
+
         pc_sampling::signal_completion_hook(queue_info_session.queue,
                                             packet.kernel_packet,
                                             _session,
                                             packet,
                                             packet.instrumentation_packets,
                                             dispatch_time);
+
         spm::signal_completion_hook(queue_info_session.queue,
                                     packet.kernel_packet,
                                     _session,
@@ -214,14 +217,11 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                     packet.instrumentation_packets,
                                     dispatch_time);
 
-        if(packet.is_serialized)
-        {
-            CHECK_NOTNULL(hsa::get_queue_controller())
-                ->serializer(&queue_info_session.queue)
-                .wlock([&](auto& serializer) {
-                    serializer.kernel_completion_signal(queue_info_session.queue);
-                });
-        }
+        CHECK_NOTNULL(hsa::get_queue_controller())
+            ->serializer(&queue_info_session.queue)
+            .wlock([&](auto& serializer) {
+                serializer.kernel_completion_signal(queue_info_session.queue, packet.is_serialized);
+            });
 
         auto _should_destroy_signal = [&packet](auto _hsa_signal) {
             // if there is a pooled signal, make sure we return value if the .handle matches.
@@ -361,13 +361,15 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // Services migrated off the queue-controller callback no longer count toward
-    // get_notifiers(); detect them explicitly so a single-service run still enters the interceptor.
+    const bool counters_active     = counters::is_any_active();
+    const bool thread_trace_active = thread_trace::is_any_active();
+    const bool spm_active          = spm::is_any_active();
+    // None of the migrated services registers a queue-controller callback any more, so none of
+    // them counts toward get_notifiers(); detect each explicitly so a run driven by only one of
+    // them still enters the interceptor.
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 && !counters::is_any_active() &&
-         !thread_trace::is_any_active() &&
+        (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active && !spm_active &&
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
-         !spm::is_any_active() &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -745,8 +747,8 @@ WriteInterceptor(const void* packets,
                 }
             });
 
-            // Services migrated off the per-queue callback registry: call hooks explicitly
-            // in client-id order (the remaining services still flow through signal_callback).
+            // These services are migrated off the per-queue callback registry: call their hooks
+            // explicitly (anything still registered flows through signal_callback above).
             counters::kernel_dispatch_phase_enter_hook(
                 queue,
                 kernel_packet,
@@ -757,6 +759,7 @@ WriteInterceptor(const void* packets,
                 corr_id,
                 _packet_data.instrumentation_packets,
                 _packet_data.is_serialized);
+
             thread_trace::write_hook(queue,
                                      kernel_packet,
                                      kernel_id,
@@ -766,6 +769,7 @@ WriteInterceptor(const void* packets,
                                      corr_id,
                                      _packet_data.instrumentation_packets,
                                      _packet_data.is_serialized);
+
             spm::write_hook(queue,
                             kernel_packet,
                             kernel_id,
@@ -1117,10 +1121,8 @@ WriteInterceptor(const void* packets,
         }
     });
 
-    // Services migrated off the registry require per-packet mode.
-    if(counters::is_any_active()) should_batch_packets = false;
-    if(thread_trace::is_any_active()) should_batch_packets = false;
-    if(spm::is_any_active()) should_batch_packets = false;
+    // These services require per-packet mode; none of them participates in the registry above.
+    if(counters_active || thread_trace_active || spm_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {

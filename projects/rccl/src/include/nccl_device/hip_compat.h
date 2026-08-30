@@ -225,6 +225,50 @@ struct atomic_ref {
       return __atomic_fetch_add(ptr, val, order);
     }
   }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired, memory_order success,
+                                                memory_order failure) const {
+    if constexpr (sizeof(T) == 4) {
+      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned int*>(ptr),
+                                                reinterpret_cast<unsigned int*>(&expected),
+                                                *reinterpret_cast<unsigned int*>(&desired), success, failure,
+                                                toHipMemoryScope(Scope));
+    } else if constexpr (sizeof(T) == 8) {
+      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned long long*>(ptr),
+                                                reinterpret_cast<unsigned long long*>(&expected),
+                                                *reinterpret_cast<unsigned long long*>(&desired), success, failure,
+                                                toHipMemoryScope(Scope));
+    } else {
+      return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/true, success, failure);
+    }
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired,
+                                                memory_order order = memory_order_seq_cst) const {
+    return compare_exchange_weak(expected, desired, order, order);
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_strong(T& expected, T desired, memory_order success,
+                                                  memory_order failure) const {
+    if constexpr (sizeof(T) == 4) {
+      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned int*>(ptr),
+                                                  reinterpret_cast<unsigned int*>(&expected),
+                                                  *reinterpret_cast<unsigned int*>(&desired), success, failure,
+                                                  toHipMemoryScope(Scope));
+    } else if constexpr (sizeof(T) == 8) {
+      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned long long*>(ptr),
+                                                  reinterpret_cast<unsigned long long*>(&expected),
+                                                  *reinterpret_cast<unsigned long long*>(&desired), success, failure,
+                                                  toHipMemoryScope(Scope));
+    } else {
+      return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, success, failure);
+    }
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_strong(T& expected, T desired,
+                                                  memory_order order = memory_order_seq_cst) const {
+    return compare_exchange_strong(expected, desired, order, order);
+  }
 };
 
 // __builtin_amdgcn_fence requires compile-time constant arguments, so we

@@ -4,8 +4,8 @@
 """Vector special operation execute body generators.
 
 Free functions that emit C++ execute_impl bodies for specialized vector
-instructions: mbcnt, mad_64_32, mad_32_16, div_fixup, div_scale, div_fmas,
-dot products, bitop3, permlane variants, and packed type conversion.
+instructions, including relative moves, packed permutations, QSAD/MQSAD,
+saturating packs, arithmetic, lane permutations, and packed type conversion.
 """
 
 from __future__ import annotations
@@ -86,6 +86,26 @@ def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
     )
 
 
+def gen_vector_bcnt(dst: list[str], src: list[str]) -> str:
+    """Generate V_BCNT_U32_B32 body: D.u32 = CountOneBits(S0.u32) + S1.u32."""
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+    L.append(
+        f'    uint32_t bits = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+    )
+    L.append(
+        f'    uint32_t accum = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+    )
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane,'
+        ' static_cast<uint32_t>(std::popcount(bits)) + accum);'
+    )
+    L.append('  }')
+    return '\n'.join(L)
+
+
 def gen_vector_mbcnt(dst: list[str], src: list[str], op: str | None) -> str:
     """Generate V_MBCNT_LO/HI_U32_B32 body."""
     L = []
@@ -128,29 +148,33 @@ def gen_vector_movrel(
     src: list[str],
     op: str | None,
     uses_vgpr_msb_indexing: bool = False,
+    supports_dpp: bool = False,
+    supports_dpp8: bool = False,
+    supports_sdwa: bool = False,
+    inactive_uses_bound_ctrl: bool = False,
 ) -> str:
-    """Generate V_MOVRELS/V_MOVRELD body for M0-relative VGPR addressing."""
-    if op not in ('src', 'dst'):
-        return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
+    """Generate M0-relative VGPR move bodies."""
+    if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
+        raise ValueError(f'unsupported MOVREL operation: {op}')
 
     L = []
     if op == 'src':
         rel_src_call = _resolved_vgpr_offset_call(src[0], uses_vgpr_msb_indexing)
-        L.append(f'  auto rel_src_base = {rel_src_call};')
-        L.append('  if (!rel_src_base)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
+        L.append(f'  std::optional<uint32_t> rel_src_base = {rel_src_call};')
         L.append(
-            '  int64_t rel_src_index = static_cast<int64_t>(*rel_src_base) + '
-            'static_cast<int32_t>(wf.m0());'
+            '  uint64_t rel_src_index = rel_src_base '
+            '? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;'
         )
         L.append(
-            '  if (rel_src_index < 0 || '
-            'static_cast<uint64_t>(rel_src_index) >= wf.vgpr_alloc().count)'
+            f'  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u && '
+            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
         )
-        L.append('    throw util::UnimplementedInst(mnemonic());')
         L.append(
-            '  Operand rel_src(32, OperandType::OPR_VGPR, '
-            'static_cast<int>(rel_src_index));'
+            f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
+            f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
+        )
+        _stage_movrel_source(
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
         )
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -161,22 +185,67 @@ def gen_vector_movrel(
         L.append('  }')
         return '\n'.join(L)
 
+    if op in ('srcdst', 'srcdst2'):
+        rel_dst_call = _resolved_vgpr_offset_call(dst[0], uses_vgpr_msb_indexing)
+        rel_src_call = _resolved_vgpr_offset_call(src[0], uses_vgpr_msb_indexing)
+        L.append(f'  std::optional<uint32_t> rel_dst_base = {rel_dst_call};')
+        L.append(f'  std::optional<uint32_t> rel_src_base = {rel_src_call};')
+        if op == 'srcdst':
+            L.append('  uint32_t rel_src_offset = wf.m0();')
+            L.append('  uint32_t rel_dst_offset = wf.m0();')
+        else:
+            L.append('  uint32_t rel_src_offset = wf.m0() & 0x3ffu;')
+            L.append('  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;')
+        L.append(
+            '  uint64_t rel_src_index = rel_src_base '
+            '? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;'
+        )
+        L.append(
+            '  uint64_t rel_dst_index = rel_dst_base '
+            '? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;'
+        )
+        L.append(
+            f'  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u && '
+            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+        )
+        L.append(
+            f'  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u && '
+            f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+        )
+        L.append('  if (!rel_dst_valid) return;')
+        L.append(
+            f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
+            f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
+        )
+        L.append(
+            f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
+        )
+        _stage_movrel_source(
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+        )
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(
+            '    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, '
+            'amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
+        )
+        L.append('  }')
+        return '\n'.join(L)
+
     rel_dst_call = _resolved_vgpr_offset_call(dst[0], uses_vgpr_msb_indexing)
-    L.append(f'  auto rel_dst_base = {rel_dst_call};')
-    L.append('  if (!rel_dst_base)')
-    L.append('    throw util::UnimplementedInst(mnemonic());')
+    L.append(f'  std::optional<uint32_t> rel_dst_base = {rel_dst_call};')
     L.append(
-        '  int64_t rel_dst_index = static_cast<int64_t>(*rel_dst_base) + '
-        'static_cast<int32_t>(wf.m0());'
+        '  uint64_t rel_dst_index = rel_dst_base '
+        '? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;'
     )
     L.append(
-        '  if (rel_dst_index < 0 || '
-        'static_cast<uint64_t>(rel_dst_index) >= wf.vgpr_alloc().count)'
+        f'  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u && '
+        f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
     )
-    L.append('    throw util::UnimplementedInst(mnemonic());')
+    L.append('  if (!rel_dst_valid) return;')
     L.append(
-        '  Operand rel_dst(32, OperandType::OPR_VGPR, '
-        'static_cast<int>(rel_dst_index));'
+        f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
     )
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -188,7 +257,446 @@ def gen_vector_movrel(
     return '\n'.join(L)
 
 
-def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> str:
+def _stage_movrel_source(
+    lines: list[str],
+    supports_dpp: bool,
+    supports_dpp8: bool,
+    supports_sdwa: bool,
+    inactive_uses_bound_ctrl: bool,
+) -> None:
+    """Stage modifiers from the M0-adjusted source VGPR, not its encoded base."""
+    if not (supports_dpp or supports_dpp8 or supports_sdwa):
+        return
+    lines.append('  std::optional<StagedOperand> rel_staged_src;')
+    if supports_dpp:
+        inactive_policy = str(inactive_uses_bound_ctrl).lower()
+        lines.extend(
+            [
+                '  amdgpu::dpp::DppPlan rel_dpp_plan;',
+                '  if (inst_.src0 == amdgpu::SRC_DPP) {',
+                '    rel_dpp_plan = amdgpu::dpp::make_dpp_plan(',
+                '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,',
+                '        dpp_bound_ctrl_, dpp_fi_, wf.exec(),',
+                f'        {inactive_policy});',
+                '    amdgpu::dpp::apply_dpp(',
+                '        rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);',
+                '  }',
+            ]
+        )
+    if supports_dpp8:
+        lines.extend(
+            [
+                '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))',
+                '    amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);',
+            ]
+        )
+    if supports_sdwa:
+        lines.extend(
+            [
+                '  if (inst_.src0 == amdgpu::SRC_SDWA)',
+                '    amdgpu::sdwa::stage_source(rel_src, sdwa_src0_sel_, sdwa_src0_sext_,',
+                '                               sdwa_src0_neg_, sdwa_src0_abs_,',
+                '                               amdgpu::sdwa::SourceModifierFormat::NONE,',
+                '                               rel_staged_src, wf);',
+            ]
+        )
+    lines.append(
+        '  ScopedOperandDelegate rel_staged_src_binding('
+        'rel_src, rel_staged_src ? &*rel_staged_src : nullptr);'
+    )
+
+
+def gen_vector_swaprel(
+    dst: list[str], src: list[str], uses_vgpr_msb_indexing: bool = False
+) -> str:
+    """Generate V_SWAPREL_B32 using the two unsigned M0 index fields."""
+    d, s = dst[0], src[0]
+    d_call = _resolved_vgpr_offset_call(d, uses_vgpr_msb_indexing)
+    s_call = _resolved_vgpr_offset_call(s, uses_vgpr_msb_indexing)
+    L = [
+        f'  std::optional<uint32_t> rel_dst_base = {d_call};',
+        f'  std::optional<uint32_t> rel_src_base = {s_call};',
+        '  uint32_t rel_src_offset = wf.m0() & 0x3ffu;',
+        '  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;',
+        '  uint64_t rel_src_index = rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;',
+        '  uint64_t rel_dst_index = rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;',
+        f'  if (!rel_src_base || rel_src_index + {s}.vgpr_count() > wf.vgpr_alloc().count) return;',
+        f'  if (!rel_dst_base || rel_dst_index + {d}.vgpr_count() > wf.vgpr_alloc().count) return;',
+        f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
+        f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        '    uint32_t dst_value = amdgpu::RegisterAccess(wf).read_lane(rel_dst, lane);',
+        '    uint32_t src_value = amdgpu::RegisterAccess(wf).read_lane(rel_src, lane);',
+        '    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, src_value);',
+        '    amdgpu::RegisterAccess(wf).write_lane(rel_src, lane, dst_value);',
+        '  }',
+    ]
+    return '\n'.join(L)
+
+
+def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
+    """Generate signed/unsigned saturating narrow-and-pack operations."""
+    if op not in ('u8_i16', 'i4_i8', 'u4_u8'):
+        raise ValueError(f'unsupported saturating-pack operation: {op}')
+    L = [
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        f'    uint32_t raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);',
+    ]
+    if op == 'u8_i16':
+        L.extend(
+            [
+                '    int32_t lo = static_cast<int16_t>(raw);',
+                '    int32_t hi = static_cast<int16_t>(raw >> 16);',
+                '    uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |',
+                '                      (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);',
+            ]
+        )
+    elif op == 'i4_i8':
+        L.extend(
+            [
+                '    uint32_t result = 0;',
+                '    for (uint32_t i = 0; i < 4; ++i) {',
+                '      int32_t value = static_cast<int8_t>(raw >> (i * 8));',
+                '      result |= (static_cast<uint32_t>(std::clamp(value, -8, 7)) & 0xfu) << (i * 4);',
+                '    }',
+            ]
+        )
+    elif op == 'u4_u8':
+        L.extend(
+            [
+                '    uint32_t result = 0;',
+                '    for (uint32_t i = 0; i < 4; ++i)',
+                '      result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);',
+            ]
+        )
+    L.extend(
+        [
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);',
+            '  }',
+        ]
+    )
+    return '\n'.join(L)
+
+
+def gen_vector_mullit(
+    dst: list[str], src: list[str], is_vop3: bool, has_abs: bool
+) -> str:
+    """Generate V_MULLIT_F32 (the legacy lighting multiply)."""
+    L = [
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));',
+        f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));',
+        f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane));',
+    ]
+    if is_vop3:
+        L.extend(vop3_src_mod('s0', 0, has_abs))
+        L.extend(vop3_src_mod('s1', 1, has_abs))
+        L.extend(vop3_src_mod('s2', 2, has_abs))
+    L.extend(
+        [
+            '    float result;',
+            '    if (s1 == -std::numeric_limits<float>::max() ||',
+            '        s1 == -std::numeric_limits<float>::infinity() || std::isnan(s1) ||',
+            '        s2 <= 0.0f || std::isnan(s2))',
+            '      result = -std::numeric_limits<float>::max();',
+            '    else',
+            '      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;',
+        ]
+    )
+    if is_vop3:
+        L.extend(vop3_dst_mod('result'))
+    L.extend(
+        [
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(result));',
+            '  }',
+        ]
+    )
+    return '\n'.join(L)
+
+
+def gen_vector_perm_pk16(
+    dst: list[str], src: list[str], op: str | None, uses_vgpr_msb_indexing: bool
+) -> str:
+    """Generate the 16-selector packed table permutation family."""
+    widths = {'b4': (4, 2), 'b6': (6, 3), 'b8': (8, 4)}
+    if op not in widths:
+        raise ValueError(f'unsupported PERM_PK16 operation: {op}')
+    elem_bits, words = widths[op]
+    L = [
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+    ]
+    if op == 'b4':
+        L.extend(
+            [
+                f'    uint64_t table = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) |',
+                f'                     (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)) << 32);',
+                f'    uint64_t selectors = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);',
+                '    uint64_t packed = 0;',
+                '    for (uint32_t i = 0; i < 16; ++i) {',
+                '      uint32_t index = (selectors >> (i * 4)) & 0xfu;',
+                '      packed |= ((table >> (index * 4)) & 0xfu) << (i * 4);',
+                '    }',
+                f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, packed);',
+            ]
+        )
+    else:
+        L.append(f'    uint32_t table[{words}] = {{}};')
+        L.append(
+            f'    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane);'
+        )
+        L.append('    table[0] = static_cast<uint32_t>(s1);')
+        L.append('    table[1] = static_cast<uint32_t>(s1 >> 32);')
+        if op == 'b6':
+            L.append(
+                f'    table[2] = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+            )
+        else:
+            L.append(
+                f'    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);'
+            )
+            L.append('    table[2] = static_cast<uint32_t>(s0);')
+            L.append('    table[3] = static_cast<uint32_t>(s0 >> 32);')
+        L.extend(
+            [
+                f'    uint64_t selectors = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);',
+                f'    uint32_t packed[{words}] = {{}};',
+                '    for (uint32_t i = 0; i < 16; ++i) {',
+                '      uint32_t index = (selectors >> (i * 4)) & 0xfu;',
+                f'      uint32_t source_bit = index * {elem_bits}u;',
+                '      uint32_t source_word = source_bit / 32;',
+                '      uint32_t source_shift = source_bit % 32;',
+                '      uint64_t pair = table[source_word];',
+                f'      if (source_word + 1 < {words}u) pair |= static_cast<uint64_t>(table[source_word + 1]) << 32;',
+                f'      uint32_t value = (pair >> source_shift) & ((1u << {elem_bits}) - 1u);',
+                f'      uint32_t dest_bit = i * {elem_bits}u;',
+                '      uint32_t dest_word = dest_bit / 32;',
+                '      uint32_t dest_shift = dest_bit % 32;',
+                '      packed[dest_word] |= value << dest_shift;',
+                f'      if (dest_shift + {elem_bits}u > 32u)',
+                '        packed[dest_word + 1] |= value >> (32u - dest_shift);',
+                '    }',
+                f'    Operand dst_word = {dst[0]};',
+                '    dst_word.size_bits_ = 32;',
+                f'    for (uint32_t word = 0; word < {words}u; ++word) {{',
+                f'      dst_word.encoding_value_ = {dst[0]}.encoding_value_ + static_cast<int>(word);',
+                '      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, packed[word]);',
+                '    }',
+            ]
+        )
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def gen_vector_qsad(
+    dst: list[str], src: list[str], op: str | None, uses_vgpr_msb_indexing: bool
+) -> str:
+    """Generate QSAD/MQSAD four-window sum-of-absolute-difference ops."""
+    is_packed = op in ('sad_pk_u16', 'msad_pk_u16')
+    is_masked = op in ('msad_pk_u16', 'msad_u32')
+    if not is_packed and op != 'msad_u32':
+        raise ValueError(f'unsupported QSAD operation: {op}')
+    L = [
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        f'    uint64_t source = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);',
+        f'    uint32_t reference = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);',
+    ]
+    if is_packed:
+        L.extend(
+            [
+                f'    uint64_t accum = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);',
+                '    uint64_t packed_result = 0;',
+            ]
+        )
+    else:
+        L.extend(
+            [
+                '    uint32_t accum[4];',
+                f'    if (std::optional<uint64_t> constant = {src[2]}.const_value()) {{',
+                '      accum[0] = static_cast<uint32_t>(*constant);',
+                '      accum[1] = static_cast<uint32_t>(*constant >> 32);',
+                '      accum[2] = 0;',
+                '      accum[3] = 0;',
+                '    } else {',
+                f'      Operand accum_word = {src[2]};',
+                '      accum_word.size_bits_ = 32;',
+                '      for (uint32_t window = 0; window < 4; ++window) {',
+                f'        accum_word.encoding_value_ = {src[2]}.encoding_value_ + static_cast<int>(window);',
+                '        accum[window] = amdgpu::RegisterAccess(wf).read_lane(accum_word, lane);',
+                '      }',
+                '    }',
+                f'    Operand dst_word = {dst[0]};',
+                '    dst_word.size_bits_ = 32;',
+            ]
+        )
+    L.extend(
+        [
+            '    for (uint32_t window = 0; window < 4; ++window) {',
+            '      uint32_t sum = 0;',
+            '      for (uint32_t byte = 0; byte < 4; ++byte) {',
+            '        uint32_t a = (source >> ((window + byte) * 8)) & 0xffu;',
+            '        uint32_t b = (reference >> (byte * 8)) & 0xffu;',
+        ]
+    )
+    if is_masked:
+        L.append('        if (b != 0) sum += a > b ? a - b : b - a;')
+    else:
+        L.append('        sum += a > b ? a - b : b - a;')
+    L.extend(['      }'])
+    if is_packed:
+        L.extend(
+            [
+                '      uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);',
+                '      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);',
+            ]
+        )
+    else:
+        L.extend(
+            [
+                f'      dst_word.encoding_value_ = {dst[0]}.encoding_value_ + static_cast<int>(window);',
+                '      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, accum[window] + sum);',
+            ]
+        )
+    L.append('    }')
+    if is_packed:
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, packed_result);'
+        )
+    L.append('  }')
+    return '\n'.join(L)
+
+
+_TRIG_PREOP_TWO_OVER_PI_CHUNKS = (
+    0xA2F983,
+    0x6E4E44,
+    0x1529FC,
+    0x2757D1,
+    0xF534DD,
+    0xC0DB62,
+    0x95993C,
+    0x439041,
+    0xFE5163,
+    0xABDEBB,
+    0xC561B7,
+    0x246E3A,
+    0x424DD2,
+    0xE00649,
+    0x2EEA09,
+    0xD1921C,
+    0xFE1DEB,
+    0x1CB129,
+    0xA73EE8,
+    0x8235F5,
+    0x2EBB44,
+    0x84E99C,
+    0x7026B4,
+    0x5F7E41,
+    0x3991D6,
+    0x398353,
+    0x39F49C,
+    0x845F8B,
+    0xBDF928,
+    0x3B1FF8,
+    0x97FFDE,
+    0x05980F,
+    0xEF2F11,
+    0x8B5A0A,
+    0x6D1F6D,
+    0x367ECF,
+    0x27CB09,
+    0xB74F46,
+    0x3F669E,
+    0x5FEA2D,
+    0x7527BA,
+    0xC7EBE5,
+    0xF17B3D,
+    0x0739F7,
+    0x8A5292,
+    0xEA6BFB,
+    0x5FB11F,
+    0x8D5D08,
+    0x560330,
+    0x46FC7B,
+    0x6BABF0,
+)
+_TRIG_PREOP_CHUNK_BITS = 24
+_TRIG_PREOP_VALID_BITS = 1201
+
+
+def gen_vector_trig_preop(
+    dst: list[str], src: list[str], is_vop3: bool, has_abs: bool
+) -> str:
+    """Generate V_TRIG_PREOP_F64's exact 53-bit 2/pi table segment lookup."""
+    chunks = ', '.join(f'0x{chunk:06X}u' for chunk in _TRIG_PREOP_TWO_OVER_PI_CHUNKS)
+    L = [
+        '  // MSB-first 24-bit chunks of the binary expansion of 2/pi used by',
+        '  // the ISA range-reduction lookup (the fdlibm/Payne-Hanek layout).',
+        f'  static constexpr uint32_t kTwoOverPiChunks[] = {{{chunks}}};',
+        f'  static constexpr uint32_t kChunkBits = {_TRIG_PREOP_CHUNK_BITS}u;',
+        f'  static constexpr uint32_t kValidBits = {_TRIG_PREOP_VALID_BITS}u;',
+        '  auto table_bit = [](uint32_t bit) -> uint64_t {',
+        '    if (bit >= kValidBits) return 0;',
+        '    uint32_t chunk = bit / kChunkBits;',
+        '    if (chunk >= std::size(kTwoOverPiChunks)) return 0;',
+        '    return (kTwoOverPiChunks[chunk] >>',
+        '            (kChunkBits - 1u - bit % kChunkBits)) & 1u;',
+        '  };',
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        f'    uint64_t raw0 = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);',
+        '    double s0 = std::bit_cast<double>(raw0);',
+    ]
+    if is_vop3:
+        L.extend(vop3_src_mod('s0', 0, has_abs))
+    L.extend(
+        [
+            f'    uint32_t selector = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 31u;',
+            '    uint32_t exponent = static_cast<uint32_t>((std::bit_cast<uint64_t>(s0) >> 52) & 0x7ffu);',
+            '    uint32_t shift = selector * 53u;',
+            '    if (exponent > 1077u) shift += exponent - 1077u;',
+            '    uint64_t segment = 0;',
+            '    for (uint32_t bit = 0; bit < 53; ++bit)',
+            '      segment = (segment << 1) | table_bit(shift + bit);',
+            '    int scale = -53 - static_cast<int>(shift);',
+            '    if (exponent >= 1968u) scale += 128;',
+            '    uint64_t result = amdgpu::fp_mode::scale_u53_f64_rtz(segment, scale);',
+        ]
+    )
+    if is_vop3:
+        L.extend(
+            [
+                '    uint32_t effective_omod = amdgpu::fp_mode::effective_omod(',
+                '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);',
+                '    result = amdgpu::fp_mode::finish_f64(',
+                '        result, wf.fp_round_mode_f16_f64(), effective_omod, inst_.clamp,',
+                '        amdgpu::floating_clamp_nan_to_zero(wf));',
+            ]
+        )
+    L.extend(
+        [
+            f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, result);',
+            '  }',
+        ]
+    )
+    return '\n'.join(L)
+
+
+def gen_vector_mad_64_32(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    result_writer: str | None = None,
+) -> str:
     """Generate V_MAD_U64_U32 / V_MAD_I64_I32 body.
 
     D.i64 = S0.i32 * S1.i32 + S2.i64 (signed)
@@ -248,7 +756,10 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         )
     L.append('  }')
     if writes_carry:
-        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
+        if result_writer is not None:
+            L.append(f'  {result_writer}(carry);')
+        else:
+            L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
     return '\n'.join(L)
 
 
@@ -436,9 +947,12 @@ def gen_vector_div_fixup(
         )
         L.append('    else result = p;')
         if is_vop3:
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'
@@ -504,6 +1018,7 @@ def gen_vector_div_scale(
     dtype: str | None,
     is_vop3: bool = False,
     has_abs: bool = False,
+    result_writer: str | None = None,
 ) -> str:
     """Generate V_DIV_SCALE body per ISA pseudocode (CDNA4 p.363-365).
 
@@ -584,9 +1099,12 @@ def gen_vector_div_scale(
     )
     L.append('  }')
     if len(dst) > 1:
-        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
+        if result_writer is not None:
+            L.append(f'  {result_writer}(vcc);')
+        else:
+            L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
 
 
@@ -1031,7 +1549,7 @@ def gen_vector_cvt_pk(
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));'
+                '      return static_cast<int16_t>(util::round_to_nearest_even(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));'
             )
             L.append('    };')
             L.append('    int16_t lo = cvt_i16(s0);')
@@ -1040,7 +1558,7 @@ def gen_vector_cvt_pk(
             L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));'
+                '      return static_cast<uint16_t>(util::round_to_nearest_even(std::clamp(f * 65535.0f, 0.0f, 65535.0f)));'
             )
             L.append('    };')
             L.append('    uint16_t lo = cvt_u16(s0);')
@@ -1507,11 +2025,37 @@ def gen_vector_cvt_scale(
 
     direction, pack_width, out_fmt, in_fmt = parts
     count = int(pack_width[2:])
+    if direction == 'unpack':
+        bits = _scale_lowp_bits(in_fmt)
+        src_word_count = (count * bits + 31) // 32
+        if out_fmt == 'f32':
+            dst_word_count = count
+        elif out_fmt in ('f16', 'bf16'):
+            dst_word_count = count // 2
+        else:
+            raise ValueError(f'unsupported scaled unpack output format: {out_fmt}')
+    elif direction == 'pack':
+        bits = _scale_lowp_bits(out_fmt)
+        src_word_count = count if in_fmt == 'f32' else count // 2
+        dst_word_count = (count * bits + 31) // 32
+    else:
+        raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
+
     L: list[str] = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
+    _scale_read_vgpr_base(L, 'src_base', src[0])
+    L.append('    amdgpu::RegisterAccess regs(wf);')
+    # TODO(newling): Apply this check-before-observe pattern to other
+    # multi-region instruction helpers, then make region acquisition require
+    # successful preflight instead of returning validity-bearing views.
+    L.append(
+        f'    if (!regs.owns_vgpr_range(src_base, {src_word_count}u) || '
+        f'!regs.owns_vgpr_range(dst_base, {dst_word_count}u))'
+    )
+    L.append('      continue;')
     scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
         L.extend(_scale_e8m0_unpack_scale(scale_src))
@@ -1525,31 +2069,31 @@ def gen_vector_cvt_scale(
         )
 
     if direction == 'unpack':
-        bits = _scale_lowp_bits(in_fmt)
+        L.append(
+            f'    auto src_region = regs.read_vgpr_region('
+            f'src_base, {src_word_count}u, 1ULL << lane);'
+        )
         if count == 8 and bits == 4:
-            L.append(
-                f'    uint32_t src_payload = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-            )
+            L.append('    uint32_t src_payload = src_region.lane(0, lane);')
         elif count == 8 and bits == 8:
-            L.append(
-                f'    uint64_t src_payload = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);'
-            )
+            L.append('    uint64_t src_payload = src_region.lane64(0, lane);')
         elif count == 16 and bits == 6:
-            _scale_read_vgpr_base(L, 'src_base', src[0])
             L.append('    uint32_t src_words[4] = {};')
             L.append('    for (uint32_t word = 0; word < 3u; ++word)')
-            L.append(
-                '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
-            )
+            L.append('      src_words[word] = src_region.lane(word, lane);')
         else:
             raise ValueError(f'unsupported scaled unpack operation: {op}')
 
         L.extend(_scale_unpack_element_raw(in_fmt, arch_name))
         if out_fmt == 'f32':
+            L.append(
+                f'    auto dst_region = regs.write_vgpr_region('
+                f'dst_base, {dst_word_count}u, 1ULL << lane);'
+            )
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append('      float value = read_scaled_src(index) * scale;')
             L.append(
-                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane, std::bit_cast<uint32_t>(value));'
+                '      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));'
             )
             L.append('    }')
         elif out_fmt in ('f16', 'bf16'):
@@ -1558,32 +2102,33 @@ def gen_vector_cvt_scale(
                 if out_fmt == 'f16'
                 else 'util::f32_to_bf16_rne_mode'
             )
-            words = count // 2
-            L.append(f'    uint32_t dst_words[{words}] = {{}};')
+            L.append(
+                f'    auto dst_region = regs.write_vgpr_region('
+                f'dst_base, {dst_word_count}u, 1ULL << lane);'
+            )
+            L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append(
                 f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, wf.fp16_ovfl());'
             )
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
             L.append('    }')
-            L.append(f'    for (uint32_t word = 0; word < {words}u; ++word)')
-            L.append(
-                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
-            )
-        else:
-            raise ValueError(f'unsupported scaled unpack output format: {out_fmt}')
+            L.append(f'    for (uint32_t word = 0; word < {dst_word_count}u; ++word)')
+            L.append('      dst_region.set_lane(word, lane, dst_words[word]);')
     elif direction == 'pack':
-        bits = _scale_lowp_bits(out_fmt)
-        src_words = count if in_fmt == 'f32' else count // 2
-        out_words = (count * bits + 31) // 32
-        _scale_read_vgpr_base(L, 'src_base', src[0])
-        L.append(f'    uint32_t src_words[{src_words}] = {{}};')
-        L.append(f'    for (uint32_t word = 0; word < {src_words}u; ++word)')
         L.append(
-            '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
+            f'    auto src_region = regs.read_vgpr_region('
+            f'src_base, {src_word_count}u, 1ULL << lane);'
         )
+        L.append(
+            f'    auto dst_region = regs.write_vgpr_region('
+            f'dst_base, {dst_word_count}u, 1ULL << lane);'
+        )
+        L.append(f'    uint32_t src_words[{src_word_count}] = {{}};')
+        L.append(f'    for (uint32_t word = 0; word < {src_word_count}u; ++word)')
+        L.append('      src_words[word] = src_region.lane(word, lane);')
         L.extend(_scale_source_reader(in_fmt))
-        L.append(f'    uint32_t dst_words[{out_words}] = {{}};')
+        L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
         L.append('    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {')
         L.append(f'      code &= 0x{((1 << bits) - 1):x}u;')
         L.append(f'      uint32_t bit = index * {bits}u;')
@@ -1605,12 +2150,8 @@ def gen_vector_cvt_scale(
                 f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value', arch_name)});"
             )
         L.append('    }')
-        L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
-        L.append(
-            '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
-        )
-    else:
-        raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
+        L.append(f'    for (uint32_t word = 0; word < {dst_word_count}u; ++word)')
+        L.append('      dst_region.set_lane(word, lane, dst_words[word]);')
 
     L.append('  }')
     return '\n'.join(L)
@@ -1655,9 +2196,7 @@ def gen_cvt_fp8(ctx) -> str:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     opsel = _opsel_field(ctx) if is_vop3 else '0u'
-    fp8_format_select = (
-        'inst_.clamp' if is_vop3 and ctx.arch_name == 'gfx1250' else None
-    )
+    fp8_format_select = 'inst_.clamp' if is_vop3 and ctx.arch_name == 'cdna5' else None
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -2119,6 +2658,16 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     if is_sr_pk_fp4_f32:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t vb = wf.vgpr_alloc().base;')
+        L.append(
+            f'  auto data_src_off = Isa::resolved_vgpr_offset({src[0]}.opr_type_, '
+            f'{src[0]}.encoding_value_);'
+        )
+        L.append('  if (!data_src_off)')
+        L.append('    throw util::UnimplementedInst(mnemonic());')
+        L.append(
+            f'  uint32_t data_src_base = vb + amdgpu::apply_gpr_idx('
+            f'wf, *data_src_off, {src[0]}.vgpr_msb_role());'
+        )
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -2140,7 +2689,8 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    float val0 = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane)));'
             )
             L.append(
-                f'    float val1 = std::bit_cast<float>(amdgpu::RegisterAccess(cu).read_vgpr(vb + {data_src}.unified_vgpr_index() + 1, lane));'
+                '    float val1 = std::bit_cast<float>('
+                'amdgpu::RegisterAccess(cu).read_vgpr(data_src_base + 1, lane));'
             )
         else:
             L.append(
@@ -2421,19 +2971,27 @@ def _gen_wide_scalef32(
     L = []
     L.append('  auto &cu = wf.cu();')
     L.append('  uint32_t vb = wf.vgpr_alloc().base;')
-    L.append(
-        '  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {'
-    )
-    L.append(
-        '    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);'
-    )
+    direct_ops = [dst[0], src[0]]
+    if direction == 'narrow' and mode == '2xpk16':
+        direct_ops.append(src[1])
+    for direct_op in dict.fromkeys(direct_ops):
+        L.append(
+            f'  auto {direct_op}_off = Isa::resolved_vgpr_offset('
+            f'{direct_op}.opr_type_, {direct_op}.encoding_value_);'
+        )
+        L.append(f'  if (!{direct_op}_off)')
+        L.append('    throw util::UnimplementedInst(mnemonic());')
+        L.append(
+            f'  uint32_t {direct_op}_base = vb + amdgpu::apply_gpr_idx('
+            f'wf, *{direct_op}_off, {direct_op}.vgpr_msb_role());'
+        )
+    L.append('  auto rd = [&](uint32_t base, uint32_t lane, uint32_t dw) -> uint32_t {')
+    L.append('    return amdgpu::RegisterAccess(cu).read_vgpr(base + dw, lane);')
     L.append('  };')
     L.append(
-        '  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {'
+        '  auto wr = [&](uint32_t base, uint32_t lane, uint32_t dw, uint32_t val) {'
     )
-    L.append(
-        '    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);'
-    )
+    L.append('    amdgpu::RegisterAccess(cu).write_vgpr(base + dw, lane, val);')
     L.append('  };')
 
     L.append('  uint64_t exec = wf.exec();')
@@ -2476,7 +3034,7 @@ def _gen_wide_scalef32(
                     idx = j * 2 + half
                     L.append(f'    {{')
                     L.append(
-                        f'      float v = std::bit_cast<float>(rd({s}, lane, {j}));'
+                        f'      float v = std::bit_cast<float>(rd({s}_base, lane, {j}));'
                     )
                     L.append(
                         f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
@@ -2496,7 +3054,7 @@ def _gen_wide_scalef32(
             for j in range(32):
                 L.append(f'    {{')
                 L.append(
-                    f'      float v = std::bit_cast<float>(rd({src[0]}, lane, {j}));'
+                    f'      float v = std::bit_cast<float>(rd({src[0]}_base, lane, {j}));'
                 )
                 L.append(
                     f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
@@ -2516,7 +3074,7 @@ def _gen_wide_scalef32(
             to_f32 = 'util::f16_to_f32' if src_fmt == 'f16' else 'util::bf16_to_f32'
             for j in range(16):
                 L.append(f'    {{')
-                L.append(f'      uint32_t dw = rd({src[0]}, lane, {j});')
+                L.append(f'      uint32_t dw = rd({src[0]}_base, lane, {j});')
                 L.append(
                     f'      float v0 = {to_f32}(static_cast<uint16_t>(dw & 0xFFFF));'
                 )
@@ -2550,7 +3108,7 @@ def _gen_wide_scalef32(
         L.append('    uint32_t dwords[6];')
         L.append('    util::pack_6bit(vals, dwords);')
         for d in range(6):
-            L.append(f'    wr({dst[0]}, lane, {d}, dwords[{d}]);')
+            L.append(f'    wr({dst[0]}_base, lane, {d}, dwords[{d}]);')
 
     else:
         # Widening: FP6/BF6 → F32/F16/BF16
@@ -2559,14 +3117,14 @@ def _gen_wide_scalef32(
 
         L.append('    uint32_t src_dwords[6];')
         for d in range(6):
-            L.append(f'    src_dwords[{d}] = rd({src[0]}, lane, {d});')
+            L.append(f'    src_dwords[{d}] = rd({src[0]}_base, lane, {d});')
         L.append('    uint8_t vals[32];')
         L.append('    util::unpack_6bit(src_dwords, vals);')
 
         if dst_fmt == 'f32':
             for j in range(32):
                 L.append(
-                    f'    wr({dst[0]}, lane, {j}, std::bit_cast<uint32_t>(static_cast<float>(static_cast<double>({cvt_fn}(vals[{j}])) * scale)));'
+                    f'    wr({dst[0]}_base, lane, {j}, std::bit_cast<uint32_t>(static_cast<float>(static_cast<double>({cvt_fn}(vals[{j}])) * scale)));'
                 )
         elif dst_fmt == 'f16':
             to_narrow = 'util::f32_to_f16_mode'
@@ -2579,7 +3137,7 @@ def _gen_wide_scalef32(
                     f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
                 )
                 L.append(
-                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
+                    f'      wr({dst[0]}_base, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
                 )
                 L.append(f'    }}')
         else:
@@ -2593,7 +3151,7 @@ def _gen_wide_scalef32(
                     f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
                 )
                 L.append(
-                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
+                    f'      wr({dst[0]}_base, lane, {j}, static_cast<uint32_t>({to_narrow}(f0, wf.fp16_ovfl())) | (static_cast<uint32_t>({to_narrow}(f1, wf.fp16_ovfl())) << 16));'
                 )
                 L.append(f'    }}')
 

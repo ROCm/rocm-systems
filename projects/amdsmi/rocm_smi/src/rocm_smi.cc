@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi.h"
 
@@ -2001,6 +1982,10 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_prese
 }
 
 static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_node_number) {
+  if (numa_node_number == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   TRY
 
       GET_DEV_AND_KFDNODE_FROM_INDX
@@ -5009,6 +4994,9 @@ rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
                                    void* /*unused*/) {
+  if (evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   TRY
 
       amd::smi::evt::Event* evt = reinterpret_cast<amd::smi::evt::Event*>(evt_handle);
@@ -5018,10 +5006,6 @@ rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_
   REQUIRE_ROOT_ACCESS
 
   int ret = 0;
-
-  if (evt_handle == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (cmd) {
     case RSMI_CNTR_CMD_START:
@@ -5691,6 +5675,8 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   bool node_is_find = false;
+  // Keep the matched link alive; io_link_map_tmp.clear() invalidates the iterator.
+  std::shared_ptr<amd::smi::IOLink> found_link;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>> io_link_map_tmp;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>>::iterator it;
   // Iterate over P2P links
@@ -5698,6 +5684,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
       if (it->first == node_ind_dst) {
         node_is_find = true;
+        found_link = it->second;
         break;
       }
     }
@@ -5712,6 +5699,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
       for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
         if (it->first == node_ind_dst) {
           node_is_find = true;
+          found_link = it->second;
           break;
         }
       }
@@ -5722,7 +5710,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   if (node_is_find) {
-    amd::smi::IO_LINK_TYPE io_link_type = it->second->type();
+    amd::smi::IO_LINK_TYPE io_link_type = found_link->type();
     if (io_link_type == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
       *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
     } else if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
@@ -5743,7 +5731,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
      *          some time to implement and test it, should we consider it is *really necessary*.
      *
      */
-    auto tmp_capability = it->second->get_link_capability();
+    auto tmp_capability = found_link->get_link_capability();
     if (auto link_direction_result =
             amd::smi::DiscoverIOLinkPerNodeDirection(node_ind_src, node_ind_dst);
         link_direction_result == amd::smi::IOLinkDirectionType_t::kBiDirectional) {
@@ -7624,7 +7612,6 @@ rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(header_value != nullptr);
   if (header_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -7648,7 +7635,6 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(xcd_counter_value != nullptr);
   if (xcd_counter_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }

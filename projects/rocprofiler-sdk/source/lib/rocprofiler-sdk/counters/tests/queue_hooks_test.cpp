@@ -174,6 +174,54 @@ TEST(counters_queue_hooks, is_any_active_false_when_no_context_active)
     EXPECT_FALSE(rocprofiler::counters::is_any_active());
 }
 
+TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_id)
+{
+    hsa::inst_pkt_t inst_pkt;
+    inst_pkt.emplace_back(
+        std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
+                       rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
+
+    auto sess    = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
+    auto packet  = rocprofiler::hsa::packet_data_t{};
+    auto fq_pkt  = rocprofiler::hsa::rocprofiler_packet{};
+
+    // Must return without touching registered counter contexts (no init required).
+    rocprofiler::counters::kernel_dispatch_phase_exit_hook(
+        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
+        fq_pkt,
+        sess,
+        packet,
+        inst_pkt,
+        rocprofiler::kernel_dispatch::profiling_time{});
+    SUCCEED();
+}
+
+TEST(counters_queue_hooks, is_any_active_true_while_context_started)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
+                         get_client_ctx(), user_dispatch_cb, nullptr, nullptr, nullptr),
+                     "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    EXPECT_TRUE(rocprofiler::counters::is_any_active());
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+    EXPECT_FALSE(rocprofiler::counters::is_any_active());
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
 // Regression for callback-registry removal, per the review on #8891: dispatches enqueued while the
 // context is active must still complete when stop_context runs before their GPU completions land.
 //

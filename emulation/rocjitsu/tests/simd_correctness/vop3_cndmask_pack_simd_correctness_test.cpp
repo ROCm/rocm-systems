@@ -15,6 +15,7 @@
 ///   - v_pack_b32_f16_vop3: pack the OPSEL-selected 16-bit halves of src0/src1
 ///     into a b32 dst.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -181,7 +182,7 @@ void check_cndmask_one(uint64_t exec, uint64_t sel) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_tern_encode(/*op=*/256, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257,
                      /*src2=*/sb, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_cndmask_b32_vop3 decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -220,7 +221,7 @@ void check_pack_one(uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_bin_encode(/*op=*/672, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_pack_b32_f16_vop3 decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -259,7 +260,7 @@ void check_pack_opsel_high_halves(uint64_t exec) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_bin_encode(/*op=*/672, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, words,
                     kOpSelSrc0Src1High);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_pack_b32_f16_vop3 decode failed";
     auto out = fx.run(inst, kRot, exec);
     delete inst;

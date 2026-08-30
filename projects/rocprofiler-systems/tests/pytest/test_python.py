@@ -90,7 +90,7 @@ class TestPython(RocprofsysTest):
     PYTHON_SOURCE_GENERAL = {
         "metric": "trip_count",  # Timemory
         "file": "trip_count.json",  # Timemory
-        "categories": ["python", "user"],  # Perfetto
+        "categories": ["python", "rocm_marker_api"],  # Perfetto
         "labels": [
             "main_loop",
             "run",
@@ -102,7 +102,10 @@ class TestPython(RocprofsysTest):
             "inefficient",
             "_sum",
         ],
-        "counts": [5, 3, 3, 6, 12, 18, 6, 3, 3],
+        # main_loop=4 as roctx.profilerPause() called mid 4th iteration
+        # supresses all marker writes from that point on.
+        # This includes the RoctxRange wrapper for 5th iteration
+        "counts": [4, 3, 3, 6, 12, 18, 6, 3, 3],
         "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 
@@ -283,8 +286,99 @@ class TestPython(RocprofsysTest):
                 fail_regex=[r"(fib|inefficient)..noprofile.py."],
             )
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.parametrize(
+        "use_cli_flag, use_env_var",
+        [
+            pytest.param(False, False, id="no-flag-no-env"),
+            pytest.param(False, True, id="no-flag-env-set"),
+            pytest.param(True, False, id="flag-no-env"),
+            pytest.param(True, True, id="flag-and-env"),
+        ],
+    )
+    def test_config_option(
+        self,
+        python_version,
+        create_config_file,
+        use_cli_flag,
+        use_env_var,
+        rocprof_config,
+    ):
+        """Check that a config file is honored whether it comes from -c/--config or
+        the ROCPROFSYS_CONFIG_FILE env var. We skip the base env (otherwise its env
+        vars would override the file), then have -c turn profiling on and the env var
+        turn tracing on, and confirm each shows up in the produced artifacts.
+
+        Note: rocpd is the default output format (ROCPROFSYS_TRACE defaults to false),
+        so this test uses ROCPROFSYS_CONFIG_FILE to *enable* tracing rather than to
+        disable it (as was done when Perfetto was the default).
+        """
+        env: dict[str, str] = {
+            # Keep artifacts at the top of output_dir with stable names (no PID
+            # suffix, no timestamped subdir) so the file checks below can find them.
+            "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_TIME_OUTPUT": "OFF",
+            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+            "PYTHONPATH": str(rocprof_config.rocprofsys_site_packages or ""),
+        }
+        profile_args = ["--label", "file"]
+
+        if use_env_var:
+            env_config = create_config_file({"ROCPROFSYS_TRACE": "ON"}, "env_config.cfg")
+            env["ROCPROFSYS_CONFIG_FILE"] = str(env_config)
+
+        if use_cli_flag:
+            cli_config = create_config_file(
+                {"ROCPROFSYS_PROFILE": "ON"}, "cli_config.cfg"
+            )
+            profile_args = profile_args + ["-c", str(cli_config)]
+
+        result = self.run_test(
+            "python",
+            target="external.py",
+            env=env,
+            profile_args=profile_args,
+            python_version=python_version,
+            run_args=["-v", "10", "-n", "5"],
+            no_base_env=True,
+        )
+        self.assert_regex(result)
+
+        trip_count_exists = (result.output_dir / "trip_count.json").exists()
+        trace_exists = result.perfetto_file is not None
+
+        if use_cli_flag:
+            assert trip_count_exists, (
+                "trip_count.json should be present: the -c config sets "
+                "ROCPROFSYS_PROFILE=ON, so its absence means -c was ignored"
+            )
+        else:
+            assert not trip_count_exists, (
+                "trip_count.json should be absent: profiling is off by default "
+                "and no -c config enabled it"
+            )
+
+        if use_env_var:
+            assert trace_exists, (
+                "perfetto trace should be present: the ROCPROFSYS_CONFIG_FILE "
+                "config sets ROCPROFSYS_TRACE=ON, so its absence means the env "
+                "var was ignored"
+            )
+        else:
+            assert not trace_exists, (
+                "perfetto trace should be absent: tracing is off by default "
+                "(rocpd is the default output format) and no ROCPROFSYS_CONFIG_FILE "
+                "config enabled it"
+            )
+
     @pytest.mark.rocpd("python_rocpd_env")
-    def test_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
+    def test_source(
+        self, python_version, python_rocpd_env, python_source_rocpd_rules, rocprof_config
+    ):
+        if not rocprof_config.capabilities.roctx_available_for(python_version):
+            pytest.skip(
+                f"roctx Python bindings not installed for Python {python_version}"
+            )
         result = self.run_test(
             "python",
             target="source.py",

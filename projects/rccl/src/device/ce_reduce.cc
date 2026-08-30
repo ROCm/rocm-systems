@@ -36,11 +36,23 @@ THE SOFTWARE.
 
 #include "nccl.h"
 
-#define NCCL_CE_DECLARE_TYPE(Type)                                                                    \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Sum(const void*, void*, int, size_t, hipStream_t);  \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Prod(const void*, void*, int, size_t, hipStream_t); \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Min(const void*, void*, int, size_t, hipStream_t);  \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(const void*, void*, int, size_t, hipStream_t)
+// Every generated launcher takes ncclCeLaunchPersistentReduce's argument list
+// minus (datatype, op), which is what this file resolves to a symbol name.
+#define NCCL_CE_LAUNCH_PARAMS \
+  const void *in, void *out, int nRanks, size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard, \
+    size_t slotChunkElems, uint32_t *signalBuffer, size_t totalSteps, uint32_t *d_barrierSync, hipStream_t stream, \
+    int coopLaunch
+
+#define NCCL_CE_LAUNCH_ARGS \
+  in, out, nRanks, baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems, signalBuffer, totalSteps, \
+    d_barrierSync, stream, coopLaunch
+
+#define NCCL_CE_DECLARE_TYPE(Type) \
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Sum(NCCL_CE_LAUNCH_PARAMS); \
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Prod(NCCL_CE_LAUNCH_PARAMS); \
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Min(NCCL_CE_LAUNCH_PARAMS); \
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(NCCL_CE_LAUNCH_PARAMS); \
+  extern int ncclCeLocalReduceBlocks_##Type(size_t)
 
 NCCL_CE_DECLARE_TYPE(f32);
 NCCL_CE_DECLARE_TYPE(f64);
@@ -56,37 +68,86 @@ NCCL_CE_DECLARE_TYPE(u8);
 #undef NCCL_CE_DECLARE_TYPE
 
 // *********************************************************************************
-// ncclCeLaunchLocalReduce -- host launcher
+// ncclCeLaunchPersistentReduce -- host launcher
 // *********************************************************************************
-ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRanks, size_t chunkElems,
-                                     ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream) {
-  if (chunkElems == 0) return ncclSuccess;
-
-#define NCCL_CE_DISPATCH_REDOP(Type)                                                    \
-  do {                                                                                  \
-    switch (op) {                                                                       \
-    case ncclSum:  return ncclCeLocalReduceLaunch_##Type##_Sum(tmpBuf, output, nRanks, chunkElems, stream);  \
-    case ncclProd: return ncclCeLocalReduceLaunch_##Type##_Prod(tmpBuf, output, nRanks, chunkElems, stream); \
-    case ncclMin:  return ncclCeLocalReduceLaunch_##Type##_Min(tmpBuf, output, nRanks, chunkElems, stream);  \
-    case ncclMax:  return ncclCeLocalReduceLaunch_##Type##_Max(tmpBuf, output, nRanks, chunkElems, stream);  \
-    default:       return ncclInvalidArgument;                                          \
-    }                                                                                    \
+ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks, size_t baseChunkElems,
+                                          size_t tailChunkElems, size_t chunksPerShard, size_t slotChunkElems,
+                                          uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync,
+                                          ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream, int coopLaunch) {
+#define NCCL_CE_DISPATCH_REDOP(Type) \
+  do { \
+    switch (op) { \
+    case ncclSum: \
+      return ncclCeLocalReduceLaunch_##Type##_Sum(NCCL_CE_LAUNCH_ARGS); \
+    case ncclProd: \
+      return ncclCeLocalReduceLaunch_##Type##_Prod(NCCL_CE_LAUNCH_ARGS); \
+    case ncclMin: \
+      return ncclCeLocalReduceLaunch_##Type##_Min(NCCL_CE_LAUNCH_ARGS); \
+    case ncclMax: \
+      return ncclCeLocalReduceLaunch_##Type##_Max(NCCL_CE_LAUNCH_ARGS); \
+    default: \
+      return ncclInvalidArgument; \
+    } \
   } while (0)
 
   switch (datatype) {
-  case ncclFloat32:  NCCL_CE_DISPATCH_REDOP(f32);
-  case ncclFloat64:  NCCL_CE_DISPATCH_REDOP(f64);
-  case ncclFloat16:  NCCL_CE_DISPATCH_REDOP(f16);
-  case ncclBfloat16: NCCL_CE_DISPATCH_REDOP(bf16);
-  case ncclInt32:    NCCL_CE_DISPATCH_REDOP(i32);
-  case ncclUint32:   NCCL_CE_DISPATCH_REDOP(u32);
-  case ncclInt64:    NCCL_CE_DISPATCH_REDOP(i64);
-  case ncclUint64:   NCCL_CE_DISPATCH_REDOP(u64);
-  case ncclInt8:     NCCL_CE_DISPATCH_REDOP(i8);
-  case ncclUint8:    NCCL_CE_DISPATCH_REDOP(u8);
+  case ncclFloat32:
+    NCCL_CE_DISPATCH_REDOP(f32);
+  case ncclFloat64:
+    NCCL_CE_DISPATCH_REDOP(f64);
+  case ncclFloat16:
+    NCCL_CE_DISPATCH_REDOP(f16);
+  case ncclBfloat16:
+    NCCL_CE_DISPATCH_REDOP(bf16);
+  case ncclInt32:
+    NCCL_CE_DISPATCH_REDOP(i32);
+  case ncclUint32:
+    NCCL_CE_DISPATCH_REDOP(u32);
+  case ncclInt64:
+    NCCL_CE_DISPATCH_REDOP(i64);
+  case ncclUint64:
+    NCCL_CE_DISPATCH_REDOP(u64);
+  case ncclInt8:
+    NCCL_CE_DISPATCH_REDOP(i8);
+  case ncclUint8:
+    NCCL_CE_DISPATCH_REDOP(u8);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
   default:
     return ncclInvalidArgument;
   }
 
 #undef NCCL_CE_DISPATCH_REDOP
+}
+
+// *********************************************************************************
+// ncclCeLocalReduceBlocks -- reduce-kernel block count for host-side reporting
+// (redop-independent; mirrors the geometry the launcher above actually uses).
+// *********************************************************************************
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems) {
+  if (chunkElems == 0) return 0;
+  switch (datatype) {
+  case ncclFloat32:
+    return ncclCeLocalReduceBlocks_f32(chunkElems);
+  case ncclFloat64:
+    return ncclCeLocalReduceBlocks_f64(chunkElems);
+  case ncclFloat16:
+    return ncclCeLocalReduceBlocks_f16(chunkElems);
+  case ncclBfloat16:
+    return ncclCeLocalReduceBlocks_bf16(chunkElems);
+  case ncclInt32:
+    return ncclCeLocalReduceBlocks_i32(chunkElems);
+  case ncclUint32:
+    return ncclCeLocalReduceBlocks_u32(chunkElems);
+  case ncclInt64:
+    return ncclCeLocalReduceBlocks_i64(chunkElems);
+  case ncclUint64:
+    return ncclCeLocalReduceBlocks_u64(chunkElems);
+  case ncclInt8:
+    return ncclCeLocalReduceBlocks_i8(chunkElems);
+  case ncclUint8:
+    return ncclCeLocalReduceBlocks_u8(chunkElems);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
+  default:
+    return 0;
+  }
 }

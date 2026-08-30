@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vexport.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -32,6 +32,16 @@ ExportVexport::ExportVexport(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeExportVexport(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vexport::validate_encoding(
+      "export", reinterpret_cast<const Vexport::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ExportVexport>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

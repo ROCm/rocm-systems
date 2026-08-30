@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -389,6 +390,13 @@ start_context(rocprofiler_context_id_t context_id)
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
+    // A context that traces kernel dispatch is the only reason to arm the KFD
+    // dispatch-log ring, so arm it here rather than at startup. Idempotent, and
+    // early enough that the firmware is recording before the first dispatch.
+    if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
+        rocprofiler::kfd::arm_dispatch_log_sessions();
+
     if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
@@ -416,10 +424,9 @@ stop_context(rocprofiler_context_id_t idx)
         {
             // Stop queue-interposed services before clearing the active slot so
             // disable_serialization() always runs before dispatches stop being instrumented.
-            // Clearing the slot first opens the opposite window, in which
-            // kernel_dispatch_phase_enter_hook / write_hook sees no active context and a
-            // dispatch is submitted without serializer packets while the serializer is still
-            // enabled.
+            // Clearing the slot first opens the opposite window, in which the enter hooks see no
+            // active context and a dispatch is submitted without serializer packets while the
+            // serializer is still enabled.
             if(_expected->dispatch_counter_collection)
             {
                 rocprofiler::counters::stop_context(const_cast<context*>(_expected));

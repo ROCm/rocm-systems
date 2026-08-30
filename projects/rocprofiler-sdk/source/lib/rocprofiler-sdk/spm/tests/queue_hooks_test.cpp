@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 
 #include <gtest/gtest.h>
@@ -33,5 +34,26 @@ namespace
 TEST(spm_queue_hooks, is_any_active_false_when_no_context_active)
 {
     EXPECT_FALSE(rocprofiler::spm::is_any_active());
+}
+
+TEST(spm_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_spm_client_id)
+{
+    rocprofiler::hsa::inst_pkt_t inst_pkt;
+    inst_pkt.emplace_back(
+        std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
+                       rocprofiler::hsa::queue_hooks::COUNTERS_CLIENT_ID));
+
+    auto sess    = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
+    auto packet  = rocprofiler::hsa::packet_data_t{};
+    auto fq_pkt  = rocprofiler::hsa::rocprofiler_packet{};
+
+    rocprofiler::spm::signal_completion_hook(
+        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
+        fq_pkt,
+        sess,
+        packet,
+        inst_pkt,
+        rocprofiler::kernel_dispatch::profiling_time{});
+    SUCCEED();
 }
 }  // namespace
