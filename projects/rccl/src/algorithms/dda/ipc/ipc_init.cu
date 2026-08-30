@@ -33,6 +33,10 @@ bool ncclDdaNranksRelaxEnabled() {
   return rcclParamDdaNranksRelax() != 0;
 }
 
+bool ncclDdaNranksSupported(int nRanks) {
+  return nRanks == kDdaNranks || (ncclDdaNranksRelaxEnabled() && nRanks >= 2 && nRanks <= kDdaNranks);
+}
+
 #define HIP_CALL(cmd) \
   do { \
     hipError_t error = (cmd); \
