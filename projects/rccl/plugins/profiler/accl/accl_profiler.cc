@@ -50,10 +50,12 @@ static void acclCtxUnref(struct acclCommContext* ctx) {
   if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) != 0) {
     return;
   }
+  pthread_mutex_lock(&ctx->outputMutex);
   if (ctx->outputFile) {
     fclose(ctx->outputFile);
     ctx->outputFile = NULL;
   }
+  pthread_mutex_unlock(&ctx->outputMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     pthread_mutex_destroy(&ctx->collPool[i].mutex);
   }
@@ -477,6 +479,14 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
+      // Read the claim under the lock every writer uses, not under
+      // collPoolMutex. A claimed slot belongs to a thread between
+      // acclShouldFinalize and acclFreeColl; it releases the slot and its
+      // reference itself, so touching it here double-releases both.
+      pthread_mutex_lock(&coll->mutex);
+      int claimed = coll->finalized;
+      pthread_mutex_unlock(&coll->mutex);
+      if (claimed) continue;
       if (!coll->finalized) {
         // Never reached its completion predicate — teardown skipped one or more
         // of its kernel-channel events. Count it so the loss is visible; no
@@ -491,8 +501,10 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
 
-  // Write the drop summary while the output file is still open. The file is
-  // closed by acclCtxUnref once the last reference goes away.
+  // Write the drop summary while the output file is still open, under the lock
+  // acclWriteRecord uses, so the summary cannot land inside a record. The file
+  // is closed by acclCtxUnref once the last reference goes away.
+  pthread_mutex_lock(&ctx->outputMutex);
   if (ctx->outputFile) {
     // Emit the summary unconditionally, including on a clean run: a consumer
     // that finds no summary line cannot distinguish "nothing was lost" from
@@ -512,6 +524,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
                 (unsigned long)ctx->leakedCollectives);
     }
   }
+  pthread_mutex_unlock(&ctx->outputMutex);
 
   // Drop the init reference; outstanding proxy ops/steps hold their own.
   acclCtxUnref(ctx);
