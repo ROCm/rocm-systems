@@ -1829,20 +1829,26 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 }
 
 void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
-                                    const ConSanOptions &options,
+                                    const ConSanFaultMutationPlan *address_plan,
+                                    const ConSanFaultMutationPlan *order_plan,
+                                    const ConSanFaultMutationPlan *scope_plan,
                                     ConSanTransformArtifacts &result) {
-  const auto target =
-      select_ordinary_acquire_mutation_target(fault_selection_view(result), options);
+  const ConSanFaultMutationPlan *primary_plan =
+      address_plan != nullptr ? address_plan : (order_plan != nullptr ? order_plan : scope_plan);
+  const auto target = primary_plan != nullptr
+                          ? select_ordinary_acquire_mutation_target(
+                                fault_selection_view(result),
+                                ConSanFaultSelection{
+                                    .primary_site_identity = primary_plan->primary_identity,
+                                    .primary_sequence_identity = {},
+                                    .companion_site_identity = {},
+                                    .companion_sequence_identity = {},
+                                    .kernel_name_filter = {},
+                                    .ordinal = 0,
+                                })
+                          : std::nullopt;
   if (!target) {
-    if (!options.fault_site_identity.empty()) {
-      result.warnings.emplace_back(
-          "ConSan ordinary fault found no exact supported acquire-load site with identity '" +
-          options.fault_site_identity + "'");
-    } else {
-      result.warnings.emplace_back(
-          "ConSan ordinary fault found no exact supported acquire-load at index " +
-          std::to_string(options.fault_ordinary_index));
-    }
+    result.errors.emplace_back("ConSan ordinary fault plan no longer matches its pristine site");
     return;
   }
 
@@ -1884,10 +1890,10 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
     return info;
   };
 
-  if (options.fault_ordinary_wrong_address) {
-    if (options.fault_ordinary_address_delta == 0u ||
-        options.fault_ordinary_address_delta % sizeof(uint32_t) != 0u ||
-        options.fault_ordinary_address_delta > 0x7fffffu) {
+  if (address_plan != nullptr) {
+    const uint32_t address_delta = address_plan->address_delta_bytes.value_or(0u);
+    if (address_delta == 0u || address_delta % sizeof(uint32_t) != 0u ||
+        address_delta > 0x7fffffu) {
       result.errors.emplace_back(
           "ConSan ordinary address delta must be a positive aligned signed-24-bit offset");
       return;
@@ -1900,8 +1906,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
           "ConSan ordinary address fault found stale or unsupported decoded load fields");
       return;
     }
-    const int64_t replacement_offset =
-        static_cast<int64_t>(original_offset) + options.fault_ordinary_address_delta;
+    const int64_t replacement_offset = static_cast<int64_t>(original_offset) + address_delta;
     if (replacement_offset < -0x800000ll || replacement_offset > 0x7fffffll ||
         replacement_offset % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
       result.errors.emplace_back(
@@ -1917,7 +1922,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->site->text_offset, target->site->size, {}));
   }
 
-  if (options.fault_ordinary_weaken_order) {
+  if (order_plan != nullptr) {
     const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
     for (uint32_t offset = 0; offset < target->cache->size; offset += sizeof(uint32_t))
       std::memcpy(candidate.data() + target->cache->file_offset + offset, &nop, sizeof(nop));
@@ -1925,7 +1930,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->cache->text_offset, target->cache->size,
                                 target->cache->identity));
   }
-  if (options.fault_ordinary_weaken_scope) {
+  if (scope_plan != nullptr) {
     const auto current_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
     if (!current_encoding || !target->load->raw_scope ||
         current_encoding->scope != *target->load->raw_scope ||
@@ -1947,16 +1952,16 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                         std::make_move_iterator(patches.end()));
   result.mutation.applied_fault_logical_identity = target->sequence->identity;
   result.mark_modified();
-  if (options.fault_ordinary_wrong_address) {
+  if (address_plan != nullptr) {
     result.warnings.emplace_back("ConSan ordinary fault shifted global_load_b32 by validated " +
-                                 std::to_string(options.fault_ordinary_address_delta) + " byte(s)");
+                                 std::to_string(*address_plan->address_delta_bytes) + " byte(s)");
   }
-  if (options.fault_ordinary_weaken_order) {
+  if (order_plan != nullptr) {
     result.warnings.emplace_back(
         "ConSan ordinary fault removed associated global_inv while preserving the acquire load "
         "and waits");
   }
-  if (options.fault_ordinary_weaken_scope) {
+  if (scope_plan != nullptr) {
     result.warnings.emplace_back("ConSan ordinary fault lowered global_load_b32 scope to wave");
   }
 }

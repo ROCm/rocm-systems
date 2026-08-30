@@ -38,7 +38,10 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
                                const ConSanFaultMutationPlan &plan,
                                ConSanTransformArtifacts &result);
 void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
-                                    const ConSanOptions &options, ConSanTransformArtifacts &result);
+                                    const ConSanFaultMutationPlan *address_plan,
+                                    const ConSanFaultMutationPlan *order_plan,
+                                    const ConSanFaultMutationPlan *scope_plan,
+                                    ConSanTransformArtifacts &result);
 
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                bool force_trampoline, ConSanTransformArtifacts &result);
