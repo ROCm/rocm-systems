@@ -717,11 +717,29 @@ inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 }
 } // namespace
 
-size_t rcclCeArRegisteredMax(const ncclComm* comm) {
-  const int64_t param = rcclParamCeArRegMaxMsgBytes();
+size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  return table != nullptr ? table->ceArRegMax : 0;
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
+}
+
+size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
+}
+
+size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
+}
+
+// Keep old name as a shim for callers that have not been updated yet.
+size_t rcclCeArRegisteredMax(const ncclComm* comm) {
+  return rcclCeRegMax(comm, ncclFuncAllReduce);
 }
 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
@@ -1155,7 +1173,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Tuning cap only: registered CE has no staging allocation, so this does not
   // size a buffer. 0 (or unset table) means no upper bound. Independent of the
   // 2-shot ceArMax / ceArMaxBytes limit used above.
-  const size_t ceArRegMax = rcclCeArRegisteredMax(comm);
+  const size_t ceArRegMax = rcclCeRegMax(comm, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
   if (ceRegInWindow && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
@@ -1317,12 +1335,21 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-    // Branch #2: FORCE_CE via DDA scratch (unregistered windows).
+    // Branch #2: CE via DDA scratch (unregistered windows).
+    // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
+    // [ceNonRegMin, ceNonRegMax] window from the arch table.  The scratch buffer
+    // must be large enough to hold the receive (ddaScratchBytes >= totalBytes).
     const bool ceScratch =
       !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (rcclParamForceCe() && ceScratch && winRegType != ncclSymSendRegRecvReg &&
-        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-        totalBytes <= (size_t)comm->ddaScratchBytes) {
+    const size_t agCeNonRegMax = rcclCeNonRegMax(comm, ncclFuncAllGather);
+    const size_t agCeNonRegMin = rcclCeNonRegMin(comm, ncclFuncAllGather);
+    const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
+                                   totalBytes >= agCeNonRegMin &&
+                                   totalBytes <= agCeNonRegMax;
+    if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
+        winRegType != ncclSymSendRegRecvReg &&
+        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment &&
+        comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }

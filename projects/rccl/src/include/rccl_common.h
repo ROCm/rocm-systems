@@ -217,10 +217,10 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 // CE AllReduce knobs (defined in rccl_wrap.cc).
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
-RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceArMax (2-shot) from arch table
-RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceArRegMax (registered) from arch table
+RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
+RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 // Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins;
-// else arch table ceArRegMax; 0 means no upper bound.
+// else arch table ceRegMax[AR]; 0 means no upper bound.
 size_t rcclCeArRegisteredMax(const ncclComm* comm);
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
 // collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce

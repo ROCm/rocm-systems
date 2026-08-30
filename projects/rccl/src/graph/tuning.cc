@@ -1005,7 +1005,7 @@ static struct tuningModel tuning_model_9{
 
 
 // tuning_model_10: gfx1250 fabric (MNNVL topology).
-// Placeholder values based on gfx950 (tuning_model_6) -- validate from sweep data (AICOMRCCL-1756).
+// Tuned from 8_29_runs_develop (Helios) AllReduce/AllGather/ReduceScatter sweep (AICOMRCCL-1756).
 static struct tuningModel tuning_model_10{
   .hwLat =
     {
@@ -1033,47 +1033,42 @@ static struct tuningModel tuning_model_10{
        /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
        /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 1.00}},
     },
+  // Correction factors derived from 8_29 (Helios) AllReduce sweep, R=0 G=0.
+  // Index i = log2(nBytes/64): [0..3]=<1KB [4]=1KB [8]=16KB [11]=128KB [13]=512KB
+  // [14]=1MB [15]=2MB [16]=4MB [17]=8MB [21]=128MB [22]=256MB [26]=4GB+
+  // LL:   Tree wins 0-512KB (idx 0-13), Ring wins 1MB-4MB (idx 14-16)
+  // LL128: Tree wins 1MB-2MB (idx 14-15), Ring wins 4MB-128MB (idx 16-21)
+  // Simple: Ring wins 256MB+ (idx 22-26)
+  // Values >1.0 boost, <1.0 suppress. 2.0=clear winner, 0.5=loser.
   .treeCorrectionFactor =
     {
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9,
-        1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
-      },
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9,
-        1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 0.1, 0.9, 0.9, 0.1, 0.1,
-      },
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,  0.1, 0.1, 0.1, 0.1,
-        0.1, 0.7, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 0.15, 0.6, 0.7, 0.6,
-      },
+      {2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,},
     },
   .ringCorrectionFactor =
     {
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0,
-        0.4, 0.4, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
-      },
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0,
-        0.4, 0.4, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 5.5, 0.1, 0.1, 1.0, 1.0,
-      },
-      {
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
-        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.9, 0.1, 1.0, 0.1, 0.6, 1.0, 1.0,
-      },
+      {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,},
     },
   .llProtoRanges =
     {
+      // sizePerRank = totalBytes / nRanks (4 ranks default on gfx1250).
+      // Breakpoints from 8_29 (Helios) sweep data.
       /*ReduceScatter*/
-      {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
+      // RS ≤4MB total handled by DDA; Ring kicks in above. For Ring proto selection:
+      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 64MB/rank (=256MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 67108864, 1, 64}},
       /*AllGather*/
-      {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
+      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 32MB/rank (=128MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 33554432, 1, 64}},
       /*AllReduce*/
-      {/*LL (min/max/factor/thread_threshold)*/ {0, 262144, 1, 0},
-       /*LL128 (min/max/factor/thread_threshold)*/ {262144, 70640910, 3145728, 0}},
+      // LL  wins 0 – 128KB/rank (=512KB total); LL128 wins 128KB – 32MB/rank (=128MB total); Simple above.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {131072, 33554432, 3145728, 0}},
       /*Reduce*/
       {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {16383, 16777216, 1, 0}},
@@ -1769,26 +1764,26 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    32ULL*1024,          // [2] AllGather       -- 32 KiB
-    32ULL*1024,          // [3] ReduceScatter   -- 32 KiB per-rank shard
-    32ULL*1024,          // [4] AllReduce       -- 32 KiB
+    128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
+    1ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
+    16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    32ULL*1024,          // [8] AlltoAll        -- 32 KiB
+    1ULL*1024*1024,         // [8] AlltoAll        -- 2MiB KiB total 
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (LL128 wins to 1M total; VMM faster above)
-    512ULL*1024,         // [3] ReduceScatter   -- 512 KiB per-rank (=2M total/4ranks; LL128 wins 256K-2M total, VMM faster above)
+    512ULL*1024,         // [2] AllGather       -- 512 KiB (kernel hard cap kDdaLL128AgMaxPerRankBytes)
+    512ULL*1024,            // [3] ReduceScatter   -- 512 KiB per-rank (kernel hard cap kDdaLL128RsMaxBytes; DDA/LL covers above)
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    128ULL*1024*1024,    // [8] AlltoAll        -- 128 MiB (DDA/LL128 wins 32K-128M; covers 4M transition and 8M-128M)
+    1ULL*1024*1024,      // [8] AlltoAll        -- 128 MiB total 
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -1796,12 +1791,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (DDA wins <=1M; Ring LL128 wins 4M-32M, Ring Simple 64M-128M)
-    2ULL*1024*1024,      // [3] ReduceScatter   -- 2 MiB total (DDA wins <=2M; Ring LL128 wins 4M-32M)
+    0,                   // [3] ReduceScatter   -- 0 = disabled; Ring/LL128 wins 8M-128M, Ring/Simple above
     16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    128ULL*1024*1024,    // [8] AlltoAll        -- 128 MiB (LL128 covers through 128M; CE disabled below this)
+    1ULL*1024*1024,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // RS fires DDA even when symEligible=true on gfx1250 (!symEligible || ddaFabricArch).
@@ -1811,8 +1806,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
-    32ULL*1024*1024,     // [3] ReduceScatter   -- R2 RS: lower VMM to 32 MiB (placeholder)
-    0,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
+    0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
+    1ULL*1024*1024,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -1833,9 +1828,48 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [7] Recv            -- not used
     0,                   // [8] AlltoAll        -- no graph-specific override
   },
-  .ceArMin     = 4ULL   * 1024 * 1024,   // 2-shot lower bound (stored; not a selector gate)
-  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging / rcclUseCeAllReduce cap
-  .ceArRegMax  = 8ULL * 1024 * 1024 * 1024,   // registered CE AUTO cap (0 = unlimited)
+  // ceNonRegMin: lower bound for CE-Scratch window per collective.
+  // AG: CE-Scratch wins 8-32 MiB; Ring/LL is faster below 8 MiB.
+  // AR: rcclUseCeAllReduce() already enforces the 4 MiB floor; no separate gate needed.
+  .ceNonRegMin = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    8ULL*1024*1024,       // [2] AllGather       -- CE-Scratch fires above 8 MiB (Ring/LL wins below)
+    0,                    // [3] ReduceScatter   -- not used
+    0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAllReduce, not this gate
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // ceNonRegMax: upper bound for CE-Scratch window per collective.
+  // AG: CE-Scratch exits at 32 MiB; Ring/LL128 wins above.
+  // AR: 256 MiB = staging buffer allocation size AND selector gate (ceArMaxBytes).
+  .ceNonRegMax = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    32ULL*1024*1024,      // [2] AllGather       -- CE-Scratch upper bound 32 MiB
+    0,                    // [3] ReduceScatter   -- not used
+    256ULL*1024*1024,     // [4] AllReduce       -- 2-shot staging cap (also allocation size)
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // ceRegMax: registered CE upper bound per collective.
+  // AG: 0 = no upper bound for CE-registered (R=2).
+  // AR: 8 GiB cap for registered CE (copies through user symmetric windows).
+  .ceRegMax = {
+    0,                             // [0] Broadcast      -- not used
+    0,                             // [1] Reduce          -- not used
+    0,                             // [2] AllGather       -- no upper bound (R=2 CE-registered)
+    0,                             // [3] ReduceScatter   -- not used
+    8ULL*1024*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
+    0,                             // [5] SendRecv        -- not used
+    0,                             // [6] Send            -- not used
+    0,                             // [7] Recv            -- not used
+    0,                             // [8] AlltoAll        -- not used
+  },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
   // msg > threshold.
   // AR set to 512 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
@@ -1843,7 +1877,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- no CE path for AG symk suppression
+    4ULL*1024*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
     0,                    // [3] ReduceScatter   -- no suppression (placeholder)
     512ULL*1024,          // [4] AllReduce       -- CE-registered wins above 512 KiB for R2
     0,                    // [5] SendRecv        -- not used
@@ -1864,9 +1898,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
-  .ceArMin     = 4ULL   * 1024 * 1024,
-  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging cap
-  .ceArRegMax  = 256ULL * 1024 * 1024,   // registered CE AUTO cap
+  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
@@ -1876,9 +1910,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
-  .ceArMin     = 4ULL   * 1024 * 1024,
-  .ceArMax     = 256ULL * 1024 * 1024,   // 2-shot staging cap
-  .ceArRegMax  = 256ULL * 1024 * 1024,   // registered CE AUTO cap
+  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };

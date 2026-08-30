@@ -266,16 +266,18 @@ struct rcclArchThresholds {
   // 0 means "use ddaVmmMax" (no graph-specific override).
   size_t ddaVmmMaxGraph[RCCL_DDA_FUNC_COUNT];
 
-  // CE AllReduce 2-shot (staging-buffer) window, total bytes. ceArMax is copied
-  // into comm->ceColl.ceArMaxBytes at init and both sizes ceARTmpBuf and gates
-  // rcclUseCeAllReduce; it is an allocation limit, not only a tuning cap.
-  // ceArMin is stored for tuning but is not a selector gate today.
-  size_t ceArMin;
-  size_t ceArMax;
-  // CE AllReduce registered-window AUTO cap, total bytes. Independent of
-  // ceArMax: registered CE copies through user windows, so this is a tuning
-  // threshold only. 0 means no upper bound.
-  size_t ceArRegMax;
+  // CE non-registered (scratch) window per collective, total bytes.
+  // CE-Scratch fires when ceNonRegMin[func] <= totalBytes <= ceNonRegMax[func].
+  // ceNonRegMin[func] = 0 means no lower bound (fires immediately above DDA exit).
+  // ceNonRegMax[func] = 0 means CE-Scratch disabled for that collective.
+  // For AllReduce, ceNonRegMax[AR] also doubles as the ceARTmpBuf allocation size.
+  size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
+  size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
+
+  // CE registered-window upper bound per collective, total bytes.
+  // For AllReduce: registered CE copies through user symmetric windows (tuning cap only).
+  // For AllGather: upper bound for CE-registered (R=2). 0 means no upper bound.
+  size_t ceRegMax[RCCL_DDA_FUNC_COUNT];
 
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
   // Above this size CE is faster than symk; setting this withdraws symk as the final
