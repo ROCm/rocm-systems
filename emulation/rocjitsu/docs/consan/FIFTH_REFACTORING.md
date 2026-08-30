@@ -368,7 +368,21 @@ library do not constitute a directed build graph.
 
 # Part II: open charter for the fifth refactoring
 
-## 10. Mandate
+## 10. Goal and mandate
+
+### 10.1 The goal
+
+**Re-architect ConSan so concrete gfx mechanics and mode-specific behavior are
+separately local, common mechanisms are implemented once, and the production
+pipeline composes them through narrow typed products and enforced dependency
+boundaries; migrate every existing mode and target to that architecture,
+delete the superseded implementation, and materially reduce production code
+without losing behavior, validation strength, diagnostics, or test coverage.**
+
+This is the single goal of the fifth refactoring. The audit, locality ideals,
+exploration questions, metrics, and eventual workstreams exist to advance and
+test this statement. They are not independent objectives that can be completed
+while the central composition problem remains.
 
 The fifth refactoring is authorized to pursue a **deep redesign of ConSan's
 internal architecture**, using the post-fourth assessment as evidence rather
@@ -401,7 +415,52 @@ tests, target support, or clarity. Within those constraints, however, a design
 that creates more opportunities to consolidate or delete code is preferable to
 one that preserves the same implementation volume behind cleaner filenames.
 
-### 10.1 Create deletion opportunities and reap them
+### 10.2 Direction of travel
+
+The destination representation is deliberately not prescribed, but every
+convergence step must move knowledge and dependencies in the same direction:
+
+```text
+concrete gfx knowledge  ---->  architecture/family owners
+mode-specific meaning   ---->  mode owners
+duplicated mechanisms   ---->  one named shared owner
+mutable shared state    ---->  immutable forward products
+implicit dependencies   ---->  declared and enforced interfaces
+superseded machinery    ---->  deletion
+```
+
+Equivalently, target packages publish normalized mechanics, constraints, and
+facts toward the composition boundary; mode packages publish semantic demands,
+strategies, and evidence contracts toward that boundary; and the common
+transaction carries accepted products forward through analysis, policy,
+resource solving, emission, proof, publication, and runtime consumption.
+Concrete gfx knowledge must not flow into modes, mode policy must not flow into
+targets, and downstream patch shape must not flow backward to recreate an
+upstream semantic decision.
+
+This supplies local guidance even while the final design is unknown:
+
+- when concrete gfx knowledge appears in common or mode code, move it toward an
+  architecture or family owner behind a normalized operation;
+- when mode meaning appears in common or target code, move it toward a mode
+  owner behind a semantic demand or strategy contract;
+- when equivalent behavior appears in several owners, move it inward to one
+  mechanism owner and make the owners compose it;
+- when components communicate through a mutable union of their states, replace
+  that exchange with the smallest forward product that expresses the accepted
+  fact or decision;
+- when a new path supersedes an old one, converge all consumers and delete the
+  old path before calling the slice complete; and
+- when two candidate designs are otherwise sound, prefer the one that removes
+  more cross-axis knowledge, broad state, duplicated authority, and production
+  implementation.
+
+The exact boundary may move as evidence accumulates. The direction may not:
+ownership becomes more local, products become narrower and more forward-only,
+dependencies become more enforceable, sharing becomes more explicit, and
+legacy implementation decreases.
+
+### 10.3 Create deletion opportunities and reap them
 
 The refactoring has a two-part code-size contract:
 
@@ -441,6 +500,70 @@ The operational no-file-deletion rule does not weaken this requirement. Legacy
 implementation must actually be removed. If a filename must remain as an inert
 comment-only tombstone, it contains no production implementation and is
 accounted as deleted code rather than retained compatibility.
+
+### 10.4 The vertical-slice iteration
+
+Autonomous work should repeat the following loop, choosing one semantic fact,
+mechanism, or interaction rather than reorganizing a whole horizontal layer at
+once:
+
+1. **Trace it deeply.** Identify the current authority, every producer and
+   consumer, mode and target sensitivity, mutation and rollback behavior,
+   validation proof, tests, and legacy alternatives.
+2. **Assign ownership.** Decide whether the knowledge belongs to common
+   semantics, one mode, an exact mode subset, one architecture, a target
+   family, or the transaction/composition boundary. Name the reason, not the
+   current filename.
+3. **Define the forward contract.** Introduce or refine the smallest typed
+   product or operation that lets the owner publish the fact without exposing
+   its private working state.
+4. **Migrate a complete vertical path.** Move production, consumption,
+   validation, diagnostics, and focused tests together so the new boundary is
+   exercised by real behavior rather than a disconnected abstraction.
+5. **Converge and delete.** Move every applicable consumer, remove the old
+   authority, adapters, fields, branches, and implementations, and leave no
+   unbounded dual path.
+6. **Enforce the boundary.** Add the narrowest useful build, visibility,
+   compile-time, or structural check that prevents the dependency from growing
+   back.
+7. **Validate and account.** Run focused tests, the appropriate mode/target
+   matrix, and periodic full gates; record production-line change, broad-type
+   consumers, cross-axis references, dependency edges, and deleted legacy
+   regions.
+8. **Choose the next highest-leverage interaction.** Prefer a region that
+   removes a broad dependency, unlocks several later deletions, or tests the
+   emerging mode/target composition model on a second consumer.
+
+A slice is not complete at step 3 or 4. Introducing a new interface without
+consumer convergence, deletion, enforcement, and evidence is migration work in
+progress. The next unrelated speculative slice should not begin while the
+current slice leaves an unowned parallel authority.
+
+### 10.5 Monotonic convergence scorecard
+
+Before implementation begins, the refactoring will record a reproducible
+baseline for the following signals. At every convergence checkpoint, the
+cumulative direction must be non-regressing unless the checkpoint names the
+specific near-term deletion payoff:
+
+- concrete gfx identifiers and raw target dependencies outside target/family
+  owners and the narrow registry;
+- mode-specific branches and dependencies outside mode, named mechanism, exact
+  subset, and narrow composition owners;
+- illegal mode-to-target-implementation and target-to-mode-policy edges;
+- consumers and fields of broad buses such as `ConSanTransformArtifacts`,
+  `MoiOptions`, and the union-shaped MOI operating point;
+- common-source engine-switch concentration and target-switch concentration;
+- parallel authorities, migration adapters, and dormant legacy paths;
+- unenforced component dependency edges;
+- comment/blank/test/generated-excluded production implementation lines; and
+- focused and full test inventory and coverage.
+
+Not every individual commit must improve every signal. A vertical slice may
+temporarily add a contract or adapter. It must identify the metric it will pay
+back and the convergence checkpoint that removes the temporary path. Two
+successive convergence checkpoints may not both defer the same promised
+payback. Test inventory and validated behavior never decrease.
 
 ## 11. Design freedom and discovery
 
@@ -813,7 +936,70 @@ already carry forward:
     when two designs are otherwise sound, prefer the one that enables more
     duplicated or legacy machinery to be removed.
 
-## 14. Sections intentionally left open
+## 14. Evidence required before declaring completion
+
+Completion is defined by observable architectural properties, not by executing
+a predetermined list of stages. The exact classes, directories, interfaces,
+and solver design may be discovered during the work, but the fifth refactoring
+must not be declared complete until an independent post-refactoring deep read
+demonstrates all of the following:
+
+1. **The architecture is explainable and enforced.** The production component
+   and build graph has a short directed explanation. Major dependencies cross
+   declared interfaces, and boundary checks enforce the important forbidden
+   directions rather than merely budgeting their present spellings.
+2. **Architecture locality applies across the matrix.** Concrete and
+   family-specific gfx implementation for all five supported targets is
+   physically local and skippable. Common and mode code consume normalized
+   facts, operations, and constraints rather than scattered target branches.
+3. **Mode locality applies across all engines.** Record/Replay, Sampled,
+   InlineShadow, and SuperCollider each have evident ownership across their
+   relevant static and runtime facets. A reader can omit unwanted modes, while
+   common and exact-subset mechanisms retain one implementation rather than
+   mode-owned copies.
+4. **The two extension axes are credible.** A concrete extension exercise and
+   its enforcement show how an already-represented operation is supplied by a
+   new target without editing mode implementations, and how a new mode composes
+   existing target operations without editing concrete target packages. This
+   may use focused test providers or another non-product extension fixture; it
+   need not add a production mode or architecture merely for the audit.
+5. **The main pipeline is forward-only at component boundaries.** Semantic
+   decisions have named authorities and narrow products. Broad mutable buses
+   are eliminated from cross-component APIs or confined as private transaction
+   storage that components cannot opportunistically inspect and mutate.
+6. **The surviving mode/target interaction is small and semantic.** Remaining
+   interactions are explicit composition points with named owners and reasons,
+   not placement, validation, analysis, or coordinator regions that jointly
+   rediscover both axes.
+7. **Legacy implementation has been harvested.** Superseded authorities,
+   adapters, branches, state, and duplicated mechanisms are removed throughout
+   the migrated production surface. There is no deferred cleanup ledger large
+   enough to constitute a parallel architecture.
+8. **Production code is materially smaller.** The agreed production-line
+   target is met using the reproducible test/generated/comment/blank-excluded
+   accounting, and the reduction comes from deleted or consolidated
+   implementation rather than lost behavior.
+9. **Behavioral evidence remains complete.** Focused component tests, the full
+   nonphysical matrix over five targets, and serialized physical `gfx1201`
+   tests pass with no unexplained loss of inventory. Every bug discovered
+   during the work has a regression test at its owning boundary.
+
+Passing the existing tests, compiling many translation units, moving files, or
+making the boundary checker pass is necessary evidence but is not independently
+sufficient. Nor is one successful architecture package or one successful mode
+slice enough: the resulting model must have been exercised across the existing
+production matrix so that apparent locality is not an untested exemplar.
+
+The completion audit must use the same deep-read method as the initial audit:
+trace definitions, inputs, outputs, mutation, callers, consumers, validation,
+and runtime use. Token searches and counters may measure and enforce known
+properties, but they may not infer semantic ownership or justify a surviving
+interaction by themselves. If the audit still finds a major broad bus,
+cross-axis implementation knot, parallel authority, or unharvested deletion
+opportunity on the main production path, the goal remains active even if the
+provisional workstreams are exhausted.
+
+## 15. Sections intentionally left open
 
 The following sections will be developed after further investigation and user
 direction. Their omission is deliberate; prematurely filling them would turn
@@ -826,5 +1012,5 @@ the initial pressure-point list into an unjustified destination design.
 - Component-level and full-matrix test strategy.
 - Exact quantitative baseline, recurring measurements, and the final
   production-code reduction target.
-- Definition of success and final convergence criteria.
+- Detailed workstream gates and numerical thresholds under the completion bar.
 - Completion and handoff records.
