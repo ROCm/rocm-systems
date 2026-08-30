@@ -8,6 +8,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_pipeline.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_registry_lifecycle.h"
 
 #include <algorithm>
 #include <array>
@@ -125,11 +126,9 @@ public:
     }
     const auto release_reservation = [&] { release_live_bytes(requested_size); };
 
-    RegionSearch search;
-    search.core = core;
-    search.requested_size = requested;
+    detail::AutoReportRegionSearch search{.core = core, .requested_size = requested};
     const hsa_status_t iterate_status =
-        core->hsa_agent_iterate_regions_fn(agent, select_region, &search);
+        core->hsa_agent_iterate_regions_fn(agent, detail::select_auto_report_region, &search);
     if (iterate_status != HSA_STATUS_SUCCESS && iterate_status != HSA_STATUS_INFO_BREAK) {
       release_reservation();
       record_allocation_failure(required_size, /*capacity_failure=*/false);
@@ -403,48 +402,24 @@ public:
 
   void bind_to_executable(uint64_t reader, uint64_t generation, hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
-    const auto entry =
-        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
-                     [reader, generation](const Entry &candidate) {
-                       return candidate.reader == reader && candidate.generation == generation;
-                     });
-    if (entry == entries_.begin() + entry_count_)
-      return;
-    entry->executable = executable.handle;
-    entry->executable_bound = true;
+    detail::bind_auto_report_entry(entries_, entry_count_, reader, generation, executable.handle);
   }
 
   void discard(CoreApiTable *core, uint64_t reader, uint64_t generation) {
     std::lock_guard lock(mutex_);
-    const auto entry =
-        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
-                     [reader, generation](const Entry &candidate) {
-                       return candidate.reader == reader && candidate.generation == generation;
-                     });
-    if (entry == entries_.begin() + entry_count_)
-      return;
-    const size_t index = static_cast<size_t>(entry - entries_.begin());
-    if (release_entry(core, *entry, /*allow_runtime_reclaimed=*/false))
-      erase_entry(index);
+    detail::discard_auto_report_entry(
+        entries_, entry_count_, reader, generation, [&](Entry &entry) {
+          return release_entry(core, entry, /*allow_runtime_reclaimed=*/false);
+        });
   }
 
   void retire(CoreApiTable *core, hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
-    size_t index = 0;
-    while (index < entry_count_) {
-      Entry &entry = entries_[index];
-      if (!entry.executable_bound || entry.executable != executable.handle) {
-        ++index;
-        continue;
-      }
-      const Summary entry_summary = summarize(core, entry);
-      if (!release_entry(core, entry, /*allow_runtime_reclaimed=*/false)) {
-        ++index;
-        continue;
-      }
-      accumulate_summary(retired_summary_, entry_summary);
-      erase_entry(index);
-    }
+    detail::retire_auto_report_entries(
+        entries_, entry_count_, executable.handle, retired_summary_,
+        [&](const Entry &entry) { return summarize(core, entry); },
+        [&](Entry &entry) { return release_entry(core, entry, /*allow_runtime_reclaimed=*/false); },
+        accumulate_summary);
   }
 
   Summary summarize_and_clear(CoreApiTable *core) {
@@ -477,14 +452,6 @@ public:
   }
 
 private:
-  struct RegionSearch {
-    CoreApiTable *core = nullptr;
-    size_t requested_size = 0;
-    hsa_region_t region{};
-    bool found = false;
-    bool fine_grained = false;
-  };
-
   struct Entry {
     using RecordReplayStaticMapping = AutoMoiRecordReplayStaticMapping;
     using SampledStaticMapping = AutoMoiSampledStaticMapping;
@@ -518,12 +485,6 @@ private:
     uint64_t executable = 0;
     bool executable_bound = false;
   };
-
-  void erase_entry(size_t index) {
-    for (size_t next = index + 1; next < entry_count_; ++next)
-      entries_[next - 1] = std::move(entries_[next]);
-    entries_[--entry_count_] = {};
-  }
 
   [[nodiscard]] bool release_entry(CoreApiTable *core, Entry &entry, bool allow_runtime_reclaimed) {
     bool freed = entry.ptr == nullptr;
@@ -666,52 +627,6 @@ private:
   [[nodiscard]] uint64_t peak_live_bytes() const {
     std::lock_guard lock(mutex_);
     return process_budget_.peak_live_bytes;
-  }
-
-  static hsa_status_t HSA_API select_region(hsa_region_t region, void *data) {
-    auto *search = static_cast<RegionSearch *>(data);
-    hsa_region_segment_t segment{};
-    hsa_status_t status =
-        search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SEGMENT, &segment);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    if (segment != HSA_REGION_SEGMENT_GLOBAL)
-      return HSA_STATUS_SUCCESS;
-
-    bool alloc_allowed = false;
-    status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED,
-                                                  &alloc_allowed);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    if (!alloc_allowed)
-      return HSA_STATUS_SUCCESS;
-
-    size_t max_size = 0;
-    status =
-        search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_ALLOC_MAX_SIZE, &max_size);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    if (max_size < search->requested_size)
-      return HSA_STATUS_SUCCESS;
-
-    uint32_t flags = 0;
-    status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-    const bool fine_grained = (flags & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED) != 0;
-    const bool coarse_grained = (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0;
-    if (fine_grained) {
-      search->region = region;
-      search->found = true;
-      search->fine_grained = true;
-      return HSA_STATUS_INFO_BREAK;
-    }
-    if (!search->found && coarse_grained) {
-      search->region = region;
-      search->found = true;
-      search->fine_grained = false;
-    }
-    return HSA_STATUS_SUCCESS;
   }
 
   Summary summarize(CoreApiTable *core, const Entry &entry) {
