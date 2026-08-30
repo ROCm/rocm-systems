@@ -467,55 +467,12 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   if (!load && !store)
     return false;
 
-  uint32_t encoding = 0;
-  uint32_t vaddr = 0;
-  uint32_t vdst = 0;
-  uint32_t vsrc = 0;
-  uint32_t saddr = 0;
-  uint32_t ioffset = 0;
-  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      instruction_bytes.size() == sizeof(cdna4::FlatScratchMachineInst)) {
-    // CDNA3 and CDNA4 share the VFLAT scratch encoding.
-    cdna4::FlatScratchMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.addr;
-    vdst = raw.vdst;
-    vsrc = raw.data;
-    saddr = raw.saddr;
-    ioffset = raw.offset;
-  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-             instruction_bytes.size() == sizeof(rdna4::VscratchMachineInst)) {
-    rdna4::VscratchMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.vaddr;
-    vdst = raw.vdst;
-    vsrc = raw.vsrc;
-    saddr = raw.saddr;
-    ioffset = raw.ioffset;
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-             instruction_bytes.size() == sizeof(cdna5::VscratchMachineInst)) {
-    cdna5::VscratchMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.vaddr;
-    vdst = raw.vdst;
-    vsrc = raw.vsrc;
-    saddr = raw.saddr;
-    ioffset = raw.ioffset;
-  } else {
-    return false;
-  }
-  // A vector address makes the effective slot lane-dependent and prevents an
-  // exact store/load match. Fail closed instead of aliasing such traffic.
-  const bool valid_encoding =
-      consan_uses_gfx9_cdna_encoding(arch) ? encoding == 0x37u : encoding == 0xedu;
-  if (!valid_encoding || vaddr != 0u)
+  const auto encoding = decode_consan_scratch_component_encoding(instruction_bytes, arch);
+  if (!encoding)
     return false;
 
   const uint32_t width = mnemonic.ends_with("b64") || mnemonic.ends_with("dwordx2") ? 2u : 1u;
-  const uint16_t vgpr = static_cast<uint16_t>(load ? vdst : vsrc);
+  const uint16_t vgpr = load ? encoding->load_data_vgpr : encoding->store_data_vgpr;
   if (static_cast<uint32_t>(vgpr) + width > tracker.vgprs.size())
     return false;
 
@@ -523,8 +480,8 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
     clear_components(tracker, RegisterRef{RegClass::VGPR, vgpr, static_cast<uint8_t>(width)});
 
   for (uint32_t half = 0; half < width; ++half) {
-    const uint32_t offset = ioffset + half * sizeof(uint32_t);
-    const uint64_t key = scratch_component_key(saddr, offset);
+    const uint32_t offset = encoding->immediate_offset + half * sizeof(uint32_t);
+    const uint64_t key = scratch_component_key(encoding->scalar_address_sgpr, offset);
     if (store) {
       const auto component = component_hint_at(tracker.vgprs, static_cast<uint16_t>(vgpr + half));
       if (component)
@@ -567,30 +524,11 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
   if (!load && !store)
     return false;
 
-  uint32_t address_vgpr = 0;
-  uint32_t data_vgpr = 0;
-  uint32_t ioffset = 0;
-  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      instruction_bytes.size() == sizeof(cdna4::FlatMachineInst)) {
-    cdna4::FlatMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    if (raw.encoding != 0x37u)
-      return false;
-    address_vgpr = raw.addr;
-    data_vgpr = load ? raw.vdst : raw.data;
-    ioffset = raw.offset;
-  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-             instruction_bytes.size() == sizeof(rdna4::VflatMachineInst)) {
-    rdna4::VflatMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    if (raw.encoding != 0xecu)
-      return false;
-    address_vgpr = raw.vaddr;
-    data_vgpr = load ? raw.vdst : raw.vsrc;
-    ioffset = raw.ioffset;
-  } else {
+  const auto encoding = decode_consan_private_component_encoding(instruction_bytes, arch);
+  if (!encoding)
     return false;
-  }
+  const uint16_t address_vgpr = encoding->address_vgpr;
+  const uint16_t data_vgpr = load ? encoding->load_data_vgpr : encoding->store_data_vgpr;
 
   const auto address_hint = pair_hint_at(tracker.vgprs, static_cast<uint16_t>(address_vgpr));
   if (!address_hint || address_hint->space != ConSanFlatAddressSpaceHint::Private)
@@ -603,7 +541,7 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
   std::array<std::optional<PrivateComponentKey>, 2> keys;
   for (uint32_t half = 0; half < width; ++half) {
     keys[half] = private_component_key(tracker, static_cast<uint16_t>(address_vgpr),
-                                       ioffset + half * sizeof(uint32_t));
+                                       encoding->immediate_offset + half * sizeof(uint32_t));
     if (!keys[half])
       return false;
   }
@@ -638,39 +576,20 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     return;
 
   if (mnemonic == "v_writelane_b32" || mnemonic == "v_readlane_b32") {
-    std::optional<uint32_t> lane_selector;
-    // RDNA4 and gfx1250 lane instructions may carry a trailing literal word;
-    // CDNA VOP3 lane instructions do not support literal operands.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-        instruction_bytes.size() >= sizeof(rdna4::Vop3MachineInst)) {
-      rdna4::Vop3MachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      lane_selector = static_cast<uint32_t>(raw.src1);
-    } else if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-               instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
-      cdna4::Vop3MachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      lane_selector = static_cast<uint32_t>(raw.src1);
-    } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-               instruction_bytes.size() >= sizeof(cdna5::Vop3MachineInst)) {
-      cdna5::Vop3MachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      lane_selector = static_cast<uint32_t>(raw.src1);
-    }
-    if (!lane_selector)
+    const auto encoding = decode_consan_lane_transfer_encoding(instruction_bytes, arch);
+    if (!encoding)
       return;
-    const std::optional<uint32_t> lane = *lane_selector >= 128u && *lane_selector < 192u
-                                             ? std::optional<uint32_t>(*lane_selector - 128u)
-                                             : std::nullopt;
+    const std::optional<uint32_t> lane =
+        encoding->lane_selector >= 128u && encoding->lane_selector < 192u
+            ? std::optional<uint32_t>(encoding->lane_selector - 128u)
+            : std::nullopt;
     if (lane && *lane < 64u) {
       if (mnemonic == "v_writelane_b32") {
         const auto vgpr = register_index(inst.dst_operand(0), RegClass::VGPR);
         if (!vgpr)
           return;
         const uint32_t key = (static_cast<uint32_t>(*vgpr) << 6u) | *lane;
-        // CDNA and RDNA4 expose the tied destination as source operand 0.
-        // gfx1250's decoder exposes only the scalar value and lane selector.
-        const int value_operand = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : 1;
+        const int value_operand = encoding->value_source_operand;
         const auto component = source_component_hint(inst.src_operand(value_operand), tracker);
         ScalarRegisterOrigin scalar_origin;
         if (const auto source = register_ref(inst.src_operand(value_operand), RegClass::SGPR))
@@ -707,17 +626,16 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
   if (mnemonic == "v_accvgpr_write" || mnemonic == "v_accvgpr_read") {
     std::optional<RegisterRef> dst = register_ref(inst.dst_operand(0));
     std::optional<RegisterRef> source = register_ref(inst.src_operand(0));
-    if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-        instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
-      // V_ACCVGPR_READ/WRITE encode their AccVGPR operand as a raw bank
-      // selector rather than the normalized operand-selector range used by
-      // generic register_ref(). Decode that one architectural operand here.
-      cdna4::Vop3MachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      if (mnemonic == "v_accvgpr_write") {
-        dst = RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.vdst), 1u};
-      } else if (raw.src0 >= 256u && raw.src0 < 512u) {
-        source = RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.src0 - 256u), 1u};
+    const bool write_accumulator = mnemonic == "v_accvgpr_write";
+    if (const auto encoding =
+            decode_consan_accvgpr_transfer_index(instruction_bytes, arch, write_accumulator)) {
+      if (encoding->accumulator_vgpr) {
+        if (write_accumulator)
+          dst = RegisterRef{RegClass::ACC_VGPR, *encoding->accumulator_vgpr, 1u};
+        else
+          source = RegisterRef{RegClass::ACC_VGPR, *encoding->accumulator_vgpr, 1u};
+      } else if (write_accumulator) {
+        dst.reset();
       } else {
         source.reset();
       }

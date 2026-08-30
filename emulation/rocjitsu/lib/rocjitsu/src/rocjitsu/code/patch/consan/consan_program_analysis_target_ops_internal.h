@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file consan_program_analysis_target_ops_internal.h
+/// @brief Family-owned raw decoders behind program-analysis target operations.
+
+#pragma once
+
+#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
+
+namespace rocjitsu::consan_program_analysis_target_detail {
+
+[[nodiscard]] std::optional<ConSanScratchComponentEncoding>
+decode_gfx9_cdna_scratch_component(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanPrivateComponentEncoding>
+decode_gfx9_cdna_private_component(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanLaneTransferEncoding>
+decode_gfx9_cdna_lane_transfer(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanAccvgprTransferEncoding>
+decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool write_accumulator);
+
+[[nodiscard]] std::optional<ConSanScratchComponentEncoding>
+decode_gfx1201_scratch_component(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanPrivateComponentEncoding>
+decode_gfx1201_private_component(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanLaneTransferEncoding>
+decode_gfx1201_lane_transfer(std::span<const uint8_t> instruction);
+
+[[nodiscard]] std::optional<ConSanScratchComponentEncoding>
+decode_gfx1250_scratch_component(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanLaneTransferEncoding>
+decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction);
+
+} // namespace rocjitsu::consan_program_analysis_target_detail

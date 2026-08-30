@@ -69,6 +69,10 @@ target_sources(
         consan_pipeline.cpp
         consan_placement.cpp
         consan_program_analysis.cpp
+        consan_program_analysis_gfx9_cdna_target_ops.cpp
+        consan_program_analysis_gfx1201_target_ops.cpp
+        consan_program_analysis_gfx1250_target_ops.cpp
+        consan_program_analysis_target_ops.cpp
         consan_resource.cpp
         consan_relay_target_ops.cpp
         consan_semantic_classifiers.cpp

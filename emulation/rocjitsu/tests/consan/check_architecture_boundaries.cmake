@@ -103,6 +103,9 @@ set(
     consan_gfx1250_lds_target_ops.cpp
     consan_moi_gfx9_target_ops.cpp
     consan_program_analysis.cpp
+    consan_program_analysis_gfx9_cdna_target_ops.cpp
+    consan_program_analysis_gfx1201_target_ops.cpp
+    consan_program_analysis_gfx1250_target_ops.cpp
     consan_supercollider_gfx1250_target_ops.cpp
     consan_supercollider_gfx9_target_ops.cpp
     consan_supercollider_rdna3_target_ops.cpp
@@ -128,6 +131,23 @@ foreach(_file IN LISTS _consan_sources)
         )
     endif()
 endforeach()
+
+# Program-analysis target operations normalize raw operands without acquiring
+# mode policy. Concrete generated types remain behind the family/member
+# implementations and their one narrow registry.
+set(_program_analysis_target_contract
+    "${_consan_dir}/consan_program_analysis_target_ops.h")
+_consan_assert_no_match(
+    "${_program_analysis_target_contract}"
+    "ConSanMoiEngine|isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_|(cdna[0-9_]*|rdna[0-9_]*)::"
+    "program-analysis target contract must be mode- and member-neutral"
+)
+file(READ "${_consan_dir}/consan_program_analysis.cpp" _program_analysis_source)
+if(NOT _program_analysis_source MATCHES "consan_program_analysis_target_ops[.]h")
+    message(FATAL_ERROR
+        "ConSan program analysis must consume normalized target operations"
+    )
+endif()
 
 # Raw full instruction words are narrower than generated-header dependencies;
 # keep these exact recipes in their named family/member files too.
