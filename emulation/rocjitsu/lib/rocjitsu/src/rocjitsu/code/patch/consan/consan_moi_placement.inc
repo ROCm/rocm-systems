@@ -4766,16 +4766,8 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       .diagnostics = {},
   };
   const rj_code_arch_t arch = problem.arch();
-  const bool has_access_or_atomic_consumer =
-      std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return !plan.owner_descriptor_file_offsets.empty() &&
-               (plan.site_kind == ConSanResourceSiteKind::Access ||
-                plan.site_kind == ConSanResourceSiteKind::Atomic);
-      });
-  const MoiDispatchIdentityPlan dispatch_identity = plan_moi_dispatch_identity(
-      problem.request(),
-      {.target_uses_gfx12_cdna_execution = consan_uses_gfx12_cdna_execution(arch),
-       .has_access_or_atomic_consumer = has_access_or_atomic_consumer});
+  const MoiDispatchIdentityPlan dispatch_identity =
+      plan_moi_dispatch_identity(problem.request(), {});
   if (!consan_is_capability_arch(arch) || !dispatch_identity.fallback_kind ||
       !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
       !options.moi_exec_save_sgpr) {
