@@ -50,6 +50,39 @@ class Record:
     n_recv_ops: int = 0
 
 
+def drop_warmup(records: List[Record], warmup: int,
+                where: str = "") -> List[Record]:
+    """Drop the first `warmup` iterations of every (rank, coll, msg_size) group.
+
+    coll_sn is comm->seqNumber[func]: monotonic for the whole run per function,
+    not per message size. Thresholding on it (sn < warmup) therefore only ever
+    trims the first size of a sweep and leaves every later size carrying its own
+    in-band warmup iterations, which is the contamination the flag exists to
+    remove. Group first, then drop within each group.
+    """
+    if warmup <= 0 or not records:
+        return records
+    groups: Dict[Tuple[int, str, int], List[int]] = defaultdict(list)
+    for i, r in enumerate(records):
+        groups[(r.rank, r.coll, r.msg_size)].append(i)
+    dropped = set()
+    short = []
+    for key, idxs in groups.items():
+        # Sort by sn so "first N iterations" holds even if completion records
+        # land out of order; the index tiebreak keeps the sort deterministic.
+        idxs.sort(key=lambda i: (records[i].sn, i))
+        dropped.update(idxs[:warmup])
+        if len(idxs) <= warmup:
+            short.append((key, len(idxs)))
+    if short:
+        detail = ", ".join(f"rank {rk} {cl} {fmt_size(sz)} ({n} record(s))"
+                           for (rk, cl, sz), n in sorted(short))
+        print(f"WARNING:{where} warmup={warmup} consumed every record of "
+              f"{len(short)} group(s); they are absent from the report: "
+              f"{detail}.", file=sys.stderr)
+    return [r for i, r in enumerate(records) if i not in dropped]
+
+
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
     records = []
     with open(filepath, encoding="utf-8") as f:
@@ -68,8 +101,6 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
 
             sn = cp.get('coll_sn', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn < warmup:
-                continue
 
             decomp = cp.get('decomposition', {})
             records.append(Record(
@@ -98,6 +129,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 n_send_ops=decomp.get('n_send_ops', 0),
                 n_recv_ops=decomp.get('n_recv_ops', 0),
             ))
+    records = drop_warmup(records, warmup, where=f" {os.path.basename(filepath)}:")
     if not records and warmup > 0:
         print(f"WARNING: 0 records after filtering warmup={warmup}. "
               f"File may have fewer than {warmup} iterations.",
