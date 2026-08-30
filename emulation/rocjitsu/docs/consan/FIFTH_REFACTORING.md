@@ -1388,9 +1388,9 @@ mixed:
 | Nonblank production lines | 99,296 | +213 |
 | Production implementation lines | 91,678 | **+228** |
 | `MoiOptions` references / files | 95 / 30 | +8 / +5 |
-| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanTransformArtifacts` references / files | 258 / 58 | -18 / +1 |
 | `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | 297 / 56 | +7 / +5 |
+| `ConSanMoiOperatingPoint` references / files | 308 / 56 | +18 / +5 |
 | Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
 | Explicit mode-enum references in `consan_moi_placement.inc` | 69 | -26 |
 | Test inventory | 5,352 | +7 |
@@ -1455,7 +1455,7 @@ mode-enum references.
 | `MoiOptions` references / files | 95 / 30 | +8 / +5 |
 | `ConSanTransformArtifacts` references / files | 258 / 58 | -18 / +1 |
 | `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | 296 / 56 | +6 / +5 |
+| `ConSanMoiOperatingPoint` references / files | 306 / 56 | +16 / +5 |
 | Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
 | Explicit mode-enum references in `consan_moi_placement.inc` | 52 | -43 |
 | Test inventory | 5,352 | +7 |
@@ -1474,3 +1474,75 @@ Validation includes repeated focused MOI, assignment, scalar-layout, fault,
 and host-hook gates; the complete 4,717-test nonphysical matrix over all five
 simulated targets at `-j16` in 247.06 seconds; and all 635 serialized physical
 gfx1201 tests at `-j1` in 109.23 seconds. All are green.
+
+### 16.8 Convergence checkpoint 7: shared mechanisms and report composition
+
+This checkpoint, through commit `0c12da3738`, follows the new ownership
+boundaries into concrete legacy and duplication harvesting. It contains seven
+production slices rather than one new abstraction campaign:
+
+- a production atomic-address planner adapter used only by focused tests moved
+  into test support, and a production fault-application test adapter moved into
+  its sole test translation unit;
+- Sampled and InlineShadow nested resource fallbacks now use one named trace
+  adoption mechanism instead of composing equivalent diagnostic trails twice;
+- SuperCollider and MOI host hooks share one bounded report-registry lifecycle
+  and one fine-grained-preferred HSA region selector while retaining separate
+  allocation policies, evidence formats, budgets, decoding, and diagnostics;
+- three generated/direct/displaced relay-reservoir payload validators collapsed
+  into one proof mechanism while their distinct geometry proofs remain
+  independent;
+- Record/Replay and Sampled direct-call and inline-island layouts share one
+  runtime workgroup-selection predicate while retaining their distinct
+  call/return geometry;
+- report layout finalization now marks fields written by the selected mode
+  planner and aliases every untouched region generically, deleting the common
+  mode-by-region cleanup matrix; and
+- Record/Replay, Sampled, and InlineShadow evidence planners share one runtime
+  report-contract publication authority after their mode-owned sizing logic.
+
+The report-layout boundary check was tightened from 18 to 15 explicit
+mode-enum references so the deleted cleanup matrix cannot silently return.
+The remaining 15 references are the reviewed mode planner selection,
+mode-specific well-formedness, capacity fitting, and independent layout
+revalidation paths; their continued presence means report mode locality is not
+yet complete.
+
+A fresh exact occurrence recount found two transcription errors in the
+checkpoint 5 and 6 tables: the actual declared production-scope counts were
+258 rather than 256 `ConSanTransformArtifacts` references at checkpoint 5,
+and 308/306 rather than 297/296 `ConSanMoiOperatingPoint` references at
+checkpoints 5/6. The tables above are corrected. No production change in this
+checkpoint created the apparent ten-reference increase.
+
+| Signal | Checkpoint 7 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 249 | +20 |
+| Physical production lines | 105,031 | +56 |
+| Nonblank production lines | 98,974 | -109 |
+| Production implementation lines | 91,351 | **-99** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 306 / 56 | +16 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 52 | -43 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 15 | -3 from checkpoint 6 |
+| Test inventory | 5,352 | +7 |
+
+This checkpoint removes 277 implementation lines since checkpoint 6 and puts
+the cumulative implementation count 99 lines below the starting baseline. It
+therefore pays back the typed mode-boundary investment, but it does not yet
+satisfy the material-shrinkage or architecture criteria. Physical line count
+remains above baseline, the operating-point surface remains wider than at the
+start, common placement still contains 52 explicit mode checks, and the
+component build graph, full architecture locality, and both extension
+exercises required by Section 14 remain open. Crossing the old implementation
+baseline is a convergence threshold, not a completion condition.
+
+Validation includes repeated focused resource, relay, report lifecycle,
+runtime-gate, evidence-contract, auto-report-layout, and architecture-boundary
+gates; the complete 4,717-test nonphysical matrix over all five simulated
+targets at `-j16` in 246.20 seconds; and all 635 serialized physical gfx1201
+tests at `-j1` in 109.29 seconds. All are green and the test inventory is
+unchanged from checkpoint 6.
