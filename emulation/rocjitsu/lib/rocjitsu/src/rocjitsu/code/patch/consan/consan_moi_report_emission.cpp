@@ -61,10 +61,10 @@ ConSanMoiReportDispatchIdSource
 plan_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
                          bool literal_permitted) {
   return {
-      .sgpr = context.point.moi_dispatch_id_sgpr,
-      .vgpr = context.point.moi_dispatch_id_vgpr,
-      .literal = context.point.moi_dispatch_id_sgpr || context.point.moi_dispatch_id_vgpr ||
-                         !literal_permitted
+      .sgpr = context.point.moi_dispatch_identity.sgpr(),
+      .vgpr = context.point.moi_dispatch_identity.vgpr(),
+      .literal = context.point.moi_dispatch_identity.sgpr() ||
+                         context.point.moi_dispatch_identity.vgpr() || !literal_permitted
                      ? std::nullopt
                      : std::optional<uint64_t>{context.resources.moi_report_dispatch_id},
   };

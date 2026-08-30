@@ -373,8 +373,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       // reload it into the access router's dead PC pair after the router has
       // entered its body.
       const bool persist_dispatch_id = !moi_has_runtime_hardware_dispatch_id(candidate_options) &&
-                                       (candidate_options.moi_dispatch_id_sgpr ||
-                                        candidate_options.automatic_moi_private_dispatch_id);
+                                       (candidate_options.moi_dispatch_identity.sgpr() ||
+                                        candidate_options.moi_dispatch_identity.private_fallback());
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -430,7 +430,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
         continue;
       }
-      candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
+      candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
     }
 
     std::vector<std::string> workgroup_errors;
@@ -963,7 +963,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               "ConSan MOI inline-shadow access lost its private dispatch reload pair");
           return;
         }
-        candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
+        candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
       }
       auto words = build_inline_shadow_words(
           bytes, candidate, candidate_options, candidate_options, candidate_options,
@@ -1385,7 +1385,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                     "ConSan MOI inline-shadow access lost its private dispatch reload pair");
                 return std::optional<std::vector<uint32_t>>{};
               }
-              candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
+              candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
             }
             return build_inline_shadow_words(
                 bytes, *planned_patch.candidate, candidate_options, candidate_options,

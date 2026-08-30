@@ -2238,13 +2238,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
-        bool overlaps =
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-            overlaps_optional(group_options.moi_owner_sgpr) ||
-            overlaps_optional(group_options.moi_persistent_sgprs.owner) ||
-            overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
-            overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
-            overlaps_optional(group_options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount);
+        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+                        overlaps_optional(group_options.moi_owner_sgpr) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.owner) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
+                        overlaps_optional(group_options.moi_dispatch_identity.sgpr(),
+                                          kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
              {group_options.moi_persistent_sgprs.record_replay_workgroup.x,
               group_options.moi_persistent_sgprs.record_replay_workgroup.y,
@@ -2599,13 +2599,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
-        bool overlaps =
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-            overlaps_optional(route_options.moi_owner_sgpr) ||
-            overlaps_optional(route_options.moi_persistent_sgprs.owner) ||
-            overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
-            overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
-            overlaps_optional(route_options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount);
+        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+                        overlaps_optional(route_options.moi_owner_sgpr) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.owner) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
+                        overlaps_optional(route_options.moi_dispatch_identity.sgpr(),
+                                          kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
              {route_options.moi_persistent_sgprs.record_replay_workgroup.x,
               route_options.moi_persistent_sgprs.record_replay_workgroup.y,

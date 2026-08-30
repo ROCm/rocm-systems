@@ -90,7 +90,6 @@ enum class ConSanMoiFallbackKind : uint8_t {
 /// Stable scalar-ABI validation failures returned to orchestration.
 enum class ConSanMoiScalarValidationReason : uint8_t {
   DispatchSgprLayout,
-  MultipleDispatchRepresentations,
   DispatchVgprLayout,
   ArchitecturalSpecialSgprAlias,
 };

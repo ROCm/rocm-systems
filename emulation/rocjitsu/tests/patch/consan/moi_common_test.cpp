@@ -39,7 +39,7 @@ TEST(ConSanMoi, DispatchIdSourcePlanningAuthorizesLiteralsAtTheModeBoundary) {
       {point, resources}, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_FALSE(target_without_literal.is_well_formed());
 
-  point.moi_dispatch_id_sgpr = 40u;
+  point.moi_dispatch_identity.set_sgpr(40u);
   const auto scalar = consan_moi_detail::moi_target_dispatch_id_sources({point, resources},
                                                                         ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(scalar.sgpr, 40u);
@@ -659,20 +659,18 @@ TEST(ConSanMoi, WorkgroupKeyRegisterPlanRequiresOneUnambiguousExecutionPlan) {
   EXPECT_FALSE(ambiguous.is_well_formed());
 }
 
-TEST(ConSanMoi, DispatchCaptureRequiresExactlyOnePersistentRepresentation) {
+TEST(ConSanMoi, DispatchCaptureSelectsOnePersistentRepresentation) {
   using consan_detail::ConSanMoiDispatchIdCapture;
   const ConSanMoiDispatchIdCapture absent{};
-  const ConSanMoiDispatchIdCapture scalar{.sgpr = 40u, .vgpr = std::nullopt};
-  const ConSanMoiDispatchIdCapture vector{.sgpr = std::nullopt, .vgpr = 20u};
-  const ConSanMoiDispatchIdCapture ambiguous{.sgpr = 40u, .vgpr = 20u};
+  const ConSanMoiDispatchIdCapture scalar = ConSanMoiDispatchIdCapture::in_sgprs(40u);
+  const ConSanMoiDispatchIdCapture vector = ConSanMoiDispatchIdCapture::in_vgprs(20u);
   EXPECT_FALSE(absent.present());
-  EXPECT_FALSE(absent.unambiguous());
   EXPECT_TRUE(scalar.present());
-  EXPECT_TRUE(scalar.unambiguous());
+  EXPECT_EQ(scalar.sgpr(), 40u);
+  EXPECT_FALSE(scalar.vgpr());
   EXPECT_TRUE(vector.present());
-  EXPECT_TRUE(vector.unambiguous());
-  EXPECT_TRUE(ambiguous.present());
-  EXPECT_FALSE(ambiguous.unambiguous());
+  EXPECT_EQ(vector.vgpr(), 20u);
+  EXPECT_FALSE(vector.sgpr());
 }
 
 TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
@@ -700,10 +698,10 @@ TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
   plan.dispatch_id_offset = 96u;
   EXPECT_FALSE(plan.is_well_formed());
   plan.dispatch_plan = ConSanMoiDispatchIdPreloadPlan{};
-  plan.dispatch_capture = {.sgpr = std::nullopt, .vgpr = plan.scratch_vgpr};
+  plan.dispatch_capture = consan_detail::ConSanMoiDispatchIdCapture::in_vgprs(plan.scratch_vgpr);
   EXPECT_EQ(plan.required_scratch_vgpr_count(), 2u);
   EXPECT_TRUE(plan.is_well_formed());
-  plan.dispatch_capture.sgpr = 40u;
+  plan.dispatch_capture = consan_detail::ConSanMoiDispatchIdCapture::in_sgprs(40u);
   EXPECT_FALSE(plan.is_well_formed());
 }
 
@@ -2942,7 +2940,7 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
     std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
     mutate_first_kernel_descriptor(bytes, mutator);
     MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.moi_dispatch_id_sgpr = explicit_pair;
+    options.moi_dispatch_identity.set_sgpr(explicit_pair);
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     return test_lower_consan(bytes, options);

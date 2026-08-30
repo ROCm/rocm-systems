@@ -373,14 +373,14 @@ test_moi_exec_save_sgpr(const ConSanTransformArtifacts &result) {
 /// excluding owner-local scalar overrides.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_operating_point.moi_dispatch_id_sgpr;
+  return result.moi_operating_point.moi_dispatch_identity.sgpr();
 }
 
 /// Return the code-object-wide vector dispatch-ID pair selected by allocation,
 /// excluding per-owner persistent VGPR tuples.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_vgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_operating_point.moi_dispatch_id_vgpr;
+  return result.moi_operating_point.moi_dispatch_identity.vgpr();
 }
 
 /// Return the owner-component scalar overrides frozen after placement.

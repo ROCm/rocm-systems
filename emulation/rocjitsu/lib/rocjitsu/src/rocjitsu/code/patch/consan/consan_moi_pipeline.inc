@@ -174,8 +174,8 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
                             planning.plans);
   append_moi_operational_resource_plans(state, request, bound_resources, debug, point, result,
                                         planning.errors, planning.plans);
-  if (consan_arch_is_cdna(arch) && point.automatic_moi_dispatch_id_sgprs &&
-      point.moi_dispatch_id_sgpr) {
+  if (consan_arch_is_cdna(arch) && point.moi_dispatch_identity.automatic_sgpr() &&
+      point.moi_dispatch_identity.sgpr()) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       ConSanMoiOperatingPoint owner_point = point;
       if (!attempted_point.owner_transient_sgprs.empty() &&
@@ -183,7 +183,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
                                                plan.owner_descriptor_file_offsets)) {
         if (consan_arch_uses_per_kernel_owner_translation(arch))
           continue;
-        owner_point.moi_dispatch_id_sgpr.reset();
+        owner_point.moi_dispatch_identity.reset_sgpr();
       }
       if (plan.owner_descriptor_file_offsets.empty())
         continue;
@@ -192,7 +192,7 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
       // records generation zero; rejecting the resource plan here would make
       // that safe fallback specific to direct code transport even though the
       // report contract is target-neutral.
-      if (!owner_point.moi_dispatch_id_sgpr &&
+      if (!owner_point.moi_dispatch_identity.sgpr() &&
           std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             const ConSanMoiTransientSgprAssignment *assignment =
                 moi_transient_sgpr_assignment(attempted_point, descriptor_offset);
@@ -200,8 +200,8 @@ build_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &r
           })) {
         continue;
       }
-      const bool missing_dispatch = !owner_point.moi_dispatch_id_sgpr;
-      const uint16_t dispatch_base = owner_point.moi_dispatch_id_sgpr.value_or(0u);
+      const bool missing_dispatch = !owner_point.moi_dispatch_identity.sgpr();
+      const uint16_t dispatch_base = owner_point.moi_dispatch_identity.sgpr().value_or(0u);
       const bool admitted = !missing_dispatch && moi_resource_owner_sgpr_window_admitted(
                                                      state, plan.owner_descriptor_file_offsets,
                                                      dispatch_base, kMoiDispatchStateSgprCount);

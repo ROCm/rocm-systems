@@ -236,7 +236,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_dispatch_id_sgpr = 20;
+  options.moi_dispatch_identity.set_sgpr(20);
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -297,7 +297,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     options.moi_exec_save_sgpr = 80u;
     options.moi_owner_vgpr = 40u;
     options.moi_epoch_vgpr = 41u;
-    options.moi_dispatch_id_sgpr = 20u;
+    options.moi_dispatch_identity.set_sgpr(20u);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     options.max_patches = 1u;
@@ -356,7 +356,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     options.moi_epoch_vgpr = 41u;
     options.moi_persistent_sgprs.owner = 70u;
     options.moi_persistent_sgprs.epoch = 71u;
-    options.moi_dispatch_id_sgpr = 20u;
+    options.moi_dispatch_identity.set_sgpr(20u);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     options.max_patches = 1u;
@@ -498,7 +498,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
-  options.moi_dispatch_id_sgpr = 20;
+  options.moi_dispatch_identity.set_sgpr(20);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -561,7 +561,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
     options.moi_exec_save_sgpr = 80;
     options.moi_owner_vgpr = 40;
     options.moi_epoch_vgpr = 41;
-    options.moi_dispatch_id_sgpr = 20;
+    options.moi_dispatch_identity.set_sgpr(20);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     options.max_patches = 1;
@@ -786,7 +786,7 @@ TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
   options.moi_owner_sgpr = 60;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
-  options.moi_dispatch_id_vgpr = 50;
+  options.moi_dispatch_identity.set_vgpr(50);
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -855,7 +855,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
   options.moi_owner_sgpr = 60;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
-  options.moi_dispatch_id_vgpr = 50;
+  options.moi_dispatch_identity.set_vgpr(50);
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -5074,7 +5074,7 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 80;
-  options.moi_dispatch_id_sgpr = 60;
+  options.moi_dispatch_identity.set_sgpr(60);
   options.moi_owner_vgpr = 14;
   options.moi_epoch_vgpr = 15;
   options.moi_init_owner_epoch = true;
@@ -5291,7 +5291,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
   options.moi_track_barriers = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.moi_dispatch_id_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(80u);
   options.moi_report_dispatch_id = 0x1122334455667788ull;
   options.max_patches = 2u;
 
@@ -5300,7 +5300,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
-  EXPECT_EQ(test_moi_dispatch_id_sgpr(result), options.moi_dispatch_id_sgpr);
+  EXPECT_EQ(test_moi_dispatch_id_sgpr(result), options.moi_dispatch_identity.sgpr());
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
   });
@@ -5357,7 +5357,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlo
   options.moi_track_barriers = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.moi_dispatch_id_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(80u);
   // Atomic-only state normally permits s234:s255. The dynamic frame save at
   // +24 makes that explicit window two registers too short.
   options.moi_exec_save_sgpr = 234u;

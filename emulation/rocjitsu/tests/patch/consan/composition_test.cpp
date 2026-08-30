@@ -853,7 +853,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
     options.moi_track_barriers = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_dispatch_id_sgpr = 70;
+    options.moi_dispatch_identity.set_sgpr(70);
     options.moi_owner_vgpr = 40;
     options.moi_epoch_vgpr = 41;
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -947,7 +947,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_dispatch_id_sgpr = 70;
+  options.moi_dispatch_identity.set_sgpr(70);
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x123456780000ull;

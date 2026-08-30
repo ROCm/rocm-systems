@@ -203,6 +203,14 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 
+# Dispatch identity is one typed allocation. Its scalar/vector choice and
+# scalar-placement provenance must not return as independently mutable fields.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_options.h.inc"
+    "(bool|std::optional<uint16_t>)[ \t]+(automatic_moi_dispatch_id_sgprs|automatic_moi_private_dispatch_id|moi_dispatch_id_sgpr|moi_dispatch_id_vgpr)[ \t]*;"
+    "dispatch identity must remain one typed operating-point allocation"
+)
+
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
     _semantic_policy_sources

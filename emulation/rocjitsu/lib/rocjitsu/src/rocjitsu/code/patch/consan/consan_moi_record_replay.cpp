@@ -117,7 +117,7 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
     options.moi_epoch_vgpr.reset();
     options.moi_record_replay_workgroup_vgprs = {};
     options.moi_persistent_sgprs.record_replay_workgroup = {};
-    options.moi_dispatch_id_vgpr.reset();
+    options.moi_dispatch_identity.reset_vgpr();
     options.owner_persistent_vgprs.clear();
     result.moi_operating_point = options;
     result.warnings.emplace_back(

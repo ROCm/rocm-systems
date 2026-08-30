@@ -62,7 +62,7 @@ bool record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperati
 }
 
 bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) {
-  return point.moi_dispatch_id_sgpr || point.moi_dispatch_id_vgpr;
+  return point.moi_dispatch_identity.sgpr() || point.moi_dispatch_identity.vgpr();
 }
 
 void note_moi_persistent_vgpr_state(ConSanPatchAbiEffects &effects,

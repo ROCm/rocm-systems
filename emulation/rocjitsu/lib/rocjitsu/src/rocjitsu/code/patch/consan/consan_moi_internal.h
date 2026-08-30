@@ -232,16 +232,34 @@ namespace consan_detail {
 /// empty value means the current prologue does not capture dispatch identity.
 /// Keeping this choice typed prevents entry initialization from silently
 /// writing two independently configured representations of the same ID.
-struct ConSanMoiDispatchIdCapture {
-  std::optional<uint16_t> sgpr;
-  std::optional<uint16_t> vgpr;
+class ConSanMoiDispatchIdCapture {
+public:
+  ConSanMoiDispatchIdCapture() = default;
 
-  [[nodiscard]] bool present() const { return sgpr || vgpr; }
-  [[nodiscard]] bool unambiguous() const {
-    return static_cast<bool>(sgpr) != static_cast<bool>(vgpr);
+  [[nodiscard]] static ConSanMoiDispatchIdCapture in_sgprs(uint16_t base) {
+    return ConSanMoiDispatchIdCapture{Kind::Sgpr, base};
+  }
+  [[nodiscard]] static ConSanMoiDispatchIdCapture in_vgprs(uint16_t base) {
+    return ConSanMoiDispatchIdCapture{Kind::Vgpr, base};
   }
 
+  [[nodiscard]] std::optional<uint16_t> sgpr() const {
+    return kind_ == Kind::Sgpr ? std::optional{base_} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<uint16_t> vgpr() const {
+    return kind_ == Kind::Vgpr ? std::optional{base_} : std::nullopt;
+  }
+  [[nodiscard]] bool present() const { return kind_ != Kind::None; }
+
   bool operator==(const ConSanMoiDispatchIdCapture &) const = default;
+
+private:
+  enum class Kind : uint8_t { None, Sgpr, Vgpr };
+
+  ConSanMoiDispatchIdCapture(Kind kind, uint16_t base) : kind_(kind), base_(base) {}
+
+  Kind kind_ = Kind::None;
+  uint16_t base_ = 0;
 };
 
 /// Complete semantic input to one private-state entry-initialization body.
@@ -326,11 +344,11 @@ struct MoiPrivateEpochPrologueEmissionPlan {
     const uint32_t scratch_end =
         static_cast<uint32_t>(scratch_vgpr) + required_scratch_vgpr_count();
     if (spill.vgpr_base != scratch_vgpr || spill.vgpr_count < required_scratch_vgpr_count() ||
-        scratch_end > 256u || (dispatch_capture.present() && !dispatch_capture.unambiguous())) {
+        scratch_end > 256u) {
       return false;
     }
-    if (dispatch_id_offset && (!dispatch_plan || dispatch_capture.sgpr ||
-                               dispatch_capture.vgpr != std::optional<uint16_t>{scratch_vgpr})) {
+    if (dispatch_id_offset && (!dispatch_plan || dispatch_capture.sgpr() ||
+                               dispatch_capture.vgpr() != std::optional<uint16_t>{scratch_vgpr})) {
       return false;
     }
     return runtime_sample_stride != 0u &&
@@ -440,7 +458,6 @@ struct MoiOwnerEpochPrologueEmissionPlan {
     if (owner_vgpr >= 256u || epoch_vgpr >= 256u || owner_vgpr == epoch_vgpr ||
         owner_shift_bits >= 32u || owner_source == ConSanMoiOwnerSource::Automatic ||
         (owner_source == ConSanMoiOwnerSource::HwId && !owner_sgpr) ||
-        (dispatch_capture.present() && !dispatch_capture.unambiguous()) ||
         (workgroup_sources && !workgroup_sources->is_well_formed())) {
       return false;
     }

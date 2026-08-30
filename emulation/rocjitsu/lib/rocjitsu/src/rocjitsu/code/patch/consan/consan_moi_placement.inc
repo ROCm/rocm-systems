@@ -575,7 +575,8 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   // window whose incoming contents are deliberately backed up at entry.
   if (selected->spill_backed)
     point.moi_exec_save_sgprs_persistent = false;
-  point.moi_dispatch_id_sgpr = selected->dispatch_id_sgpr;
+  point.moi_dispatch_identity.set_sgpr(selected->dispatch_id_sgpr,
+                                       point.moi_dispatch_identity.automatic_sgpr());
   point.moi_router_jump = selected->router_jump;
   point.moi_router_call = selected->router_call;
   if (spill_layout == ConSanMoiScalarSpillLayout::Inline) {
@@ -634,7 +635,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
     point.moi_epoch_vgpr.reset();
     point.moi_workgroup_key_vgpr.reset();
     point.moi_record_replay_workgroup_vgprs = {};
-    point.moi_dispatch_id_vgpr.reset();
+    point.moi_dispatch_identity.reset_vgpr();
     return true;
   }
   // One physical site cannot consume two different persistent
@@ -649,12 +650,12 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   // private entry state. Only a selected dispatch VGPR pair supersedes that
   // private representation.
   if (selected->dispatch_id_vgpr)
-    point.automatic_moi_private_dispatch_id = false;
+    point.moi_dispatch_identity.set_private_fallback(false);
   point.moi_owner_vgpr = selected->owner_vgpr;
   point.moi_epoch_vgpr = selected->epoch_vgpr;
   point.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
   point.moi_record_replay_workgroup_vgprs = selected->record_replay_workgroup_vgprs;
-  point.moi_dispatch_id_vgpr = selected->dispatch_id_vgpr;
+  point.moi_dispatch_identity.set_vgpr(selected->dispatch_id_vgpr);
   return true;
 }
 
@@ -2250,7 +2251,7 @@ void forbid_moi_persistent_vgprs(RegisterSet &forbidden, const ConSanMoiOperatin
   forbid_vgpr(point.moi_owner_vgpr);
   forbid_vgpr(point.moi_epoch_vgpr);
   forbid_vgpr(point.moi_workgroup_key_vgpr);
-  forbid_vgpr(point.moi_dispatch_id_vgpr, 2u);
+  forbid_vgpr(point.moi_dispatch_identity.vgpr(), 2u);
   forbid_workgroup_tuple(point.moi_record_replay_workgroup_vgprs);
   for (uint64_t descriptor_offset : owner_descriptors) {
     const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
@@ -2929,7 +2930,7 @@ template <typename PersistentVgprState>
   forbid(options.moi_owner_vgpr);
   forbid(options.moi_epoch_vgpr);
   forbid(options.moi_workgroup_key_vgpr);
-  forbid(options.moi_dispatch_id_vgpr, 2u);
+  forbid(options.moi_dispatch_identity.vgpr(), 2u);
   for (std::optional<uint16_t> reg : options.moi_record_replay_workgroup_vgprs.registers()) {
     forbid(reg);
   }
@@ -2995,16 +2996,17 @@ std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
     std::optional<uint16_t> moi_owner_vgpr;
     std::optional<uint16_t> moi_epoch_vgpr;
     std::optional<uint16_t> moi_workgroup_key_vgpr;
-    std::optional<uint16_t> moi_dispatch_id_vgpr;
+    ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
     ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
   };
-  const PersistentStateAdapter adapter{
+  PersistentStateAdapter adapter{
       .moi_owner_vgpr = persistent_state.owner,
       .moi_epoch_vgpr = persistent_state.epoch,
       .moi_workgroup_key_vgpr = persistent_state.workgroup_key,
-      .moi_dispatch_id_vgpr = persistent_state.dispatch_id,
+      .moi_dispatch_identity = {},
       .moi_record_replay_workgroup_vgprs = persistent_state.record_replay_workgroup,
   };
+  adapter.moi_dispatch_identity.set_vgpr(persistent_state.dispatch_id);
   return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
                                              adapter);
 }
@@ -3095,10 +3097,10 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
           std::max<uint16_t>(resolved.required_vgpr_count,
                              static_cast<uint16_t>(*site_point.moi_workgroup_key_vgpr + 1u));
     }
-    if (site_point.moi_dispatch_id_vgpr) {
+    if (site_point.moi_dispatch_identity.vgpr()) {
       resolved.required_vgpr_count =
           std::max<uint16_t>(resolved.required_vgpr_count,
-                             static_cast<uint16_t>(*site_point.moi_dispatch_id_vgpr + 2u));
+                             static_cast<uint16_t>(*site_point.moi_dispatch_identity.vgpr() + 2u));
     }
     for (const std::optional<uint16_t> reg :
          site_point.moi_record_replay_workgroup_vgprs.registers()) {
@@ -3170,7 +3172,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                   moi_exec_save_sgpr_count(
                       resolve_moi_exec_save_requirement(request, resources, point), arch)) ||
          overlaps(point.moi_owner_sgpr) ||
-         overlaps(point.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
+         overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
          overlaps_auxiliary_state ||
          std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
 }
@@ -3332,11 +3334,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     const bool needs_exec_override = !moi_scalar_contexts_admit_reserved_window(
         component_contexts->summaries, *options.moi_exec_save_sgpr, count, arch);
     const bool needs_dispatch_override =
-        options.moi_dispatch_id_sgpr &&
+        options.moi_dispatch_identity.sgpr() &&
         (!moi_scalar_contexts_admit_reserved_window(component_contexts->summaries,
-                                                    *options.moi_dispatch_id_sgpr,
+                                                    *options.moi_dispatch_identity.sgpr(),
                                                     kMoiDispatchStateSgprCount, arch) ||
-         range_overlaps(*options.moi_exec_save_sgpr, count, *options.moi_dispatch_id_sgpr,
+         range_overlaps(*options.moi_exec_save_sgpr, count, *options.moi_dispatch_identity.sgpr(),
                         kMoiDispatchStateSgprCount));
     const bool needs_override =
         dispatch_only ? needs_dispatch_override
@@ -3379,8 +3381,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                 intersects(unavailable, candidate, count) ||
                 (options.moi_owner_sgpr &&
                  range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
-                (options.moi_dispatch_id_sgpr &&
-                 range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
+                (options.moi_dispatch_identity.sgpr() &&
+                 range_overlaps(candidate, count, *options.moi_dispatch_identity.sgpr(),
                                 kMoiDispatchStateSgprCount)) ||
                 (options.moi_dynamic_stack_spill &&
                  moi_sgpr_range_overlaps_dynamic_stack_state(candidate, count)))
@@ -3399,8 +3401,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         return overlaps_architectural_state(base, width) ||
                (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
-               (options.moi_dispatch_id_sgpr &&
-                range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
+               (options.moi_dispatch_identity.sgpr() &&
+                range_overlaps(base, width, *options.moi_dispatch_identity.sgpr(),
                                kMoiDispatchStateSgprCount)) ||
                (options.moi_dynamic_stack_spill &&
                 moi_sgpr_range_overlaps_dynamic_stack_state(base, width));
@@ -3588,7 +3590,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
               overlaps_optional(base, width, options.moi_persistent_sgprs.owner) ||
               overlaps_optional(base, width, options.moi_persistent_sgprs.epoch) ||
               overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
-              overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
+              overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
                                 kMoiDispatchStateSgprCount) ||
               overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
           for (const std::optional<uint16_t> reg :
@@ -3650,8 +3652,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         return overlaps_architectural_state(base, width) ||
                (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
-               (options.moi_dispatch_id_sgpr &&
-                range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
+               (options.moi_dispatch_identity.sgpr() &&
+                range_overlaps(base, width, *options.moi_dispatch_identity.sgpr(),
                                kMoiDispatchStateSgprCount)) ||
                (options.moi_dynamic_stack_spill &&
                 moi_sgpr_range_overlaps_dynamic_stack_state(base, width)) ||
@@ -3730,7 +3732,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
             overlaps_optional(base, width, options.moi_persistent_sgprs.owner) ||
             overlaps_optional(base, width, options.moi_persistent_sgprs.epoch) ||
             overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
-            overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
+            overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
                               kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
              options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
@@ -3778,13 +3780,13 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
                               branch_only_scalar_spill || dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
-        options.moi_dispatch_id_sgpr &&
+        options.moi_dispatch_identity.sgpr() &&
                 moi_scalar_contexts_admit_reserved_window(component_contexts->summaries,
-                                                          *options.moi_dispatch_id_sgpr,
+                                                          *options.moi_dispatch_identity.sgpr(),
                                                           kMoiDispatchStateSgprCount, arch) &&
-                !range_overlaps(selected_sgpr, count, *options.moi_dispatch_id_sgpr,
+                !range_overlaps(selected_sgpr, count, *options.moi_dispatch_identity.sgpr(),
                                 kMoiDispatchStateSgprCount)
-            ? options.moi_dispatch_id_sgpr
+            ? options.moi_dispatch_identity.sgpr()
             : std::nullopt;
     for (uint64_t owner : owners) {
       owner_transient_sgprs.push_back(
@@ -3824,12 +3826,12 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // persistent VGPR pair during the later persistent-state placement pass.
   // The marker is intentionally set only after component assignment has
   // proved which owners cannot use the global pair.
-  if (inline_layout && options.moi_dispatch_id_sgpr &&
+  if (inline_layout && options.moi_dispatch_identity.sgpr() &&
       std::ranges::any_of(owner_transient_sgprs,
                           [](const ConSanMoiTransientSgprAssignment &assignment) {
                             return !assignment.dispatch_id_sgpr;
                           })) {
-    options.automatic_moi_private_dispatch_id = true;
+    options.moi_dispatch_identity.set_private_fallback(true);
     warnings.emplace_back(
         "ConSan MOI deferred incompatible owner-local dispatch identity to private or "
         "persistent VGPR state");
@@ -3917,8 +3919,9 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     if (options.moi_owner_sgpr && range_overlaps(base, count, *options.moi_owner_sgpr, 1u)) {
       continue;
     }
-    if (options.moi_dispatch_id_sgpr &&
-        range_overlaps(base, count, *options.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount)) {
+    if (options.moi_dispatch_identity.sgpr() &&
+        range_overlaps(base, count, *options.moi_dispatch_identity.sgpr(),
+                       kMoiDispatchStateSgprCount)) {
       continue;
     }
     options.moi_exec_save_sgpr = base;
@@ -3948,7 +3951,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         continue;
       }
 
-      const std::optional<uint16_t> prior_dispatch_sgpr = options.moi_dispatch_id_sgpr;
+      const std::optional<uint16_t> prior_dispatch_sgpr = options.moi_dispatch_identity.sgpr();
+      const bool prior_dispatch_automatic = options.moi_dispatch_identity.automatic_sgpr();
       std::optional<uint16_t> component_dispatch_sgpr = prior_dispatch_sgpr;
       const uint16_t dispatch_count = kMoiDispatchStateSgprCount;
       const auto dispatch_pair_is_available = [&](uint16_t dispatch_base) {
@@ -3985,7 +3989,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
           range_overlaps(candidate, count, *component_dispatch_sgpr, dispatch_count);
       if (dispatch_overlaps_candidate) {
         const bool can_relocate_automatic_inline_dispatch =
-            inline_layout && options.automatic_moi_dispatch_id_sgprs;
+            inline_layout && options.moi_dispatch_identity.automatic_sgpr();
         if (!can_relocate_automatic_inline_dispatch)
           continue;
         component_dispatch_sgpr.reset();
@@ -4016,7 +4020,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       options.moi_exec_save_sgpr = candidate;
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
-      options.moi_dispatch_id_sgpr = component_dispatch_sgpr;
+      options.moi_dispatch_identity.set_sgpr(component_dispatch_sgpr, prior_dispatch_automatic);
       const bool assigned_component_local = configure_automatic_moi_transient_sgpr_assignments(
           options, problem, site_plans, warnings, planning_state);
       const bool can_exclude_incompatible_component = consan_uses_gfx9_cdna_encoding(arch);
@@ -4043,7 +4047,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       options.moi_exec_save_sgpr.reset();
       options.automatic_moi_partial_exec_save_sgprs = false;
       options.moi_exec_save_sgprs_persistent = false;
-      options.moi_dispatch_id_sgpr = prior_dispatch_sgpr;
+      options.moi_dispatch_identity.set_sgpr(prior_dispatch_sgpr, prior_dispatch_automatic);
     }
   }
 
@@ -4116,8 +4120,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                moi_sgpr_range_overlaps_dynamic_stack_state(candidate, count)) ||
               (options.moi_owner_sgpr &&
                range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
-              (options.moi_dispatch_id_sgpr &&
-               range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
+              (options.moi_dispatch_identity.sgpr() &&
+               range_overlaps(candidate, count, *options.moi_dispatch_identity.sgpr(),
                               kMoiDispatchStateSgprCount))) {
             return false;
           }
@@ -4164,8 +4168,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     const auto overlaps_reserved = [&](uint16_t base, uint16_t width) {
       return overlaps_architectural_state(base, width) ||
              (options.moi_owner_sgpr && range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
-             (options.moi_dispatch_id_sgpr &&
-              range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
+             (options.moi_dispatch_identity.sgpr() &&
+              range_overlaps(base, width, *options.moi_dispatch_identity.sgpr(),
                              kMoiDispatchStateSgprCount)) ||
              (options.moi_dynamic_stack_spill &&
               moi_sgpr_range_overlaps_dynamic_stack_state(base, width));
@@ -4261,8 +4265,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       if (overlaps_architectural_state(candidate, count) ||
           (options.moi_owner_sgpr &&
            range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
-          (options.moi_dispatch_id_sgpr &&
-           range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
+          (options.moi_dispatch_identity.sgpr() &&
+           range_overlaps(candidate, count, *options.moi_dispatch_identity.sgpr(),
                           kMoiDispatchStateSgprCount)) ||
           (options.moi_dynamic_stack_spill &&
            moi_sgpr_range_overlaps_dynamic_stack_state(candidate, count))) {
@@ -4407,7 +4411,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
       request, {.target_uses_gfx12_cdna_execution = consan_uses_gfx12_cdna_execution(arch),
                 .has_access_or_atomic_consumer = has_access_or_atomic_consumer});
   if (!dispatch_identity.needs_dispatch_id || !resources.moi_report_buffer_address ||
-      options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr) {
+      options.moi_dispatch_identity.sgpr() || options.moi_dispatch_identity.vgpr()) {
     return update;
   }
   const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, site_plans);
@@ -4484,8 +4488,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
         return true;
       });
   if (dispatch_base) {
-    options.moi_dispatch_id_sgpr = *dispatch_base;
-    options.automatic_moi_dispatch_id_sgprs = true;
+    options.moi_dispatch_identity.set_sgpr(*dispatch_base, true);
     qualify_owner_local_assignments(*dispatch_base);
     update.diagnostics.emplace_back("ConSan MOI automatically assigned persistent dispatch-ID "
                                     "state SGPRs s" +
@@ -4530,8 +4533,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                   resolve_moi_exec_save_requirement(request, resources, options), arch))) {
         continue;
       }
-      options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
-      options.automatic_moi_dispatch_id_sgprs = true;
+      options.moi_dispatch_identity.set_sgpr(static_cast<uint16_t>(base), true);
       qualify_owner_local_assignments(static_cast<uint16_t>(base));
       update.diagnostics.emplace_back(
           "ConSan MOI reserved a high dispatch-ID SGPR pair and excluded only "
@@ -4590,8 +4592,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                     !moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count));
           });
       if (unused_dispatch_base) {
-        options.moi_dispatch_id_sgpr = *unused_dispatch_base;
-        options.automatic_moi_dispatch_id_sgprs = true;
+        options.moi_dispatch_identity.set_sgpr(*unused_dispatch_base, true);
         qualify_owner_local_assignments(*unused_dispatch_base);
         update.diagnostics.emplace_back(
             "ConSan MOI assigned persistent dispatch-ID state to a proven-unused " +
@@ -4638,7 +4639,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     // in the same address-free private entry state as owner/epoch. A dynamic
     // stack cannot compose with that representation; leave the dispatch marker
     // set so persistent-state placement includes an entry-captured VGPR pair.
-    options.automatic_moi_private_dispatch_id = true;
+    options.moi_dispatch_identity.set_private_fallback(true);
     if (!has_dynamic_stack_access_owner) {
       options.moi_initialize_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
@@ -4674,7 +4675,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   const MoiDispatchIdentityPlan dispatch_identity =
       plan_moi_dispatch_identity(problem.request(), {});
   if (!consan_is_capability_arch(arch) || !dispatch_identity.fallback_kind ||
-      !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
+      !options.moi_dispatch_identity.automatic_sgpr() || !options.moi_dispatch_identity.sgpr() ||
       !options.moi_exec_save_sgpr) {
     return attempt;
   }
@@ -4758,9 +4759,9 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
 [[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
 validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
                                const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
-  if (!point.moi_dispatch_id_sgpr)
+  if (!point.moi_dispatch_identity.sgpr())
     return std::nullopt;
-  const uint16_t base = *point.moi_dispatch_id_sgpr;
+  const uint16_t base = *point.moi_dispatch_identity.sgpr();
   const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
   const bool overlaps_owner =
       point.moi_owner_sgpr && range_overlaps(base, dispatch_state_count, *point.moi_owner_sgpr, 1u);
@@ -4807,16 +4808,10 @@ validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeR
 
 [[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
 validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
-  if (point.moi_dispatch_id_sgpr && point.moi_dispatch_id_vgpr) {
-    return ConSanMoiScalarValidationFailure{
-        .reason = ConSanMoiScalarValidationReason::MultipleDispatchRepresentations,
-        .diagnostic = "ConSan MOI has multiple persistent hardware dispatch-ID representations",
-    };
-  }
-  if (!point.moi_dispatch_id_vgpr)
+  if (!point.moi_dispatch_identity.vgpr())
     return std::nullopt;
 
-  const uint16_t base = *point.moi_dispatch_id_vgpr;
+  const uint16_t base = *point.moi_dispatch_identity.vgpr();
   const auto overlaps = [&](std::optional<uint16_t> reg) {
     return reg && range_overlaps(base, 2u, *reg, 1u);
   };
@@ -5124,7 +5119,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // retain the smaller scalar-dispatch representation.
   const bool needs_cdna_component_dispatch_placement =
       (consan_uses_gfx9_cdna_encoding(program_inventory.arch())) &&
-      uses_resident_wave_private_state && options.automatic_moi_private_dispatch_id &&
+      uses_resident_wave_private_state && options.moi_dispatch_identity.private_fallback() &&
       !needs_persistent_dispatch_vgprs;
   if (crosses_cdna_accvgpr_boundary || needs_cdna_component_dispatch_placement) {
     // ACCUM_OFFSET defines the compiler's ordinary/accumulator register split.
@@ -5181,8 +5176,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                  base, scalar_count, *options.moi_exec_save_sgpr,
                  moi_exec_save_sgpr_count(
                      resolve_moi_exec_save_requirement(request, resources, options), arch))) ||
-            (options.moi_dispatch_id_sgpr &&
-             range_overlaps(base, scalar_count, *options.moi_dispatch_id_sgpr,
+            (options.moi_dispatch_identity.sgpr() &&
+             range_overlaps(base, scalar_count, *options.moi_dispatch_identity.sgpr(),
                             kMoiDispatchStateSgprCount)) ||
             (options.moi_owner_sgpr &&
              range_overlaps(base, scalar_count, *options.moi_owner_sgpr, 1u))) {
@@ -5551,7 +5546,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           options.owner_transient_sgprs.empty() ||
           apply_moi_transient_sgpr_assignment(request, component_options, options, component);
       const bool component_needs_persistent_dispatch_vgprs =
-          (needs_persistent_dispatch_vgprs || options.automatic_moi_private_dispatch_id) &&
+          (needs_persistent_dispatch_vgprs || options.moi_dispatch_identity.private_fallback()) &&
           component_transient_state_resolved &&
           !moi_has_runtime_hardware_dispatch_id(component_options);
       const uint32_t component_persistent_count =
@@ -5688,7 +5683,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         });
     if (assigned_persistent_dispatch_vgprs) {
       if (!assigned_private_component)
-        options.automatic_moi_private_dispatch_id = false;
+        options.moi_dispatch_identity.set_private_fallback(false);
     }
     diagnostics.emplace_back(
         assigned_private_component && options.automatic_moi_persistent_vgprs
@@ -5884,9 +5879,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     };
   }
   if (needs_persistent_dispatch_vgprs) {
-    options.moi_dispatch_id_vgpr = next_persistent_vgpr;
+    options.moi_dispatch_identity.set_vgpr(next_persistent_vgpr);
     next_persistent_vgpr = static_cast<uint16_t>(next_persistent_vgpr + 2u);
-    options.automatic_moi_private_dispatch_id = false;
+    options.moi_dispatch_identity.set_private_fallback(false);
   }
   options.moi_initialize_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;
@@ -5925,10 +5920,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     required_count =
         std::max<uint16_t>(required_count, static_cast<uint16_t>(*point.moi_owner_sgpr + 1u));
   }
-  if (point.moi_dispatch_id_sgpr) {
-    required_count =
-        std::max<uint16_t>(required_count, static_cast<uint16_t>(*point.moi_dispatch_id_sgpr +
-                                                                 kMoiDispatchStateSgprCount));
+  if (point.moi_dispatch_identity.sgpr()) {
+    required_count = std::max<uint16_t>(
+        required_count,
+        static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + kMoiDispatchStateSgprCount));
   }
   if (point.moi_persistent_sgprs.owner)
     required_count = std::max<uint16_t>(

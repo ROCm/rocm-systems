@@ -3898,7 +3898,7 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   mutate_first_kernel_descriptor(
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 21120u; });
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_dispatch_id_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(80u);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4131,7 +4131,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   mutate_first_kernel_descriptor(
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 21120u; });
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_dispatch_id_sgpr = 80u;
+  options.moi_dispatch_identity.set_sgpr(80u);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4186,7 +4186,7 @@ TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   options.moi_exec_save_sgpr = 60;
   options.moi_owner_vgpr = 50;
   options.moi_epoch_vgpr = 51;
-  options.moi_dispatch_id_sgpr = 100u;
+  options.moi_dispatch_identity.set_sgpr(100u);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
@@ -7119,7 +7119,7 @@ TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
   options.moi_owner_vgpr = 80u;
   options.moi_epoch_vgpr = 81u;
   options.moi_exec_save_sgpr = 60u;
-  options.moi_dispatch_id_sgpr = 100u;
+  options.moi_dispatch_identity.set_sgpr(100u);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;

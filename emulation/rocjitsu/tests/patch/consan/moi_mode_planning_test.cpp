@@ -350,7 +350,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.private_workgroup_tuple_supported);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
-  point.automatic_moi_private_dispatch_id = true;
+  point.moi_dispatch_identity.set_private_fallback(true);
   demand = plan_moi_persistent_state_demand(request, resources, point,
                                             {.access_count = 1u,
                                              .has_operational_dynamic_stack_owner = true,

@@ -817,17 +817,18 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return true;
   };
   bool stored_generation = false;
-  if (request.moi_track_atomics && point.moi_dispatch_id_sgpr) {
+  if (request.moi_track_atomics && point.moi_dispatch_identity.sgpr()) {
     stored_generation =
         store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation),
-                     *point.moi_dispatch_id_sgpr) &&
+                     *point.moi_dispatch_identity.sgpr()) &&
         store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                     static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u));
-  } else if (request.moi_track_atomics && point.moi_dispatch_id_vgpr) {
+                     static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u));
+  } else if (request.moi_track_atomics && point.moi_dispatch_identity.vgpr()) {
     stored_generation =
-        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation), *point.moi_dispatch_id_vgpr) &&
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation),
+                   *point.moi_dispatch_identity.vgpr()) &&
         store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                   static_cast<uint16_t>(*point.moi_dispatch_id_vgpr + 1u));
+                   static_cast<uint16_t>(*point.moi_dispatch_identity.vgpr() + 1u));
   } else {
     const uint64_t generation = request.moi_track_atomics ? bound_resources.moi_report_dispatch_id
                                                           : bound_resources.moi_report_generation;
@@ -2613,8 +2614,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
-  if (point.moi_dispatch_id_vgpr &&
-      range_overlaps(*point.moi_dispatch_id_vgpr, 2u, scratch_vgpr, scratch_count)) {
+  if (point.moi_dispatch_identity.vgpr() &&
+      range_overlaps(*point.moi_dispatch_identity.vgpr(), 2u, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI scratch VGPRs overlap the dispatch-ID VGPR pair");
     return std::nullopt;
   }
@@ -2703,7 +2704,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.reserve(candidate.size() / sizeof(uint32_t) + 64u + (point.moi_exec_save_sgpr ? 120u : 0u) +
                 (point.moi_epoch_vgpr ? 2u : 0u));
   if (private_dispatch_id_offset) {
-    if (!point.moi_dispatch_id_sgpr) {
+    if (!point.moi_dispatch_identity.sgpr()) {
       errors.emplace_back(
           "ConSan MOI private dispatch reload requires a transient scalar destination");
       return std::nullopt;
@@ -2713,10 +2714,10 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto load_high = instrumentation::build_private_load_b32(
         address_hi_vgpr, *private_dispatch_id_offset + SpillManager::kSlotBytes, arch);
     const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
-    const auto read_low = instrumentation::build_v_readfirstlane_b32(*point.moi_dispatch_id_sgpr,
-                                                                     address_lo_vgpr, arch);
+    const auto read_low = instrumentation::build_v_readfirstlane_b32(
+        *point.moi_dispatch_identity.sgpr(), address_lo_vgpr, arch);
     const auto read_high = instrumentation::build_v_readfirstlane_b32(
-        static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u), address_hi_vgpr, arch);
+        static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u), address_hi_vgpr, arch);
     const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
     if (!load_low || !load_high || !wait_load || !read_low || !read_high || !wait_scalar) {
       errors.emplace_back(
@@ -2846,13 +2847,14 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     // Workgroup coordinates alone repeat across dispatches. Fold the native
     // dispatch identity into the bounded generation and reserve zero for an
     // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
-    const uint16_t dispatch_low_source = point.moi_dispatch_id_sgpr
-                                             ? *point.moi_dispatch_id_sgpr
-                                             : vector_source_vgpr(*point.moi_dispatch_id_vgpr);
+    const uint16_t dispatch_low_source =
+        point.moi_dispatch_identity.sgpr()
+            ? *point.moi_dispatch_identity.sgpr()
+            : vector_source_vgpr(*point.moi_dispatch_identity.vgpr());
     const uint16_t dispatch_high_source =
-        point.moi_dispatch_id_sgpr
-            ? static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u)
-            : vector_source_vgpr(static_cast<uint16_t>(*point.moi_dispatch_id_vgpr + 1u));
+        point.moi_dispatch_identity.sgpr()
+            ? static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u)
+            : vector_source_vgpr(static_cast<uint16_t>(*point.moi_dispatch_identity.vgpr() + 1u));
     const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
         workgroup_key_vgpr, dispatch_low_source, workgroup_key_vgpr, arch);
     const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
@@ -3258,9 +3260,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish with "
             "EXEC base s" +
             std::to_string(*point.moi_exec_save_sgpr) + " and dispatch base " +
-            (point.moi_dispatch_id_sgpr   ? "s" + std::to_string(*point.moi_dispatch_id_sgpr)
-             : point.moi_dispatch_id_vgpr ? "v" + std::to_string(*point.moi_dispatch_id_vgpr)
-                                          : std::string("literal")));
+            (point.moi_dispatch_identity.sgpr()
+                 ? "s" + std::to_string(*point.moi_dispatch_identity.sgpr())
+             : point.moi_dispatch_identity.vgpr()
+                 ? "v" + std::to_string(*point.moi_dispatch_identity.vgpr())
+                 : std::string("literal")));
         return std::nullopt;
       }
       if (loop_external_cells) {

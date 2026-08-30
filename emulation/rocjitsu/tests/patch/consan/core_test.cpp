@@ -97,10 +97,10 @@ TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   ConSanMoiOperatingPoint allocation;
   allocation.automatic_moi_private_epoch = true;
   allocation.moi_exec_save_sgpr = 2u;
-  allocation.moi_dispatch_id_sgpr = 4u;
+  allocation.moi_dispatch_identity.set_sgpr(4u);
   allocation.owner_persistent_vgprs = {persistent_state};
   allocation.owner_transient_sgprs = {owner_state};
-  allocation.moi_dispatch_id_vgpr = 12u;
+  allocation.moi_dispatch_identity.set_vgpr(12u);
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
   EXPECT_EQ(allocation, ConSanMoiOperatingPoint(allocation));
@@ -118,12 +118,12 @@ TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   changed.owner_transient_sgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
-  changed.moi_dispatch_id_vgpr.reset();
+  changed.moi_dispatch_identity.reset_vgpr();
   EXPECT_NE(changed, allocation);
 }
 
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
-  const ConSanMoiOperatingPoint state{
+  ConSanMoiOperatingPoint state{
       .moi_initialize_owner_epoch = true,
       .moi_exec_save_sgpr = 2u,
       .moi_owner_sgpr = 3u,
@@ -138,14 +138,11 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_dynamic_stack_spill = true,
       .moi_inline_access_present = true,
       .automatic_moi_owner_sgpr = true,
-      .automatic_moi_dispatch_id_sgprs = true,
-      .automatic_moi_private_dispatch_id = true,
       .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
       .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
-      .moi_dispatch_id_sgpr = 16u,
-      .moi_dispatch_id_vgpr = 18u,
+      .moi_dispatch_identity = {},
       .moi_persistent_sgprs = {.owner = 20u,
                                .epoch = 21u,
                                .workgroup_key = 22u,
@@ -156,6 +153,8 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
   };
+  state.moi_dispatch_identity.set_sgpr(16u, true);
+  state.moi_dispatch_identity.set_private_fallback(true);
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
   EXPECT_EQ(state, ConSanMoiOperatingPoint(state));
@@ -183,14 +182,15 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_dynamic_stack_spill = false; });
   expect_field_participates([](auto &value) { value.moi_inline_access_present = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_owner_sgpr = false; });
-  expect_field_participates([](auto &value) { value.automatic_moi_dispatch_id_sgprs = false; });
-  expect_field_participates([](auto &value) { value.automatic_moi_private_dispatch_id = false; });
+  expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_sgpr(16u, false); });
+  expect_field_participates(
+      [](auto &value) { value.moi_dispatch_identity.set_private_fallback(false); });
   expect_field_participates([](auto &value) { value.moi_router_jump.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_branch_only_spill.reset(); });
   expect_field_participates([](auto &value) { value.moi_router_call.reset(); });
-  expect_field_participates([](auto &value) { value.moi_dispatch_id_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_dispatch_id_vgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_dispatch_identity.reset_sgpr(); });
+  expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_vgpr(18u); });
   expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });
   expect_field_participates([](auto &value) { value.moi_record_replay_workgroup_vgprs = {}; });
   expect_field_participates(
@@ -373,12 +373,12 @@ TEST(ConSan, MoiOperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
 
 TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionTogether) {
   ConSanMoiOperatingPointUpdate accepted;
-  accepted.attempted_operating_point.moi_dispatch_id_sgpr = 40u;
+  accepted.attempted_operating_point.moi_dispatch_identity.set_sgpr(40u);
   accepted.changed = true;
   accepted.diagnostics.emplace_back("accepted placement");
   EXPECT_TRUE(accepted.accepted());
   EXPECT_TRUE(accepted.changed);
-  EXPECT_EQ(accepted.attempted_operating_point.moi_dispatch_id_sgpr, 40u);
+  EXPECT_EQ(accepted.attempted_operating_point.moi_dispatch_identity.sgpr(), 40u);
   EXPECT_EQ(accepted.diagnostics, std::vector<std::string>{"accepted placement"});
 
   ConSanMoiOperatingPointUpdate rejected = accepted;

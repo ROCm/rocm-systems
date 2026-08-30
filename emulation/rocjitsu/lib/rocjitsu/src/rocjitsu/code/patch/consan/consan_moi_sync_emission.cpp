@@ -3357,7 +3357,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       return std::nullopt;
     }
     if (private_layout->dispatch_id_offset) {
-      if (!point.moi_dispatch_id_sgpr) {
+      if (!point.moi_dispatch_identity.sgpr()) {
         errors.emplace_back("ConSan MOI inline atomic patch has no private dispatch reload pair");
         return std::nullopt;
       }
@@ -3368,10 +3368,10 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
           *private_layout->dispatch_id_offset + SpillManager::kSlotBytes, arch);
       const auto wait_dispatch = instrumentation::build_s_wait_private_load0(arch);
       const auto read_dispatch_low = instrumentation::build_v_readfirstlane_b32(
-          *point.moi_dispatch_id_sgpr, private_temporary, arch);
+          *point.moi_dispatch_identity.sgpr(), private_temporary, arch);
       const auto read_dispatch_high = instrumentation::build_v_readfirstlane_b32(
-          static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + 1u), materialized_workgroup_key,
-          arch);
+          static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u),
+          materialized_workgroup_key, arch);
       const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!load_dispatch_low || !load_dispatch_high || !wait_dispatch || !read_dispatch_low ||
           !read_dispatch_high || !wait_scalar) {

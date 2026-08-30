@@ -51,7 +51,7 @@ std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
       .sample_offset = request.moi_runtime_sample_offset,
       .flavor = flavor,
       .cached_selection = cached_selection,
-      .dispatch_id_sgpr = point.moi_dispatch_id_sgpr,
+      .dispatch_id_sgpr = point.moi_dispatch_identity.sgpr(),
       .literal_dispatch_id = resources.moi_report_dispatch_id,
       .direct_call_form = target->direct_call_form,
   };

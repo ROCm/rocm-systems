@@ -3211,8 +3211,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
                !patch.persistent_dispatch_id_private_offset &&
-               !result.moi_operating_point.moi_dispatch_id_sgpr &&
-               !result.moi_operating_point.moi_dispatch_id_vgpr &&
+               !result.moi_operating_point.moi_dispatch_identity.sgpr() &&
+               !result.moi_operating_point.moi_dispatch_identity.vgpr() &&
                !owner_local_dispatch_vgpr(patch) &&
                environment.target_profile->dispatch_identity !=
                    ConSanDispatchIdentitySource::CodeObjectLiteral;
@@ -3417,9 +3417,9 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     std::vector<uint32_t> capture_high;
     const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
     std::optional<uint16_t> expected_dispatch_sgpr =
-        result.moi_operating_point.moi_dispatch_id_sgpr;
+        result.moi_operating_point.moi_dispatch_identity.sgpr();
     std::optional<uint16_t> expected_dispatch_vgpr =
-        result.moi_operating_point.moi_dispatch_id_vgpr;
+        result.moi_operating_point.moi_dispatch_identity.vgpr();
     const auto &assignments = result.moi_operating_point.owner_transient_sgprs;
     if (!patch.persistent_dispatch_id_private_offset && !assignments.empty()) {
       // A partially admitted code-object-wide pair can be unavailable to one

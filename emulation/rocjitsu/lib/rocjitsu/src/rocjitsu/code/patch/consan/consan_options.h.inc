@@ -328,6 +328,74 @@ struct ConSanMoiBranchOnlyScalarSpill {
   auto operator<=>(const ConSanMoiBranchOnlyScalarSpill &) const = default;
 };
 
+/// Persistent hardware dispatch identity selected for an MOI operating point.
+///
+/// The scalar and vector register forms are alternatives. Scalar provenance is
+/// part of the selected alternative, so an automatic-placement marker cannot
+/// drift away from the pair that it describes. A private-entry fallback is an
+/// independent component policy: it may coexist with an object-wide scalar
+/// pair when only some owner components cannot retain that pair.
+class ConSanMoiDispatchIdentityAllocation {
+public:
+  enum class RegisterKind : uint8_t {
+    None,
+    ExplicitSgpr,
+    AutomaticSgpr,
+    Vgpr,
+  };
+
+  [[nodiscard]] std::optional<uint16_t> sgpr() const {
+    return register_kind_ == RegisterKind::ExplicitSgpr ||
+                   register_kind_ == RegisterKind::AutomaticSgpr
+               ? std::optional{register_base_}
+               : std::nullopt;
+  }
+  [[nodiscard]] std::optional<uint16_t> vgpr() const {
+    return register_kind_ == RegisterKind::Vgpr ? std::optional{register_base_} : std::nullopt;
+  }
+  [[nodiscard]] bool automatic_sgpr() const {
+    return register_kind_ == RegisterKind::AutomaticSgpr;
+  }
+  [[nodiscard]] bool private_fallback() const { return private_fallback_; }
+
+  void set_sgpr(uint16_t base, bool automatic = false) {
+    register_kind_ = automatic ? RegisterKind::AutomaticSgpr : RegisterKind::ExplicitSgpr;
+    register_base_ = base;
+  }
+  void set_sgpr(std::optional<uint16_t> base, bool automatic = false) {
+    if (base)
+      set_sgpr(*base, automatic);
+    else
+      reset_sgpr();
+  }
+  void set_vgpr(uint16_t base) {
+    register_kind_ = RegisterKind::Vgpr;
+    register_base_ = base;
+  }
+  void set_vgpr(std::optional<uint16_t> base) {
+    if (base)
+      set_vgpr(*base);
+    else
+      reset_vgpr();
+  }
+  void reset_sgpr() {
+    if (sgpr())
+      register_kind_ = RegisterKind::None;
+  }
+  void reset_vgpr() {
+    if (vgpr())
+      register_kind_ = RegisterKind::None;
+  }
+  void set_private_fallback(bool enabled) { private_fallback_ = enabled; }
+
+  auto operator<=>(const ConSanMoiDispatchIdentityAllocation &) const = default;
+
+private:
+  RegisterKind register_kind_ = RegisterKind::None;
+  uint16_t register_base_ = 0;
+  bool private_fallback_ = false;
+};
+
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
@@ -863,13 +931,6 @@ struct ConSanMoiOperatingPoint {
   bool moi_inline_access_present = false;
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
   bool automatic_moi_owner_sgpr = false;
-  /// Internal marker set after ConSan assigns the persistent hardware
-  /// dispatch-ID SGPR pair used by dispatch-qualified engine metadata.
-  bool automatic_moi_dispatch_id_sgprs = false;
-  /// Internal marker set when every admitted CDNA Inline owner must capture
-  /// its hardware dispatch identity in private entry state because no
-  /// code-object-wide persistent SGPR pair survives the guest program.
-  bool automatic_moi_private_dispatch_id = false;
   /// Explicit scalar-router ABI selected when a spill-backed transient window
   /// cannot use the mode's fixed register layout. The indirect jump, dispatch
   /// key, and call-return pair are one shared routing mechanism used by Inline,
@@ -882,8 +943,7 @@ struct ConSanMoiOperatingPoint {
   /// relays instead of live-through SGPR state, including its optional
   /// dynamic-stack bootstrap pair.
   std::optional<ConSanMoiBranchOnlyScalarSpill> moi_branch_only_spill;
-  std::optional<uint16_t> moi_dispatch_id_sgpr;
-  std::optional<uint16_t> moi_dispatch_id_vgpr;
+  ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
   /// Uniform persistent scalar state selected when an MOI owner cannot retain
   /// the equivalent values in ordinary VGPRs. The owner is captured from the
   /// entry workitem ID; epoch, compact workgroup key, and exact Record/Replay

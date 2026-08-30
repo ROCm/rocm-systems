@@ -154,7 +154,8 @@ plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRun
       .needs_workgroup_key = facts.access_count || facts.atomic_count,
       .needs_persistent_state = true,
       .private_dispatch_incompatible_with_dynamic_stack =
-          point.automatic_moi_private_dispatch_id && facts.has_operational_dynamic_stack_owner,
+          point.moi_dispatch_identity.private_fallback() &&
+          facts.has_operational_dynamic_stack_owner,
       .prefer_private_epoch_for_dynamic_lds = facts.has_operational_dynamic_lds_owner,
       .scalar_state_supported = true,
       .private_state_supported = true,
