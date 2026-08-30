@@ -54,3 +54,11 @@ ncclResult_t ncclNvmlDeviceGetCudaComputeCapability(nvmlDevice_t device, int* ma
   *major = *minor = 1;
   return ncclSuccess;
 }
+
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkGeneration(nvmlDevice_t device, unsigned int* currLinkGen) {
+  return ncclSystemError;
+}
+
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkWidth(nvmlDevice_t device, unsigned int* currLinkWidth) {
+  return ncclSystemError;
+}

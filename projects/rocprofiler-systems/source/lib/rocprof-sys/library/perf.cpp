@@ -137,7 +137,7 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
     if(m_fd == -1)
     {
-        std::string path = "/proc/sys/kernel/perf_event_paranoid";
+        const std::string path = "/proc/sys/kernel/perf_event_paranoid";
 
         auto file = std::ifstream{ path.c_str() };
 
@@ -154,7 +154,7 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
             true, "Failed to open perf event. Consider tweaking "
                       << path << " to 2 or less " << "(current value is " << value
                       << "), "
-                      << "or run rocprof-sys as a privileged user (with CAP_SYS_ADMIN).");
+                      << "or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
     }
 
     // If sampling, map the perf event file
@@ -178,8 +178,8 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 std::optional<std::string>
 perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
 {
-    auto          _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    std::uint64_t _period             = (1.0 / _freq) * units::sec;
+    auto _thread_state_guard       = state::thread::scoped(state::thread::Internal);
+    const std::uint64_t    _period = (1.0 / _freq) * units::sec;
     struct perf_event_attr _pe;
 
     if(_batch_size > 0)
@@ -417,9 +417,9 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
 {
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
-    size_t    _beg_idx = _index % sizes.data;
-    size_t    _end_idx = _beg_idx + _nbytes;
+    const uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
+    const size_t    _beg_idx = _index % sizes.data;
+    const size_t    _end_idx = _beg_idx + _nbytes;
 
     if(_end_idx <= sizes.data)
     {
@@ -427,8 +427,8 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
     }
     else
     {
-        size_t _chunk_size2 = _end_idx - sizes.data;
-        size_t _chunk_size1 = _nbytes - _chunk_size2;
+        const size_t _chunk_size2 = _end_idx - sizes.data;
+        const size_t _chunk_size1 = _nbytes - _chunk_size2;
 
         void* _dest2 =
             reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_dest) + _chunk_size1);
@@ -520,8 +520,8 @@ perf_event::record::get_callchain() const
         std::abort();
     }
 
-    std::uint64_t* _base = locate_field<sample::callchain, std::uint64_t*>();
-    std::uint64_t  _size = *_base;
+    std::uint64_t*      _base = locate_field<sample::callchain, std::uint64_t*>();
+    const std::uint64_t _size = *_base;
     // Advance the callchain array pointer past the size
     ++_base;
     return container::wrap_c_array(_base, _size);
@@ -584,11 +584,11 @@ perf_event::record::locate_field() const
     if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::read))
     {
-        std::uint64_t read_format = m_source->get_read_format();
+        const std::uint64_t read_format = m_source->get_read_format();
         if(read_format & PERF_FORMAT_GROUP)
         {
             // Get the number of values in the read format structure
-            std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
+            const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
             // The default size of each entry is a u64
             size_t sz = sizeof(std::uint64_t);
             // If requested, the id will be included with each value
@@ -614,7 +614,7 @@ perf_event::record::locate_field() const
     if constexpr(SampleT == sample::callchain) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::callchain))
     {
-        std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
+        const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
         p += sizeof(std::uint64_t) + (nr * sizeof(std::uint64_t));
     }
 
@@ -622,7 +622,7 @@ perf_event::record::locate_field() const
     if constexpr(SampleT == sample::raw) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::raw))
     {
-        std::uint32_t raw_size = *reinterpret_cast<std::uint32_t*>(p);
+        const std::uint32_t raw_size = *reinterpret_cast<std::uint32_t*>(p);
         p += sizeof(std::uint32_t) + raw_size;
     }
 

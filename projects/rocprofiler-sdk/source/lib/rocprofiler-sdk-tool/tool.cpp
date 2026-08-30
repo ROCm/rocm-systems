@@ -28,6 +28,7 @@
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
+#include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
@@ -86,9 +87,11 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -333,47 +336,21 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
-    const std::unordered_set<size_t>* range = target_kernels.rlock(
-        [](const auto& _targets_v, uint64_t _kern_id_v) -> const std::unordered_set<size_t>* {
-            if(_targets_v.find(_kern_id_v) != _targets_v.end()) return &_targets_v.at(_kern_id_v);
-            return nullptr;
+    // hold target_kernels around kernel_iteration so the range stays valid; both
+    // are only locked here / in add_kernel_target(), so the nesting is safe
+    return target_kernels.rlock(
+        [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
+            return _kernel_iteration.wlock(
+                [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
+                    return tool::is_targeted_kernel_iteration(
+                        _kernel_id,
+                        _targets_v,
+                        _kernel_iter,
+                        tool::get_config().advanced_thread_trace);
+                },
+                _kern_id_v);
         },
         _kern_id);
-
-    if(range)
-    {
-        _kernel_iteration.wlock(
-            [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
-                auto itr = _kernel_iter.find(_kernel_id);
-                if(itr == _kernel_iter.end())
-                    _kernel_iter.emplace(_kernel_id, 1);
-                else
-                    itr->second++;
-            },
-            _kern_id);
-
-        return _kernel_iteration.rlock(
-            [](const auto&                       _kernel_iter,
-               uint64_t                          _kernel_id,
-               const std::unordered_set<size_t>& _range) {
-                auto itr = _kernel_iter.at(_kernel_id);
-                // If the iteration range is not given then all iterations of the kernel is profiled
-                if(_range.empty())
-                {
-                    if(!tool::get_config().advanced_thread_trace)
-                        return true;
-                    else if(itr == 1)
-                        return true;
-                }
-                else if(_range.find(itr) != _range.end())
-                    return true;
-                return false;
-            },
-            _kern_id,
-            *range);
-    }
-
-    return false;
 }
 
 auto&
@@ -2948,6 +2925,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_detail     = tool::get_config().att_no_detail;
         bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
@@ -2958,6 +2936,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_detail)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
         if(att_no_intercept)
             global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 
@@ -4128,6 +4108,43 @@ diagnose_status(pid_t _pid, int _status)
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 {
+    // Only the first fatal signal in the process runs the body below. A later one, whether it
+    // is a re-entrant abort from finalization on this thread or a signal on another thread,
+    // must not wait on the std::call_once: the first is a recursive lock, the second blocks
+    // until the finalization it is waiting on completes, and either way the process can no
+    // longer be terminated. This runs before any logging so that a stuck logger or allocator
+    // cannot get in the way.
+    static auto _handling = std::atomic_flag{};
+    if(_handling.test_and_set())
+    {
+        constexpr auto _msg =
+            std::string_view{"[rocprofv3] fatal signal while already handling one... "
+                             "terminating\n"};
+        // write() rather than the logger: async-signal-safe and takes no locks
+        auto _written = ::write(STDERR_FILENO, _msg.data(), _msg.size());
+        (void) _written;
+
+        // rocprofv3 interposes signal()/sigaction() to keep this handler installed, so the
+        // default disposition has to be restored through the real symbol before re-raising.
+        auto _default_action       = sigaction_t{};
+        _default_action.sa_handler = SIG_DFL;
+        sigemptyset(&_default_action.sa_mask);
+        if(auto* _real_sigaction = get_sigaction_function();
+           _real_sigaction != nullptr && _real_sigaction(signo, &_default_action, nullptr) == 0)
+        {
+            // the handler was entered with signo blocked, so unblock it or the raise below
+            // only marks it pending and the process exits rather than dying from the signal
+            auto _blocked = sigset_t{};
+            sigemptyset(&_blocked);
+            sigaddset(&_blocked, signo);
+            ::pthread_sigmask(SIG_UNBLOCK, &_blocked, nullptr);
+            ::raise(signo);
+        }
+
+        // only reached if the signal is not fatal by default or could not be restored
+        ::_exit(128 + signo);
+    }
+
     auto this_pid  = getpid();
     auto this_ppid = getppid();
     auto this_tid  = common::get_tid();

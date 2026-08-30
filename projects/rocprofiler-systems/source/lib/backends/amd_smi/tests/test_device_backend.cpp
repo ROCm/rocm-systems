@@ -67,8 +67,8 @@ TEST_F(DeviceBackendTest, get_gpu_asic_info_maps_market_name_to_product_name)
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_gpu_asic_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_gpu_asic_info();
     EXPECT_EQ(info.product_name, "Radeon RX 7900 XTX");
     EXPECT_EQ(info.vendor_name, "AMD");
 }
@@ -78,7 +78,7 @@ TEST_F(DeviceBackendTest, get_gpu_asic_info_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_gpu_asic_info()), std::runtime_error);
 }
 
@@ -87,7 +87,7 @@ TEST_F(DeviceBackendTest, get_gpu_asic_info_error_message_contains_function_name
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(
         {
             try
@@ -115,7 +115,7 @@ TEST_F(DeviceBackendTest, get_bdf_formats_canonical_string)
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_device_bdf(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_bdf(), "0000:03:00.0");
 }
 
@@ -124,7 +124,7 @@ TEST_F(DeviceBackendTest, get_bdf_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_device_bdf(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_bdf()), std::runtime_error);
 }
 
@@ -139,8 +139,8 @@ TEST_F(DeviceBackendTest, get_metrics_maps_power_fields)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.current_socket_power, 150U);
     EXPECT_EQ(m.average_socket_power, 120U);
 }
@@ -156,8 +156,8 @@ TEST_F(DeviceBackendTest, get_metrics_maps_temperature_fields)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.hotspot_temperature, 85U);
     EXPECT_EQ(m.edge_temperature, 72U);
 }
@@ -174,8 +174,8 @@ TEST_F(DeviceBackendTest, get_metrics_maps_activity_fields)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.gfx_activity, 80U);
     EXPECT_EQ(m.umc_activity, 40U);
     EXPECT_EQ(m.mm_activity, 60U);
@@ -191,8 +191,8 @@ TEST_F(DeviceBackendTest, get_metrics_pcie_fields_zeroed_when_sentinel)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.pcie.link.width, 0U);
     EXPECT_EQ(m.pcie.link.speed, 0U);
     EXPECT_EQ(m.pcie.bandwidth.acc, 0U);
@@ -210,8 +210,8 @@ TEST_F(DeviceBackendTest, get_metrics_pcie_fields_populated_when_supported)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.pcie.link.width, 16U);
     EXPECT_EQ(m.pcie.link.speed, 32U);
     EXPECT_EQ(m.pcie.bandwidth.acc, 10000U);
@@ -228,8 +228,8 @@ TEST_F(DeviceBackendTest, get_metrics_xgmi_link_zeroed_when_sentinel)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.link.width, 0U);
     EXPECT_EQ(m.xgmi.link.speed, 0U);
 }
@@ -243,8 +243,8 @@ TEST_F(DeviceBackendTest, get_metrics_xgmi_link_populated_when_supported)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.link.width, 2U);
     EXPECT_EQ(m.xgmi.link.speed, 25U);
 }
@@ -258,8 +258,8 @@ TEST_F(DeviceBackendTest, get_metrics_xgmi_data_acc_populated_when_supported)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.data_acc.read[0], 1000U);
     EXPECT_EQ(m.xgmi.data_acc.write[0], 2000U);
 }
@@ -274,8 +274,8 @@ TEST_F(DeviceBackendTest, get_metrics_clocks_zeroed_when_sentinel)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.gfx_clock_mhz, 0U);
     EXPECT_EQ(m.mem_clock_mhz, 0U);
 }
@@ -289,8 +289,8 @@ TEST_F(DeviceBackendTest, get_metrics_clocks_populated_when_supported)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.gfx_clock_mhz, 2100U);
     EXPECT_EQ(m.mem_clock_mhz, 1200U);
 }
@@ -306,8 +306,8 @@ TEST_F(DeviceBackendTest, get_metrics_vcn_activity_is_copied)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.vcn_activity[0], 55U);
     EXPECT_EQ(m.vcn_activity[1], 77U);
 }
@@ -321,8 +321,8 @@ TEST_F(DeviceBackendTest, get_metrics_jpeg_activity_is_copied)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.jpeg_activity[0], 11U);
     EXPECT_EQ(m.jpeg_activity[31], 22U);
 }
@@ -336,8 +336,8 @@ TEST_F(DeviceBackendTest, get_metrics_xcp_vcn_busy_is_copied)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.xcp_stats[0].vcn_busy[0], 33U);
     EXPECT_EQ(m.xcp_stats[0].vcn_busy[3], 44U);
 }
@@ -351,8 +351,8 @@ TEST_F(DeviceBackendTest, get_metrics_xcp_jpeg_busy_is_copied)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_metrics();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      m = sut.get_metrics();
     EXPECT_EQ(m.xcp_stats[0].jpeg_busy[0], 55U);
     EXPECT_EQ(m.xcp_stats[0].jpeg_busy[39], 66U);
 }
@@ -364,7 +364,7 @@ TEST_F(DeviceBackendTest, get_metrics_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_metrics()), std::runtime_error);
 }
 
@@ -373,7 +373,7 @@ TEST_F(DeviceBackendTest, get_metrics_error_message_contains_function_name)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(
         {
             try
@@ -396,7 +396,7 @@ TEST_F(DeviceBackendTest, get_memory_usage_returns_reported_bytes)
     EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, NotNull()))
         .WillOnce(DoAll(SetArgPointee<2>(k_bytes), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_memory_usage(), k_bytes);
 }
 
@@ -406,7 +406,7 @@ TEST_F(DeviceBackendTest, get_memory_usage_passes_vram_type)
     EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, k_vram, _))
         .WillOnce(DoAll(SetArgPointee<2>(0U), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_memory_usage(), 0U);
 }
 
@@ -415,7 +415,7 @@ TEST_F(DeviceBackendTest, get_memory_usage_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_memory_usage()), std::runtime_error);
 }
 
@@ -424,7 +424,7 @@ TEST_F(DeviceBackendTest, get_memory_usage_error_message_contains_function_name)
     EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(
         {
             try
@@ -449,7 +449,7 @@ TEST_F(DeviceBackendTest, get_hotspot_temperature_returns_reported_value)
                                 testing::mock_backend::TEMP_CURRENT, NotNull()))
         .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_hotspot_temperature(), k_temp);
 }
 
@@ -463,7 +463,7 @@ TEST_F(DeviceBackendTest, get_hotspot_temperature_passes_hotspot_sensor_type)
                 get_temp_metric(k_handle, k_hotspot, _, NotNull()))
         .WillOnce(DoAll(SetArgPointee<3>(std::int64_t{ 0 }), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     static_cast<void>(sut.get_hotspot_temperature());
 }
 
@@ -474,7 +474,7 @@ TEST_F(DeviceBackendTest, get_hotspot_temperature_throws_on_backend_error)
         get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_HOTSPOT, _, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_hotspot_temperature()), std::runtime_error);
 }
 
@@ -486,7 +486,7 @@ TEST_F(DeviceBackendTest, get_edge_temperature_returns_reported_value)
                                 testing::mock_backend::TEMP_CURRENT, NotNull()))
         .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_edge_temperature(), k_temp);
 }
 
@@ -497,7 +497,7 @@ TEST_F(DeviceBackendTest, get_edge_temperature_passes_edge_sensor_type)
     EXPECT_CALL(*testing::g_mock_backend, get_temp_metric(k_handle, k_edge, _, NotNull()))
         .WillOnce(DoAll(SetArgPointee<3>(std::int64_t{ 0 }), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     static_cast<void>(sut.get_edge_temperature());
 }
 
@@ -508,7 +508,7 @@ TEST_F(DeviceBackendTest, get_edge_temperature_throws_on_backend_error)
         get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_EDGE, _, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_edge_temperature()), std::runtime_error);
 }
 
@@ -521,8 +521,8 @@ TEST_F(DeviceBackendTest, get_nic_asic_info_maps_product_and_vendor_names)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_nic_asic_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_nic_asic_info();
     EXPECT_EQ(info.product_name, "CX7");
     EXPECT_EQ(info.vendor_name, "Mellanox");
 }
@@ -532,7 +532,7 @@ TEST_F(DeviceBackendTest, get_nic_asic_info_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_nic_asic_info()), std::runtime_error);
 }
 
@@ -543,8 +543,8 @@ TEST_F(DeviceBackendTest, get_nic_port_info_returns_empty_when_no_ports)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_nic_port_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_nic_port_info();
     EXPECT_TRUE(info.device_name.empty());
 }
 
@@ -556,8 +556,8 @@ TEST_F(DeviceBackendTest, get_nic_port_info_returns_netdev_for_first_port)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_nic_port_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_nic_port_info();
     EXPECT_EQ(info.device_name, "mlx5_0");
 }
 
@@ -566,7 +566,7 @@ TEST_F(DeviceBackendTest, get_nic_port_info_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_nic_port_info()), std::runtime_error);
 }
 
@@ -577,8 +577,8 @@ TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_zero_when_no_rdma_devices)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_nic_rdma_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_nic_rdma_info();
     EXPECT_EQ(info.port_count, 0U);
 }
 
@@ -590,8 +590,8 @@ TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_port_count)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto info = sut.get_nic_rdma_info();
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      info = sut.get_nic_rdma_info();
     EXPECT_EQ(info.port_count, 4U);
 }
 
@@ -600,19 +600,19 @@ TEST_F(DeviceBackendTest, get_nic_rdma_info_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_info()), std::runtime_error);
 }
 
 TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_returns_empty_when_count_zero)
 {
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(
         *testing::g_mock_backend,
         get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<2>(0U), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_TRUE(sut.get_nic_rdma_port_statistics(0).empty());
 }
 
@@ -620,7 +620,7 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_maps_name_and_value)
 {
     const testing::mock_nic_stat_t stat{ .name = "rx_bytes", .value = 99999 };
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(
         *testing::g_mock_backend,
         get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), IsNull()))
@@ -631,8 +631,8 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_maps_name_and_value)
         .WillOnce(DoAll(SetArgPointee<2>(1U), SetArrayArgument<3>(&stat, &stat + 1),
                         Return(k_ok)));
 
-    DeviceSut  sut{ m_session, k_handle };
-    const auto stats = sut.get_nic_rdma_port_statistics(0);
+    const DeviceSut sut{ m_session, k_handle };
+    const auto      stats = sut.get_nic_rdma_port_statistics(0);
     ASSERT_EQ(stats.size(), 1U);
     EXPECT_EQ(stats[0].name, "rx_bytes");
     EXPECT_EQ(stats[0].value, 99999U);
@@ -644,14 +644,14 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_count_error)
                 get_nic_rdma_port_statistics(k_handle, _, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_port_statistics(0)),
                  std::runtime_error);
 }
 
 TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
 {
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_nic_rdma_port_statistics(k_handle, _, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<2>(1U), Return(k_ok)));
@@ -659,7 +659,7 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
                 get_nic_rdma_port_statistics(k_handle, _, NotNull(), NotNull()))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_port_statistics(0)),
                  std::runtime_error);
 }
@@ -672,7 +672,7 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_no_processes)
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
 }
 
@@ -682,7 +682,7 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_count_fails)
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_raw_sdma_usage()), std::runtime_error);
 }
 
@@ -690,7 +690,7 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_accumulates_sdma_usage)
 {
     const testing::mock_proc_info_t procs[] = { { .sdma_usage = 100 },
                                                 { .sdma_usage = 200 } };
-    InSequence                      seq;
+    const InSequence                seq;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(2U), Return(k_ok)));
@@ -699,13 +699,13 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_accumulates_sdma_usage)
         .WillOnce(DoAll(SetArgPointee<1>(2U), SetArrayArgument<2>(procs, procs + 2),
                         Return(k_ok)));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_EQ(sut.get_raw_sdma_usage(), 300U);
 }
 
 TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_data_fetch_fails)
 {
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
@@ -713,7 +713,7 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_data_fetch_fails)
                 get_gpu_process_list(k_handle, NotNull(), NotNull()))
         .WillOnce(Return(k_err));
 
-    DeviceSut sut{ m_session, k_handle };
+    const DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_raw_sdma_usage()), std::runtime_error);
 }
 

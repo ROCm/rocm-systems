@@ -82,6 +82,17 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
                        hsa::inst_pkt_t&                inst_pkt,
                        kernel_dispatch::profiling_time dispatch_time)
 {
+    bool has_spm_packets = false;
+    for(const auto& tagged_pkt : inst_pkt)
+    {
+        if(tagged_pkt.second == hsa::queue_hooks::SPM_CLIENT_ID)
+        {
+            has_spm_packets = true;
+            break;
+        }
+    }
+    if(!has_spm_packets) return;
+
     // Route by packet provenance, not current activeness: post_kernel_call self-filters via
     // packet_return_map, so in-flight dispatches still complete after stop_context removes the
     // context from the active list. Without this, a dispatch in flight at stop skips the

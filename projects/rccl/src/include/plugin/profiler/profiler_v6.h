@@ -162,6 +162,7 @@ typedef union {
 typedef struct {
   const char* name;
 
+  // init - initialize the profiler plugin
   ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes,
                        int nranks, int rank, ncclDebugLogger_t logfn);
 
@@ -169,6 +170,7 @@ typedef struct {
 
   ncclResult_t (*stopEvent)(void* eHandle);
 
+  // recordEventState - record event state transitions and updates
   ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v6_t eState,
                                    ncclProfilerEventStateArgs_v6_t* eStateArgs);
 

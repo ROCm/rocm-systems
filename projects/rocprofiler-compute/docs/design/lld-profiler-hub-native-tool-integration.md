@@ -11,7 +11,8 @@ both loaded via `LD_PRELOAD` into the target application
    and an empty `rocpd_pmc_event` table). It is told NOT to collect counters
    (`ROCPROF_COUNTER_COLLECTION=0`).
 2. The rocprofiler-compute "native tool" (`src/lib/rocprofiler_compute_tool`) collects the
-   hardware counters and currently writes a CSV (`<pid>_native_counter_collection.csv`),
+   hardware counters and currently writes a gzip-compressed CSV
+   (`<pid>_native_counter_collection.csv.gz`),
    which the Python layer parses and injects row by row into the SDK rocpd's
    `rocpd_pmc_event` table (`src/utils/rocpd_data.py`, `src/utils/utils_profile.py`).
 

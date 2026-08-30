@@ -635,14 +635,6 @@ public:
 #endif
     }
 
-    static const uint32_t SQTT_TOKEN_REG_USERDATA = 1 << 3;
-    static const uint32_t SQTT_TOKEN_VALU         = 1 << 2;
-    static const uint32_t SQTT_TOKEN_WVRDY        = 1 << 3;
-    static const uint32_t SQTT_TOKEN_WAVE         = 1 << 4;
-    static const uint32_t SQTT_TOKEN_REG          = 1 << 5;
-    static const uint32_t SQTT_TOKEN_IMMED        = 1 << 6;
-    static const uint32_t SQTT_TOKEN_INST         = 1 << 8;
-
     // not supported in gfx11
     static uint32_t sqtt_perf_mask_value() { return 0; }
 
@@ -653,12 +645,15 @@ public:
 #if SQTT_PRIM_ENABLED
         uint32_t sq_thread_trace_token_mask =
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_EXCLUDE, 0x3) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE, SQTT_TOKEN_REG_USERDATA) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               REG_INCLUDE,
+                               (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
+                                SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
+                                SQ_TT_TOKEN_MASK_COMP_BIT)) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                TOKEN_EXCLUDE,
-                               (SQTT_TOKEN_VALU | SQTT_TOKEN_WVRDY | SQTT_TOKEN_WAVE |
-                                SQTT_TOKEN_REG | SQTT_TOKEN_IMMED | SQTT_TOKEN_INST) ^
-                                   0x7FF);
+                               ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT)));
         return sq_thread_trace_token_mask;
 #else
         return 0;
@@ -681,12 +676,24 @@ public:
     static uint32_t sqtt_token_mask_occupancy_value()
     {
 #if SQTT_PRIM_ENABLED
-        uint32_t sq_thread_trace_token_mask =
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE, SQTT_TOKEN_REG_USERDATA) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3) |
+        uint32_t sq_thread_trace_token_mask{0};
+        sq_thread_trace_token_mask =
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               REG_INCLUDE,
+                               (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
+                                SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
+                                SQ_TT_TOKEN_MASK_COMP_BIT)) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                TOKEN_EXCLUDE,
-                               (SQTT_TOKEN_WAVE | SQTT_TOKEN_REG) ^ 0x7FF);
+                               ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT))) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3);
         return sq_thread_trace_token_mask;
 #else
         return 0;

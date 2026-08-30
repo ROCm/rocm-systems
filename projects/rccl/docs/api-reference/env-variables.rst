@@ -75,6 +75,12 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ALLGATHERV_ENABLE``
+        | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
+          ring kernel when two or more distinct roots appear in a group.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
 Logging and debugging
 =====================
 
@@ -141,6 +147,71 @@ in the following table.
         | Write logs to a file rather than ``stdout``.
       - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
+    * - | ``NCCL_CHECK_MODE``
+        | Selects how thoroughly RCCL validates the arguments of every
+          collective call. Checking costs latency, so it is disabled by default
+          and intended for development and bring-up. See
+          :ref:`check-mode` for what each mode detects.
+      - | ``DEFAULT``: No argument validation (default).
+        | ``DEBUG_LOCAL``: Validate the buffer pointers locally on each rank.
+          Replaces the deprecated ``NCCL_CHECK_POINTERS``.
+        | ``DEBUG_GLOBAL``: Also validate arguments across ranks, including
+          symmetric buffer registration.
+        | Values other than ``DEBUG_LOCAL`` and ``DEBUG_GLOBAL`` leave the mode
+          unchanged, so writing ``DEFAULT`` does not switch checking off again.
+
+    * - | ``NCCL_CHECK_POINTERS``
+        | Deprecated. Enables local validation of the buffer pointers passed to
+          each collective.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, equivalent to ``NCCL_CHECK_MODE=DEBUG_LOCAL``.
+        | Use ``NCCL_CHECK_MODE`` instead. When both are set, ``DEBUG_LOCAL`` or
+          ``DEBUG_GLOBAL`` wins; any other ``NCCL_CHECK_MODE`` value keeps the
+          mode selected by ``NCCL_CHECK_POINTERS=1``.
+
+.. _check-mode:
+
+Validating collective arguments
+-------------------------------
+
+``NCCL_CHECK_MODE=DEBUG_LOCAL`` inspects only what a rank can see by itself: it
+verifies that the ``sendbuff`` and ``recvbuff`` arguments are valid device
+pointers that belong to the device the communicator was created on. Passing a
+host pointer or a pointer from another device makes the collective return
+``ncclInvalidArgument`` instead of faulting inside the kernel.
+
+``NCCL_CHECK_MODE=DEBUG_GLOBAL`` adds cross-rank validation of symmetric buffer
+registration. The symmetric kernels require every rank to describe its buffers
+identically, because a rank addresses a peer's buffer by applying its own offsets
+to the peer's symmetric window. RCCL cannot verify that from a single rank, so at
+group launch the ranks exchange the identity of the windows backing their buffers
+and compare against rank 0. A collective is rejected with
+``ncclInvalidArgument`` when:
+
+* Some ranks pass buffers registered with ``NCCL_WIN_COLL_SYMMETRIC`` while
+  others pass unregistered buffers.
+* The ranks pass buffers from windows registered at different positions in the
+  symmetric address space.
+* The ranks pass buffers at different offsets inside their windows.
+
+Each rejection is reported by rank 0 with a ``WARN`` message naming the
+collective, the message size, and the first rank that disagrees, so set
+``NCCL_DEBUG=WARN`` when using this mode. Setting ``NCCL_DEBUG=INFO`` with
+``NCCL_DEBUG_SUBSYS=COLL`` additionally prints a ``SymCheck`` line per rank with
+the window and user offsets that were compared.
+
+Without this mode such a mismatch is not diagnosed: RCCL silently falls back to
+the general kernels for calls it cannot serve symmetrically, so the collective
+still produces correct results but loses the performance of the symmetric path.
+Enable ``DEBUG_GLOBAL`` when a workload registers symmetric windows yet does not
+reach the expected symmetric performance.
+
+.. note::
+
+   ``DEBUG_GLOBAL`` adds a bootstrap all-gather to every group launch, which is
+   far more expensive than the collective itself for small messages. Use it to
+   diagnose a configuration, not in production.
+
 Algorithm and protocol control
 ==============================
 
@@ -196,6 +267,13 @@ in the following table.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
+        | When unset, RCCL auto-selects an interface in this order:
+        | ``ib*`` first; if none is found and ``NCCL_COMM_ID`` is set, an
+        | interface on the same subnet as that address; then any interface
+        | other than ``docker*``, ``lo`` and ``virbr*``; then ``docker*``;
+        | then ``lo``; and finally ``virbr*``. Libvirt bridge interfaces
+        | (``virbr*``) are considered last because they serve host-to-VM
+        | (virtual machine) traffic and cannot reach a remote node.
       - | Interface prefix string or list
         | Multiple prefixes separated by ``,``
         | Prefix with ``^`` for exclusion, ``=`` for exact match
@@ -374,3 +452,104 @@ application adds explicit synchronization between streams.
         | output feeds into the next.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
+
+Inspector profiling
+===================
+
+The NCCL Inspector is a profiler plugin that emits per-communicator,
+per-operation performance data (collectives and point-to-point) as JSON or
+Prometheus textfile metrics. For a full walkthrough, see
+:doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
+variables are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_INSPECTOR_ENABLE``
+        | Enables the Inspector profiler plugin. The plugin must also be
+        | loaded through ``NCCL_PROFILER_PLUGIN``.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_ENABLE_P2P``
+        | Enables tracking of point-to-point (``Send``/``Recv``) operations in
+        | addition to collectives. Required for the ``nccl_p2p_*`` Prometheus
+        | metrics and the P2P panels of the Grafana dashboard.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_PROM_DUMP``
+        | Selects the Prometheus node-exporter textfile output format
+        | (``nccl_inspector_metrics_<uuid>.prom``) instead of the default JSON.
+      - | ``0``: JSON output (default).
+        | ``1``: Prometheus textfile output.
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
+        | Enables the internal dump thread. When disabled, output is only
+        | written at communicator teardown, regardless of the configured
+        | dump interval.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS``
+        | Interval, in microseconds, at which the internal dump thread writes
+        | output. Output is always written at communicator teardown.
+      - | ``-1``: Dump only at teardown (default).
+        | ``0``: Dump continuously.
+        | ``N``: Dump every ``N`` microseconds. In Prometheus mode a minimum of
+        | ``30000000`` (30 s) is enforced to match node-exporter polling.
+
+    * - | ``NCCL_INSPECTOR_DUMP_DIR``
+        | Output directory for Inspector logs/metrics. For Prometheus mode,
+        | point this at the node-exporter textfile collector directory.
+      - | String path.
+        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | ``nccl-inspector-unknown-jobid``.
+
+    * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``
+        | Includes per-event trace information (sequence numbers and
+        | timestamps) in the JSON output.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES``
+        | Minimum message size (in bytes) tracked by the Inspector.
+      - | Integer value in bytes (default: ``8192``).
+
+    * - | ``NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING``
+        | Requires GPU-based kernel timing for an event to be recorded. When
+        | enabled, events that fall back to CPU-measured timing are discarded.
+      - | ``0``: Record events regardless of timing source.
+        | ``1``: Record only GPU-timed events (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | collectives waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_DUMP_P2P_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | point-to-point operations waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_COLL_POOL_SIZE``
+        | Initial size, and growth stride, of the collective event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_P2P_POOL_SIZE``
+        | Initial size, and growth stride, of the point-to-point event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_COMM_POOL_SIZE``
+        | Initial size, and growth stride, of the communicator event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_POOL_GROW``
+        | Allows the event pools above to grow beyond their initial size. When
+        | disabled, events are dropped once a pool is exhausted.
+      - | ``0``: Fixed-size pools.
+        | ``1``: Pools grow on demand (default).

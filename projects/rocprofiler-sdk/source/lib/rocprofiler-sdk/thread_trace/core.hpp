@@ -186,6 +186,7 @@ private:
 
     mutable std::shared_mutex agents_map_mut{};
     std::atomic<int>          post_move_data{0};
+    std::atomic<bool>         enabled{false};
 };
 
 class DeviceThreadTracer

@@ -33,7 +33,7 @@ namespace thread_trace
 namespace
 {
 auto
-active_thread_trace_contexts_filter()
+thread_trace_contexts_filter()
 {
     return [](const context::context* ctx) -> bool {
         return ctx && ctx->dispatch_thread_trace != nullptr;
@@ -54,7 +54,7 @@ write_hook(const hsa::Queue& queue,
 {
     const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
 
-    auto active = context::get_active_contexts(active_thread_trace_contexts_filter());
+    auto active = context::get_active_contexts(thread_trace_contexts_filter());
     for(auto* ctx : active)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
@@ -76,8 +76,10 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
                        hsa::inst_pkt_t&                            inst_pkt,
                        kernel_dispatch::profiling_time /*dispatch_time*/)
 {
-    auto active = context::get_active_contexts(active_thread_trace_contexts_filter());
-    for(auto* ctx : active)
+    // Completion routing follows packet provenance rather than current activeness so work
+    // submitted before stop_context can still retire after the context leaves the active set.
+    auto contexts = context::get_registered_contexts(thread_trace_contexts_filter());
+    for(auto* ctx : contexts)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
         tracer.post_kernel_call(inst_pkt, *session, packet_data);
@@ -87,7 +89,7 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
 bool
 is_any_active()
 {
-    return !context::get_active_contexts(active_thread_trace_contexts_filter()).empty();
+    return !context::get_active_contexts(thread_trace_contexts_filter()).empty();
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler
