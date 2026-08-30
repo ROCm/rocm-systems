@@ -2243,6 +2243,36 @@ dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uin
   return state.dynamic_frame_saves_by_site.emplace(text_offset, std::move(saved)).first->second;
 }
 
+void forbid_moi_persistent_vgprs(RegisterSet &forbidden, const ConSanMoiOperatingPoint &point,
+                                 const ConSanMoiOperatingPoint &allocation,
+                                 std::span<const uint64_t> owner_descriptors) {
+  const auto forbid_vgpr = [&](std::optional<uint16_t> reg, uint8_t count = 1u) {
+    if (reg)
+      forbidden.expand({RegClass::VGPR, *reg, count});
+  };
+  const auto forbid_workgroup_tuple = [&](const ConSanMoiPersistentWorkgroupRegisters &registers) {
+    forbid_vgpr(registers.x);
+    forbid_vgpr(registers.y);
+    forbid_vgpr(registers.z);
+    forbid_vgpr(registers.cluster_workgroup_id);
+  };
+  forbid_vgpr(point.moi_owner_vgpr);
+  forbid_vgpr(point.moi_epoch_vgpr);
+  forbid_vgpr(point.moi_workgroup_key_vgpr);
+  forbid_vgpr(point.moi_dispatch_id_vgpr, 2u);
+  forbid_workgroup_tuple(point.moi_record_replay_workgroup_vgprs);
+  for (uint64_t descriptor_offset : owner_descriptors) {
+    const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+    if (!assignment)
+      continue;
+    forbid_vgpr(assignment->owner_vgpr);
+    forbid_vgpr(assignment->epoch_vgpr);
+    forbid_vgpr(assignment->workgroup_key_vgpr);
+    forbid_vgpr(assignment->dispatch_id_vgpr, 2u);
+    forbid_workgroup_tuple(assignment->record_replay_workgroup_vgprs);
+  }
+}
+
 [[nodiscard]] ConSanCandidateResourcePlan
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &semantic_request,
                        const ConSanDebugOverrides &debug, const ConSanMoiOperatingPoint &point,
@@ -2426,40 +2456,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   if (!point.moi_owner_vgpr && state.register_allocation.owner_persistent_vgprs.empty() &&
       semantic_request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
     request.forbidden.expand({RegClass::VGPR, kRdna4WorkitemIdX, 1});
-  if (point.moi_owner_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *point.moi_owner_vgpr, 1});
-  if (point.moi_epoch_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *point.moi_epoch_vgpr, 1});
-  if (point.moi_workgroup_key_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *point.moi_workgroup_key_vgpr, 1});
-  if (point.moi_dispatch_id_vgpr)
-    request.forbidden.expand({RegClass::VGPR, *point.moi_dispatch_id_vgpr, 2});
-  for (const std::optional<uint16_t> reg :
-       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
-        point.moi_record_replay_workgroup_vgprs.z,
-        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
-    if (reg)
-      request.forbidden.expand({RegClass::VGPR, *reg, 1});
-  }
-  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-    const auto *assignment =
-        moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
-    if (!assignment)
-      continue;
-    request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
-    request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
-    if (assignment->workgroup_key_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
-    if (assignment->dispatch_id_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *assignment->dispatch_id_vgpr, 2});
-    for (const std::optional<uint16_t> reg :
-         {assignment->record_replay_workgroup_vgprs.x, assignment->record_replay_workgroup_vgprs.y,
-          assignment->record_replay_workgroup_vgprs.z,
-          assignment->record_replay_workgroup_vgprs.cluster_workgroup_id}) {
-      if (reg)
-        request.forbidden.expand({RegClass::VGPR, *reg, 1});
-    }
-  }
+  forbid_moi_persistent_vgprs(request.forbidden, point, state.register_allocation,
+                              plan.owner_descriptor_file_offsets);
 
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
@@ -2515,41 +2513,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     if (every_owner_can_move_empty_cdna_accvgpr_boundary)
       spill_request.architecture_limit = kMaxVgprs;
     spill_request.forbidden = {};
-    if (point.moi_owner_vgpr)
-      spill_request.forbidden.expand({RegClass::VGPR, *point.moi_owner_vgpr, 1});
-    if (point.moi_epoch_vgpr)
-      spill_request.forbidden.expand({RegClass::VGPR, *point.moi_epoch_vgpr, 1});
-    if (point.moi_workgroup_key_vgpr)
-      spill_request.forbidden.expand({RegClass::VGPR, *point.moi_workgroup_key_vgpr, 1});
-    if (point.moi_dispatch_id_vgpr)
-      spill_request.forbidden.expand({RegClass::VGPR, *point.moi_dispatch_id_vgpr, 2});
-    for (const std::optional<uint16_t> reg :
-         {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
-          point.moi_record_replay_workgroup_vgprs.z,
-          point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
-      if (reg)
-        spill_request.forbidden.expand({RegClass::VGPR, *reg, 1});
-    }
-    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      const auto *assignment =
-          moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
-      if (!assignment)
-        continue;
-      spill_request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
-      spill_request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
-      if (assignment->workgroup_key_vgpr)
-        spill_request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
-      if (assignment->dispatch_id_vgpr)
-        spill_request.forbidden.expand({RegClass::VGPR, *assignment->dispatch_id_vgpr, 2});
-      for (const std::optional<uint16_t> reg :
-           {assignment->record_replay_workgroup_vgprs.x,
-            assignment->record_replay_workgroup_vgprs.y,
-            assignment->record_replay_workgroup_vgprs.z,
-            assignment->record_replay_workgroup_vgprs.cluster_workgroup_id}) {
-        if (reg)
-          spill_request.forbidden.expand({RegClass::VGPR, *reg, 1});
-      }
-    }
+    forbid_moi_persistent_vgprs(spill_request.forbidden, point, state.register_allocation,
+                                plan.owner_descriptor_file_offsets);
     if (operand_overlap_spill.protected_vgpr) {
       spill_request.forbidden.expand({RegClass::VGPR, *operand_overlap_spill.protected_vgpr,
                                       operand_overlap_spill.protected_vgpr_count});
