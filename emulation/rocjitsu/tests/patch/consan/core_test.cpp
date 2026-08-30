@@ -132,8 +132,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_persistent_vgprs = true,
       .automatic_moi_private_epoch = true,
       .automatic_moi_partial_exec_save_sgprs = true,
-      .automatic_moi_inline_sgpr_spill = true,
-      .automatic_moi_record_replay_sgpr_spill = true,
+      .automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline,
       .moi_record_replay_dense_barrier_router = true,
       .moi_exec_save_sgprs_persistent = true,
       .moi_dynamic_stack_spill = true,
@@ -180,9 +179,9 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.automatic_moi_private_epoch = false; });
   expect_field_participates(
       [](auto &value) { value.automatic_moi_partial_exec_save_sgprs = false; });
-  expect_field_participates([](auto &value) { value.automatic_moi_inline_sgpr_spill = false; });
-  expect_field_participates(
-      [](auto &value) { value.automatic_moi_record_replay_sgpr_spill = false; });
+  expect_field_participates([](auto &value) {
+    value.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  });
   expect_field_participates(
       [](auto &value) { value.moi_record_replay_dense_barrier_router = false; });
   expect_field_participates([](auto &value) { value.moi_exec_save_sgprs_persistent = false; });
@@ -250,7 +249,7 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
   resources.moi_report_layout = ConSanMoiReportBufferLayout{};
   resources.moi_report_layout->record_replay_dispatch_token_capacity = 4u;
   ConSanMoiOperatingPoint point;
-  point.automatic_moi_record_replay_sgpr_spill = true;
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_dynamic_stack_spill = true;
   point.moi_inline_access_present = true;
   point.moi_record_replay_dense_barrier_router = true;

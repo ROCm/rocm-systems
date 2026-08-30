@@ -96,7 +96,7 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
   MoiScalarAbiPlan plan{.special_state = special_state,
                         .indirect_jump = std::nullopt,
                         .access_router_uses_dense_abi = access_router_uses_dense_abi};
-  if (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill) {
+  if (point.has_moi_scalar_spill()) {
     if (point.moi_inline_indirect_pc_sgpr && point.moi_inline_indirect_scc_sgpr) {
       plan.indirect_jump =
           MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_inline_indirect_pc_sgpr,

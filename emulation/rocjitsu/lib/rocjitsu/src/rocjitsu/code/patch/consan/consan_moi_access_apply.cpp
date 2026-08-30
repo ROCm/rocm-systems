@@ -359,7 +359,7 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
                                              const ResolvedMoiScratchPlan &resources,
                                              const ConSanMoiOperatingPoint &point) {
-  if (!point.automatic_moi_inline_sgpr_spill && !point.automatic_moi_record_replay_sgpr_spill) {
+  if (!point.has_moi_scalar_spill()) {
     return false;
   }
   return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
@@ -379,8 +379,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
     const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
     std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
     const VgprSpillSequence *vgpr_spill) {
-  if ((!point.automatic_moi_inline_sgpr_spill && !point.automatic_moi_record_replay_sgpr_spill) ||
-      !point.moi_exec_save_sgpr)
+  if ((!point.has_moi_scalar_spill()) || !point.moi_exec_save_sgpr)
     return std::nullopt;
   if (!consan_is_capability_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back(

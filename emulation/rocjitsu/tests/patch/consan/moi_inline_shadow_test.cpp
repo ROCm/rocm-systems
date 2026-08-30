@@ -1178,7 +1178,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   options.moi_inline_dispatch_key_sgpr = 50u;
   options.moi_inline_call_return_sgpr = 48u;
   options.automatic_moi_partial_exec_save_sgprs = true;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
       .descriptor_file_offset = original_full_kernel->descriptor_file_offset,
       .exec_save_sgpr = 4u,
@@ -1402,7 +1402,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   options.moi_inline_dispatch_key_sgpr = 50u;
   options.moi_inline_call_return_sgpr = 48u;
   options.automatic_moi_partial_exec_save_sgprs = true;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
       .descriptor_file_offset = original.kernels().front().descriptor_file_offset,
       .exec_save_sgpr = 4u,
@@ -6648,7 +6648,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.moi_inline_dispatch_key_sgpr = kKeyAndSccSgpr;
   options.moi_inline_call_return_sgpr = kIndirectPcSgpr;
   options.automatic_moi_partial_exec_save_sgprs = true;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
       .descriptor_file_offset = original.kernels().front().descriptor_file_offset,
       .exec_save_sgpr = 4u,
@@ -7182,7 +7182,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.moi_owner_vgpr = 80;
   options.moi_epoch_vgpr = 81;
   options.moi_exec_save_sgpr = 60;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_inline_indirect_pc_sgpr = 30;
   options.moi_inline_call_return_sgpr = 26;
@@ -7301,7 +7301,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.moi_owner_vgpr = 80;
   options.moi_epoch_vgpr = 81;
   options.moi_exec_save_sgpr = 60;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_inline_indirect_pc_sgpr = 30;
   options.moi_inline_call_return_sgpr = 26;
@@ -7414,7 +7414,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.moi_owner_vgpr = 80;
   options.moi_epoch_vgpr = 81;
   options.moi_exec_save_sgpr = 60;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_inline_indirect_pc_sgpr = 30;
   options.moi_inline_call_return_sgpr = 26;
@@ -7504,7 +7504,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.moi_owner_vgpr = 80;
   options.moi_epoch_vgpr = 81;
   options.moi_exec_save_sgpr = 60;
-  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_inline_indirect_pc_sgpr = 30;
   options.moi_inline_call_return_sgpr = 26;

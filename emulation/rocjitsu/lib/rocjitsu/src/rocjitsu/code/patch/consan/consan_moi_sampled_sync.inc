@@ -894,7 +894,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        std::move(private_layout), candidate_options.automatic_moi_record_replay_sgpr_spill,
+        std::move(private_layout), candidate_options.has_compact_moi_scalar_spill(),
         result.warnings);
     if (!probe)
       continue;
@@ -1147,7 +1147,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       }
       const auto special_state = moi_special_state_sgprs(group_options, group_options);
       const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
-      const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
+      const bool spill_backed_router = group_options.has_compact_moi_scalar_spill();
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state ||
           (spill_backed_router && (!group_options.moi_record_replay_dispatch_key_sgpr ||
@@ -1986,7 +1986,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        std::move(private_layout), candidate_options.automatic_moi_record_replay_sgpr_spill,
+        std::move(private_layout), candidate_options.has_compact_moi_scalar_spill(),
         result.warnings);
     if (!probe)
       continue;
@@ -2217,7 +2217,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
+      const bool spill_backed_router = group_options.has_compact_moi_scalar_spill();
       auto special_state = moi_special_state_sgprs(group_options, group_options);
       auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
@@ -2595,7 +2595,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
           "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");
       continue;
     }
-    if (route_options.automatic_moi_record_replay_sgpr_spill) {
+    if (route_options.has_compact_moi_scalar_spill()) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
       const auto route_overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {

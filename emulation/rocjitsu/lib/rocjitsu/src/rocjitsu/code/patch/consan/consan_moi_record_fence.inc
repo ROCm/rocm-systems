@@ -95,7 +95,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     }
     std::optional<uint32_t> active_private_size;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        options.automatic_moi_record_replay_sgpr_spill) {
+        options.has_compact_moi_scalar_spill()) {
       active_private_size = 0u;
       bool active_descriptor_missing = false;
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {

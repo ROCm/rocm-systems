@@ -54,7 +54,7 @@ std::optional<uint16_t> inline_shadow_visible_evidence_sgpr(const ConSanRequest 
                                                             const ConSanMoiOperatingPoint &point) {
   if (request.moi_engine != ConSanMoiEngine::InlineShadow || !point.moi_exec_save_sgpr)
     return std::nullopt;
-  if (point.automatic_moi_inline_sgpr_spill)
+  if (point.has_inline_moi_scalar_spill())
     return point.moi_inline_visible_evidence_sgpr;
   if (!point.moi_exec_save_sgprs_persistent)
     return std::nullopt;
@@ -76,7 +76,7 @@ bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
                                            rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (!point.moi_exec_save_sgpr)
     return true;
-  if (point.automatic_moi_inline_sgpr_spill && point.moi_inline_access_present &&
+  if (point.has_inline_moi_scalar_spill() && point.moi_inline_access_present &&
       ((!point.moi_inline_call_return_sgpr || !point.moi_inline_dispatch_key_sgpr) &&
        !point.moi_inline_branch_only_scalar_spill &&
        !point.moi_inline_dynamic_stack_borrowed_sgpr)) {
@@ -2584,8 +2584,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
   const uint16_t expected_spill_count = static_cast<uint16_t>(
       scratch_count + static_cast<uint16_t>(spill != nullptr && !spill->uses_dynamic_stack_frame &&
-                                            (point.automatic_moi_inline_sgpr_spill ||
-                                             point.automatic_moi_record_replay_sgpr_spill)));
+                                            (point.has_moi_scalar_spill())));
   if (spill != nullptr &&
       (spill->vgpr_base != scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
     errors.emplace_back(

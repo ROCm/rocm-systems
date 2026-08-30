@@ -2055,11 +2055,9 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     }
     const uint16_t prologue_temporary_vgpr_count =
         has_private_workgroup_key ? 3u : (workgroup_shadow ? 2u : 1u);
-    const bool fixed_lane_entry_scalar_reservoir =
-        kernel_options.moi_exec_save_sgpr &&
-        (kernel_options.automatic_moi_inline_sgpr_spill ||
-         kernel_options.automatic_moi_record_replay_sgpr_spill) &&
-        !kernel.uses_dynamic_stack.value_or(false);
+    const bool fixed_lane_entry_scalar_reservoir = kernel_options.moi_exec_save_sgpr &&
+                                                   (kernel_options.has_moi_scalar_spill()) &&
+                                                   !kernel.uses_dynamic_stack.value_or(false);
     std::optional<uint16_t> entry_scalar_reservoir_vgpr;
     uint16_t prologue_spill_vgpr_count = prologue_temporary_vgpr_count;
     if (fixed_lane_entry_scalar_reservoir) {
@@ -2646,7 +2644,7 @@ void try_apply_owner_epoch_prologue_patch(
     // compact and branch-only routers and for every admitted architecture.
     const bool needs_record_replay_runtime_scalar_backup =
         kernel_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        kernel_options.automatic_moi_record_replay_sgpr_spill &&
+        kernel_options.has_compact_moi_scalar_spill() &&
         kernel_options.moi_runtime_sample_stride > 1u;
     const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
                                                 needs_dynamic_stack_scalar_backup ||
@@ -2657,8 +2655,7 @@ void try_apply_owner_epoch_prologue_patch(
         kernel_options.moi_owner_sgpr.has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
       const bool entry_backup_arch_supported = consan_is_capability_arch(arch);
-      const bool has_scalar_spill_contract = kernel_options.automatic_moi_inline_sgpr_spill ||
-                                             kernel_options.automatic_moi_record_replay_sgpr_spill;
+      const bool has_scalar_spill_contract = kernel_options.has_moi_scalar_spill();
       if (!entry_backup_arch_supported || !kernel_options.moi_exec_save_sgpr ||
           !has_scalar_spill_contract ||
           (needs_dynamic_stack_scalar_backup && !kernel_options.moi_dynamic_stack_spill)) {

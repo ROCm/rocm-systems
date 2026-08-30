@@ -619,7 +619,7 @@ void try_apply_first_light_access_record_patch(
         result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        private_layout, candidate_options.automatic_moi_record_replay_sgpr_spill, result.warnings);
+        private_layout, candidate_options.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe) {
       if (needs_vgpr_spill) {
         result.warnings.emplace_back(
@@ -635,8 +635,8 @@ void try_apply_first_light_access_record_patch(
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
     }
-    const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
-        candidate_options.automatic_moi_record_replay_sgpr_spill);
+    const uint32_t candidate_entry_island_words =
+        moi_record_replay_entry_island_words(candidate_options.has_compact_moi_scalar_spill());
     const auto &access_ranges = candidate.ranges;
     if (access_ranges.empty()) {
       result.warnings.emplace_back(
@@ -838,10 +838,10 @@ void try_apply_first_light_access_record_patch(
                                        ? displaced_original_size
                                        : candidate_entry_island_words * sizeof(uint32_t));
       }
-      const bool dense_runtime_workgroup_gate =
-          use_dense_call && options.moi_runtime_sample_stride > 1u &&
-          !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-          has_probe_entry_runtime_workgroup_gate;
+      const bool dense_runtime_workgroup_gate = use_dense_call &&
+                                                options.moi_runtime_sample_stride > 1u &&
+                                                !candidate_options.has_compact_moi_scalar_spill() &&
+                                                has_probe_entry_runtime_workgroup_gate;
       const uint64_t patch_bytes =
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
           spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes +
@@ -849,7 +849,7 @@ void try_apply_first_light_access_record_patch(
       if (!branch_only_scalar_spill) {
         const uint64_t return_words =
             use_dense_call ? (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
-                                      candidate_options.automatic_moi_record_replay_sgpr_spill
+                                      candidate_options.has_compact_moi_scalar_spill()
                                   ? 7u
                                   : 1u)
                            : 6u;
@@ -908,14 +908,12 @@ void try_apply_first_light_access_record_patch(
                                                                   : candidate_entry_island_words;
     planned.entry_island_at_anchor = entry_island_at_anchor;
     planned.dense_call_anchor = use_dense_call;
-    planned.runtime_workgroup_gate = uses_reserved_entry_relay &&
-                                     options.moi_runtime_sample_stride > 1u &&
-                                     !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-                                     has_probe_entry_runtime_workgroup_gate;
+    planned.runtime_workgroup_gate =
+        uses_reserved_entry_relay && options.moi_runtime_sample_stride > 1u &&
+        !candidate_options.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
     planned.dense_runtime_workgroup_gate =
         use_dense_call && options.moi_runtime_sample_stride > 1u &&
-        !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-        has_probe_entry_runtime_workgroup_gate;
+        !candidate_options.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
     if (planned.runtime_workgroup_gate || planned.dense_runtime_workgroup_gate)
       planned.runtime_workgroup_sources = runtime_workgroup_sources;
     if (use_dense_call)
@@ -1379,7 +1377,7 @@ void try_apply_first_light_access_record_patch(
         }
         if (planned_patch.dense_call_anchor) {
           if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
-              candidate_options.automatic_moi_record_replay_sgpr_spill) {
+              candidate_options.has_compact_moi_scalar_spill()) {
             const MoiSpecialStateSgprs special_state =
                 *moi_special_state_sgprs(candidate_options, candidate_options);
             const size_t return_begin = cave_words->size();

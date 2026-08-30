@@ -57,7 +57,7 @@
     island_capacity_words = kMoiInlineShadowIndirectIslandWords;
     relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords;
   } else {
-    const bool spill_backed = point.automatic_moi_record_replay_sgpr_spill;
+    const bool spill_backed = point.has_compact_moi_scalar_spill();
     if (!point.moi_exec_save_sgpr ||
         (spill_backed &&
          (!point.moi_inline_indirect_pc_sgpr || !point.moi_record_replay_dispatch_key_sgpr ||

@@ -196,7 +196,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
       }
     }
-    if (candidate_options.automatic_moi_inline_sgpr_spill) {
+    if (candidate_options.has_inline_moi_scalar_spill()) {
       if (!candidate_options.moi_exec_save_sgpr) {
         result.warnings.emplace_back(
             "ConSan MOI inline atomic spill-backed scalar state has no SGPR window in " +
@@ -218,7 +218,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        std::move(private_layout), candidate_options.automatic_moi_inline_sgpr_spill,
+        std::move(private_layout), candidate_options.has_inline_moi_scalar_spill(),
         result.warnings);
     if (!probe)
       continue;

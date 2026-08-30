@@ -319,7 +319,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     // cannot borrow that guest window. Keep the semantically equivalent
     // external exact-shadow table for every spill-backed component, whether
     // or not it also found a fresh visible-evidence latch.
-    const bool spill_backed_scalar_state = candidate_options.automatic_moi_inline_sgpr_spill;
+    const bool spill_backed_scalar_state = candidate_options.has_inline_moi_scalar_spill();
     if (!requires_wave_partitioned_exact_shadow && !has_unspilled_component_override &&
         !spill_backed_scalar_state) {
       uint16_t next_compact_token = 0u;
@@ -514,7 +514,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         continue;
     }
     std::optional<SgprSpillSequence> scalar_spill;
-    if (candidate_options.automatic_moi_inline_sgpr_spill) {
+    if (candidate_options.has_inline_moi_scalar_spill()) {
       scalar_spill = build_moi_sgpr_spill_sequence(
           result.program_inventory, *resources,
           static_cast<const ConSanRequest &>(candidate_options),
@@ -1189,7 +1189,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
-                candidate_options.automatic_moi_inline_sgpr_spill
+                candidate_options.has_inline_moi_scalar_spill()
                     ? *candidate_options.moi_inline_call_return_sgpr
                     : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));

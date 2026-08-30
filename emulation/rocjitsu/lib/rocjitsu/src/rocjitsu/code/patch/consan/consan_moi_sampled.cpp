@@ -130,7 +130,7 @@ std::optional<uint16_t> moi_sampled_access_return_scc_sgpr(const ConSanRequest &
                                                            const ConSanMoiOperatingPoint &point) {
   if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
     return std::nullopt;
-  if (point.automatic_moi_record_replay_sgpr_spill) {
+  if (point.has_compact_moi_scalar_spill()) {
     const auto indirect = moi_indirect_jump_sgprs(request, point);
     return indirect ? std::optional<uint16_t>(indirect->scc_save_sgpr) : std::nullopt;
   }
@@ -256,7 +256,7 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
   const std::optional<consan_detail::MoiSpecialStateSgprs> special_state =
       publication ? std::optional{consan_detail::MoiSpecialStateSgprs{
                         .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-                        .scc_save_sgpr = point.automatic_moi_record_replay_sgpr_spill &&
+                        .scc_save_sgpr = point.has_compact_moi_scalar_spill() &&
                                                  point.moi_inline_indirect_scc_sgpr
                                              ? *point.moi_inline_indirect_scc_sgpr
                                              : publication->publication_exec_save_sgpr,

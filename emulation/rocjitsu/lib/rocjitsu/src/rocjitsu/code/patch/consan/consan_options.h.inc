@@ -780,6 +780,12 @@ struct ConSanOptions : ConSanRequest,
 /// independently assembled subsets of the accepted allocation. Site-local
 /// lowering may copy the operating point and bind one owner assignment without
 /// changing the accepted code-object-wide value.
+enum class ConSanMoiScalarSpillLayout : uint8_t {
+  None,
+  Inline,
+  Compact,
+};
+
 struct ConSanMoiOperatingPoint {
   /// Placement's effective owner/epoch-prologue decision. An empty value
   /// preserves the immutable request; a concrete value records a solver-owned
@@ -812,13 +818,10 @@ struct ConSanMoiOperatingPoint {
   /// retained, while resource planning excludes only owner groups whose guest
   /// scalar allocation reaches that window.
   bool automatic_moi_partial_exec_save_sgprs = false;
-  /// Internal gfx1250 Inline fallback: the transient scalar window is saved
-  /// to per-lane private memory around every access probe because no complete
-  /// liveness-dead window exists at all access sites.
-  bool automatic_moi_inline_sgpr_spill = false;
-  /// Internal Record/Replay fallback: EXEC/VCC destinations are preserved in
-  /// private memory while dense routing uses separately proven-dead scalars.
-  bool automatic_moi_record_replay_sgpr_spill = false;
+  /// Spill-backed scalar layout selected after no complete liveness-dead
+  /// transient window exists. Inline and compact Record/Replay-style layouts
+  /// have different ABI fields and are mutually exclusive.
+  ConSanMoiScalarSpillLayout automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
   /// Internal operating-point marker for RDNA-family and CDNA4 Record/Replay objects
   /// whose barrier inventory can require the relocated dense router. Such
   /// objects reserve a dispatch key and call-return pair in addition to the
@@ -879,6 +882,16 @@ struct ConSanMoiOperatingPoint {
   std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
   /// Per-owner-component transient scalar overrides selected by placement.
   std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
+
+  [[nodiscard]] bool has_moi_scalar_spill() const {
+    return automatic_moi_scalar_spill_layout != ConSanMoiScalarSpillLayout::None;
+  }
+  [[nodiscard]] bool has_inline_moi_scalar_spill() const {
+    return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Inline;
+  }
+  [[nodiscard]] bool has_compact_moi_scalar_spill() const {
+    return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Compact;
+  }
 
   /// Visit every fixed-width auxiliary scalar reservation represented by this
   /// operating point. EXEC, owner, dispatch, and persistent state have

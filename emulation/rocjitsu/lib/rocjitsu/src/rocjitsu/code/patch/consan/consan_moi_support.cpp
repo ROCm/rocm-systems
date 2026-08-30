@@ -470,7 +470,7 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
           !request.moi_dynamic_access_records && resources.moi_report_layout &&
           resources.moi_report_layout->record_replay_dispatch_token_capacity != 0u,
       .runtime_sample_stride = request.moi_runtime_sample_stride,
-      .scalar_spill = operating_point.automatic_moi_record_replay_sgpr_spill,
+      .scalar_spill = operating_point.has_compact_moi_scalar_spill(),
       .dynamic_stack_spill = operating_point.moi_dynamic_stack_spill,
       .inline_access_present = operating_point.moi_inline_access_present,
       .dense_record_barrier_router = operating_point.moi_record_replay_dense_barrier_router,

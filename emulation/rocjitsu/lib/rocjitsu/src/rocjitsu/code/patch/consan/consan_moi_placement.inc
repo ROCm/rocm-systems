@@ -518,7 +518,7 @@ moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
                           })) {
     return true;
   }
-  if (!point.automatic_moi_inline_sgpr_spill && !point.automatic_moi_record_replay_sgpr_spill) {
+  if (!point.has_moi_scalar_spill()) {
     return false;
   }
   return std::ranges::any_of(site_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -553,7 +553,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
            (request.moi_engine == ConSanMoiEngine::InlineShadow &&
-            point.automatic_moi_inline_sgpr_spill &&
+            point.has_inline_moi_scalar_spill() &&
             ((point.moi_inline_indirect_pc_sgpr && point.moi_inline_indirect_scc_sgpr &&
               point.moi_inline_dispatch_key_sgpr && point.moi_inline_call_return_sgpr) ||
              point.moi_inline_branch_only_scalar_spill ||
@@ -573,18 +573,20 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   point.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   point.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;
   if (request.moi_engine == ConSanMoiEngine::InlineShadow) {
-    point.automatic_moi_inline_sgpr_spill = selected->spill_backed;
-    point.automatic_moi_record_replay_sgpr_spill = false;
+    point.automatic_moi_scalar_spill_layout = selected->spill_backed
+                                                  ? ConSanMoiScalarSpillLayout::Inline
+                                                  : ConSanMoiScalarSpillLayout::None;
     point.moi_inline_dispatch_key_sgpr = selected->dispatch_key_sgpr;
     point.moi_inline_call_return_sgpr = selected->call_return_sgpr;
     point.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
     point.moi_inline_branch_only_scalar_spill = selected->branch_only_scalar_spill;
     point.moi_inline_dynamic_stack_borrowed_sgpr = selected->dynamic_stack_borrowed_sgpr;
   } else {
-    point.automatic_moi_inline_sgpr_spill = false;
+    point.automatic_moi_scalar_spill_layout = selected->spill_backed
+                                                  ? ConSanMoiScalarSpillLayout::Compact
+                                                  : ConSanMoiScalarSpillLayout::None;
     point.moi_inline_branch_only_scalar_spill = false;
     point.moi_inline_dynamic_stack_borrowed_sgpr.reset();
-    point.automatic_moi_record_replay_sgpr_spill = selected->spill_backed;
     point.moi_record_replay_dispatch_key_sgpr = selected->dispatch_key_sgpr;
     point.moi_record_replay_call_return_sgpr = selected->call_return_sgpr;
   }
@@ -1543,7 +1545,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
   if (!indirect_jump)
     return std::nullopt;
 
-  if (point.automatic_moi_inline_sgpr_spill) {
+  if (point.has_inline_moi_scalar_spill()) {
     if (!point.moi_inline_dispatch_key_sgpr)
       return std::nullopt;
     if (consan_arch_has_s_call_i64(arch) && !point.moi_inline_call_return_sgpr)
@@ -1579,7 +1581,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
   // emitted router, not a guest register window assumed to be preserved.
   // Spill-backed layouts carry their allocated registers explicitly. The
   // fixed-layout offsets below are the matching emission ABI fields.
-  if (point.automatic_moi_record_replay_sgpr_spill) {
+  if (point.has_compact_moi_scalar_spill()) {
     if (!point.moi_inline_indirect_pc_sgpr || !point.moi_inline_indirect_scc_sgpr ||
         !point.moi_record_replay_dispatch_key_sgpr || !point.moi_record_replay_call_return_sgpr) {
       return {};
@@ -1589,7 +1591,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
             {*point.moi_record_replay_dispatch_key_sgpr, 1u},
             {*point.moi_record_replay_call_return_sgpr, 2u}};
   }
-  if (point.automatic_moi_inline_sgpr_spill) {
+  if (point.has_inline_moi_scalar_spill()) {
     if (scalar_state == MoiRelocatableHostScalarState::BarrierRouter) {
       if (!point.moi_inline_indirect_pc_sgpr || !point.moi_inline_indirect_scc_sgpr)
         return {};
@@ -2068,7 +2070,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
         continue;
       }
       entry_island_words =
-          moi_record_replay_entry_island_words(group_point.automatic_moi_record_replay_sgpr_spill);
+          moi_record_replay_entry_island_words(group_point.has_compact_moi_scalar_spill());
     }
 
     const bool has_dense_neighbors =
@@ -2325,8 +2327,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
         return assignment != nullptr && assignment->spill_backed;
       });
   const bool fixed_lane_scalar_reservoir =
-      ((point.moi_exec_save_sgpr &&
-        (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill)) ||
+      ((point.moi_exec_save_sgpr && point.has_moi_scalar_spill()) ||
        owners_have_spill_backed_scalar_state) &&
       std::ranges::none_of(owners, [](const MoiKernelResourceContext *owner) {
         return owner->kernel->uses_dynamic_stack.value_or(false);
@@ -4279,7 +4280,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
         dispatch_key = scc;
       if (pc && call_return && dispatch_key && scc) {
         options.moi_exec_save_sgpr = spill_base;
-        options.automatic_moi_inline_sgpr_spill = true;
+        options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
         options.moi_inline_visible_evidence_sgpr = visible;
         options.moi_inline_indirect_pc_sgpr = pc;
         options.moi_inline_call_return_sgpr = call_return;
@@ -4931,7 +4932,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   const bool branch_only_scalar_invalid =
       options.moi_inline_branch_only_scalar_spill &&
       (request.moi_engine != ConSanMoiEngine::InlineShadow ||
-       !options.automatic_moi_inline_sgpr_spill || !consan_uses_gfx12_encoding(arch) ||
+       !options.has_inline_moi_scalar_spill() || !consan_uses_gfx12_encoding(arch) ||
        !options.moi_exec_save_sgpr || options.moi_inline_indirect_pc_sgpr ||
        options.moi_inline_indirect_scc_sgpr || options.moi_inline_dispatch_key_sgpr ||
        options.moi_inline_call_return_sgpr);
@@ -4954,10 +4955,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
     return request.moi_engine != ConSanMoiEngine::InlineShadow ||
-           !options.automatic_moi_inline_sgpr_spill ||
-           !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
-           !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
-           moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
+           !options.has_inline_moi_scalar_spill() || !options.moi_inline_branch_only_scalar_spill ||
+           !options.moi_dynamic_stack_spill || !consan_uses_gfx12_encoding(arch) ||
+           base % 2u != 0u || moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            (options.moi_exec_save_sgpr &&
             range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
            options.moi_inline_indirect_pc_sgpr || options.moi_inline_indirect_scc_sgpr ||

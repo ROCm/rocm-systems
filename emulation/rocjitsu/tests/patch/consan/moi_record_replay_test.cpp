@@ -2750,7 +2750,7 @@ TEST(ConSanMoi, Cdna4DynamicStackRejectsRecordReplayScalarSpillWithoutBootstrap)
                                  /*uses_dynamic_stack=*/true);
   MoiOptions options = moi_options();
   options.test_force_vgpr_spill = true;
-  options.automatic_moi_record_replay_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -5496,7 +5496,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_epoch_vgpr = 41u;
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
-    options.automatic_moi_record_replay_sgpr_spill = true;
+    options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
     options.moi_inline_indirect_pc_sgpr = 70u;
     options.moi_inline_indirect_scc_sgpr = 72u;
     options.moi_dispatch_id_sgpr = 60u;
@@ -5537,7 +5537,7 @@ TEST(ConSanMoi, IncompleteRecordReplaySpillStateFailsBeforeEncodingIndirectJump)
   options.moi_epoch_vgpr = 41u;
   options.moi_init_owner_epoch = true;
   options.moi_exec_save_sgpr = 80u;
-  options.automatic_moi_record_replay_sgpr_spill = true;
+  options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   options.moi_dispatch_id_sgpr = 60u;
   options.moi_persistent_sgprs.record_replay_workgroup = {.x = 50u, .y = 51u, .z = 52u};
   options.moi_runtime_sample_stride = 65'536u;

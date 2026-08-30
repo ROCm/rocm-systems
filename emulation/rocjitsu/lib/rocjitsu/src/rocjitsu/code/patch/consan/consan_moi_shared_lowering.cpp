@@ -377,17 +377,14 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     else
       has_fixed_owner = true;
   }
-  const bool needs_dynamic_scalar_frame =
-      has_dynamic_owner &&
-      (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill);
+  const bool needs_dynamic_scalar_frame = has_dynamic_owner && (point.has_moi_scalar_spill());
   if (resources.source != ConSanRegisterAllocationSource::SpillRequired &&
       !needs_dynamic_scalar_frame) {
     return std::nullopt;
   }
 
   const bool fixed_lane_scalar_reservoir =
-      !has_dynamic_owner && point.moi_exec_save_sgpr &&
-      (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill);
+      !has_dynamic_owner && point.moi_exec_save_sgpr && (point.has_moi_scalar_spill());
   const uint16_t spill_vgpr_count =
       static_cast<uint16_t>(resources.count + static_cast<uint16_t>(fixed_lane_scalar_reservoir));
   if (spill_vgpr_count < resources.count ||
@@ -418,8 +415,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no EXEC-save scalar window");
       return std::nullopt;
     }
-    const bool spill_backed_scalar_window =
-        point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill;
+    const bool spill_backed_scalar_window = point.has_moi_scalar_spill();
     const auto special_state = moi_special_state_sgprs(request, point);
     const auto indirect_state = moi_indirect_jump_sgprs(request, point);
     if (!special_state || (spill_backed_scalar_window && !indirect_state)) {

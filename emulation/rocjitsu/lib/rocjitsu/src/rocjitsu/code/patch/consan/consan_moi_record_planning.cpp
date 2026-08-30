@@ -66,7 +66,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     return std::nullopt;
   }
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
-  if (request.moi_runtime_sample_stride > 1u && !point.automatic_moi_record_replay_sgpr_spill) {
+  if (request.moi_runtime_sample_stride > 1u && !point.has_compact_moi_scalar_spill()) {
     runtime_workgroup_gate =
         plan_moi_runtime_workgroup_gate(request, bound_resources, point, *workgroup_sources, arch);
   }
@@ -80,7 +80,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
-      .automatic_moi_record_replay_sgpr_spill = point.automatic_moi_record_replay_sgpr_spill,
+      .automatic_moi_record_replay_sgpr_spill = point.has_compact_moi_scalar_spill(),
       .moi_record_replay_dispatch_key_sgpr = point.moi_record_replay_dispatch_key_sgpr,
       .moi_record_replay_call_return_sgpr = point.moi_record_replay_call_return_sgpr,
       .workgroup_sources = *workgroup_sources,
@@ -173,8 +173,8 @@ plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &in
   }
   auto probe = plan_moi_probe_resources(inventory, resources, request, bound_resources, event_point,
                                         spill_managers, arch, std::move(private_layout),
-                                        event_point.automatic_moi_record_replay_sgpr_spill,
-                                        warnings, active_private_segment_size);
+                                        event_point.has_compact_moi_scalar_spill(), warnings,
+                                        active_private_segment_size);
   if (!probe)
     return std::nullopt;
 

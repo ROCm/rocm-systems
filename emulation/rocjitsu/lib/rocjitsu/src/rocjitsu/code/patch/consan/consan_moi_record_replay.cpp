@@ -202,10 +202,9 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const ConSanRequest &,
     const uint16_t base = *point.moi_exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
-        .scc_save_sgpr =
-            point.automatic_moi_record_replay_sgpr_spill && point.moi_inline_indirect_scc_sgpr
-                ? *point.moi_inline_indirect_scc_sgpr
-                : static_cast<uint16_t>(base + 4u),
+        .scc_save_sgpr = point.has_compact_moi_scalar_spill() && point.moi_inline_indirect_scc_sgpr
+                             ? *point.moi_inline_indirect_scc_sgpr
+                             : static_cast<uint16_t>(base + 4u),
     };
   }
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);

@@ -140,7 +140,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 30u);
   EXPECT_TRUE(plan.access_router_uses_dense_abi);
 
-  point.automatic_moi_inline_sgpr_spill = true;
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   point.moi_inline_indirect_pc_sgpr = 40u;
   point.moi_inline_indirect_scc_sgpr = 42u;
   plan = plan_moi_scalar_abi(request, point);

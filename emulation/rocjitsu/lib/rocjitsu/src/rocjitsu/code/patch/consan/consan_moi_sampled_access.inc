@@ -374,7 +374,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        private_layout, candidate_options.automatic_moi_record_replay_sgpr_spill, result.warnings);
+        private_layout, candidate_options.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     auto &spill = probe->spill;
@@ -393,8 +393,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
     }
-    const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
-        candidate_options.automatic_moi_record_replay_sgpr_spill);
+    const uint32_t candidate_entry_island_words =
+        moi_record_replay_entry_island_words(candidate_options.has_compact_moi_scalar_spill());
     std::vector<std::string> candidate_errors;
     MoiAccessEntryIslandPlan entry_plan;
     entry_plan.original_size = candidate.size();
@@ -429,13 +429,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     const bool has_private_workgroup_sources =
         candidate_options.moi_record_replay_workgroup_private_offsets.complete();
-    const bool runtime_fast_gate = !candidate_options.automatic_moi_record_replay_sgpr_spill &&
+    const bool runtime_fast_gate = !candidate_options.has_compact_moi_scalar_spill() &&
                                    use_indirect_appended && !use_dense_call &&
                                    !uses_local_entry_island && !has_private_workgroup_sources &&
                                    options.moi_runtime_sample_stride > 1u;
-    const bool dense_runtime_fast_gate =
-        !candidate_options.automatic_moi_record_replay_sgpr_spill && use_dense_call &&
-        !has_private_workgroup_sources && options.moi_runtime_sample_stride > 1u;
+    const bool dense_runtime_fast_gate = !candidate_options.has_compact_moi_scalar_spill() &&
+                                         use_dense_call && !has_private_workgroup_sources &&
+                                         options.moi_runtime_sample_stride > 1u;
     const bool runtime_workgroup_gate_in_body =
         options.moi_runtime_sample_stride > 1u && !runtime_fast_gate && !dense_runtime_fast_gate;
     ConSanMoiCandidate lowered_candidate = candidate;
@@ -568,7 +568,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             .return_target = candidate.anchor() + displaced_original_size,
         };
         const uint64_t return_words =
-            use_dense_call && candidate_options.automatic_moi_record_replay_sgpr_spill
+            use_dense_call && candidate_options.has_compact_moi_scalar_spill()
                 ? kIndirectIslandWords
                 : 6u;
         indirect_body_cursor += patch_bytes + return_words * sizeof(uint32_t);
@@ -970,12 +970,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
                   return_jump_sgprs->pc_sgpr, *return_scc_sgpr,
-                  /*capture_scc=*/candidate_options.automatic_moi_record_replay_sgpr_spill, arch)) {
+                  /*capture_scc=*/candidate_options.has_compact_moi_scalar_spill(), arch)) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe could not encode its dense long return");
             return;
           }
-          if (candidate_options.automatic_moi_record_replay_sgpr_spill)
+          if (candidate_options.has_compact_moi_scalar_spill())
             while (cave_words->size() < return_begin + kIndirectIslandWords)
               cave_words->push_back(build_s_nop(0, arch));
         } else if (planned_patch.entry_island_offset) {

@@ -985,7 +985,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             continue;
         }
         std::optional<SgprSpillSequence> scalar_spill;
-        if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+        if (candidate_options.has_compact_moi_scalar_spill()) {
           scalar_spill = build_moi_sgpr_spill_sequence(
               result.program_inventory, *resources,
               static_cast<const ConSanRequest &>(candidate_options),
@@ -1110,11 +1110,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         static_cast<const ConSanRequest &>(candidate_options),
         static_cast<const BoundRuntimeResources &>(candidate_options),
         static_cast<const ConSanMoiOperatingPoint &>(candidate_options));
-    const bool needs_record_replay_scalar_spill =
-        candidate_options.automatic_moi_record_replay_sgpr_spill;
+    const bool needs_record_replay_scalar_spill = candidate_options.has_compact_moi_scalar_spill();
     const bool needs_scalar_spill =
         needs_record_replay_scalar_spill ||
-        (scratch_count > 1u && candidate_options.automatic_moi_inline_sgpr_spill);
+        (scratch_count > 1u && candidate_options.has_inline_moi_scalar_spill());
     if (scratch_count > 1u || needs_scalar_spill) {
       if (plan == nullptr) {
         result.warnings.emplace_back(
@@ -1392,11 +1391,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                           : local_indirect_allocator.claim_reachable(site.text_offset);
       if (!island_offset) {
         const bool has_spill_backed_inline_router =
-            candidate_options.automatic_moi_inline_sgpr_spill &&
+            candidate_options.has_inline_moi_scalar_spill() &&
             moi_inline_dense_router_scalar_abi(candidate_options, candidate_options, arch)
                 .has_value();
         const bool has_spill_backed_record_replay_router =
-            candidate_options.automatic_moi_record_replay_sgpr_spill &&
+            candidate_options.has_compact_moi_scalar_spill() &&
             moi_indirect_jump_sgprs(candidate_options, candidate_options) &&
             candidate_options.moi_record_replay_dispatch_key_sgpr &&
             candidate_options.moi_record_replay_call_return_sgpr;
@@ -1824,9 +1823,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       const auto inline_dense_abi =
           moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
-      const bool spill_backed_inline_router = group_options.automatic_moi_inline_sgpr_spill;
-      const bool spill_backed_record_replay_router =
-          group_options.automatic_moi_record_replay_sgpr_spill;
+      const bool spill_backed_inline_router = group_options.has_inline_moi_scalar_spill();
+      const bool spill_backed_record_replay_router = group_options.has_compact_moi_scalar_spill();
       const bool spill_backed_router =
           spill_backed_inline_router || spill_backed_record_replay_router;
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
@@ -2199,7 +2197,7 @@ void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
   if (!options.moi_track_barriers)
     return;
   MoiOptions barrier_options = options;
-  if (barrier_options.automatic_moi_inline_sgpr_spill)
+  if (barrier_options.has_inline_moi_scalar_spill())
     barrier_options.moi_exec_save_sgpr.reset();
   try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state, {},
                                               result);
