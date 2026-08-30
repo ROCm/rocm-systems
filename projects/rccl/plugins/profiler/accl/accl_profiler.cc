@@ -10,6 +10,7 @@
 #include "accl_profiler.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -58,6 +59,9 @@ static void acclCtxUnref(struct acclCommContext* ctx) {
   pthread_mutex_unlock(&ctx->outputMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     pthread_mutex_destroy(&ctx->collPool[i].mutex);
+  }
+  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+    pthread_mutex_destroy(&ctx->proxyOpPool[i].mutex);
   }
   pthread_mutex_destroy(&ctx->outputMutex);
   pthread_mutex_destroy(&ctx->collPoolMutex);
@@ -112,8 +116,16 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
     if (!ctx->proxyOpPoolUsed[i]) {
       ctx->proxyOpPoolUsed[i] = 1;
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-      memset(&ctx->proxyOpPool[i], 0, sizeof(ctx->proxyOpPool[i]));
-      pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
+      // Clear the slot around the mutex, never through it. The mutex is created
+      // once in acclPluginInit and outlives every tenancy; a stale ProxyStep
+      // stop can be inside pthread_mutex_lock on it at this instant, since that
+      // path does not take proxyOpPoolMutex, so writing its bytes here — by
+      // memset or by a save/restore struct copy — is a data race either way.
+      struct acclProxyOpInfo* slot = &ctx->proxyOpPool[i];
+      const size_t muOff = offsetof(struct acclProxyOpInfo, mutex);
+      const size_t muEnd = muOff + sizeof(slot->mutex);
+      memset(slot, 0, muOff);
+      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
       pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
       return &ctx->proxyOpPool[i];
     }
@@ -130,7 +142,10 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
 
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op) {
   if (!op) return;
-  pthread_mutex_destroy(&op->mutex);
+  // The mutex is not destroyed here. A ProxyStep stop still locks it after the
+  // op's slot has been released, so destroying per free leaves that path locking
+  // a destroyed mutex once the slot is reissued. It is destroyed once, in
+  // acclCtxUnref, when the last context reference drops.
   pthread_mutex_lock(&ctx->proxyOpPoolMutex);
   int idx = (int)(op - ctx->proxyOpPool);
   if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
@@ -439,6 +454,9 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   ctx->refCount = 1;
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+  }
+  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+    pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
   }
   ctx->commHash = commHash;
   ctx->rank = rank;
