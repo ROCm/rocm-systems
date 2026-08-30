@@ -23,7 +23,7 @@ ConSanVectorMemoryDecode decode_gfx1100_global_memory(std::span<const uint8_t> i
 bool decode_gfx1100_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                 std::span<const uint8_t> instruction) {
   return decode_pregfx12_atomic_site<rdna3::FlatMachineInst, rdna3::FlatGlobalMachineInst>(
-      site, mnemonic, instruction);
+      site, mnemonic, instruction, kRdna3GlobalNoSaddrEncoding);
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail

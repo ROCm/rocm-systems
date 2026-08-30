@@ -81,7 +81,8 @@ ConSanVectorMemoryDecode decode_pregfx12_vector_memory(std::span<const uint8_t> 
 }
 
 template <typename Raw>
-void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool global) {
+void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool global,
+                               uint32_t null_saddr) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
@@ -98,21 +99,26 @@ void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool glob
     site.returns_old_value = raw.sc0 != 0u;
   }
   site.raw_scope = 2u;
+  if (global) {
+    site.saddr_sgpr = raw.saddr == null_saddr
+                          ? std::nullopt
+                          : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr));
+  }
 }
 
 template <typename FlatRaw, typename GlobalRaw>
 bool decode_pregfx12_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
-                                 std::span<const uint8_t> instruction) {
+                                 std::span<const uint8_t> instruction, uint32_t null_saddr) {
   if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
     FlatRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_pregfx12_atomic_site(site, raw, false);
+    fill_pregfx12_atomic_site(site, raw, false, null_saddr);
     return true;
   }
   if (mnemonic.starts_with("global_atomic") && instruction.size() >= sizeof(GlobalRaw)) {
     GlobalRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_pregfx12_atomic_site(site, raw, true);
+    fill_pregfx12_atomic_site(site, raw, true, null_saddr);
     return true;
   }
   return false;

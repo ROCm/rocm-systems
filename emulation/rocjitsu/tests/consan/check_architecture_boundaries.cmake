@@ -80,6 +80,11 @@ _consan_assert_no_match(
     "isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_"
     "access classification must consume normalized inventory and the typed target profile"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_analysis.inc"
+    "ROCJITSU_CODE_ARCH_"
+    "program analysis must consume target-normalized decodes and profile facts"
+)
 
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.

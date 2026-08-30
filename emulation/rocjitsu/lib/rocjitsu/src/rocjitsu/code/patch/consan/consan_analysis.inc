@@ -1229,8 +1229,8 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.instruction_size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
-  if ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
-      mnemonic.starts_with("flat_atomic") && site.decoded_width_bits == 0u) {
+  if (!consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("flat_atomic") &&
+      site.decoded_width_bits == 0u) {
     site.decoded_width_bits = 32u;
   }
   site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
@@ -1410,7 +1410,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+  if (!consan_uses_gfx12_encoding(arch) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       site.width_bits == 0u) {
     site.width_bits = 32u;
@@ -1435,22 +1435,6 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   if (!site.dst_vgpr && site.returns_old_value.value_or(false) && site.raw_vdst &&
       *site.raw_vdst <= std::numeric_limits<uint16_t>::max()) {
     site.dst_vgpr = static_cast<uint16_t>(*site.raw_vdst);
-  }
-
-  // Some decoder revisions expose VGLOBAL's scalar address only through the
-  // raw instruction field. Normalize that equivalent register selector so
-  // downstream address consumers do not depend on operand-list presentation.
-  const bool cdna_global_no_saddr = (consan_uses_gfx9_cdna_encoding(arch)) &&
-                                    mnemonic.starts_with("global_atomic") && site.raw_saddr &&
-                                    *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
-  const bool rdna3_global_no_saddr = arch == ROCJITSU_CODE_ARCH_RDNA3 &&
-                                     mnemonic.starts_with("global_atomic") && site.raw_saddr &&
-                                     *site.raw_saddr == kRdna3GlobalNoSaddrEncoding;
-  if (cdna_global_no_saddr || rdna3_global_no_saddr) {
-    site.saddr_sgpr.reset();
-  } else if (mnemonic.starts_with("global_atomic") && !site.saddr_sgpr && site.raw_saddr &&
-             *site.raw_saddr <= std::numeric_limits<uint16_t>::max()) {
-    site.saddr_sgpr = static_cast<uint16_t>(*site.raw_saddr);
   }
 
   site.mnemonic = std::string(mnemonic);
