@@ -508,6 +508,29 @@ rules, while a mode-owned product states what that mode requests, supplies, or
 implements. Common code should not gradually accumulate a complete handwritten
 branch for each mode at every stage.
 
+Locality is therefore an ownership rule, not a self-containment rule. A mode
+package should depend on shared infrastructure instead of carrying private
+copies of it. Moving equivalent access classification, routing, register
+search, report handling, or validation logic into several mode directories
+would make navigation look local while restoring `O(N)` duplication and future
+semantic drift. That outcome is a failure of the refactoring even if every
+duplicated copy has an unambiguous mode-prefixed filename.
+
+The desired factoring is compositional:
+
+- one shared implementation owns each genuinely common semantic operation or
+  mechanism;
+- each mode locally owns only its distinct policy, parameters, selected
+  strategies, evidence contract, and irreducibly mode-specific behavior; and
+- a mode assembles common mechanisms through narrow typed contracts rather than
+  copying them or asking a central coordinator to reproduce the mode's entire
+  implementation in a switch arm.
+
+When two or more modes need nearly the same code, the default response should
+be to identify and name the shared operation, not to accept parallel mode-owned
+copies. Exact-subset ownership is appropriate only when the commonality is real
+and its contract excludes the other modes for a semantic reason.
+
 Mode locality is inherently less one-dimensional than architecture locality.
 A mode has behavior across static policy, resource solving, device emission,
 runtime evidence, host analysis, and final validation. The design must decide
@@ -546,7 +569,7 @@ expected change should be approximately:
 - add one mode package, or one clearly bounded set of mode-owned facets;
 - add one narrow registration/composition entry;
 - add mode-focused host, emulation-matrix, and physical tests as applicable;
-  and
+- reuse shared mechanisms without copying their implementations; and
 - make no edits to concrete architecture packages.
 
 Common stage code may need a deliberately extensible interface, but should not
@@ -597,6 +620,8 @@ It is expected to grow substantially.
 - What is the essential semantic contract of an engine?
 - Which behavior is truly common to all modes, to exact subsets, or only to
   one mode?
+- What checks or measurements will detect equivalent implementations copied
+  into separate mode packages instead of factored behind one shared contract?
 - Can engine-owned demand/planning products replace deep mode switches in
   coordinators and the resource solver?
 - Are Record/Replay, Sampled, and InlineShadow best understood as three
@@ -723,8 +748,9 @@ already carry forward:
    explicitly named family owners rather than being duplicated.
 9. Mode-specific behavior should move toward physically local, skippable
    packages or consistently named facets, while genuine cross-mode mechanisms
-   remain in explicitly named mechanism or exact-subset owners rather than
-   deep common-code switches.
+   retain one shared implementation in explicitly named mechanism or
+   exact-subset owners rather than being duplicated or hidden in deep
+   common-code switches.
 
 ## 14. Sections intentionally left open
 
