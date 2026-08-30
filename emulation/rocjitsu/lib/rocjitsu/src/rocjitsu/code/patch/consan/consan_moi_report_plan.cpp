@@ -8,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <limits>
+#include <utility>
 
 namespace rocjitsu {
 namespace {
@@ -314,6 +315,23 @@ namespace {
     return abi_plan.reason == ConSanMoiAutoReportPlanReason::None && abi_plan.layout.valid &&
            abi_plan.layout.required_bytes == abi_plan.required_bytes;
   return abi_plan.reason != ConSanMoiAutoReportPlanReason::None && !abi_plan.layout.valid;
+}
+
+template <typename Requirements>
+void publish_moi_evidence_requirements(Requirements &requirements,
+                                       ConSanMoiAutoReportInventory inventory,
+                                       uint64_t caller_ceiling_bytes) {
+  requirements.sizing_inventory = std::move(inventory);
+  requirements.abi_plan =
+      plan_consan_moi_auto_report(requirements.sizing_inventory, caller_ceiling_bytes);
+  requirements.runtime_requirements = {
+      .host_device_visible_memory = true,
+      .host_device_coherent_memory = true,
+      .device_atomic_publication = true,
+      .minimum_report_allocation_bytes = requirements.abi_plan.required_bytes,
+      .executable_binding = true,
+  };
+  requirements.reason = ConSanEvidenceRequirementReason::None;
 }
 
 void add_saturating(uint64_t &count, uint64_t increment) {
@@ -651,16 +669,8 @@ plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_inte
   inventory = fit_consan_moi_record_replay_auto_report_inventory(
       inventory, capacity_policy.caller_ceiling_bytes);
 
-  requirements.runtime_requirements.host_device_visible_memory = true;
-  requirements.runtime_requirements.host_device_coherent_memory = true;
-  requirements.runtime_requirements.device_atomic_publication = true;
-  requirements.runtime_requirements.executable_binding = true;
-  requirements.sizing_inventory = inventory;
-  requirements.abi_plan =
-      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
-  requirements.runtime_requirements.minimum_report_allocation_bytes =
-      requirements.abi_plan.required_bytes;
-  requirements.reason = ConSanEvidenceRequirementReason::None;
+  publish_moi_evidence_requirements(requirements, std::move(inventory),
+                                    capacity_policy.caller_ceiling_bytes);
   return requirements;
 }
 
@@ -693,16 +703,8 @@ plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
   inventory =
       fit_consan_moi_sampled_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
 
-  requirements.runtime_requirements.host_device_visible_memory = true;
-  requirements.runtime_requirements.host_device_coherent_memory = true;
-  requirements.runtime_requirements.device_atomic_publication = true;
-  requirements.runtime_requirements.executable_binding = true;
-  requirements.sizing_inventory = inventory;
-  requirements.abi_plan =
-      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
-  requirements.runtime_requirements.minimum_report_allocation_bytes =
-      requirements.abi_plan.required_bytes;
-  requirements.reason = ConSanEvidenceRequirementReason::None;
+  publish_moi_evidence_requirements(requirements, std::move(inventory),
+                                    capacity_policy.caller_ceiling_bytes);
   return requirements;
 }
 
@@ -794,17 +796,9 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   inventory =
       fit_consan_moi_inline_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
 
-  requirements.runtime_requirements.host_device_visible_memory = true;
-  requirements.runtime_requirements.host_device_coherent_memory = true;
-  requirements.runtime_requirements.device_atomic_publication = true;
-  requirements.runtime_requirements.executable_binding = true;
   requirements.required_lds_aperture_bytes = inventory.inline_lds_bytes;
-  requirements.sizing_inventory = inventory;
-  requirements.abi_plan =
-      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
-  requirements.runtime_requirements.minimum_report_allocation_bytes =
-      requirements.abi_plan.required_bytes;
-  requirements.reason = ConSanEvidenceRequirementReason::None;
+  publish_moi_evidence_requirements(requirements, std::move(inventory),
+                                    capacity_policy.caller_ceiling_bytes);
   return requirements;
 }
 
