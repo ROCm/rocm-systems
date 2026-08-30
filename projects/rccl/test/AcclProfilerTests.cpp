@@ -166,6 +166,24 @@ static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
     return summary;
 }
 
+// Returns the first collective record line from the plugin's JSONL, or "".
+//
+// Scans for "coll_perf" rather than taking line 1: acclPluginFinalize emits the
+// {"summary":...} line unconditionally, so "the first line" is only a record
+// while at least one collective finalized before it. Reading line 1 blind turns
+// "this test produced no record" into a confusing mismatch on summary fields,
+// and would silently pass a record assertion that happened to match the summary.
+// Returning the line rather than the whole buffer keeps per-line assertions
+// (front/back, and any substring) confined to the record they are about.
+static std::string ReadCollRecord(const char* dir, const char* commHashHex) {
+    std::stringstream ss(ReadProfilerOutput(dir, commHashHex));
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (line.find("\"coll_perf\"") != std::string::npos) return line;
+    }
+    return std::string();
+}
+
 // Fills a Coll event descriptor with the fields every lifecycle test needs.
 static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
                           uint64_t seqNumber, size_t count) {
@@ -178,6 +196,16 @@ static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
     d->coll.count = count;
     d->coll.seqNumber = seqNumber;
     d->coll.nChannels = nChannels;
+}
+
+// Fills a KernelCh event descriptor for one channel of `parent`.
+static void MakeKernelChDescr(ncclProfilerEventDescr_v5_t* d, void* parent,
+                              uint8_t channelId, uint64_t pTimer) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileKernelCh;
+    d->parentObj = parent;
+    d->kernelCh.channelId = channelId;
+    d->kernelCh.pTimer = pTimer;
 }
 
 // =========================================================================
@@ -378,15 +406,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
 
             // Start a Coll event
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 1024;
-            collDescr.coll.seqNumber = 10;
-            collDescr.coll.nChannels = 1;
+            MakeCollDescr(&collDescr, /*nChannels=*/1, /*seqNumber=*/10,
+                          /*count=*/1024);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
@@ -394,11 +415,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
 
             // Start a KernelCh event
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/1000000);
 
             void* kchHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
@@ -423,17 +441,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify output file contains valid JSONL
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
-                dir.c_str(), hostname, (int)getpid());
-            std::ifstream ifs(path);
-            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
-            std::string line;
-            ASSERT_TRUE(std::getline(ifs, line));
-            EXPECT_FALSE(line.empty());
+            std::string line = ReadCollRecord(dir.c_str(), "0xbeef");
+            ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_EQ(line.front(), '{');
             EXPECT_EQ(line.back(), '}');
             EXPECT_NE(line.find("\"AllReduce\""), std::string::npos);
@@ -484,11 +493,8 @@ TEST(AcclProfilerMinSize, DropsBelowThresholdAndKeepsEqual) {
                 if (!coll) return nullptr;
 
                 ncclProfilerEventDescr_v5_t kd;
-                memset(&kd, 0, sizeof(kd));
-                kd.type = ncclProfileKernelCh;
-                kd.parentObj = coll;
-                kd.kernelCh.channelId = 0;
-                kd.kernelCh.pTimer = 1000000;
+                MakeKernelChDescr(&kd, coll, /*channelId=*/0,
+                                  /*pTimer=*/1000000);
                 void* kch = nullptr;
                 EXPECT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
                 EXPECT_EQ(acclPluginStopEvent(coll), 0);
@@ -567,26 +573,16 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 
             // Start Coll
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 256;
-            collDescr.coll.seqNumber = 20;
-            collDescr.coll.nChannels = 1;
+            MakeCollDescr(&collDescr, /*nChannels=*/1, /*seqNumber=*/20,
+                          /*count=*/256);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
 
             // Start KernelCh
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 0;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/0);
 
             void* kchHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
@@ -616,16 +612,8 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify the output JSONL carries proxy op data
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xcafe.jsonl",
-                dir.c_str(), hostname, (int)getpid());
-            std::ifstream ifs(path);
-            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
-            std::string line;
-            ASSERT_TRUE(std::getline(ifs, line));
+            std::string line = ReadCollRecord(dir.c_str(), "0xcafe");
+            ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos)
                 << "Record must carry the proxy op that stopped after the kernel";
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
@@ -653,15 +641,8 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
             void* handles[256];
             for (int i = 0; i < 256; i++) {
                 ncclProfilerEventDescr_v5_t d;
-                memset(&d, 0, sizeof(d));
-                d.type = ncclProfileColl;
-                d.coll.func = "AllReduce";
-                d.coll.algo = "Ring";
-                d.coll.proto = "Simple";
-                d.coll.datatype = "ncclFloat32";
-                d.coll.count = 1;
-                d.coll.seqNumber = i;
-                d.coll.nChannels = 1;
+                MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/(uint64_t)i,
+                              /*count=*/1);
                 ASSERT_EQ(acclPluginStartEvent(ctx, &handles[i], &d), 0);
                 ASSERT_NE(handles[i], nullptr) << "Pool exhausted at i=" << i;
                 ASSERT_EQ(acclPluginStopEvent(handles[i]), 0);
@@ -669,15 +650,7 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
 
             // Pool is full. The 257th allocation must return NULL (dropped).
             ncclProfilerEventDescr_v5_t d;
-            memset(&d, 0, sizeof(d));
-            d.type = ncclProfileColl;
-            d.coll.func = "AllReduce";
-            d.coll.algo = "Ring";
-            d.coll.proto = "Simple";
-            d.coll.datatype = "ncclFloat32";
-            d.coll.count = 1;
-            d.coll.seqNumber = 999;
-            d.coll.nChannels = 1;
+            MakeCollDescr(&d, /*nChannels=*/1, /*seqNumber=*/999, /*count=*/1);
             void* h = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &h, &d), 0);
             EXPECT_EQ(h, nullptr)
@@ -704,15 +677,8 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
 
             // Start coll with 2 channels
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 512;
-            collDescr.coll.seqNumber = 42;
-            collDescr.coll.nChannels = 2;
+            MakeCollDescr(&collDescr, /*nChannels=*/2, /*seqNumber=*/42,
+                          /*count=*/512);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
@@ -721,16 +687,12 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             void* kch0 = nullptr;
             void* kch1 = nullptr;
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = collHandle;
-
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 2000000;
+            MakeKernelChDescr(&kd, collHandle, /*channelId=*/0,
+                              /*pTimer=*/2000000);
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
 
-            kd.kernelCh.channelId = 1;
-            kd.kernelCh.pTimer = 2000100;
+            MakeKernelChDescr(&kd, collHandle, /*channelId=*/1,
+                              /*pTimer=*/2000100);
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kd), 0);
 
             // Record GPU stop timestamps
@@ -752,30 +714,21 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            // Verify exactly one record with both channels
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xface.jsonl",
-                dir.c_str(), hostname, (int)getpid());
-            std::ifstream ifs(path);
-            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
-
+            // Verify exactly one record with both channels.
             // Count coll records only. finalize() always appends a
             // {"summary":...} line, so a raw line count is not a record count.
+            std::stringstream out(ReadProfilerOutput(dir.c_str(), "0xface"));
             int lineCount = 0;
             std::string line;
-            while (std::getline(ifs, line)) {
+            while (std::getline(out, line)) {
                 if (line.find("\"coll_perf\"") != std::string::npos) lineCount++;
             }
             EXPECT_EQ(lineCount, 1)
                 << "Expected exactly 1 record, got " << lineCount;
 
-            // Re-read the single line to verify content
-            ifs.clear();
-            ifs.seekg(0);
-            ASSERT_TRUE(std::getline(ifs, line));
+            // Verify the content of that single record
+            line = ReadCollRecord(dir.c_str(), "0xface");
+            ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_NE(line.find("\"coll_sn\":42"), std::string::npos);
             EXPECT_NE(line.find("\"coll_n_channels\":2"), std::string::npos);
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
@@ -800,26 +753,16 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             // Start Coll
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 256;
-            collDescr.coll.seqNumber = 30;
-            collDescr.coll.nChannels = 1;
+            MakeCollDescr(&collDescr, /*nChannels=*/1, /*seqNumber=*/30,
+                          /*count=*/256);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
 
             // Start KernelCh
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 5000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/5000000);
             void* kchHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
 
@@ -871,16 +814,8 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xa1b2.jsonl",
-                dir.c_str(), hostname, (int)getpid());
-            std::ifstream ifs(path);
-            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
-            std::string line;
-            ASSERT_TRUE(std::getline(ifs, line));
+            std::string line = ReadCollRecord(dir.c_str(), "0xa1b2");
+            ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
@@ -911,11 +846,8 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
 
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 5000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/5000000);
             void* kchHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
 
@@ -965,8 +897,9 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
             ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::string out = ReadProfilerOutput(dir.c_str(), "0xc3d4");
-            ASSERT_FALSE(out.empty()) << "no profiler output in " << dir.path();
+            std::string out = ReadCollRecord(dir.c_str(), "0xc3d4");
+            ASSERT_FALSE(out.empty())
+                << "no collective record in " << dir.path();
 
             // One proxy op, so the per-op divisor is 1 and the JSON values are
             // the raw accumulated microseconds.
@@ -995,14 +928,6 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
 // collective with known per-op state durations and check each component lands
 // on its per-class mean; dividing by n_proxy_ops would halve all four.
 // =========================================================================
-
-// Returns the numeric value of `key` in the decomposition object, or -1.
-static double DecompValue(const std::string& line, const char* key) {
-    std::string needle = std::string("\"") + key + "\":";
-    size_t p = line.find(needle);
-    if (p == std::string::npos) return -1;
-    return atof(line.c_str() + p + needle.size());
-}
 
 // Mirrors how src/transport/net.cc drives a step: announce the state on ENTRY,
 // then spend the time in it. The interval is charged to the state being left,
@@ -1071,11 +996,7 @@ TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
             ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
 
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = coll;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
             void* kch = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
 
@@ -1097,13 +1018,12 @@ TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
             }
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d0");
-            ASSERT_FALSE(out.empty());
-            std::string line = out.substr(0, out.find('\n'));
+            std::string line = ReadCollRecord(dir.c_str(), "0xd1d0");
+            ASSERT_FALSE(line.empty());
 
-            EXPECT_EQ(DecompValue(line, "n_proxy_ops"), 8);
-            EXPECT_EQ(DecompValue(line, "n_send_ops"), 4);
-            EXPECT_EQ(DecompValue(line, "n_recv_ops"), 4);
+            EXPECT_EQ(JsonNumber(line, "n_proxy_ops"), 8);
+            EXPECT_EQ(JsonNumber(line, "n_send_ops"), 4);
+            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 4);
 
             // usleep only guarantees a lower bound, so each window is
             // [nominal, 2x nominal): wide enough for scheduling jitter, tight
@@ -1117,7 +1037,7 @@ TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
                 {"proxy_network_us",       1500, 3000},
             };
             for (auto& e : expect) {
-                double v = DecompValue(line, e.key);
+                double v = JsonNumber(line, e.key);
                 EXPECT_GE(v, e.lo) << e.key
                     << " is below one op class's mean, so it was averaged over"
                        " every proxy op instead of over its own class";
@@ -1146,11 +1066,7 @@ TEST(AcclProfilerLifecycle, SendOnlyCollectiveReportsZeroRecvComponents) {
             ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
 
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = coll;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
             void* kch = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
 
@@ -1168,17 +1084,16 @@ TEST(AcclProfilerLifecycle, SendOnlyCollectiveReportsZeroRecvComponents) {
             ASSERT_EQ(acclPluginStopEvent(op), 0);
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d1");
-            ASSERT_FALSE(out.empty());
-            std::string line = out.substr(0, out.find('\n'));
+            std::string line = ReadCollRecord(dir.c_str(), "0xd1d1");
+            ASSERT_FALSE(line.empty());
 
-            EXPECT_EQ(DecompValue(line, "n_recv_ops"), 0);
+            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 0);
             EXPECT_EQ(line.find("nan"), std::string::npos)
                 << "a zero op count must not reach a division: " << line;
             EXPECT_EQ(line.find("inf"), std::string::npos) << line;
-            EXPECT_DOUBLE_EQ(DecompValue(line, "proxy_flush_us"), 0.0);
-            EXPECT_DOUBLE_EQ(DecompValue(line, "proxy_gpu_recv_wait_us"), 0.0);
-            EXPECT_GE(DecompValue(line, "proxy_gpu_wait_us"), 4000);
+            EXPECT_DOUBLE_EQ(JsonNumber(line, "proxy_flush_us"), 0.0);
+            EXPECT_DOUBLE_EQ(JsonNumber(line, "proxy_gpu_recv_wait_us"), 0.0);
+            EXPECT_GE(JsonNumber(line, "proxy_gpu_wait_us"), 4000);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
@@ -1200,37 +1115,27 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
                                      1, 2, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 256;
-            collDescr.coll.seqNumber = 50;
-            collDescr.coll.nChannels = 2;
+            MakeCollDescr(&collDescr, /*nChannels=*/2, /*seqNumber=*/50,
+                          /*count=*/256);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
             ASSERT_NE(collHandle, nullptr);
 
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
 
             // channelId=4 and 5 with nChannels=2: simulates the second
             // collective in a grouped launch where the first used channels 0-3.
             // These MUST be accepted — the guard is ACCL_MAX_CHANNELS, not nChannels.
-            kchDescr.kernelCh.channelId = 4;
-            kchDescr.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/4,
+                              /*pTimer=*/1000000);
             void* kch4 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch4, &kchDescr), 0);
             ASSERT_NE(kch4, nullptr)
                 << "channelId=4 with nChannels=2 must be accepted (absolute id)";
 
-            kchDescr.kernelCh.channelId = 5;
-            kchDescr.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/5,
+                              /*pTimer=*/1000000);
             void* kch5 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch5, &kchDescr), 0);
             ASSERT_NE(kch5, nullptr)
@@ -1268,32 +1173,22 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
                                      1, 2, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t collDescr;
-            memset(&collDescr, 0, sizeof(collDescr));
-            collDescr.type = ncclProfileColl;
-            collDescr.coll.func = "AllReduce";
-            collDescr.coll.algo = "Ring";
-            collDescr.coll.proto = "Simple";
-            collDescr.coll.datatype = "ncclFloat32";
-            collDescr.coll.count = 1024;
-            collDescr.coll.seqNumber = 60;
-            collDescr.coll.nChannels = 2;
+            MakeCollDescr(&collDescr, /*nChannels=*/2, /*seqNumber=*/60,
+                          /*count=*/1024);
 
             void* collHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
 
             // Channel 0: 100 us (10000 ticks at 100 MHz)
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = collHandle;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, collHandle, /*channelId=*/0,
+                              /*pTimer=*/1000000);
             void* kch0 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
 
             // Channel 1: 200 us (20000 ticks)
-            kd.kernelCh.channelId = 1;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, collHandle, /*channelId=*/1,
+                              /*pTimer=*/1000000);
             void* kch1 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kd), 0);
 
@@ -1312,16 +1207,8 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "%s/accl_profiler_rank0_%s_pid%d_0xd1d2.jsonl",
-                dir.c_str(), hostname, (int)getpid());
-            std::ifstream ifs(path);
-            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
-            std::string line;
-            ASSERT_TRUE(std::getline(ifs, line));
+            std::string line = ReadCollRecord(dir.c_str(), "0xd1d2");
+            ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_NE(line.find("\"gpu_kernel_avg_us\":150.00"), std::string::npos)
                 << "Expected avg of 100+200=150us";
             EXPECT_NE(line.find("\"gpu_kernel_min_us\":100.00"), std::string::npos);
@@ -1371,11 +1258,8 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
             void* kch[256];
             for (int c = 0; c < 256; c++) {
                 ncclProfilerEventDescr_v5_t kd;
-                memset(&kd, 0, sizeof(kd));
-                kd.type = ncclProfileKernelCh;
-                kd.parentObj = coll;
-                kd.kernelCh.channelId = (uint8_t)c;
-                kd.kernelCh.pTimer = 1000000;
+                MakeKernelChDescr(&kd, coll, /*channelId=*/(uint8_t)c,
+                                  /*pTimer=*/1000000);
                 ASSERT_EQ(acclPluginStartEvent(ctx, &kch[c], &kd), 0);
                 ASSERT_NE(kch[c], nullptr) << "channel " << c;
             }
@@ -1429,11 +1313,7 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
             // Only channel 0 reports — the other 255 are skipped, as they are
             // when RCCL's profiler transport drains during teardown.
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = coll;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
             void* kch0 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
 
@@ -1480,11 +1360,7 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
             ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &d), 0);
 
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = coll;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
             void* kch0 = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
 
@@ -1962,11 +1838,7 @@ TEST(AcclProfilerSummary, CleanRunStillReportsComplete) {
             ASSERT_NE(coll, nullptr);
 
             ncclProfilerEventDescr_v5_t kd;
-            memset(&kd, 0, sizeof(kd));
-            kd.type = ncclProfileKernelCh;
-            kd.parentObj = coll;
-            kd.kernelCh.channelId = 0;
-            kd.kernelCh.pTimer = 1000000;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
             void* kch = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
             ASSERT_EQ(acclPluginStopEvent(coll), 0);
@@ -2104,14 +1976,7 @@ TEST(AcclProfilerLifecycle, CollSlotReuseDoesNotWriteTheSlotMutex) {
                                      1, 1, 0, nullptr), 0);
 
             ncclProfilerEventDescr_v5_t cd;
-            memset(&cd, 0, sizeof(cd));
-            cd.type = ncclProfileColl;
-            cd.coll.func = "AllReduce";
-            cd.coll.algo = "Ring";
-            cd.coll.proto = "Simple";
-            cd.coll.datatype = "ncclFloat32";
-            cd.coll.count = 1024;
-            cd.coll.nChannels = 1;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/0, /*count=*/1024);
 
             void* coll = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
@@ -2126,10 +1991,7 @@ TEST(AcclProfilerLifecycle, CollSlotReuseDoesNotWriteTheSlotMutex) {
             std::atomic<unsigned long> locks{0};
             std::thread kernelCh([&]() {
                 ncclProfilerEventDescr_v5_t kd;
-                memset(&kd, 0, sizeof(kd));
-                kd.type = ncclProfileKernelCh;
-                kd.parentObj = coll;
-                kd.kernelCh.channelId = 0;
+                MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/0);
                 while (!stop.load(std::memory_order_relaxed)) {
                     void* kh = nullptr;
                     // Reaches pthread_mutex_lock(&coll->mutex) whenever the slot
