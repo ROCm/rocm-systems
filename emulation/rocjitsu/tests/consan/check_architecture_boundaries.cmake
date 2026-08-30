@@ -345,6 +345,11 @@ _consan_assert_no_match(
     "validate_consan_(ordinary_global|atomic)"
     "encoded mutation validation must remain one operation over a typed semantic kind"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation.inc"
+    "COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET"
+    "common validation must consume target-owned descriptor resource proof"
+)
 file(
     GLOB _consan_sources
     "${_consan_dir}/*.cpp"

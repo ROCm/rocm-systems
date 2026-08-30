@@ -4139,7 +4139,6 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
           std::max(requirement.required_private_bytes, unscoped_required_private_bytes);
     }
     KernelDescriptor normalized = replacement_descriptor;
-    const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
     const bool requires_full_workgroup_id = requirement.require_full_workgroup_id;
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
@@ -4242,48 +4241,28 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     }
     if (text_relocated || requirement.allow_entry_delta)
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;
-    if (cdna) {
-      constexpr uint32_t kAccvgprOffsetGranularity = 4u;
-      const uint32_t original_encoded_accum_offset = AMDHSA_BITS_GET(
-          original_descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-      const uint32_t replacement_encoded_accum_offset = AMDHSA_BITS_GET(
-          replacement_descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-      if (replacement_encoded_accum_offset != original_encoded_accum_offset) {
-        const auto unified_vgpr_count = [](const KernelDescriptor &descriptor) {
-          const uint32_t granulated = AMDHSA_BITS_GET(
-              descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-          constexpr uint32_t kCdnaVgprGranularity = 8u;
-          return (granulated + 1u) * kCdnaVgprGranularity;
-        };
-        const uint32_t original_accvgpr_base =
-            (original_encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
-        const uint32_t replacement_accvgpr_base =
-            (replacement_encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
-        const uint32_t original_unified_vgprs = unified_vgpr_count(original_descriptor);
-        const uint32_t replacement_unified_vgprs = unified_vgpr_count(replacement_descriptor);
-        const bool original_accumulator_bank_proven_empty = original_kernel.agpr_count == 0u;
-        const bool valid_empty_boundary_move =
-            requirement.allow_resource_delta && original_encoded_accum_offset != 0u &&
-            replacement_encoded_accum_offset != 0u &&
-            (original_unified_vgprs <= original_accvgpr_base ||
-             original_accumulator_bank_proven_empty) &&
-            replacement_unified_vgprs == replacement_accvgpr_base &&
-            replacement_accvgpr_base >= requirement.required_vgpr_count;
-        if (!valid_empty_boundary_move) {
-          errors.emplace_back(
-              "ConSan final validation found an invalid accumulator-boundary move for kernel '" +
-              original_kernel.name + "'");
-        }
-      }
+    const ConSanDescriptorResourceDeltaValidation target_resource_validation =
+        validate_consan_descriptor_resource_delta(
+            arch, {
+                      .original_rsrc1 = original_descriptor.compute_pgm_rsrc1,
+                      .replacement_rsrc1 = replacement_descriptor.compute_pgm_rsrc1,
+                      .original_rsrc3 = original_descriptor.compute_pgm_rsrc3,
+                      .replacement_rsrc3 = replacement_descriptor.compute_pgm_rsrc3,
+                      .required_vgpr_count = requirement.required_vgpr_count,
+                      .original_accumulator_bank_proven_empty = original_kernel.agpr_count == 0u,
+                      .allow_resource_delta = requirement.allow_resource_delta,
+                      .normalize_resource_delta =
+                          requirement.allow_resource_delta || has_unscoped_resource_growth,
+                  });
+    if (!target_resource_validation.valid) {
+      errors.emplace_back(
+          "ConSan final validation found an invalid accumulator-boundary move for kernel '" +
+          original_kernel.name + "'");
     }
     if (requirement.allow_resource_delta || has_unscoped_resource_growth) {
       normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
       normalized.compute_pgm_rsrc2 = original_descriptor.compute_pgm_rsrc2;
-      if (validation_uses_gfx9_cdna_encoding(*environment.target_profile)) {
-        AMDHSA_BITS_SET(normalized.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                        AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
-                                        kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
-      }
+      normalized.compute_pgm_rsrc3 = target_resource_validation.normalized_rsrc3;
       normalized.private_segment_fixed_size = original_descriptor.private_segment_fixed_size;
       normalized.group_segment_fixed_size = original_descriptor.group_segment_fixed_size;
     }
